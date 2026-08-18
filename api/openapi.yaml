@@ -304,7 +304,7 @@ components:
     Instance:
       type: object
       description: A single unit of work the driver is running for a workload.
-      required: [id, state, specHash, restartCount]
+      required: [id, state, specHash]
       properties:
         id:
           type: string
@@ -320,11 +320,9 @@ components:
             differs from the workload's current hash, the instance is replaced.
         exitCode:
           type: integer
-          description: The exit code, set once the instance has exited.
-        restartCount:
-          type: integer
-          description: How many times the driver has restarted this instance.
-          minimum: 0
+          description: |
+            The exit code. Absent while the instance is still running, since it
+            has not yet ended in any particular way.
         startedAt:
           type: string
           format: date-time

@@ -109,15 +109,13 @@ type ErrorResponse struct {
 
 // Instance A single unit of work the driver is running for a workload.
 type Instance struct {
-	// ExitCode The exit code, set once the instance has exited.
+	// ExitCode The exit code. Absent while the instance is still running, since it
+	// has not yet ended in any particular way.
 	ExitCode *int `json:"exitCode,omitempty"`
 
 	// ID The driver's opaque handle for this instance. A container ID for the
 	// docker driver.
 	ID string `json:"id"`
-
-	// RestartCount How many times the driver has restarted this instance.
-	RestartCount int `json:"restartCount"`
 
 	// SpecHash The hash of the specification this instance was started from. When it
 	// differs from the workload's current hash, the instance is replaced.
