@@ -1,0 +1,13 @@
+filename: mocks_test.go
+log-level: error
+pkgname: '{{.SrcPackageName}}_test'
+packages:
+  github.com/dsb-labs/orca/internal/server/driver/docker:
+    config:
+      all: true
+  github.com/dsb-labs/orca/internal/server/service:
+    config:
+      all: true
+  github.com/dsb-labs/orca/internal/server/api:
+    config:
+      all: true

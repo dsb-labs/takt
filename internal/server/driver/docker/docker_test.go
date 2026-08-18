@@ -1,0 +1,327 @@
+package docker_test
+
+import (
+	"errors"
+	"io"
+	"log/slog"
+	"strings"
+	"testing"
+
+	dockercontainer "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/image"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/driver/docker"
+)
+
+func TestDriver_Start(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name       string
+		Workload   docker.Workload
+		SetupMocks func(*MockClient)
+		Assert     func(*testing.T, string)
+		ExpectErr  error
+	}{
+		{
+			Name: "starts a container with orca's ownership labels",
+			Workload: docker.Workload{
+				Name:     "example",
+				Version:  2,
+				SpecHash: "hash-two",
+				Image:    "example/example:latest",
+				Env:      map[string]string{"EXAMPLE": "EXAMPLE"},
+				Ports:    []string{"8080:8080"},
+				Labels:   map[string]string{"some-key": "some-value"},
+			},
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything,
+					mock.MatchedBy(func(config *dockercontainer.Config) bool {
+						return config.Image == "example/example:latest" &&
+							config.Labels[docker.LabelWorkload] == "example" &&
+							config.Labels[docker.LabelSpecHash] == "hash-two" &&
+							config.Labels[docker.LabelVersion] == "2" &&
+							config.Labels["some-key"] == "some-value" &&
+							len(config.Env) == 1 && config.Env[0] == "EXAMPLE=EXAMPLE"
+					}),
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						bindings := host.PortBindings["8080/tcp"]
+						return len(bindings) == 1 && bindings[0].HostPort == "8080"
+					}),
+					mock.Anything, mock.Anything, "orca-example-2",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			Name: "pulls the image when it isn't present locally",
+			Workload: docker.Workload{
+				Name:  "example",
+				Image: "example/example:latest",
+			},
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return(nil, nil).Once()
+				c.EXPECT().ImagePull(mock.Anything, "example/example:latest", mock.Anything).
+					Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			Name: "rejects unparseable port mappings",
+			Workload: docker.Workload{
+				Name:  "example",
+				Image: "example/example:latest",
+				Ports: []string{"not-a-port"},
+			},
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+			},
+			ExpectErr: docker.ErrInvalidPorts,
+		},
+		{
+			Name: "removes the container when it cannot be started",
+			Workload: docker.Workload{
+				Name:  "example",
+				Image: "example/example:latest",
+			},
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).
+					Return(errors.New("no such image")).Once()
+				c.EXPECT().ContainerRemove(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			ExpectErr: nil,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			client := NewMockClient(t)
+			tc.SetupMocks(client)
+
+			d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+			id, err := d.Start(t.Context(), tc.Workload)
+			switch {
+			case tc.ExpectErr != nil:
+				assert.ErrorIs(t, err, tc.ExpectErr)
+				return
+			case tc.Assert == nil:
+				assert.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			tc.Assert(t, id)
+		})
+	}
+}
+
+func TestDriver_Stop(t *testing.T) {
+	t.Parallel()
+
+	t.Run("stops and removes every container it owns for the workload", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one"},
+			{ID: "container-two"},
+		}, nil).Once()
+
+		for _, id := range []string{"container-one", "container-two"} {
+			client.EXPECT().ContainerStop(mock.Anything, id, mock.Anything).Return(nil).Once()
+			client.EXPECT().ContainerRemove(mock.Anything, id, mock.Anything).Return(nil).Once()
+		}
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		require.NoError(t, d.Stop(t.Context(), "example"))
+	})
+
+	t.Run("succeeds when it owns nothing for the workload", func(t *testing.T) {
+		client := NewMockClient(t)
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		require.NoError(t, d.Stop(t.Context(), "example"))
+	})
+}
+
+func TestDriver_Observe(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports running containers without inspecting them", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:    "container-one",
+				State: dockercontainer.StateRunning,
+				Labels: map[string]string{
+					docker.LabelWorkload: "example",
+					docker.LabelSpecHash: "hash-one",
+					docker.LabelVersion:  "3",
+				},
+			},
+		}, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+
+		assert.Equal(t, "container-one", instances[0].ID)
+		assert.Equal(t, "example", instances[0].Workload)
+		assert.Equal(t, "hash-one", instances[0].SpecHash)
+		assert.Equal(t, 3, instances[0].Version)
+		assert.Equal(t, driver.StateRunning, instances[0].State)
+	})
+
+	t.Run("inspects stopped containers for their exit code", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:    "container-one",
+				State: dockercontainer.StateExited,
+				Labels: map[string]string{
+					docker.LabelWorkload: "example",
+					docker.LabelSpecHash: "hash-one",
+				},
+			},
+		}, nil).Once()
+
+		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				State: &dockercontainer.State{
+					Status:    dockercontainer.StateExited,
+					ExitCode:  137,
+					StartedAt: "2026-08-18T12:00:00Z",
+				},
+			},
+		}, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+
+		// A non-zero exit overrides the exited status: the container did not
+		// finish cleanly, however docker labels it.
+		assert.Equal(t, driver.StateFailed, instances[0].State)
+		assert.Equal(t, 137, instances[0].ExitCode)
+		assert.False(t, instances[0].StartedAt.IsZero())
+	})
+
+	t.Run("keeps a clean exit as exited", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:     "container-one",
+				State:  dockercontainer.StateExited,
+				Labels: map[string]string{docker.LabelWorkload: "example"},
+			},
+		}, nil).Once()
+
+		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				State: &dockercontainer.State{Status: dockercontainer.StateExited, ExitCode: 0},
+			},
+		}, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+
+		assert.Equal(t, driver.StateExited, instances[0].State)
+		assert.Zero(t, instances[0].ExitCode)
+	})
+
+	t.Run("reports nothing when it owns no containers", func(t *testing.T) {
+		client := NewMockClient(t)
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		assert.Empty(t, instances)
+	})
+}
+
+func TestDriver_Logs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("demultiplexes the container's log stream", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one"},
+		}, nil).Once()
+
+		client.EXPECT().ContainerLogs(mock.Anything, "container-one", mock.MatchedBy(func(options dockercontainer.LogsOptions) bool {
+			return options.ShowStdout && options.ShowStderr && options.Tail == "20"
+		})).Return(io.NopCloser(strings.NewReader(multiplexed("hello world\n"))), nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		logs, err := d.Logs(t.Context(), "example", 20)
+		require.NoError(t, err)
+		assert.Equal(t, "hello world\n", logs)
+	})
+}
+
+// multiplexed frames payload the way the docker daemon frames the output of a
+// container without a TTY: an 8 byte header carrying the stream type and the
+// payload length, followed by the payload itself.
+func multiplexed(payload string) string {
+	header := []byte{1, 0, 0, 0, 0, 0, 0, 0}
+	size := len(payload)
+	header[4] = byte(size >> 24)
+	header[5] = byte(size >> 16)
+	header[6] = byte(size >> 8)
+	header[7] = byte(size)
+
+	return string(header) + payload
+}
+
+func newTestLogger(t *testing.T) *slog.Logger {
+	t.Helper()
+
+	level := slog.LevelError
+	if testing.Verbose() {
+		level = slog.LevelDebug
+	}
+
+	return slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{
+		AddSource: testing.Verbose(),
+		Level:     level,
+	}))
+}
