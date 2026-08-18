@@ -186,6 +186,12 @@ func (d *Driver) Start(ctx context.Context, w Workload) (string, error) {
 }
 
 // Stop stops and removes every container the driver holds for the named workload.
+//
+// Removal is forced because ContainerStop only asks the container to stop and
+// returns before it necessarily has: an unforced remove races that shutdown and
+// fails with "container is running", which would leave the container behind for
+// every future pass to trip over. The stop is still issued first so the container
+// gets its grace period rather than being killed outright.
 func (d *Driver) Stop(ctx context.Context, workload string) error {
 	containers, err := d.containers(ctx, workload)
 	if err != nil {
@@ -197,7 +203,7 @@ func (d *Driver) Stop(ctx context.Context, workload string) error {
 			return fmt.Errorf("failed to stop container: %w", err)
 		}
 
-		if err = d.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{}); err != nil {
+		if err = d.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {
 			return fmt.Errorf("failed to remove container: %w", err)
 		}
 

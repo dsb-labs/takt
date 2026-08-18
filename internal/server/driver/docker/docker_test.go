@@ -159,6 +159,28 @@ func TestDriver_Stop(t *testing.T) {
 		require.NoError(t, d.Stop(t.Context(), "example"))
 	})
 
+	t.Run("forces removal so it doesn't race the container shutting down", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one"},
+		}, nil).Once()
+
+		client.EXPECT().ContainerStop(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+
+		// ContainerStop returns before the container has necessarily stopped, so an
+		// unforced remove fails with "container is running" and leaves the
+		// container behind for every later pass to trip over.
+		client.EXPECT().ContainerRemove(mock.Anything, "container-one",
+			mock.MatchedBy(func(options dockercontainer.RemoveOptions) bool {
+				return options.Force
+			})).Return(nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		require.NoError(t, d.Stop(t.Context(), "example"))
+	})
+
 	t.Run("succeeds when it owns nothing for the workload", func(t *testing.T) {
 		client := NewMockClient(t)
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
