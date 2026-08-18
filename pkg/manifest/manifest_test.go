@@ -8,7 +8,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -18,31 +17,24 @@ func TestParse(t *testing.T) {
 	tt := []struct {
 		Name         string
 		File         string
-		Assert       func(*testing.T, api.WorkloadSpec)
+		Assert       func(*testing.T, manifest.Spec)
 		ExpectErr    error
 		ExpectsError bool
 	}{
 		{
 			Name: "a full container manifest",
 			File: "container.yaml",
-			Assert: func(t *testing.T, spec api.WorkloadSpec) {
+			Assert: func(t *testing.T, spec manifest.Spec) {
 				assert.Equal(t, "v1", spec.Version)
 				assert.Equal(t, "example", spec.Name)
 
-				require.NotNil(t, spec.Schedule)
-				assert.Equal(t, "*/5 * * * *", *spec.Schedule)
-
-				require.NotNil(t, spec.Labels)
-				assert.Equal(t, map[string]string{"some-key": "some-value"}, *spec.Labels)
+				assert.Equal(t, "*/5 * * * *", spec.Schedule)
+				assert.Equal(t, map[string]string{"some-key": "some-value"}, spec.Labels)
 
 				require.NotNil(t, spec.Container)
 				assert.Equal(t, "example/example:latest", spec.Container.Image)
-
-				require.NotNil(t, spec.Container.Env)
-				assert.Equal(t, map[string]string{"EXAMPLE": "EXAMPLE"}, *spec.Container.Env)
-
-				require.NotNil(t, spec.Container.Ports)
-				assert.Equal(t, []string{"8080:8080"}, *spec.Container.Ports)
+				assert.Equal(t, map[string]string{"EXAMPLE": "EXAMPLE"}, spec.Container.Env)
+				assert.Equal(t, []string{"8080:8080"}, spec.Container.Ports)
 
 				assert.Nil(t, spec.Script)
 			},
@@ -50,30 +42,28 @@ func TestParse(t *testing.T) {
 		{
 			Name: "a minimal container manifest",
 			File: "minimal.yaml",
-			Assert: func(t *testing.T, spec api.WorkloadSpec) {
+			Assert: func(t *testing.T, spec manifest.Spec) {
 				require.NotNil(t, spec.Container)
 				assert.Equal(t, "example/example:latest", spec.Container.Image)
-				assert.Nil(t, spec.Schedule)
-				assert.Nil(t, spec.Container.Ports)
+				assert.Empty(t, spec.Schedule)
+				assert.Empty(t, spec.Container.Ports)
 			},
 		},
 		{
 			Name: "a script manifest with a raw body",
 			File: "script_raw.yaml",
-			Assert: func(t *testing.T, spec api.WorkloadSpec) {
+			Assert: func(t *testing.T, spec manifest.Spec) {
 				require.NotNil(t, spec.Script)
-				require.NotNil(t, spec.Script.Raw)
-				assert.Equal(t, `echo "hello world"`, *spec.Script.Raw)
+				assert.Equal(t, `echo "hello world"`, spec.Script.Raw)
 				assert.Nil(t, spec.Container)
 			},
 		},
 		{
 			Name: "a script manifest with a source url",
 			File: "script_source.yaml",
-			Assert: func(t *testing.T, spec api.WorkloadSpec) {
+			Assert: func(t *testing.T, spec manifest.Spec) {
 				require.NotNil(t, spec.Script)
-				require.NotNil(t, spec.Script.Source)
-				assert.Equal(t, "https://example.com/some_script.sh", *spec.Script.Source)
+				assert.Equal(t, "https://example.com/some_script.sh", spec.Script.Source)
 			},
 		},
 		{
@@ -157,35 +147,35 @@ func TestParse(t *testing.T) {
 	}
 }
 
-func TestRuntime(t *testing.T) {
+func TestRuntimeOf(t *testing.T) {
 	t.Parallel()
 
 	tt := []struct {
 		Name      string
-		Spec      api.WorkloadSpec
-		Expected  api.Runtime
+		Spec      manifest.Spec
+		Expected  manifest.Runtime
 		ExpectErr error
 	}{
 		{
 			Name:     "a container block selects the container runtime",
-			Spec:     api.WorkloadSpec{Container: &api.ContainerSpec{Image: "example/example:latest"}},
-			Expected: api.Container,
+			Spec:     manifest.Spec{Container: &manifest.Container{Image: "example/example:latest"}},
+			Expected: manifest.RuntimeContainer,
 		},
 		{
 			Name:     "a script block selects the script runtime",
-			Spec:     api.WorkloadSpec{Script: &api.ScriptSpec{Raw: new("echo hello")}},
-			Expected: api.Script,
+			Spec:     manifest.Spec{Script: &manifest.Script{Raw: "echo hello"}},
+			Expected: manifest.RuntimeScript,
 		},
 		{
 			Name:      "no block at all",
-			Spec:      api.WorkloadSpec{},
+			Spec:      manifest.Spec{},
 			ExpectErr: manifest.ErrNoRuntime,
 		},
 		{
 			Name: "two blocks",
-			Spec: api.WorkloadSpec{
-				Container: &api.ContainerSpec{Image: "example/example:latest"},
-				Script:    &api.ScriptSpec{Raw: new("echo hello")},
+			Spec: manifest.Spec{
+				Container: &manifest.Container{Image: "example/example:latest"},
+				Script:    &manifest.Script{Raw: "echo hello"},
 			},
 			ExpectErr: manifest.ErrAmbiguousRuntime,
 		},
@@ -193,7 +183,7 @@ func TestRuntime(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			got, err := manifest.Runtime(tc.Spec)
+			got, err := manifest.RuntimeOf(tc.Spec)
 			if tc.ExpectErr != nil {
 				assert.ErrorIs(t, err, tc.ExpectErr)
 				return
@@ -224,14 +214,10 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	// A nil here means a key in the fixture didn't map onto its Go field.
 	assert.NotEmpty(t, spec.Version)
 	assert.NotEmpty(t, spec.Name)
-	require.NotNil(t, spec.Schedule)
-	assert.NotEmpty(t, *spec.Schedule)
-	require.NotNil(t, spec.Labels)
-	assert.NotEmpty(t, *spec.Labels)
+	assert.NotEmpty(t, spec.Schedule)
+	assert.NotEmpty(t, spec.Labels)
 	require.NotNil(t, spec.Container)
 	assert.NotEmpty(t, spec.Container.Image)
-	require.NotNil(t, spec.Container.Env)
-	assert.NotEmpty(t, *spec.Container.Env)
-	require.NotNil(t, spec.Container.Ports)
-	assert.NotEmpty(t, *spec.Container.Ports)
+	assert.NotEmpty(t, spec.Container.Env)
+	assert.NotEmpty(t, spec.Container.Ports)
 }

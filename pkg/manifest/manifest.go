@@ -1,9 +1,9 @@
 // Package manifest provides parsing and validation of orca workload manifests.
 //
-// A manifest is the YAML file an operator writes to describe a workload. It is a
-// client-side authoring convenience: parsing produces the same specification type
-// the API accepts, so the OpenAPI document remains the only description of the
-// wire format and the server never has to understand YAML.
+// A manifest is the YAML file an operator writes to describe a workload. Parsing
+// it is a client-side concern: it produces a Spec, which is what the client
+// submits, so the OpenAPI document remains the only description of the wire format
+// and the server never has to understand YAML.
 package manifest
 
 import (
@@ -17,8 +17,6 @@ import (
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v3"
-
-	"github.com/dsb-labs/orca/internal/generated/api"
 )
 
 var (
@@ -45,30 +43,27 @@ var namePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 // Unknown fields are rejected rather than ignored, so a typo in a key is reported
 // instead of silently doing nothing.
 //
-// The generated specification types carry only JSON tags, and YAML keys are
-// matched against the lowercased Go field names. That holds while every manifest
-// key is a single word, as they all are today. A multi-word field added to the
-// specification would be spelled camelCase in JSON but have to be written
-// lowercased here, so such a field needs an explicit yaml tag on the generated
-// type — see the manifest tests, which assert the current mapping.
-func Parse(r io.Reader) (api.WorkloadSpec, error) {
+// YAML keys are matched against the lowercased Go field names of Spec. That holds
+// while every manifest key is a single word, as they all are today; a multi-word
+// field would need an explicit yaml tag, and the tests pin the current mapping.
+func Parse(r io.Reader) (Spec, error) {
 	decoder := yaml.NewDecoder(r)
 	decoder.KnownFields(true)
 
-	var spec api.WorkloadSpec
+	var spec Spec
 	if err := decoder.Decode(&spec); err != nil {
-		return api.WorkloadSpec{}, fmt.Errorf("failed to parse manifest: %w", err)
+		return Spec{}, fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
 	if err := Validate(spec); err != nil {
-		return api.WorkloadSpec{}, err
+		return Spec{}, err
 	}
 
 	return spec, nil
 }
 
 // Validate reports whether spec is a usable workload specification.
-func Validate(spec api.WorkloadSpec) error {
+func Validate(spec Spec) error {
 	err := validation.ValidateStruct(&spec,
 		validation.Field(&spec.Version,
 			validation.Required,
@@ -85,24 +80,40 @@ func Validate(spec api.WorkloadSpec) error {
 		return fmt.Errorf("invalid manifest: %w", err)
 	}
 
-	runtime, err := Runtime(spec)
+	runtime, err := RuntimeOf(spec)
 	if err != nil {
 		return fmt.Errorf("invalid manifest: %w", err)
 	}
 
-	// The runtime blocks are generated types with no validation of their own, so
-	// each is checked here against the rules its driver needs.
 	switch runtime {
-	case api.Container:
+	case RuntimeContainer:
 		return validateContainer(*spec.Container)
-	case api.Script:
+	case RuntimeScript:
 		return validateScript(*spec.Script)
 	default:
 		return nil
 	}
 }
 
-func validateContainer(spec api.ContainerSpec) error {
+// RuntimeOf reports which runtime spec describes, which is determined by the block
+// it carries rather than by a discriminator field.
+//
+// Returns ErrNoRuntime when no block is present, or ErrAmbiguousRuntime when more
+// than one is.
+func RuntimeOf(spec Spec) (Runtime, error) {
+	switch {
+	case spec.Container != nil && spec.Script != nil:
+		return "", ErrAmbiguousRuntime
+	case spec.Container != nil:
+		return RuntimeContainer, nil
+	case spec.Script != nil:
+		return RuntimeScript, nil
+	default:
+		return "", ErrNoRuntime
+	}
+}
+
+func validateContainer(spec Container) error {
 	err := validation.ValidateStruct(&spec,
 		validation.Field(&spec.Image, validation.Required),
 		validation.Field(&spec.Ports, validation.By(validPorts)),
@@ -114,22 +125,19 @@ func validateContainer(spec api.ContainerSpec) error {
 	return nil
 }
 
-func validateScript(spec api.ScriptSpec) error {
-	source := spec.Source != nil && *spec.Source != ""
-	raw := spec.Raw != nil && *spec.Raw != ""
-
+func validateScript(spec Script) error {
 	switch {
-	case source && raw:
+	case spec.Source != "" && spec.Raw != "":
 		return errors.New("invalid script: only one of source or raw may be specified")
-	case !source && !raw:
+	case spec.Source == "" && spec.Raw == "":
 		return errors.New("invalid script: one of source or raw is required")
 	}
 
-	if !source {
+	if spec.Source == "" {
 		return nil
 	}
 
-	if _, err := url.Parse(*spec.Source); err != nil {
+	if _, err := url.Parse(spec.Source); err != nil {
 		return fmt.Errorf("invalid script: source must be a valid url: %w", err)
 	}
 
@@ -139,45 +147,27 @@ func validateScript(spec api.ScriptSpec) error {
 // validPorts checks the port mappings with the same parser the docker driver uses,
 // so a manifest that parses here cannot fail at the point the container is created.
 func validPorts(value any) error {
-	ports, ok := value.(*[]string)
-	if !ok || ports == nil {
+	ports, ok := value.([]string)
+	if !ok || len(ports) == 0 {
 		return nil
 	}
 
-	if _, _, err := nat.ParsePortSpecs(*ports); err != nil {
+	if _, _, err := nat.ParsePortSpecs(ports); err != nil {
 		return fmt.Errorf("must be valid port mappings: %w", err)
 	}
 
 	return nil
 }
 
-// Runtime reports which runtime spec describes, which is determined by the block
-// it carries rather than by a discriminator field.
-//
-// Returns ErrNoRuntime when no block is present, or ErrAmbiguousRuntime when more
-// than one is.
-func Runtime(spec api.WorkloadSpec) (api.Runtime, error) {
-	switch {
-	case spec.Container != nil && spec.Script != nil:
-		return "", ErrAmbiguousRuntime
-	case spec.Container != nil:
-		return api.Container, nil
-	case spec.Script != nil:
-		return api.Script, nil
-	default:
-		return "", ErrNoRuntime
-	}
-}
-
 func validCron(value any) error {
-	schedule, ok := value.(*string)
-	if !ok || schedule == nil || *schedule == "" {
+	schedule, ok := value.(string)
+	if !ok || schedule == "" {
 		return nil
 	}
 
 	// The standard five-field form, matching what an operator would put in a
 	// crontab, rather than the seconds-resolution variant.
-	if _, err := cron.ParseStandard(*schedule); err != nil {
+	if _, err := cron.ParseStandard(schedule); err != nil {
 		return errors.New("must be a valid cron expression")
 	}
 
