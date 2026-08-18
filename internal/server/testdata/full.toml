@@ -1,0 +1,14 @@
+[http]
+address = "localhost:9999"
+
+[data]
+directory = "/var/lib/orca"
+
+[docker]
+host = "tcp://localhost:2375"
+
+[reconcile]
+interval = "30s"
+
+[logging]
+level = "debug"

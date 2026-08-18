@@ -12,6 +12,13 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+
+	"github.com/dsb-labs/orca/cmd/apply"
+	delcmd "github.com/dsb-labs/orca/cmd/delete"
+	"github.com/dsb-labs/orca/cmd/get"
+	"github.com/dsb-labs/orca/cmd/list"
+	"github.com/dsb-labs/orca/cmd/logs"
+	"github.com/dsb-labs/orca/cmd/serve"
 )
 
 func main() {
@@ -30,6 +37,15 @@ func main() {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		cmd.Version = info.Main.Version
 	}
+
+	cmd.AddCommand(
+		serve.Command(),
+		apply.Command(),
+		list.Command(),
+		get.Command(),
+		delcmd.Command(),
+		logs.Command(),
+	)
 
 	if err := cmd.ExecuteContext(ctx); err != nil {
 		os.Exit(1)

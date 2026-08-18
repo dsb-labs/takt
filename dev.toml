@@ -1,0 +1,11 @@
+[http]
+address = "localhost:7373"
+
+[data]
+directory = "./data"
+
+[reconcile]
+interval = "5s"
+
+[logging]
+level = "debug"
