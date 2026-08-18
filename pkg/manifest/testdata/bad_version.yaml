@@ -1,0 +1,4 @@
+version: v2
+name: example
+container:
+  image: example/example:latest

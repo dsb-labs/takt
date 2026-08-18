@@ -11,11 +11,14 @@ tool (
 require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.1
+	github.com/go-ozzo/ozzo-validation/v4 v4.4.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/opencontainers/image-spec v1.1.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.0
+	go.yaml.in/yaml/v3 v3.0.5
 	modernc.org/sqlite v1.56.0
 )
 
@@ -86,7 +89,6 @@ require (
 	go.opentelemetry.io/otel/sdk v1.45.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.45.0 // indirect
 	go.opentelemetry.io/otel/trace v1.45.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/exp v0.0.0-20260212183809-81e46e3db34a // indirect
 	golang.org/x/exp/typeparams v0.0.0-20231108232855-2478ac86f678 // indirect
 	golang.org/x/mod v0.38.0 // indirect

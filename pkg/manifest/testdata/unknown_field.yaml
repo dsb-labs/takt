@@ -1,0 +1,5 @@
+version: v1
+name: example
+replicas: 3
+container:
+  image: example/example:latest

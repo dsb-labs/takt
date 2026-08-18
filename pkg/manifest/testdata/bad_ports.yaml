@@ -1,0 +1,6 @@
+version: v1
+name: example
+container:
+  image: example/example:latest
+  ports:
+    - "not-a-port"

@@ -1,0 +1,5 @@
+version: v1
+name: example
+script:
+  source: https://example.com/some_script.sh
+  raw: echo hello

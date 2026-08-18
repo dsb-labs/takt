@@ -1,0 +1,11 @@
+version: v1
+name: example
+schedule: "*/5 * * * *"
+labels:
+  some-key: some-value
+container:
+  image: example/example:latest
+  env:
+    EXAMPLE: EXAMPLE
+  ports:
+    - "8080:8080"

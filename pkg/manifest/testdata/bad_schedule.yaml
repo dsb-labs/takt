@@ -1,0 +1,5 @@
+version: v1
+name: example
+schedule: "not a cron expression"
+container:
+  image: example/example:latest
