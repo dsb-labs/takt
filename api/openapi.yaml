@@ -98,6 +98,14 @@ paths:
                 $ref: "#/components/schemas/Workload"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "409":
+          description: |
+            The workload is being deleted. It cannot be applied again until its
+            teardown has finished and it has disappeared.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: |
             The specification is well-formed but names a runtime the server cannot
@@ -114,11 +122,19 @@ paths:
       tags: [workloads]
       summary: Delete a workload
       description: |
-        Removes the workload's desired state and stops every instance the driver is
-        running on its behalf.
+        Marks the workload for deletion and returns it as it now stands.
+
+        Deletion is asynchronous. The workload is reported as terminating while its
+        instances are stopped, and disappears once nothing is left running for it,
+        so a caller can watch the teardown by polling the workload until it returns
+        404. Applying a workload while it is terminating is rejected.
       responses:
-        "204":
-          description: The workload was deleted.
+        "202":
+          description: The workload was marked for deletion.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workload"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -285,6 +301,12 @@ components:
           $ref: "#/components/schemas/WorkloadState"
         spec:
           $ref: "#/components/schemas/WorkloadSpec"
+        deleting:
+          type: boolean
+          description: |
+            Whether the workload has been marked for deletion and is being torn
+            down. Such a workload is reported as terminating and will disappear
+            once nothing is left running for it.
         instances:
           type: array
           description: |
@@ -340,19 +362,25 @@ components:
       description: |
         The workload's overall state, derived from its instances. A workload is
         pending until something is running, running while its instances are up,
-        failed when an instance exited non-zero, and stopped when none are running.
+        terminating while they are being torn down, failed when an instance exited
+        non-zero, and stopped when none are running.
       enum:
         - pending
         - running
+        - terminating
         - stopped
         - failed
 
     InstanceState:
       type: string
-      description: The state of a single instance as reported by its driver.
+      description: |
+        The state of a single instance as reported by its driver. An instance is
+        terminating while it is being torn down, which happens when an outdated
+        instance is replaced or its workload is deleted.
       enum:
         - pending
         - running
+        - terminating
         - exited
         - failed
 

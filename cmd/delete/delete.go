@@ -13,19 +13,29 @@ import (
 // everything running for it.
 func Command() *cobra.Command {
 	var address string
+	var wait bool
 
 	cmd := &cobra.Command{
 		Use:     "delete <name>",
 		Aliases: []string{"rm"},
 		Short:   "Delete a workload and stop its work",
-		Args:    cobra.ExactArgs(1),
+		Long: "Delete a workload and stop its work.\n\n" +
+			"Deletion is asynchronous: the workload is reported as terminating while its\n" +
+			"instances are stopped, and disappears once nothing is left running for it.\n" +
+			"Pass --wait to block until the teardown has finished.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := client.New(address)
 			if err != nil {
 				return err
 			}
 
-			if err = c.Delete(cmd.Context(), args[0]); err != nil {
+			var options []client.DeleteOption
+			if wait {
+				options = append(options, client.WithWait())
+			}
+
+			if _, err = c.Delete(cmd.Context(), args[0], options...); err != nil {
 				return fmt.Errorf("failed to delete workload: %w", err)
 			}
 
@@ -33,7 +43,9 @@ func Command() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
+	flags := cmd.Flags()
+	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
+	flags.BoolVarP(&wait, "wait", "w", false, "block until the workload has finished terminating")
 
 	return cmd
 }

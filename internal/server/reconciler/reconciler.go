@@ -31,10 +31,13 @@ type (
 	}
 
 	// The WorkloadRepository interface describes the persistence operations the
-	// reconciler uses to read desired state.
+	// reconciler uses to read desired state and to finish a deletion.
 	WorkloadRepository interface {
 		// List should return every stored workload.
 		List(ctx context.Context) ([]database.Workload, error)
+		// Delete should remove the workload with the given name, which the
+		// reconciler calls once the driver reports its work is gone.
+		Delete(ctx context.Context, name string) error
 	}
 
 	// The Reconciler type drives the running state of the node towards the desired
@@ -199,10 +202,27 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 // converge brings a single workload's running state into line with its desired
 // state.
 func (r *Reconciler) converge(ctx context.Context, row database.Workload, instances []driver.Instance) error {
+	// A workload marked for deletion is torn down here rather than by whoever
+	// asked, so that one component is responsible for touching the runtime and the
+	// desired state survives until the work described by it is actually gone.
+	if !row.DeletingAt.IsZero() {
+		return r.teardown(ctx, row, instances)
+	}
+
 	// Only container workloads can run today. A workload naming any other runtime
 	// is stored but left alone, so it starts working when its driver arrives
 	// rather than being reported as broken.
 	if api.Runtime(row.Runtime) != api.Container {
+		return nil
+	}
+
+	// An instance on its way out is mid-teardown from an earlier pass. Acting now
+	// would mean stopping what is already stopping, or starting a replacement whose
+	// name the departing container still holds, so the pass leaves the workload
+	// alone and picks it up once the runtime has finished.
+	if slices.ContainsFunc(instances, terminating) {
+		r.logger.With("workload", row.Name).Debug("waiting for workload to finish terminating")
+
 		return nil
 	}
 
@@ -233,6 +253,49 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	}
 
 	return r.restart(ctx, row, instances)
+}
+
+// teardown removes a workload that has been marked for deletion, and its desired
+// state once the driver reports nothing is left.
+//
+// The row is the last thing to go. While it exists the workload reads as
+// terminating, so the teardown is observable; once the driver is empty there is
+// nothing left for the row to describe, and removing it is what finally makes the
+// workload disappear. Ordering it this way means a failure at any point leaves a
+// workload that will be torn down again on the next pass, rather than running work
+// that nothing records.
+func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instances []driver.Instance) error {
+	if len(instances) > 0 {
+		// Already on its way out from an earlier pass; stopping it again would just
+		// race the runtime finishing the job.
+		if slices.ContainsFunc(instances, terminating) {
+			r.logger.With("workload", row.Name).Debug("waiting for deleted workload to finish terminating")
+
+			return nil
+		}
+
+		r.logger.With("workload", row.Name).Debug("stopping deleted workload")
+
+		if err := r.driver.Stop(ctx, row.Name); err != nil {
+			return fmt.Errorf("failed to stop deleted workload: %w", err)
+		}
+
+		// The stop may not have taken effect yet, so the row is left for the next
+		// pass to reap once the driver reports the work is gone.
+		return nil
+	}
+
+	if err := r.workloads.Delete(ctx, row.Name); err != nil {
+		return fmt.Errorf("failed to delete workload: %w", err)
+	}
+
+	// Backoff is keyed by workload and would otherwise outlive it, pacing the
+	// restarts of a later workload that happens to reuse the name.
+	delete(r.backoff, row.Name)
+
+	r.logger.With("workload", row.Name).Info("workload deleted")
+
+	return nil
 }
 
 // restart brings back a workload whose instances have all stopped, pacing repeated
@@ -298,6 +361,10 @@ func staleInstances(row database.Workload, instances []driver.Instance) []driver
 
 func running(instance driver.Instance) bool {
 	return instance.State == driver.StateRunning || instance.State == driver.StatePending
+}
+
+func terminating(instance driver.Instance) bool {
+	return instance.State == driver.StateTerminating
 }
 
 func exitCodeOf(instances []driver.Instance) int {

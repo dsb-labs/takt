@@ -112,20 +112,29 @@ func (_c *MockWorkloadService_Apply_Call) RunAndReturn(run func(ctx context.Cont
 }
 
 // Delete provides a mock function for the type MockWorkloadService
-func (_mock *MockWorkloadService) Delete(ctx context.Context, name string) error {
+func (_mock *MockWorkloadService) Delete(ctx context.Context, name string) (service.Workload, error) {
 	ret := _mock.Called(ctx, name)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
 	}
 
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+	var r0 service.Workload
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (service.Workload, error)); ok {
+		return returnFunc(ctx, name)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) service.Workload); ok {
 		r0 = returnFunc(ctx, name)
 	} else {
-		r0 = ret.Error(0)
+		r0 = ret.Get(0).(service.Workload)
 	}
-	return r0
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
 }
 
 // MockWorkloadService_Delete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Delete'
@@ -158,12 +167,12 @@ func (_c *MockWorkloadService_Delete_Call) Run(run func(ctx context.Context, nam
 	return _c
 }
 
-func (_c *MockWorkloadService_Delete_Call) Return(err error) *MockWorkloadService_Delete_Call {
-	_c.Call.Return(err)
+func (_c *MockWorkloadService_Delete_Call) Return(workload service.Workload, err error) *MockWorkloadService_Delete_Call {
+	_c.Call.Return(workload, err)
 	return _c
 }
 
-func (_c *MockWorkloadService_Delete_Call) RunAndReturn(run func(ctx context.Context, name string) error) *MockWorkloadService_Delete_Call {
+func (_c *MockWorkloadService_Delete_Call) RunAndReturn(run func(ctx context.Context, name string) (service.Workload, error)) *MockWorkloadService_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }

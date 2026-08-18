@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,7 @@ func TestClient_Apply(t *testing.T) {
 		Assert            func(*testing.T, client.Workload, bool)
 		ExpectBadRequest  bool
 		ExpectUnsupported bool
+		ExpectConflict    bool
 	}{
 		{
 			Name: "creates a workload",
@@ -74,6 +76,13 @@ func TestClient_Apply(t *testing.T) {
 			},
 			ExpectUnsupported: true,
 		},
+		{
+			Name: "reports a workload that is being deleted",
+			Handler: func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(t, w, http.StatusConflict, api.ErrorResponse{Error: "workload is being deleted"})
+			},
+			ExpectConflict: true,
+		},
 	}
 
 	for _, tc := range tt {
@@ -92,6 +101,9 @@ func TestClient_Apply(t *testing.T) {
 				return
 			case tc.ExpectUnsupported:
 				assert.True(t, client.IsUnprocessable(err))
+				return
+			case tc.ExpectConflict:
+				assert.True(t, client.IsConflict(err))
 				return
 			}
 
@@ -168,15 +180,67 @@ func TestClient_List(t *testing.T) {
 func TestClient_Delete(t *testing.T) {
 	t.Parallel()
 
-	t.Run("deletes the workload", func(t *testing.T) {
+	t.Run("returns the terminating workload", func(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, http.MethodDelete, r.Method)
 			assert.Equal(t, "/api/v1/workloads/example", r.URL.Path)
 
-			w.WriteHeader(http.StatusNoContent)
+			terminating := workload("example", api.WorkloadStateTerminating)
+			terminating.Deleting = new(true)
+
+			writeJSON(t, w, http.StatusAccepted, terminating)
 		})
 
-		require.NoError(t, c.Delete(t.Context(), "example"))
+		got, err := c.Delete(t.Context(), "example")
+		require.NoError(t, err)
+
+		assert.True(t, got.Deleting)
+		assert.Equal(t, string(api.WorkloadStateTerminating), got.State)
+	})
+
+	t.Run("waits for the teardown to finish", func(t *testing.T) {
+		var gets int
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete {
+				writeJSON(t, w, http.StatusAccepted, workload("example", api.WorkloadStateTerminating))
+				return
+			}
+
+			// The workload is reported as terminating until the server has stopped
+			// its work, and disappears once it has. Waiting has to keep polling
+			// through the former and stop at the latter.
+			gets++
+			if gets < 3 {
+				writeJSON(t, w, http.StatusOK, workload("example", api.WorkloadStateTerminating))
+				return
+			}
+
+			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: "workload not found"})
+		})
+
+		_, err := c.Delete(t.Context(), "example", client.WithWaitInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, gets)
+	})
+
+	t.Run("gives up waiting when the context is cancelled", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete {
+				writeJSON(t, w, http.StatusAccepted, workload("example", api.WorkloadStateTerminating))
+				return
+			}
+
+			// Never disappears, so the wait can only end by cancellation.
+			writeJSON(t, w, http.StatusOK, workload("example", api.WorkloadStateTerminating))
+		})
+
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancel()
+
+		_, err := c.Delete(ctx, "example", client.WithWaitInterval(time.Millisecond))
+		assert.Error(t, err)
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
@@ -184,7 +248,8 @@ func TestClient_Delete(t *testing.T) {
 			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})
 		})
 
-		assert.ErrorIs(t, c.Delete(t.Context(), "nope"), client.ErrWorkloadNotFound)
+		_, err := c.Delete(t.Context(), "nope")
+		assert.ErrorIs(t, err, client.ErrWorkloadNotFound)
 	})
 }
 

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -22,6 +23,8 @@ type (
 		Runtime string
 		// The workload's overall state, derived from its instances.
 		State string
+		// Whether the workload is being torn down and will shortly disappear.
+		Deleting bool
 		// The specification that was submitted.
 		Spec manifest.Spec
 		// The instances the server is currently running for the workload.
@@ -66,6 +69,8 @@ func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool,
 		return newWorkload(*resp.JSON200), false, nil
 	case resp.JSON400 != nil:
 		return Workload{}, false, newError(http.StatusBadRequest, resp.JSON400)
+	case resp.JSON409 != nil:
+		return Workload{}, false, newError(http.StatusConflict, resp.JSON409)
 	case resp.JSON422 != nil:
 		return Workload{}, false, newError(http.StatusUnprocessableEntity, resp.JSON422)
 	case resp.JSON500 != nil:
@@ -117,23 +122,102 @@ func (c *Client) List(ctx context.Context) ([]Workload, error) {
 	}
 }
 
-// Delete removes the workload with the given name and stops everything running for
-// it, returning ErrWorkloadNotFound when no such workload exists.
-func (c *Client) Delete(ctx context.Context, name string) error {
-	resp, err := c.api.DeleteWorkloadWithResponse(ctx, name)
-	if err != nil {
-		return fmt.Errorf("failed to delete workload: %w", err)
+type (
+	// The DeleteOption type is a function that modifies how a delete is performed.
+	DeleteOption func(*deleteConfig)
+
+	deleteConfig struct {
+		wait     bool
+		interval time.Duration
+	}
+)
+
+func defaultDeleteConfig() *deleteConfig {
+	return &deleteConfig{
+		interval: 500 * time.Millisecond,
+	}
+}
+
+// WithWait modifies a delete to block until the server has finished tearing the
+// workload down and it has disappeared, rather than returning as soon as it has
+// been marked for deletion.
+//
+// Waiting is polling, so the call returns once the workload is gone, the context is
+// cancelled, or the server reports an error.
+func WithWait() DeleteOption {
+	return func(c *deleteConfig) { c.wait = true }
+}
+
+// WithWaitInterval modifies how often a waiting delete polls the server, and
+// implies WithWait.
+func WithWaitInterval(interval time.Duration) DeleteOption {
+	return func(c *deleteConfig) {
+		c.wait = true
+		c.interval = interval
+	}
+}
+
+// Delete marks the workload with the given name for deletion and returns it as it
+// stood when marked, returning ErrWorkloadNotFound when no such workload exists.
+//
+// Deletion is asynchronous: the returned workload is reported as terminating, and
+// disappears once the server has stopped everything running for it. Pass WithWait
+// to block until that has happened.
+func (c *Client) Delete(ctx context.Context, name string, options ...DeleteOption) (Workload, error) {
+	config := defaultDeleteConfig()
+	for _, option := range options {
+		option(config)
 	}
 
+	resp, err := c.api.DeleteWorkloadWithResponse(ctx, name)
+	if err != nil {
+		return Workload{}, fmt.Errorf("failed to delete workload: %w", err)
+	}
+
+	var workload Workload
 	switch {
-	case resp.StatusCode() == http.StatusNoContent:
-		return nil
+	case resp.JSON202 != nil:
+		workload = newWorkload(*resp.JSON202)
 	case resp.JSON404 != nil:
-		return fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
+		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
 	case resp.JSON500 != nil:
-		return newError(http.StatusInternalServerError, resp.JSON500)
+		return Workload{}, newError(http.StatusInternalServerError, resp.JSON500)
 	default:
-		return newError(resp.StatusCode(), nil)
+		return Workload{}, newError(resp.StatusCode(), nil)
+	}
+
+	if !config.wait {
+		return workload, nil
+	}
+
+	// The workload returned is the one that was marked, not one re-read after the
+	// teardown: by the time waiting finishes there is nothing left to read.
+	if err = c.waitForTeardown(ctx, name, config.interval); err != nil {
+		return Workload{}, err
+	}
+
+	return workload, nil
+}
+
+// waitForTeardown polls the workload until the server reports it is gone, which is
+// how a caller observes an asynchronous deletion completing.
+func (c *Client) waitForTeardown(ctx context.Context, name string, interval time.Duration) error {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			_, err := c.Get(ctx, name)
+			switch {
+			case errors.Is(err, ErrWorkloadNotFound):
+				return nil
+			case err != nil:
+				return fmt.Errorf("failed to wait for workload deletion: %w", err)
+			}
+		}
 	}
 }
 
@@ -171,6 +255,10 @@ func newWorkload(w api.Workload) Workload {
 		Spec:      newSpec(w.Spec),
 		CreatedAt: w.CreatedAt,
 		UpdatedAt: w.UpdatedAt,
+	}
+
+	if w.Deleting != nil {
+		workload.Deleting = *w.Deleting
 	}
 
 	if w.Instances == nil {

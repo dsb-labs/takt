@@ -87,6 +87,111 @@ func TestReconciler_Run(t *testing.T) {
 			},
 		},
 		{
+			Name: "waits for an instance that is still terminating",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateTerminating},
+			},
+			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+					storedWorkload("example", "hash-one"),
+				}, nil)
+
+				// Teardown from an earlier pass is still in flight. Stopping what is
+				// already stopping, or starting a replacement whose name the
+				// departing container still holds, would both fail — so no Start or
+				// Stop is expected at all.
+			},
+		},
+		{
+			Name: "waits rather than replacing an outdated instance that is terminating",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateTerminating},
+			},
+			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
+				// The stored hash has moved on, so this instance is outdated as well
+				// as terminating. It is already on its way out, so the replacement
+				// waits for it to finish rather than racing its removal.
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+					storedWorkload("example", "hash-two"),
+				}, nil)
+			},
+		},
+		{
+			Name: "stops the work of a workload marked for deletion",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning},
+			},
+			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
+				row := storedWorkload("example", "hash-one")
+				row.DeletingAt = time.Now().UTC()
+
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// The work is stopped, but the row is left for a later pass: the
+				// stop may not have taken effect yet, and removing the desired
+				// state now would leave nothing describing work still running.
+				d.EXPECT().Stop(mock.Anything, "example").Return(nil)
+			},
+		},
+		{
+			Name: "removes the desired state once a deleted workload has no work left",
+			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
+				row := storedWorkload("example", "hash-one")
+				row.DeletingAt = time.Now().UTC()
+
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// The driver reports nothing for the workload, so there is nothing
+				// left for the row to describe and it is finally removed.
+				repo.EXPECT().Delete(mock.Anything, "example").Return(nil)
+			},
+		},
+		{
+			Name: "waits for a deleted workload that is still terminating",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateTerminating},
+			},
+			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
+				row := storedWorkload("example", "hash-one")
+				row.DeletingAt = time.Now().UTC()
+
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// Already on its way out, so neither stopping it again nor removing
+				// the row is expected — the pass simply waits.
+			},
+		},
+		{
+			Name: "keeps the desired state when a deleted workload cannot be stopped",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning},
+			},
+			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
+				row := storedWorkload("example", "hash-one")
+				row.DeletingAt = time.Now().UTC()
+
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// A failed stop must not remove the row, or the container would be
+				// left running with nothing recording that it exists.
+				d.EXPECT().Stop(mock.Anything, "example").Return(errors.New("docker is down"))
+			},
+		},
+		{
+			Name: "tears down a deleted workload whose runtime has no driver",
+			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
+				row := storedWorkload("example", "hash-one")
+				row.Runtime = string(api.Script)
+				row.DeletingAt = time.Now().UTC()
+
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// Nothing can be running for it, so deletion must still complete
+				// rather than leaving an undeletable row behind.
+				repo.EXPECT().Delete(mock.Anything, "example").Return(nil)
+			},
+		},
+		{
 			Name: "stops work nothing asked for",
 			Observed: []driver.Instance{
 				{ID: "container-one", Workload: "orphan", SpecHash: "hash-one", State: driver.StateRunning},

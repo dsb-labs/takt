@@ -37,6 +37,11 @@ type (
 		CreatedAt time.Time
 		// The time the workload's specification last changed.
 		UpdatedAt time.Time
+		// The time the workload was marked for deletion, or the zero time when it
+		// has not been. A workload being deleted keeps its row until the driver
+		// reports its work is gone, so that the teardown is observable and the
+		// reconciler is the only thing that removes running work.
+		DeletingAt time.Time
 	}
 
 	// The WorkloadRepository type provides persistence operations for the workload domain.
@@ -147,19 +152,19 @@ func (r *WorkloadRepository) update(ctx context.Context, w Workload, labels stri
 // when no such workload exists.
 func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, error) {
 	const q = `
-		SELECT name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at
+		SELECT name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at, deleting_at
 		FROM workload
 		WHERE name = ?
 	`
 
 	var (
-		w                    Workload
-		spec, labels         string
-		createdAt, updatedAt string
+		w                                Workload
+		spec, labels                     string
+		createdAt, updatedAt, deletingAt string
 	)
 
 	err := r.db.QueryRowContext(ctx, q, name).Scan(
-		&w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt,
+		&w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletingAt,
 	)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -168,7 +173,7 @@ func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, er
 		return Workload{}, fmt.Errorf("failed to load workload: %w", err)
 	}
 
-	if err = hydrate(&w, spec, labels, createdAt, updatedAt); err != nil {
+	if err = hydrate(&w, spec, labels, createdAt, updatedAt, deletingAt); err != nil {
 		return Workload{}, err
 	}
 
@@ -178,7 +183,7 @@ func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, er
 // List returns every workload, ordered by name.
 func (r *WorkloadRepository) List(ctx context.Context) ([]Workload, error) {
 	const q = `
-		SELECT name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at
+		SELECT name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at, deleting_at
 		FROM workload
 		ORDER BY name ASC
 	`
@@ -193,16 +198,16 @@ func (r *WorkloadRepository) List(ctx context.Context) ([]Workload, error) {
 
 	for rows.Next() {
 		var (
-			w                    Workload
-			spec, labels         string
-			createdAt, updatedAt string
+			w                                Workload
+			spec, labels                     string
+			createdAt, updatedAt, deletingAt string
 		)
 
-		if err = rows.Scan(&w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt); err != nil {
+		if err = rows.Scan(&w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletingAt); err != nil {
 			return nil, fmt.Errorf("failed to scan workload: %w", err)
 		}
 
-		if err = hydrate(&w, spec, labels, createdAt, updatedAt); err != nil {
+		if err = hydrate(&w, spec, labels, createdAt, updatedAt, deletingAt); err != nil {
 			return nil, err
 		}
 
@@ -212,8 +217,47 @@ func (r *WorkloadRepository) List(ctx context.Context) ([]Workload, error) {
 	return workloads, rows.Err()
 }
 
+// MarkDeleting records that the workload with the given name should be deleted,
+// returning the marked workload.
+//
+// The row is deliberately kept: the reconciler is the only thing that stops
+// running work, so the desired state has to survive long enough for it to notice
+// and act. Marking is idempotent — a workload already marked keeps its original
+// timestamp — so a repeated request neither fails nor restarts the clock. Returns
+// ErrWorkloadNotFound when no such workload exists.
+func (r *WorkloadRepository) MarkDeleting(ctx context.Context, name string) (Workload, error) {
+	const q = `
+		UPDATE workload
+		SET deleting_at = ?
+		WHERE name = ? AND deleting_at = ''
+	`
+
+	existing, err := r.Get(ctx, name)
+	if err != nil {
+		return Workload{}, err
+	}
+
+	if !existing.DeletingAt.IsZero() {
+		return existing, nil
+	}
+
+	now := time.Now().UTC()
+
+	if _, err = r.db.ExecContext(ctx, q, formatTime(now), name); err != nil {
+		return Workload{}, fmt.Errorf("failed to mark workload for deletion: %w", err)
+	}
+
+	existing.DeletingAt = now
+
+	return existing, nil
+}
+
 // Delete removes the workload with the given name, returning ErrWorkloadNotFound
 // when no such workload exists.
+//
+// This is the final removal of desired state, and is the reconciler's to call once
+// the driver reports the workload's work is gone. Callers wanting to delete a
+// workload should use MarkDeleting.
 func (r *WorkloadRepository) Delete(ctx context.Context, name string) error {
 	const q = `DELETE FROM workload WHERE name = ?`
 
@@ -233,7 +277,7 @@ func (r *WorkloadRepository) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
-func hydrate(w *Workload, spec, labels, createdAt, updatedAt string) error {
+func hydrate(w *Workload, spec, labels, createdAt, updatedAt, deletingAt string) error {
 	parsedLabels, err := unmarshalLabels(labels)
 	if err != nil {
 		return err
@@ -244,10 +288,16 @@ func hydrate(w *Workload, spec, labels, createdAt, updatedAt string) error {
 		return err
 	}
 
+	deleting, err := parseOptionalTime(deletingAt)
+	if err != nil {
+		return fmt.Errorf("failed to parse deleting_at: %w", err)
+	}
+
 	w.Spec = []byte(spec)
 	w.Labels = parsedLabels
 	w.CreatedAt = created
 	w.UpdatedAt = updated
+	w.DeletingAt = deleting
 
 	return nil
 }

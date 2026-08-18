@@ -416,9 +416,15 @@ func state(status container.ContainerState) driver.State {
 		return driver.StateRunning
 	case container.StateCreated, container.StatePaused:
 		return driver.StatePending
+	case container.StateRemoving:
+		// Being removed is orca's own doing — a replacement or a delete in
+		// progress — so it is reported as terminating rather than as a failure.
+		return driver.StateTerminating
 	case container.StateExited:
 		return driver.StateExited
-	case container.StateDead, container.StateRemoving:
+	case container.StateDead:
+		// Docker could not remove the container and will retry when the daemon
+		// restarts. Nothing orca can do will move it on, so it stays a failure.
 		return driver.StateFailed
 	default:
 		return driver.StatePending

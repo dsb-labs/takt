@@ -22,10 +22,11 @@ import (
 
 // Defines values for InstanceState.
 const (
-	InstanceStateExited  InstanceState = "exited"
-	InstanceStateFailed  InstanceState = "failed"
-	InstanceStatePending InstanceState = "pending"
-	InstanceStateRunning InstanceState = "running"
+	InstanceStateExited      InstanceState = "exited"
+	InstanceStateFailed      InstanceState = "failed"
+	InstanceStatePending     InstanceState = "pending"
+	InstanceStateRunning     InstanceState = "running"
+	InstanceStateTerminating InstanceState = "terminating"
 )
 
 // Valid indicates whether the value is a known member of the InstanceState enum.
@@ -38,6 +39,8 @@ func (e InstanceState) Valid() bool {
 	case InstanceStatePending:
 		return true
 	case InstanceStateRunning:
+		return true
+	case InstanceStateTerminating:
 		return true
 	default:
 		return false
@@ -64,10 +67,11 @@ func (e Runtime) Valid() bool {
 
 // Defines values for WorkloadState.
 const (
-	WorkloadStateFailed  WorkloadState = "failed"
-	WorkloadStatePending WorkloadState = "pending"
-	WorkloadStateRunning WorkloadState = "running"
-	WorkloadStateStopped WorkloadState = "stopped"
+	WorkloadStateFailed      WorkloadState = "failed"
+	WorkloadStatePending     WorkloadState = "pending"
+	WorkloadStateRunning     WorkloadState = "running"
+	WorkloadStateStopped     WorkloadState = "stopped"
+	WorkloadStateTerminating WorkloadState = "terminating"
 )
 
 // Valid indicates whether the value is a known member of the WorkloadState enum.
@@ -80,6 +84,8 @@ func (e WorkloadState) Valid() bool {
 	case WorkloadStateRunning:
 		return true
 	case WorkloadStateStopped:
+		return true
+	case WorkloadStateTerminating:
 		return true
 	default:
 		return false
@@ -124,11 +130,15 @@ type Instance struct {
 	// StartedAt When the instance last started.
 	StartedAt *time.Time `json:"startedAt,omitempty"`
 
-	// State The state of a single instance as reported by its driver.
+	// State The state of a single instance as reported by its driver. An instance is
+	// terminating while it is being torn down, which happens when an outdated
+	// instance is replaced or its workload is deleted.
 	State InstanceState `json:"state"`
 }
 
-// InstanceState The state of a single instance as reported by its driver.
+// InstanceState The state of a single instance as reported by its driver. An instance is
+// terminating while it is being torn down, which happens when an outdated
+// instance is replaced or its workload is deleted.
 type InstanceState string
 
 // Runtime Which runtime block the workload's specification names.
@@ -154,6 +164,11 @@ type Workload struct {
 	// CreatedAt When the workload was first applied.
 	CreatedAt time.Time `json:"createdAt"`
 
+	// Deleting Whether the workload has been marked for deletion and is being torn
+	// down. Such a workload is reported as terminating and will disappear
+	// once nothing is left running for it.
+	Deleting *bool `json:"deleting,omitempty"`
+
 	// Instances The instances the driver is currently running for this workload. Empty
 	// when nothing is running yet.
 	Instances *[]Instance `json:"instances,omitempty"`
@@ -170,7 +185,8 @@ type Workload struct {
 
 	// State The workload's overall state, derived from its instances. A workload is
 	// pending until something is running, running while its instances are up,
-	// failed when an instance exited non-zero, and stopped when none are running.
+	// terminating while they are being torn down, failed when an instance exited
+	// non-zero, and stopped when none are running.
 	State WorkloadState `json:"state"`
 
 	// UpdatedAt When the workload's specification last changed.
@@ -214,7 +230,8 @@ type WorkloadSpec struct {
 
 // WorkloadState The workload's overall state, derived from its instances. A workload is
 // pending until something is running, running while its instances are up,
-// failed when an instance exited non-zero, and stopped when none are running.
+// terminating while they are being torn down, failed when an instance exited
+// non-zero, and stopped when none are running.
 type WorkloadState string
 
 // WorkloadName defines model for WorkloadName.
@@ -322,8 +339,12 @@ type ClientInterface interface {
 
 	// DeleteWorkload Delete a workload
 	//
-	// Removes the workload's desired state and stops every instance the driver is
-	// running on its behalf.
+	// Marks the workload for deletion and returns it as it now stands.
+	//
+	// Deletion is asynchronous. The workload is reported as terminating while its
+	// instances are stopped, and disappears once nothing is left running for it,
+	// so a caller can watch the teardown by polling the workload until it returns
+	// 404. Applying a workload while it is terminating is rejected.
 	//
 	// Corresponds with DELETE /api/v1/workloads/{name} (the `DeleteWorkload` operationId).
 	DeleteWorkload(ctx context.Context, name WorkloadName, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -393,8 +414,12 @@ func (c *Client) ListWorkloads(ctx context.Context, reqEditors ...RequestEditorF
 
 // DeleteWorkload Delete a workload
 //
-// Removes the workload's desired state and stops every instance the driver is
-// running on its behalf.
+// Marks the workload for deletion and returns it as it now stands.
+//
+// Deletion is asynchronous. The workload is reported as terminating while its
+// instances are stopped, and disappears once nothing is left running for it,
+// so a caller can watch the teardown by polling the workload until it returns
+// 404. Applying a workload while it is terminating is rejected.
 //
 // Corresponds with DELETE /api/v1/workloads/{name} (the `DeleteWorkload` operationId).
 func (c *Client) DeleteWorkload(ctx context.Context, name WorkloadName, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -752,8 +777,12 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteWorkloadWithResponse Delete a workload
 	//
-	// Removes the workload's desired state and stops every instance the driver is
-	// running on its behalf.
+	// Marks the workload for deletion and returns it as it now stands.
+	//
+	// Deletion is asynchronous. The workload is reported as terminating while its
+	// instances are stopped, and disappears once nothing is left running for it,
+	// so a caller can watch the teardown by polling the workload until it returns
+	// 404. Applying a workload while it is terminating is rejected.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -860,10 +889,17 @@ func (r ListWorkloadsResponse) ContentType() string {
 type DeleteWorkloadResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *Workload
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *NotFound
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r DeleteWorkloadResponse) GetJSON202() *Workload {
+	return r.JSON202
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
@@ -969,6 +1005,8 @@ type ApplyWorkloadResponse struct {
 	JSON201 *Workload
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *BadRequest
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
 	// JSON422 the response for an HTTP 422 `application/json` response
 	JSON422 *ErrorResponse
 	// JSON500 the response for an HTTP 500 `application/json` response
@@ -988,6 +1026,11 @@ func (r ApplyWorkloadResponse) GetJSON201() *Workload {
 // GetJSON400 returns the response for an HTTP 400 `application/json` response
 func (r ApplyWorkloadResponse) GetJSON400() *BadRequest {
 	return r.JSON400
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r ApplyWorkloadResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
 }
 
 // GetJSON422 returns the response for an HTTP 422 `application/json` response
@@ -1095,8 +1138,12 @@ func (c *ClientWithResponses) ListWorkloadsWithResponse(ctx context.Context, req
 
 // DeleteWorkloadWithResponse Delete a workload
 //
-// Removes the workload's desired state and stops every instance the driver is
-// running on its behalf.
+// Marks the workload for deletion and returns it as it now stands.
+//
+// Deletion is asynchronous. The workload is reported as terminating while its
+// instances are stopped, and disappears once nothing is left running for it,
+// so a caller can watch the teardown by polling the workload until it returns
+// 404. Applying a workload while it is terminating is rejected.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -1228,8 +1275,12 @@ func ParseDeleteWorkloadResponse(rsp *http.Response) (*DeleteWorkloadResponse, e
 	}
 
 	switch {
-	case rsp.StatusCode == 204:
-		break // No content-type
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest Workload
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest NotFound
@@ -1324,6 +1375,13 @@ func ParseApplyWorkloadResponse(rsp *http.Response) (*ApplyWorkloadResponse, err
 			return nil, err
 		}
 		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest ErrorResponse
@@ -1719,12 +1777,18 @@ type DeleteWorkloadResponseObject interface {
 	VisitDeleteWorkloadResponse(w http.ResponseWriter) error
 }
 
-type DeleteWorkload204Response struct {
-}
+type DeleteWorkload202JSONResponse Workload
 
-func (response DeleteWorkload204Response) VisitDeleteWorkloadResponse(w http.ResponseWriter) error {
-	w.WriteHeader(204)
-	return nil
+func (response DeleteWorkload202JSONResponse) VisitDeleteWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 type DeleteWorkload404JSONResponse struct{ NotFoundJSONResponse }
@@ -1856,6 +1920,20 @@ func (response ApplyWorkload400JSONResponse) VisitApplyWorkloadResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyWorkload409JSONResponse ErrorResponse
+
+func (response ApplyWorkload409JSONResponse) VisitApplyWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }

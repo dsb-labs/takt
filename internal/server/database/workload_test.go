@@ -154,6 +154,63 @@ func TestWorkloadRepository_List(t *testing.T) {
 	})
 }
 
+func TestWorkloadRepository_MarkDeleting(t *testing.T) {
+	t.Parallel()
+
+	t.Run("records the deletion without removing the row", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := t.Context()
+
+		_, _, err := repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{}`),
+			SpecHash: "hash-one",
+		})
+		require.NoError(t, err)
+
+		marked, err := repo.MarkDeleting(ctx, "example")
+		require.NoError(t, err)
+		assert.False(t, marked.DeletingAt.IsZero())
+
+		// The row has to survive so that the reconciler still knows what to tear
+		// down, and so the teardown stays observable.
+		stored, err := repo.Get(ctx, "example")
+		require.NoError(t, err)
+		assert.False(t, stored.DeletingAt.IsZero())
+	})
+
+	t.Run("is idempotent", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := t.Context()
+
+		_, _, err := repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{}`),
+			SpecHash: "hash-one",
+		})
+		require.NoError(t, err)
+
+		first, err := repo.MarkDeleting(ctx, "example")
+		require.NoError(t, err)
+
+		second, err := repo.MarkDeleting(ctx, "example")
+		require.NoError(t, err)
+
+		// A repeated delete must not restart the clock, or a caller retrying could
+		// hold a workload in teardown indefinitely.
+		assert.Equal(t, first.DeletingAt, second.DeletingAt)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		repo := newTestRepository(t)
+
+		_, err := repo.MarkDeleting(t.Context(), "nope")
+		assert.ErrorIs(t, err, database.ErrWorkloadNotFound)
+	})
+}
+
 func TestWorkloadRepository_Delete(t *testing.T) {
 	t.Parallel()
 

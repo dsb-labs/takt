@@ -95,6 +95,16 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			ExpectStatus: http.StatusBadRequest,
 		},
 		{
+			Name: "reports a workload that is being deleted",
+			Path: "/api/v1/workloads/example",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Workload{}, false, service.ErrWorkloadDeleting).Once()
+			},
+			ExpectStatus: http.StatusConflict,
+		},
+		{
 			Name: "reports an unexpected failure",
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
@@ -219,17 +229,32 @@ func TestWorkloadAPI_ListWorkloads(t *testing.T) {
 func TestWorkloadAPI_DeleteWorkload(t *testing.T) {
 	t.Parallel()
 
-	t.Run("deletes the workload", func(t *testing.T) {
+	t.Run("accepts the deletion and returns the terminating workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Delete(mock.Anything, "example").Return(nil).Once()
+
+		terminating := workload("example", generated.WorkloadStateTerminating)
+		terminating.Deleting = true
+
+		svc.EXPECT().Delete(mock.Anything, "example").Return(terminating, nil).Once()
 
 		resp := do(t, svc, http.MethodDelete, "/api/v1/workloads/example", nil)
-		assert.Equal(t, http.StatusNoContent, resp.Code)
+
+		// 202 rather than 204: the workload is not gone when the request returns,
+		// so the caller gets the workload back and can watch it disappear.
+		require.Equal(t, http.StatusAccepted, resp.Code)
+
+		var got generated.Workload
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+
+		assert.Equal(t, generated.WorkloadStateTerminating, got.State)
+		require.NotNil(t, got.Deleting)
+		assert.True(t, *got.Deleting)
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Delete(mock.Anything, "nope").Return(service.ErrWorkloadNotFound).Once()
+		svc.EXPECT().Delete(mock.Anything, "nope").
+			Return(service.Workload{}, service.ErrWorkloadNotFound).Once()
 
 		resp := do(t, svc, http.MethodDelete, "/api/v1/workloads/nope", nil)
 		assert.Equal(t, http.StatusNotFound, resp.Code)

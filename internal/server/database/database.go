@@ -135,6 +135,16 @@ func unmarshalLabels(data string) (map[string]string, error) {
 	return labels, nil
 }
 
+// parseOptionalTime parses a timestamp column that is empty when unset, which is
+// how SQLite carries a nullable time without a NULL.
+func parseOptionalTime(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+
+	return time.Parse(time.RFC3339Nano, value)
+}
+
 func parseTimestamps(createdAt, updatedAt string) (time.Time, time.Time, error) {
 	created, err := time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {

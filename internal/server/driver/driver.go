@@ -21,6 +21,15 @@ const (
 	StatePending State = "pending"
 	// StateRunning indicates the instance is running.
 	StateRunning State = "running"
+	// StateTerminating indicates the instance is being torn down and will shortly
+	// be gone.
+	//
+	// This is a state orca's own actions produce: replacing an outdated instance
+	// and deleting a workload both stop a container before removing it, and a
+	// runtime need not complete either step before reporting. It is deliberately
+	// distinct from a failure, because nothing has gone wrong, and from an exit,
+	// because there is nothing left to restart.
+	StateTerminating State = "terminating"
 	// StateExited indicates the instance ran to completion and exited cleanly.
 	StateExited State = "exited"
 	// StateFailed indicates the instance exited with a non-zero status, or could

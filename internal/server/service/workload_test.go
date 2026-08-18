@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -31,6 +32,9 @@ func TestWorkloadService_Apply(t *testing.T) {
 			Name: "stores a container workload",
 			Spec: containerSpec("example", "example/example:latest"),
 			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
+				repo.EXPECT().Get(mock.Anything, "example").
+					Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
 				repo.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(w database.Workload) bool {
 					return w.Name == "example" &&
 						w.Runtime == string(api.Container) &&
@@ -57,6 +61,9 @@ func TestWorkloadService_Apply(t *testing.T) {
 			Name: "reports a running workload",
 			Spec: containerSpec("example", "example/example:latest"),
 			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
+				repo.EXPECT().Get(mock.Anything, "example").
+					Return(storedWorkload("example"), nil).Once()
+
 				repo.EXPECT().Upsert(mock.Anything, mock.Anything).
 					RunAndReturn(func(_ context.Context, w database.Workload) (database.Workload, bool, error) {
 						w.Version = 2
@@ -130,6 +137,8 @@ func TestWorkloadService_Apply_NotifiesReconciler(t *testing.T) {
 
 	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
 
+	repo.EXPECT().Get(mock.Anything, "example").
+		Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 	repo.EXPECT().Upsert(mock.Anything, mock.Anything).
 		RunAndReturn(func(_ context.Context, w database.Workload) (database.Workload, bool, error) {
 			w.Version = 1
@@ -197,6 +206,78 @@ func TestWorkloadService_Get(t *testing.T) {
 	})
 }
 
+func TestWorkloadService_Get_State(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name      string
+		Instances []driver.Instance
+		Expected  api.WorkloadState
+	}{
+		{
+			Name:     "nothing running yet is pending",
+			Expected: api.WorkloadStatePending,
+		},
+		{
+			Name: "a container being torn down is terminating",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateTerminating},
+			},
+			Expected: api.WorkloadStateTerminating,
+		},
+		{
+			Name: "a replacement already up outranks its departing predecessor",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateTerminating},
+				{ID: "container-two", Workload: "example", State: driver.StateRunning},
+			},
+			// The workload is serving traffic, so reporting it as terminating
+			// would misrepresent a healthy mid-replacement workload.
+			Expected: api.WorkloadStateRunning,
+		},
+		{
+			Name: "teardown is reported ahead of how the instance ended",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateTerminating},
+				{ID: "container-two", Workload: "example", State: driver.StateFailed, ExitCode: 137},
+			},
+			// The non-zero exit is a consequence of the teardown — orca stopped
+			// it — rather than news in its own right.
+			Expected: api.WorkloadStateTerminating,
+		},
+		{
+			Name: "a failed instance outranks a clean exit",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateExited},
+				{ID: "container-two", Workload: "example", State: driver.StateFailed, ExitCode: 1},
+			},
+			Expected: api.WorkloadStateFailed,
+		},
+		{
+			Name: "a clean exit is stopped",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateExited},
+			},
+			Expected: api.WorkloadStateStopped,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+
+			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+			d.EXPECT().Observe(mock.Anything).Return(tc.Instances, nil).Once()
+
+			svc := service.NewWorkloadService(newTestLogger(t), d, repo, nil)
+
+			got, err := svc.Get(t.Context(), "example")
+			require.NoError(t, err)
+			assert.Equal(t, tc.Expected, got.State)
+		})
+	}
+}
+
 func TestWorkloadService_List(t *testing.T) {
 	t.Parallel()
 
@@ -227,40 +308,74 @@ func TestWorkloadService_List(t *testing.T) {
 func TestWorkloadService_Delete(t *testing.T) {
 	t.Parallel()
 
-	t.Run("stops the driver before removing desired state", func(t *testing.T) {
+	t.Run("marks the workload for deletion without touching the runtime", func(t *testing.T) {
 		d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
 
-		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Stop(mock.Anything, "example").Return(nil).Once()
-		repo.EXPECT().Delete(mock.Anything, "example").Return(nil).Once()
+		marked := storedWorkload("example")
+		marked.DeletingAt = time.Now().UTC()
+
+		repo.EXPECT().MarkDeleting(mock.Anything, "example").Return(marked, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+			{ID: "container-one", Workload: "example", State: driver.StateRunning},
+		}, nil).Once()
 
 		svc := service.NewWorkloadService(newTestLogger(t), d, repo, nil)
 
-		require.NoError(t, svc.Delete(t.Context(), "example"))
+		got, err := svc.Delete(t.Context(), "example")
+		require.NoError(t, err)
+
+		// The reconciler owns stopping the work, so the service records the intent
+		// and reports the workload as on its way out. A running instance does not
+		// make it read as running any more.
+		assert.True(t, got.Deleting)
+		assert.Equal(t, api.WorkloadStateTerminating, got.State)
 	})
 
-	t.Run("keeps desired state when the driver cannot be stopped", func(t *testing.T) {
+	t.Run("notifies the reconciler", func(t *testing.T) {
 		d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
 
-		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Stop(mock.Anything, "example").Return(errors.New("docker is down")).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
 
-		svc := service.NewWorkloadService(newTestLogger(t), d, repo, nil)
+		var notified bool
+		svc := service.NewWorkloadService(newTestLogger(t), d, repo, func() { notified = true })
 
-		// Deleting the row here would orphan a running container that nothing
-		// records any more, so the failure has to propagate.
-		assert.Error(t, svc.Delete(t.Context(), "example"))
+		_, err := svc.Delete(t.Context(), "example")
+		require.NoError(t, err)
+
+		// Nothing happens until the reconciler runs, so it has to be woken.
+		assert.True(t, notified)
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
 		d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
 
-		repo.EXPECT().Get(mock.Anything, "nope").Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "nope").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 
 		svc := service.NewWorkloadService(newTestLogger(t), d, repo, nil)
 
-		assert.ErrorIs(t, svc.Delete(t.Context(), "nope"), service.ErrWorkloadNotFound)
+		_, err := svc.Delete(t.Context(), "nope")
+		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
 	})
+}
+
+func TestWorkloadService_Apply_RejectsATerminatingWorkload(t *testing.T) {
+	t.Parallel()
+
+	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+
+	deleting := storedWorkload("example")
+	deleting.DeletingAt = time.Now().UTC()
+
+	repo.EXPECT().Get(mock.Anything, "example").Return(deleting, nil).Once()
+
+	svc := service.NewWorkloadService(newTestLogger(t), d, repo, nil)
+
+	// Re-applying a workload mid-teardown would race the reconciler removing it,
+	// and could leave the freshly applied instance being torn down instead.
+	_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
+	assert.ErrorIs(t, err, service.ErrWorkloadDeleting)
 }
 
 func TestWorkloadService_Logs(t *testing.T) {

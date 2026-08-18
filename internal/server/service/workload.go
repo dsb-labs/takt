@@ -27,19 +27,19 @@ var (
 	// ErrAmbiguousRuntime is returned when a specification names more than one
 	// runtime, leaving no single driver to run it.
 	ErrAmbiguousRuntime = errors.New("more than one runtime specified")
+	// ErrWorkloadDeleting is returned when applying a workload that is currently
+	// being torn down.
+	ErrWorkloadDeleting = errors.New("workload is being deleted")
 )
 
 type (
 	// The Driver interface describes the runtime operations the service uses to
 	// report on and read from workloads.
 	//
-	// Starting and stopping work is the reconciler's job, not the service's: the
-	// service records what is wanted and the reconciler makes it so. The one
-	// exception is Stop on delete, where the running work has to be gone before
-	// the desired state that describes it is removed.
+	// The service never starts or stops work. It records what is wanted — including
+	// that a workload should go away — and the reconciler makes it so, which keeps
+	// a single component responsible for touching the runtime.
 	Driver interface {
-		// Stop should stop and discard everything the driver runs for the named workload.
-		Stop(ctx context.Context, workload string) error
 		// Observe should report every instance the driver is currently running.
 		Observe(ctx context.Context) ([]driver.Instance, error)
 		// Logs should return the recent output of the named workload, limited to
@@ -57,8 +57,9 @@ type (
 		Get(ctx context.Context, name string) (database.Workload, error)
 		// List should return every stored workload.
 		List(ctx context.Context) ([]database.Workload, error)
-		// Delete should remove the workload with the given name.
-		Delete(ctx context.Context, name string) error
+		// MarkDeleting should record that the workload with the given name is to be
+		// deleted, returning it as it now stands.
+		MarkDeleting(ctx context.Context, name string) (database.Workload, error)
 	}
 
 	// The WorkloadService type orchestrates the persistence layer and the driver
@@ -97,6 +98,17 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 	runtime, err := runtimeOf(spec)
 	if err != nil {
 		return Workload{}, false, err
+	}
+
+	// A workload mid-teardown cannot be resurrected by re-applying it: the
+	// reconciler is still removing its work, so accepting the change would race
+	// that teardown and could leave the new instance being torn down instead.
+	existing, err := s.workloads.Get(ctx, spec.Name)
+	switch {
+	case err != nil && !errors.Is(err, database.ErrWorkloadNotFound):
+		return Workload{}, false, fmt.Errorf("failed to load workload: %w", err)
+	case err == nil && !existing.DeletingAt.IsZero():
+		return Workload{}, false, ErrWorkloadDeleting
 	}
 
 	encoded, hash, err := canonicalise(spec)
@@ -172,37 +184,29 @@ func (s *WorkloadService) List(ctx context.Context) ([]Workload, error) {
 	return workloads, nil
 }
 
-// Delete removes the workload with the given name and stops everything the driver
-// runs for it. Returns ErrWorkloadNotFound when no such workload exists.
+// Delete marks the workload with the given name for deletion and returns it as it
+// now stands. Returns ErrWorkloadNotFound when no such workload exists.
 //
-// The driver is stopped before the desired state is removed so that a failure to
-// stop leaves the workload in place, rather than orphaning running work that
-// nothing records any more.
-func (s *WorkloadService) Delete(ctx context.Context, name string) error {
-	if _, err := s.workloads.Get(ctx, name); err != nil {
-		if errors.Is(err, database.ErrWorkloadNotFound) {
-			return ErrWorkloadNotFound
-		}
-
-		return fmt.Errorf("failed to load workload: %w", err)
-	}
-
-	if err := s.driver.Stop(ctx, name); err != nil {
-		return fmt.Errorf("failed to stop workload: %w", err)
-	}
-
-	err := s.workloads.Delete(ctx, name)
+// Deletion is asynchronous: the workload is marked and the reconciler tears its
+// work down, removing the desired state only once the driver reports nothing is
+// left. Stopping the work here instead would race the reconciler for the same
+// containers, and removing the row eagerly would destroy the desired state the
+// teardown is driven from — leaving running work that nothing records. Keeping the
+// row also makes the teardown observable, so a caller can watch the workload reach
+// terminating and then disappear.
+func (s *WorkloadService) Delete(ctx context.Context, name string) (Workload, error) {
+	marked, err := s.workloads.MarkDeleting(ctx, name)
 	switch {
 	case errors.Is(err, database.ErrWorkloadNotFound):
-		return ErrWorkloadNotFound
+		return Workload{}, ErrWorkloadNotFound
 	case err != nil:
-		return fmt.Errorf("failed to delete workload: %w", err)
+		return Workload{}, fmt.Errorf("failed to mark workload for deletion: %w", err)
 	}
 
-	s.logger.With("workload", name).Debug("workload deleted")
+	s.logger.With("workload", name).Debug("workload marked for deletion")
 	s.wake()
 
-	return nil
+	return s.hydrate(ctx, marked)
 }
 
 // Logs returns the recent output of the named workload, limited to the last tail
@@ -291,6 +295,8 @@ func newWorkload(row database.Workload, instances []driver.Instance) (Workload, 
 		return Workload{}, fmt.Errorf("failed to decode workload spec: %w", err)
 	}
 
+	deleting := !row.DeletingAt.IsZero()
+
 	return Workload{
 		Name:      row.Name,
 		Version:   row.Version,
@@ -299,26 +305,43 @@ func newWorkload(row database.Workload, instances []driver.Instance) (Workload, 
 		Spec:      spec,
 		Labels:    row.Labels,
 		Instances: instances,
-		State:     stateOf(instances),
+		State:     stateOf(instances, deleting),
+		Deleting:  deleting,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
 	}, nil
 }
 
-// stateOf derives a workload's overall state from its instances. Running wins
-// over everything — a workload with one healthy instance is running — then
-// failure, then a clean exit; a workload with no instances at all is pending,
-// because the reconciler has yet to start it.
-func stateOf(instances []driver.Instance) api.WorkloadState {
+// stateOf derives a workload's overall state from its instances and whether it is
+// being deleted.
+//
+// A workload marked for deletion is terminating whatever its instances are doing,
+// because that is the only thing that will happen to it from here — reporting it as
+// running while it is on its way out would invite a caller to wait for something
+// that is never coming back.
+//
+// Otherwise running wins: a workload whose replacement is already up while its
+// predecessor is still going away is running, not terminating. Then teardown in
+// progress is reported ahead of how the departing instance ended, since the exit is
+// a consequence of the teardown rather than news in its own right. Failure outranks
+// a clean exit, and a workload with no instances at all is pending, because the
+// reconciler has yet to start it.
+func stateOf(instances []driver.Instance, deleting bool) api.WorkloadState {
+	if deleting {
+		return api.WorkloadStateTerminating
+	}
+
 	if len(instances) == 0 {
 		return api.WorkloadStatePending
 	}
 
-	var failed, exited bool
+	var terminating, failed, exited bool
 	for _, instance := range instances {
 		switch instance.State {
 		case driver.StateRunning:
 			return api.WorkloadStateRunning
+		case driver.StateTerminating:
+			terminating = true
 		case driver.StateFailed:
 			failed = true
 		case driver.StateExited:
@@ -327,6 +350,8 @@ func stateOf(instances []driver.Instance) api.WorkloadState {
 	}
 
 	switch {
+	case terminating:
+		return api.WorkloadStateTerminating
 	case failed:
 		return api.WorkloadStateFailed
 	case exited:
@@ -353,8 +378,11 @@ type Workload struct {
 	Labels map[string]string
 	// The instances the driver is currently running for the workload.
 	Instances []driver.Instance
-	// The workload's overall state, derived from its instances.
+	// The workload's overall state, derived from its instances and whether it is
+	// being deleted.
 	State api.WorkloadState
+	// Whether the workload has been marked for deletion and is being torn down.
+	Deleting bool
 	// The time the workload was first applied.
 	CreatedAt time.Time
 	// The time the workload's specification last changed.

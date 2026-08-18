@@ -286,6 +286,58 @@ func TestDriver_Observe(t *testing.T) {
 		assert.Zero(t, instances[0].ExitCode)
 	})
 
+	t.Run("reports a container being removed as terminating", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		// Removal is orca's own doing — a replacement or a delete in progress — so
+		// it must not be reported as a failure, and must not be inspected for an
+		// exit code it hasn't produced yet.
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:     "container-one",
+				State:  dockercontainer.StateRemoving,
+				Labels: map[string]string{docker.LabelWorkload: "example"},
+			},
+		}, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+
+		assert.Equal(t, driver.StateTerminating, instances[0].State)
+		assert.Zero(t, instances[0].ExitCode)
+	})
+
+	t.Run("reports a container docker could not remove as failed", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:     "container-one",
+				State:  dockercontainer.StateDead,
+				Labels: map[string]string{docker.LabelWorkload: "example"},
+			},
+		}, nil).Once()
+
+		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				State: &dockercontainer.State{Status: dockercontainer.StateDead},
+			},
+		}, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+
+		// Nothing orca does will move a dead container on; docker retries it when
+		// the daemon restarts, so it stays a failure rather than terminating.
+		assert.Equal(t, driver.StateFailed, instances[0].State)
+	})
+
 	t.Run("reports nothing when it owns no containers", func(t *testing.T) {
 		client := NewMockClient(t)
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()

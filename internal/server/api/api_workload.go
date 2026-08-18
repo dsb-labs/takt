@@ -21,8 +21,9 @@ type (
 		Get(ctx context.Context, name string) (service.Workload, error)
 		// List should return every workload.
 		List(ctx context.Context) ([]service.Workload, error)
-		// Delete should remove the workload with the given name and stop its work.
-		Delete(ctx context.Context, name string) error
+		// Delete should mark the workload with the given name for deletion,
+		// returning it as it now stands.
+		Delete(ctx context.Context, name string) (service.Workload, error)
 		// Logs should return the recent output of the named workload.
 		Logs(ctx context.Context, name string, tail int) (string, error)
 	}
@@ -76,6 +77,10 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 
 	workload, created, err := a.workloads.Apply(ctx, spec)
 	switch {
+	case errors.Is(err, service.ErrWorkloadDeleting):
+		return api.ApplyWorkload409JSONResponse{
+			Error: fmt.Sprintf("workload %q is being deleted", request.Name),
+		}, nil
 	case errors.Is(err, service.ErrUnsupportedRuntime):
 		return api.ApplyWorkload422JSONResponse{Error: err.Error()}, nil
 	case errors.Is(err, service.ErrNoRuntime), errors.Is(err, service.ErrAmbiguousRuntime):
@@ -137,9 +142,13 @@ func (a *WorkloadAPI) ListWorkloads(ctx context.Context, _ api.ListWorkloadsRequ
 	return response, nil
 }
 
-// DeleteWorkload removes the workload with the given name.
+// DeleteWorkload marks the workload with the given name for deletion.
+//
+// The response is 202 rather than 204 because the workload is not gone when the
+// request returns: it is reported as terminating until the driver's work for it has
+// actually stopped, at which point it disappears.
 func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWorkloadRequestObject) (api.DeleteWorkloadResponseObject, error) {
-	err := a.workloads.Delete(ctx, request.Name)
+	workload, err := a.workloads.Delete(ctx, request.Name)
 	switch {
 	case errors.Is(err, service.ErrWorkloadNotFound):
 		return api.DeleteWorkload404JSONResponse{
@@ -155,7 +164,7 @@ func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWork
 		}, nil
 	}
 
-	return api.DeleteWorkload204Response{}, nil
+	return api.DeleteWorkload202JSONResponse(newWorkload(workload)), nil
 }
 
 // GetWorkloadLogs returns the recent output of the named workload.
@@ -194,6 +203,10 @@ func newWorkload(w service.Workload) api.Workload {
 		Spec:      w.Spec,
 		CreatedAt: w.CreatedAt,
 		UpdatedAt: w.UpdatedAt,
+	}
+
+	if w.Deleting {
+		workload.Deleting = new(true)
 	}
 
 	if len(w.Instances) == 0 {

@@ -75,6 +75,12 @@ func IsUnprocessable(err error) bool {
 	return hasStatus(err, http.StatusUnprocessableEntity)
 }
 
+// IsConflict reports whether err is a server-side error with a 409 status, which
+// the server uses when a workload cannot be applied because it is being deleted.
+func IsConflict(err error) bool {
+	return hasStatus(err, http.StatusConflict)
+}
+
 func hasStatus(err error, status int) bool {
 	clientErr, ok := errors.AsType[Error](err)
 	if !ok {
