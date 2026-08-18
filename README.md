@@ -36,11 +36,17 @@ orca list                       # list workloads              (alias: ls)
 orca get example                # show one workload
 orca logs example --tail 20     # read recent output
 orca delete example             # remove it and stop its work (alias: rm)
+orca delete example --wait      # ...and block until it's gone
 ```
 
 Applying the same file twice is a no-op — a workload's version only changes when
 its specification does, so re-running `apply` never restarts healthy work. Read
 commands print indented JSON, so they pipe into `jq`.
+
+Deleting is asynchronous. The workload reads as `terminating` while its containers
+are stopped and disappears once nothing is left running for it, so a teardown can
+be watched by polling `get` until it 404s. Applying a workload that is still
+terminating is rejected rather than resurrecting it half-torn-down.
 
 ## How it works
 
@@ -59,6 +65,10 @@ commands print indented JSON, so they pipe into `jq`.
   container is what identifies it as outdated.
 - **orca owns restarts**, not Docker, so they can be paced by exponential backoff
   and stay visible in the workload's reported state.
+- **Only the reconciler touches the runtime.** Deleting a workload records the
+  intent and the reconciler performs the teardown, removing the desired state last.
+  Nothing races it for the same containers, and a failure part-way leaves a workload
+  that gets torn down again rather than containers nothing records.
 
 ## Configuration
 
