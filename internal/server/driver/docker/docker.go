@@ -3,6 +3,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,8 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 
+	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 )
 
@@ -37,6 +40,9 @@ const (
 var (
 	// ErrInvalidPorts is returned when a workload's port mappings cannot be parsed.
 	ErrInvalidPorts = errors.New("invalid port mapping")
+	// ErrNotContainerWorkload is returned when NewWorkload is given a stored
+	// workload whose specification carries no container block.
+	ErrNotContainerWorkload = errors.New("workload does not describe a container")
 )
 
 type (
@@ -85,6 +91,39 @@ func New(config Config) *Driver {
 		logger: config.Logger.With("component", "driver", "driver", "docker"),
 		client: config.Client,
 	}
+}
+
+// NewWorkload maps a stored workload onto the driver's own view of it, decoding
+// the container block from the specification the server persisted.
+//
+// Returns ErrNotContainerWorkload when the specification carries no container
+// block, which means it was meant for a different driver.
+func NewWorkload(row database.Workload) (Workload, error) {
+	var spec api.WorkloadSpec
+	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+		return Workload{}, fmt.Errorf("failed to decode workload spec: %w", err)
+	}
+
+	if spec.Container == nil {
+		return Workload{}, ErrNotContainerWorkload
+	}
+
+	w := Workload{
+		Name:     row.Name,
+		Version:  row.Version,
+		SpecHash: row.SpecHash,
+		Image:    spec.Container.Image,
+		Labels:   row.Labels,
+	}
+
+	if spec.Container.Env != nil {
+		w.Env = *spec.Container.Env
+	}
+	if spec.Container.Ports != nil {
+		w.Ports = *spec.Container.Ports
+	}
+
+	return w, nil
 }
 
 // Start creates and starts a container for the given workload, pulling its image

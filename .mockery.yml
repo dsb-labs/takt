@@ -8,6 +8,9 @@ packages:
   github.com/dsb-labs/orca/internal/server/service:
     config:
       all: true
+  github.com/dsb-labs/orca/internal/server/reconciler:
+    config:
+      all: true
   github.com/dsb-labs/orca/internal/server/api:
     config:
       all: true
