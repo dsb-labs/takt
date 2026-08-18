@@ -1,0 +1,368 @@
+openapi: 3.1.0
+
+info:
+  title: orca
+  description: |
+    orca is a single-node workload orchestrator. Workloads are submitted as desired
+    state and continuously reconciled against the runtime so that what is running
+    matches what was asked for.
+
+    A workload names exactly one runtime block, which selects the driver used to run
+    it. Only the container runtime is implemented today; additional blocks are
+    reserved for future runtimes.
+  version: 1.0.0
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:7373
+    description: Local orca server.
+
+tags:
+  - name: workloads
+    description: Submission and inspection of workloads.
+
+paths:
+  /api/v1/workloads:
+    get:
+      operationId: listWorkloads
+      tags: [workloads]
+      summary: List every workload
+      description: |
+        Returns every workload known to the server, with the observed state of each
+        one's instances merged in.
+      responses:
+        "200":
+          description: The workloads known to the server.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Workload"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/workloads/{name}:
+    parameters:
+      - $ref: "#/components/parameters/WorkloadName"
+
+    get:
+      operationId: getWorkload
+      tags: [workloads]
+      summary: Get a single workload
+      description: |
+        Returns the workload with the given name, with the observed state of its
+        instances merged in.
+      responses:
+        "200":
+          description: The requested workload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workload"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      operationId: applyWorkload
+      tags: [workloads]
+      summary: Create or update a workload
+      description: |
+        Applies the given specification as the desired state for the named workload.
+        The operation is idempotent: applying an unchanged specification is a no-op
+        that leaves the workload's version untouched, while a changed specification
+        increments it and causes the running instances to be replaced.
+
+        The specification's name must match the name in the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkloadSpec"
+      responses:
+        "200":
+          description: The workload already existed and was updated, or was unchanged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workload"
+        "201":
+          description: The workload was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workload"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          description: |
+            The specification is well-formed but names a runtime the server cannot
+            run yet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteWorkload
+      tags: [workloads]
+      summary: Delete a workload
+      description: |
+        Removes the workload's desired state and stops every instance the driver is
+        running on its behalf.
+      responses:
+        "204":
+          description: The workload was deleted.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/workloads/{name}/logs:
+    parameters:
+      - $ref: "#/components/parameters/WorkloadName"
+
+    get:
+      operationId: getWorkloadLogs
+      tags: [workloads]
+      summary: Read a workload's logs
+      description: |
+        Returns the combined output of the workload's instances as plain text, most
+        recent last.
+      parameters:
+        - name: tail
+          in: query
+          required: false
+          description: The number of lines to return from the end of the logs.
+          schema:
+            type: integer
+            minimum: 1
+            default: 100
+      responses:
+        "200":
+          description: The workload's logs.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  parameters:
+    WorkloadName:
+      name: name
+      in: path
+      required: true
+      description: The name that identifies the workload.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 63
+
+  responses:
+    BadRequest:
+      description: The request was malformed or failed validation.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFound:
+      description: No workload exists with the given name.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InternalServerError:
+      description: The server failed to handle the request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    WorkloadSpec:
+      type: object
+      description: |
+        The desired state of a workload. Exactly one runtime block must be present;
+        which one it is selects the driver that runs the workload.
+      required: [version, name]
+      properties:
+        version:
+          type: string
+          description: The manifest schema version. Only "v1" is understood.
+          examples: ["v1"]
+        name:
+          type: string
+          description: The name that identifies the workload.
+          minLength: 1
+          maxLength: 63
+          examples: ["example"]
+        schedule:
+          type: string
+          description: |
+            A cron expression describing when the workload should run. Accepted and
+            stored, but not yet acted on; workloads are run continuously for now.
+          examples: ["*/5 * * * *"]
+        labels:
+          type: object
+          description: Arbitrary key-value pairs attached to the workload.
+          additionalProperties:
+            type: string
+        container:
+          $ref: "#/components/schemas/ContainerSpec"
+        script:
+          $ref: "#/components/schemas/ScriptSpec"
+
+    ContainerSpec:
+      type: object
+      description: The container runtime block, run by the docker driver.
+      required: [image]
+      properties:
+        image:
+          type: string
+          description: The image reference to run.
+          minLength: 1
+          examples: ["example/example:latest"]
+        env:
+          type: object
+          description: Environment variables set inside the container.
+          additionalProperties:
+            type: string
+        ports:
+          type: array
+          description: |
+            Port mappings to publish, in Docker's "host:container" form. A bare
+            port publishes the same number on both sides.
+          items:
+            type: string
+            examples: ["8080:8080"]
+
+    ScriptSpec:
+      type: object
+      description: |
+        The script runtime block. Exactly one of source or raw must be present.
+        Reserved: no driver runs scripts yet.
+      properties:
+        source:
+          type: string
+          description: A URL to fetch the script from.
+          examples: ["https://example.com/some_script.sh"]
+        raw:
+          type: string
+          description: The script body, run as-is.
+          examples: ["echo \"hello world\""]
+
+    Workload:
+      type: object
+      description: |
+        A workload's desired state, together with the state observed from the driver
+        that runs it.
+      required: [name, version, runtime, state, spec, createdAt, updatedAt]
+      properties:
+        name:
+          type: string
+          description: The name that identifies the workload.
+        version:
+          type: integer
+          description: |
+            Incremented every time the workload's specification changes. Applying an
+            unchanged specification leaves it as-is.
+          minimum: 1
+        runtime:
+          $ref: "#/components/schemas/Runtime"
+        state:
+          $ref: "#/components/schemas/WorkloadState"
+        spec:
+          $ref: "#/components/schemas/WorkloadSpec"
+        instances:
+          type: array
+          description: |
+            The instances the driver is currently running for this workload. Empty
+            when nothing is running yet.
+          items:
+            $ref: "#/components/schemas/Instance"
+        createdAt:
+          type: string
+          format: date-time
+          description: When the workload was first applied.
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the workload's specification last changed.
+
+    Instance:
+      type: object
+      description: A single unit of work the driver is running for a workload.
+      required: [id, state, specHash, restartCount]
+      properties:
+        id:
+          type: string
+          description: |
+            The driver's opaque handle for this instance. A container ID for the
+            docker driver.
+        state:
+          $ref: "#/components/schemas/InstanceState"
+        specHash:
+          type: string
+          description: |
+            The hash of the specification this instance was started from. When it
+            differs from the workload's current hash, the instance is replaced.
+        exitCode:
+          type: integer
+          description: The exit code, set once the instance has exited.
+        restartCount:
+          type: integer
+          description: How many times the driver has restarted this instance.
+          minimum: 0
+        startedAt:
+          type: string
+          format: date-time
+          description: When the instance last started.
+
+    Runtime:
+      type: string
+      description: Which runtime block the workload's specification names.
+      enum:
+        - container
+        - script
+
+    WorkloadState:
+      type: string
+      description: |
+        The workload's overall state, derived from its instances. A workload is
+        pending until something is running, running while its instances are up,
+        failed when an instance exited non-zero, and stopped when none are running.
+      enum:
+        - pending
+        - running
+        - stopped
+        - failed
+
+    InstanceState:
+      type: string
+      description: The state of a single instance as reported by its driver.
+      enum:
+        - pending
+        - running
+        - exited
+        - failed
+
+    ErrorResponse:
+      type: object
+      description: The body returned for any unsuccessful request.
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: A human-readable description of what went wrong.
