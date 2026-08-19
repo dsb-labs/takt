@@ -441,6 +441,77 @@ func TestReconciler_Run_RegistersChecks(t *testing.T) {
 	assert.Equal(t, "/healthz", got.HTTP)
 }
 
+func TestReconciler_Run_ForgetsChecksOnReplacement(t *testing.T) {
+	t.Parallel()
+
+	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+
+	row := storedWorkload("example", "hash-one")
+	row.ID = "workload-one"
+	row.Spec = specWithHealth("example")
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+	ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+		"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+	}, nil)
+
+	checker.EXPECT().Set("example", mock.Anything).Return()
+	checker.EXPECT().Result("example").
+		Return(health.Result{Status: health.StatusUnhealthy, Failures: 2}, true)
+
+	// The replacement must not inherit the departed container's verdict: it would be
+	// condemned for failures it never produced, and denied the start period every
+	// newly started workload is owed.
+	forgotten := make(chan struct{}, 1)
+	checker.EXPECT().Forget("example").Run(func(string) {
+		select {
+		case forgotten <- struct{}{}:
+		default:
+		}
+	}).Return()
+
+	d.EXPECT().Stop(mock.Anything, "example").Return(nil).Once()
+	d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil).Once()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return []driver.Instance{{
+				ID:       "container-one",
+				Workload: "example",
+				SpecHash: "hash-one",
+				State:    driver.StateRunning,
+			}}, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Driver:    d,
+		Workloads: repo,
+		Ports:     ports,
+		Checker:   checker,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	<-forgotten
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 	t.Parallel()
 

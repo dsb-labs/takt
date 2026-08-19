@@ -596,7 +596,19 @@ func (r *Reconciler) stop(ctx context.Context, workload string) error {
 	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
 
-	return r.driver.Stop(ctx, workload)
+	if err := r.driver.Stop(ctx, workload); err != nil {
+		return err
+	}
+
+	// The check history describes work that no longer exists. Keeping it would
+	// condemn the replacement for failures the departed container produced, and deny
+	// it the start period a newly started workload is owed — so a workload replaced
+	// for being unhealthy could never demonstrate that it had recovered.
+	if r.checker != nil {
+		r.checker.Forget(workload)
+	}
+
+	return nil
 }
 
 // staleInstances returns the instances running a specification other than the
