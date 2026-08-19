@@ -258,11 +258,62 @@ components:
         ports:
           type: array
           description: |
-            Port mappings to publish, in Docker's "host:container" form. A bare
-            port publishes the same number on both sides.
+            The ports to publish. Each entry names a port inside the container and,
+            optionally, the host port that should reach it; when the host port is
+            omitted the server allocates one.
           items:
-            type: string
-            examples: ["8080:8080"]
+            $ref: "#/components/schemas/PortMapping"
+
+    PortMapping:
+      type: object
+      description: |
+        A port to publish. The `to` port is the one the workload listens on inside
+        its runtime; the `from` port is the one on the host that reaches it.
+
+        Leaving `from` unset asks the server to allocate a host port, which is the
+        usual case: the workload keeps a fixed port of its own and callers discover
+        the allocated one from the workload's instances. Setting it pins the host
+        port, which is worth doing only when something outside orca has to know the
+        address in advance.
+      required: [to]
+      properties:
+        to:
+          type: integer
+          description: The port the workload listens on inside its runtime.
+          minimum: 1
+          maximum: 65535
+          examples: [8080]
+        from:
+          type: integer
+          description: |
+            The host port that reaches `to`. Allocated by the server when unset.
+          minimum: 1
+          maximum: 65535
+          examples: [4141]
+
+    ResolvedPort:
+      type: object
+      description: |
+        A port mapping as it was actually applied, with the host port the server
+        settled on. This is what a caller uses to reach a workload.
+      required: [to, from, dynamic]
+      properties:
+        to:
+          type: integer
+          description: The port the workload listens on inside its runtime.
+          minimum: 1
+          maximum: 65535
+        from:
+          type: integer
+          description: The host port that reaches it.
+          minimum: 1
+          maximum: 65535
+        dynamic:
+          type: boolean
+          description: |
+            Whether the host port was allocated by the server rather than pinned by
+            the specification. A dynamic port is stable for the life of the workload
+            but may be reallocated if it turns out to be unusable.
 
     ScriptSpec:
       type: object
@@ -307,6 +358,14 @@ components:
             Whether the workload has been marked for deletion and is being torn
             down. Such a workload is reported as terminating and will disappear
             once nothing is left running for it.
+        ports:
+          type: array
+          description: |
+            The port mappings the server settled on for this workload, including the
+            host ports it allocated. These are how a caller reaches the workload, and
+            are reported whether or not anything is currently running.
+          items:
+            $ref: "#/components/schemas/ResolvedPort"
         instances:
           type: array
           description: |

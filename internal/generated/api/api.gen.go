@@ -102,9 +102,10 @@ type ContainerSpec struct {
 	// Examples: example/example:latest
 	Image string `json:"image"`
 
-	// Ports Port mappings to publish, in Docker's "host:container" form. A bare
-	// port publishes the same number on both sides.
-	Ports *[]string `json:"ports,omitempty"`
+	// Ports The ports to publish. Each entry names a port inside the container and,
+	// optionally, the host port that should reach it; when the host port is
+	// omitted the server allocates one.
+	Ports *[]PortMapping `json:"ports,omitempty"`
 }
 
 // ErrorResponse The body returned for any unsuccessful request.
@@ -141,6 +142,42 @@ type Instance struct {
 // instance is replaced or its workload is deleted.
 type InstanceState string
 
+// PortMapping A port to publish. The `to` port is the one the workload listens on inside
+// its runtime; the `from` port is the one on the host that reaches it.
+//
+// Leaving `from` unset asks the server to allocate a host port, which is the
+// usual case: the workload keeps a fixed port of its own and callers discover
+// the allocated one from the workload's instances. Setting it pins the host
+// port, which is worth doing only when something outside orca has to know the
+// address in advance.
+type PortMapping struct {
+	// From The host port that reaches `to`. Allocated by the server when unset.
+	//
+	//
+	// Examples: 4141
+	From *int `json:"from,omitempty"`
+
+	// To The port the workload listens on inside its runtime.
+	//
+	// Examples: 8080
+	To int `json:"to"`
+}
+
+// ResolvedPort A port mapping as it was actually applied, with the host port the server
+// settled on. This is what a caller uses to reach a workload.
+type ResolvedPort struct {
+	// Dynamic Whether the host port was allocated by the server rather than pinned by
+	// the specification. A dynamic port is stable for the life of the workload
+	// but may be reallocated if it turns out to be unusable.
+	Dynamic bool `json:"dynamic"`
+
+	// From The host port that reaches it.
+	From int `json:"from"`
+
+	// To The port the workload listens on inside its runtime.
+	To int `json:"to"`
+}
+
 // Runtime Which runtime block the workload's specification names.
 type Runtime string
 
@@ -175,6 +212,11 @@ type Workload struct {
 
 	// Name The name that identifies the workload.
 	Name string `json:"name"`
+
+	// Ports The port mappings the server settled on for this workload, including the
+	// host ports it allocated. These are how a caller reaches the workload, and
+	// are reported whether or not anything is currently running.
+	Ports *[]ResolvedPort `json:"ports,omitempty"`
 
 	// Runtime Which runtime block the workload's specification names.
 	Runtime Runtime `json:"runtime"`
