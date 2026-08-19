@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -251,9 +252,12 @@ func (d *Driver) Observe(ctx context.Context) ([]driver.Instance, error) {
 		}
 
 		// The summary carries no exit code or start time, so anything that has
-		// stopped needs an inspect to find out how it ended. Running containers
-		// are left alone to keep the common path to a single API call.
-		if instance.State == driver.StateExited || instance.State == driver.StateFailed {
+		// stopped needs an inspect to find out how it ended. A running container is
+		// inspected only when it reports a health check of its own, which the summary
+		// mentions in its status text — the typed result lives on the inspection, and
+		// the text is not a contract worth parsing. A container without a check stays
+		// on the single-call path.
+		if instance.State == driver.StateExited || instance.State == driver.StateFailed || hasHealthCheck(c.Status) {
 			d.inspect(ctx, &instance)
 		}
 
@@ -390,6 +394,10 @@ func (d *Driver) inspect(ctx context.Context, instance *driver.Instance) {
 		return
 	}
 
+	if details.State.Health != nil {
+		instance.RuntimeHealth = details.State.Health.Status
+	}
+
 	instance.ExitCode = details.State.ExitCode
 
 	if startedAt, err := time.Parse(time.RFC3339Nano, details.State.StartedAt); err == nil {
@@ -430,6 +438,18 @@ func (d *Driver) ensureImage(ctx context.Context, ref string) error {
 	}
 
 	return nil
+}
+
+// hasHealthCheck reports whether a container summary mentions a health check.
+//
+// Docker reports health in the summary only inside the human-facing status text
+// ("Up 6 seconds (unhealthy)"), so this recognises that a check exists in order to
+// decide whether an inspection is worth making. The verdict itself is read from the
+// inspection's typed field rather than from this text, which carries no guarantee
+// about its wording.
+func hasHealthCheck(status string) bool {
+	return strings.Contains(status, "(health") || strings.Contains(status, "(healthy)") ||
+		strings.Contains(status, "(unhealthy)")
 }
 
 func state(status container.ContainerState) driver.State {

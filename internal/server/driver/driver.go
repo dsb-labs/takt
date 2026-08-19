@@ -61,6 +61,13 @@ type (
 		StartedAt time.Time
 		// The ports the instance actually has published, as reported by its runtime.
 		Ports []Port
+		// What the runtime reports about the instance's own health, when the image
+		// declares a check of its own. Empty when it declares none.
+		//
+		// This is separate from the check orca performs: an image may carry a
+		// HEALTHCHECK that docker is already running, and ignoring it would discard
+		// something the operator asked for.
+		RuntimeHealth string
 	}
 
 	// The Port type describes a published port of an instance.
