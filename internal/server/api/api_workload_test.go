@@ -75,6 +75,16 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			ExpectStatus: http.StatusUnprocessableEntity,
 		},
 		{
+			Name: "reports a specification that fails validation",
+			Path: "/api/v1/workloads/example",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Workload{}, false, service.ErrInvalidSpec).Once()
+			},
+			ExpectStatus: http.StatusBadRequest,
+		},
+		{
 			Name: "reports a specification naming no runtime",
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),

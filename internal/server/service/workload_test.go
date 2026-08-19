@@ -83,6 +83,51 @@ func TestWorkloadService_Apply(t *testing.T) {
 			},
 		},
 		{
+			Name: "rejects an unknown schema version",
+			Spec: func() api.WorkloadSpec {
+				spec := containerSpec("example", "example/example:latest")
+				spec.Version = "v99"
+				return spec
+			}(),
+			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
+			ExpectErr:  service.ErrInvalidSpec,
+		},
+		{
+			Name: "rejects a name the runtime could not represent",
+			Spec: containerSpec("BAD_NAME", "example/example:latest"),
+			// The CLI checks this, but a caller that skips the CLI must not be able
+			// to store a workload whose name breaks orca's own documented rules.
+			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
+			ExpectErr:  service.ErrInvalidSpec,
+		},
+		{
+			Name:       "rejects a container with no image",
+			Spec:       containerSpec("example", ""),
+			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
+			// Storing this would produce a workload that can only ever fail to start.
+			ExpectErr: service.ErrInvalidSpec,
+		},
+		{
+			Name: "rejects a schedule that is not cron",
+			Spec: func() api.WorkloadSpec {
+				spec := containerSpec("example", "example/example:latest")
+				spec.Schedule = new("not a cron")
+				return spec
+			}(),
+			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
+			ExpectErr:  service.ErrInvalidSpec,
+		},
+		{
+			Name: "rejects a port outside the usable range",
+			Spec: func() api.WorkloadSpec {
+				spec := containerSpec("example", "example/example:latest")
+				spec.Container.Ports = &[]api.PortMapping{{To: 70000}}
+				return spec
+			}(),
+			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
+			ExpectErr:  service.ErrInvalidSpec,
+		},
+		{
 			Name: "rejects a script workload as unsupported",
 			Spec: api.WorkloadSpec{
 				Version: "v1",

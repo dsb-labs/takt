@@ -94,7 +94,9 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		return api.ApplyWorkload503JSONResponse{Error: err.Error()}, nil
 	case errors.Is(err, service.ErrUnsupportedRuntime):
 		return api.ApplyWorkload422JSONResponse{Error: err.Error()}, nil
-	case errors.Is(err, service.ErrNoRuntime), errors.Is(err, service.ErrAmbiguousRuntime):
+	case errors.Is(err, service.ErrInvalidSpec),
+		errors.Is(err, service.ErrNoRuntime),
+		errors.Is(err, service.ErrAmbiguousRuntime):
 		return api.ApplyWorkload400JSONResponse{
 			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
 		}, nil

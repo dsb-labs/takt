@@ -1,5 +1,9 @@
 package manifest
 
+import (
+	"github.com/dsb-labs/orca/internal/generated/api"
+)
+
 type (
 	// The Runtime type names the runtime a workload is run by, which determines
 	// which of a specification's runtime blocks is used.
@@ -63,3 +67,54 @@ const (
 	// RuntimeScript is the runtime that runs a workload as a script.
 	RuntimeScript Runtime = "script"
 )
+
+// NewSpec maps a wire specification onto the canonical shape.
+//
+// It exists so that anything holding the wire form — the server receiving a request,
+// a client reading a response — can validate it against the same rules a manifest is
+// held to, rather than each side growing its own.
+func NewSpec(spec api.WorkloadSpec) Spec {
+	out := Spec{
+		Version: spec.Version,
+		Name:    spec.Name,
+	}
+
+	if spec.Schedule != nil {
+		out.Schedule = *spec.Schedule
+	}
+	if spec.Labels != nil {
+		out.Labels = *spec.Labels
+	}
+
+	if spec.Container != nil {
+		out.Container = &Container{Image: spec.Container.Image}
+
+		if spec.Container.Env != nil {
+			out.Container.Env = *spec.Container.Env
+		}
+		if spec.Container.Ports != nil {
+			out.Container.Ports = make([]Port, 0, len(*spec.Container.Ports))
+			for _, mapping := range *spec.Container.Ports {
+				port := Port{To: mapping.To}
+				if mapping.From != nil {
+					port.From = *mapping.From
+				}
+
+				out.Container.Ports = append(out.Container.Ports, port)
+			}
+		}
+	}
+
+	if spec.Script != nil {
+		out.Script = new(Script)
+
+		if spec.Script.Source != nil {
+			out.Script.Source = *spec.Script.Source
+		}
+		if spec.Script.Raw != nil {
+			out.Script.Raw = *spec.Script.Raw
+		}
+	}
+
+	return out
+}

@@ -17,6 +17,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/port"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 var (
@@ -41,6 +42,9 @@ var (
 	// ErrNoPortsAvailable is returned when no host port is free for a workload that
 	// needs one allocated.
 	ErrNoPortsAvailable = errors.New("no host port available")
+	// ErrInvalidSpec is returned when a specification does not describe a runnable
+	// workload.
+	ErrInvalidSpec = errors.New("invalid specification")
 )
 
 type (
@@ -150,9 +154,21 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 // replace any running instance. Returns ErrNoRuntime when the specification names
 // no runtime, or ErrUnsupportedRuntime when it names one the server cannot run.
 func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Workload, bool, error) {
+	// The runtime is resolved first so that naming none or naming two is reported as
+	// exactly that, rather than as a general validation failure.
 	runtime, err := runtimeOf(spec)
 	if err != nil {
 		return Workload{}, false, err
+	}
+
+	// Everything else is validated here rather than only in the client that parsed a
+	// manifest. The rules are what make a workload runnable at all — a name the
+	// runtime can represent, an image to run, a schedule that parses — so a caller
+	// that skips the CLI has to be held to them too. Without this the server accepted
+	// an unknown schema version, a name breaking its own documented rules, and an
+	// empty image that could only ever fail to start.
+	if err = manifest.Validate(manifest.NewSpec(spec)); err != nil {
+		return Workload{}, false, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
 
 	// A workload mid-teardown cannot be resurrected by re-applying it: the

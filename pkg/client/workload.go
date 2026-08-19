@@ -280,7 +280,7 @@ func newWorkload(w api.Workload) Workload {
 		Version:   w.Version,
 		Runtime:   string(w.Runtime),
 		State:     string(w.State),
-		Spec:      newSpec(w.Spec),
+		Spec:      manifest.NewSpec(w.Spec),
 		CreatedAt: w.CreatedAt,
 		UpdatedAt: w.UpdatedAt,
 	}
