@@ -86,6 +86,7 @@ func Run(ctx context.Context, config Config) error {
 	for _, middleware := range []func(http.Handler) http.Handler{
 		api.Recovery(logger),
 		api.Logging(logger),
+		api.Limit,
 	} {
 		handler = middleware(handler)
 	}
