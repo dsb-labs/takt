@@ -1,0 +1,12 @@
+version: v1
+name: example
+health:
+  http: /healthz
+  interval: 5s
+  timeout: 1s
+  retries: 2
+  startPeriod: 15s
+container:
+  image: example/example:latest
+  ports:
+    - to: 8080

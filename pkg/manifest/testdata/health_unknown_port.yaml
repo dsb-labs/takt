@@ -1,0 +1,9 @@
+version: v1
+name: example
+health:
+  http: /healthz
+  port: 7070
+container:
+  image: example/example:latest
+  ports:
+    - to: 8080

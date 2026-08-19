@@ -1,0 +1,6 @@
+version: v1
+name: example
+health:
+  http: /healthz
+script:
+  raw: echo hello

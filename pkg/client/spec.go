@@ -23,6 +23,8 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 		spec.Labels = new(s.Labels)
 	}
 
+	spec.Health = manifest.WireHealth(s.Health)
+
 	if s.Container != nil {
 		spec.Container = &api.ContainerSpec{Image: s.Container.Image}
 

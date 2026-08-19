@@ -1,0 +1,8 @@
+version: v1
+name: example
+health:
+  tcp: true
+container:
+  image: example/example:latest
+  ports:
+    - to: 8080

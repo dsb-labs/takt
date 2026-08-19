@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/url"
 	"regexp"
+	"slices"
+	"strings"
 
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/robfig/cron/v3"
@@ -54,6 +56,12 @@ func Parse(r io.Reader) (Spec, error) {
 		return Spec{}, fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
+	// Timing left unset in the file is resolved before validation, so the rules check
+	// the values that will actually be used rather than zeroes.
+	if spec.Health != nil {
+		spec.Health.defaults()
+	}
+
 	if err := Validate(spec); err != nil {
 		return Spec{}, err
 	}
@@ -84,6 +92,10 @@ func Validate(spec Spec) error {
 		return fmt.Errorf("invalid manifest: %w", err)
 	}
 
+	if err = validateHealth(spec, runtime); err != nil {
+		return err
+	}
+
 	switch runtime {
 	case RuntimeContainer:
 		return validateContainer(*spec.Container)
@@ -92,6 +104,78 @@ func Validate(spec Spec) error {
 	default:
 		return nil
 	}
+}
+
+// validateHealth reports whether the workload's health check is one its runtime can
+// actually perform.
+//
+// The timing fields apply to any runtime, so they are checked for every workload. The
+// probe fields do not: a check is performed against an address, and a runtime with
+// nothing to address cannot be probed. Rejecting that combination matters more than
+// ignoring it would — a workload whose check can never run would sit reported as
+// starting forever, which looks like orca failing rather than the manifest being
+// wrong.
+func validateHealth(spec Spec, runtime Runtime) error {
+	health := spec.Health
+	if health == nil {
+		return nil
+	}
+
+	if len(health.invalid) > 0 {
+		return fmt.Errorf("invalid health: %s is not a duration", strings.Join(health.invalid, ", "))
+	}
+
+	switch {
+	case health.Interval <= 0:
+		return errors.New("invalid health: interval must be greater than zero")
+	case health.Timeout <= 0:
+		return errors.New("invalid health: timeout must be greater than zero")
+	case health.Timeout > health.Interval:
+		// A check that may run longer than the gap between checks would overlap
+		// itself, so the failure count would stop meaning consecutive failures.
+		return errors.New("invalid health: timeout must not exceed interval")
+	case health.Retries < 1:
+		return errors.New("invalid health: retries must be at least one")
+	case health.StartPeriod < 0:
+		return errors.New("invalid health: start period must not be negative")
+	}
+
+	switch {
+	case health.HTTP != "" && health.TCP:
+		return errors.New("invalid health: only one of http or tcp may be specified")
+	case health.HTTP == "" && !health.TCP:
+		return errors.New("invalid health: one of http or tcp is required")
+	}
+
+	if runtime != RuntimeContainer {
+		// Only a container publishes an address today. A script runs to completion,
+		// and whether it worked is its exit status rather than something to poll.
+		return fmt.Errorf("invalid health: the %s runtime cannot be probed", runtime)
+	}
+
+	return validateHealthPort(*health, *spec.Container)
+}
+
+// validateHealthPort reports whether the check names a port the workload actually
+// publishes, since a probe is performed against a published address.
+func validateHealthPort(health Health, container Container) error {
+	if len(container.Ports) == 0 {
+		return errors.New("invalid health: the workload publishes no ports to check")
+	}
+
+	if health.Port == 0 {
+		if len(container.Ports) > 1 {
+			return errors.New("invalid health: port is required when more than one port is published")
+		}
+
+		return nil
+	}
+
+	if !slices.ContainsFunc(container.Ports, func(port Port) bool { return port.To == health.Port }) {
+		return fmt.Errorf("invalid health: port %d is not published by the workload", health.Port)
+	}
+
+	return nil
 }
 
 // RuntimeOf reports which runtime spec describes, which is determined by the block

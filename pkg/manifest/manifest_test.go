@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,6 +66,81 @@ func TestParse(t *testing.T) {
 				require.NotNil(t, spec.Script)
 				assert.Equal(t, "https://example.com/some_script.sh", spec.Script.Source)
 			},
+		},
+		{
+			Name: "a health check over http",
+			File: "health_http.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Health)
+				assert.Equal(t, "/healthz", spec.Health.HTTP)
+				assert.Equal(t, 5*time.Second, spec.Health.Interval)
+				assert.Equal(t, time.Second, spec.Health.Timeout)
+				assert.Equal(t, 2, spec.Health.Retries)
+				assert.Equal(t, 15*time.Second, spec.Health.StartPeriod)
+			},
+		},
+		{
+			Name: "a health check over tcp takes the timing defaults",
+			File: "health_tcp.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Health)
+				assert.True(t, spec.Health.TCP)
+
+				// Resolved here so nothing downstream has to decide what an unset
+				// interval means.
+				assert.Equal(t, manifest.DefaultHealthInterval, spec.Health.Interval)
+				assert.Equal(t, manifest.DefaultHealthTimeout, spec.Health.Timeout)
+				assert.Equal(t, manifest.DefaultHealthRetries, spec.Health.Retries)
+				assert.Equal(t, manifest.DefaultHealthStartPeriod, spec.Health.StartPeriod)
+			},
+		},
+		{
+			Name:         "rejects a health check naming no probe",
+			File:         "health_no_probe.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a health check naming both probes",
+			File:         "health_both_probes.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name: "rejects a health check on a workload publishing no ports",
+			File: "health_no_ports.yaml",
+			// A probe is performed against a published address, so there would be
+			// nothing to check and the workload would never report healthy.
+			ExpectsError: true,
+		},
+		{
+			Name: "rejects an ambiguous port when several are published",
+			File: "health_ambiguous_port.yaml",
+			// Guessing which port to check would make the manifest mean something
+			// the operator did not say.
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a port the workload does not publish",
+			File:         "health_unknown_port.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name: "rejects a probe the runtime cannot perform",
+			File: "health_script.yaml",
+			// A script runs to completion and has no address to probe, so this is
+			// rejected rather than left to sit as starting forever.
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a timing field that is not a duration",
+			File:         "health_bad_duration.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name: "rejects a timeout longer than the interval",
+			File: "health_timeout_over_interval.yaml",
+			// Checks would overlap, so a failure count would stop meaning
+			// consecutive failures.
+			ExpectsError: true,
 		},
 		{
 			Name:      "rejects a manifest naming no runtime",

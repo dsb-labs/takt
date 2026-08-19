@@ -1,0 +1,6 @@
+version: v1
+name: example
+health:
+  http: /healthz
+container:
+  image: example/example:latest
