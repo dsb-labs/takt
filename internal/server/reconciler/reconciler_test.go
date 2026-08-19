@@ -271,6 +271,60 @@ func TestReconciler_Run(t *testing.T) {
 	}
 }
 
+func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
+	t.Parallel()
+
+	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+		storedWorkload("example", "hash-one"),
+	}, nil)
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(nil, nil)
+
+	// A workload can fail to start for reasons retrying will never fix, such as an
+	// image that does not exist. Without pacing it would be retried on every pass
+	// and every event, achieving nothing but noise.
+	starts := newCounter()
+	d.EXPECT().Start(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, docker.Workload) (string, error) {
+			starts.inc()
+			return "", errors.New("no such image")
+		})
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Driver:    d,
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	// The startup pass tries once and fails, which opens the backoff window.
+	passes.wait(t, 1)
+
+	// Nudges are coalesced, so each one is requested only after the previous pass has
+	// been accounted for; otherwise a burst would collapse into a single pass and
+	// prove nothing about the window.
+	for i := 2; i <= 4; i++ {
+		r.Notify()
+		passes.wait(t, i)
+	}
+
+	cancel()
+	require.NoError(t, <-done)
+
+	assert.Equal(t, 1, starts.get(), "a failing workload was retried inside its backoff window")
+}
+
 func TestReconciler_Run_ReconcilesOnDriverEvent(t *testing.T) {
 	t.Parallel()
 

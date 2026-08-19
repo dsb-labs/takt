@@ -255,7 +255,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	}
 
 	if len(instances) == 0 {
-		return r.start(ctx, row)
+		return r.attempt(ctx, row)
 	}
 
 	return r.restart(ctx, row, instances)
@@ -304,11 +304,34 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 	return nil
 }
 
+// attempt starts a workload that has nothing running, pacing repeated failures with
+// the same backoff a repeatedly-crashing workload gets.
+//
+// A workload can fail to start for reasons no amount of retrying will fix — an image
+// that does not exist, a host port held by something outside orca and no free port to
+// move to. Without pacing, such a workload is retried on every pass and every driver
+// event, which was measured filling the log at over a thousand errors in four
+// minutes while achieving nothing.
+func (r *Reconciler) attempt(ctx context.Context, row database.Workload) error {
+	if r.waiting(row.Name) {
+		return nil
+	}
+
+	if err := r.start(ctx, row); err != nil {
+		r.hold(row.Name)
+
+		return err
+	}
+
+	delete(r.backoff, row.Name)
+
+	return nil
+}
+
 // restart brings back a workload whose instances have all stopped, pacing repeated
 // failures with exponential backoff.
 func (r *Reconciler) restart(ctx context.Context, row database.Workload, instances []driver.Instance) error {
-	state := r.backoff[row.Name]
-	if !state.next.IsZero() && time.Now().Before(state.next) {
+	if r.waiting(row.Name) {
 		return nil
 	}
 
@@ -320,12 +343,12 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, instanc
 	}
 
 	if err := r.start(ctx, row); err != nil {
+		r.hold(row.Name)
+
 		return err
 	}
 
-	state.attempts++
-	state.next = time.Now().Add(delay(state.attempts))
-	r.backoff[row.Name] = state
+	state := r.hold(row.Name)
 
 	r.logger.With(
 		"workload", row.Name,
@@ -334,6 +357,25 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, instanc
 	).Debug("restarted stopped workload")
 
 	return nil
+}
+
+// waiting reports whether a workload is still inside its backoff window.
+func (r *Reconciler) waiting(workload string) bool {
+	state := r.backoff[workload]
+
+	return !state.next.IsZero() && time.Now().Before(state.next)
+}
+
+// hold records another attempt against a workload and pushes out the earliest time
+// the next one may happen.
+func (r *Reconciler) hold(workload string) backoff {
+	state := r.backoff[workload]
+
+	state.attempts++
+	state.next = time.Now().Add(delay(state.attempts))
+	r.backoff[workload] = state
+
+	return state
 }
 
 func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
