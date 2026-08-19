@@ -154,6 +154,46 @@ func (s *Suite) awaitState(name, state string) client.Workload {
 	return workload
 }
 
+// awaitHealth waits for the named workload's instance to reach the given health
+// status and returns the workload.
+func (s *Suite) awaitHealth(name, status string) client.Workload {
+	var workload client.Workload
+
+	s.Require().Eventuallyf(func() bool {
+		var err error
+
+		workload, err = s.client.Get(s.ctx(), name)
+		if err != nil || len(workload.Instances) == 0 {
+			return false
+		}
+
+		reported := workload.Instances[0].Health
+
+		return reported != nil && reported.Status == status
+	}, convergeTimeout, 500*time.Millisecond, "workload %q never reached health %q", name, status)
+
+	return workload
+}
+
+// awaitInstance waits for the named workload to be running an instance and returns
+// its identifier, which is how a later replacement is recognised.
+func (s *Suite) awaitInstance(name string) string {
+	var instance string
+
+	s.Require().Eventuallyf(func() bool {
+		workload, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(workload.Instances) == 0 {
+			return false
+		}
+
+		instance = workload.Instances[0].ID
+
+		return instance != ""
+	}, convergeTimeout, 500*time.Millisecond, "workload %q never reported an instance", name)
+
+	return instance
+}
+
 // awaitInstanceOtherThan waits for the named workload to be running an instance that
 // isn't the given one, which is how a replacement is distinguished from the instance
 // it replaced.

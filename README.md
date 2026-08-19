@@ -43,6 +43,40 @@ anything pointing at it keeps working. Pin `from` only when something outside or
 has to know the address up front; pinning one another workload already holds is
 rejected when you apply it, rather than failing quietly later.
 
+### Health
+
+A `health:` block tells orca how to check that a workload is actually working, which
+is a different question from whether its runtime reports it started. A process that
+is listening and answering errors looks fine to docker:
+
+```yaml
+version: v1
+name: example
+health:
+  http: /healthz    # or `tcp: true` to just check the port accepts a connection
+  port: 80          # only needed when the workload publishes more than one
+  interval: 10s
+  timeout: 2s
+  retries: 3
+  startPeriod: 30s
+container:
+  image: example/example:latest
+  ports:
+    - to: 80
+```
+
+orca performs the check itself, from the host, against the port it allocated — so an
+image carrying no shell can still be checked, and any driver gets the behaviour by
+publishing an address rather than implementing checks of its own.
+
+A workload that exhausts its retries is restarted on the same paced schedule a
+crashed one takes. `startPeriod` is the grace it gets first: failures inside it don't
+count, so a workload slow to become ready isn't killed for failing checks it was
+never going to pass yet. Passing one check ends the grace early — it has demonstrably
+started.
+
+Only `http` or `tcp` is required; the timings above are the defaults.
+
 ## Usage
 
 ```sh

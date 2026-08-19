@@ -284,6 +284,134 @@ func (s *Suite) TestOrphanedContainerIsStopped() {
 	}, convergeTimeout, 500*time.Millisecond, "orphaned container was never stopped")
 }
 
+// TestHealthyWorkloadIsReported covers a workload whose check passes, which must
+// read as healthy and be left running.
+func (s *Suite) TestHealthyWorkloadIsReported() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name, manifest.Port{To: 80})
+	// nginx serves its index at the root, so this is a check the workload passes.
+	//
+	// The timeout and retries are deliberately slack: this test is about a passing
+	// check being reported and acted on, not about tight timings, and a probe that
+	// merely lost a race with a loaded machine must not read as a workload failure.
+	spec.Health = &manifest.Health{
+		HTTP:     "/",
+		Interval: 5 * time.Second,
+		Timeout:  5 * time.Second,
+		Retries:  10,
+	}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, "running")
+
+	workload := s.awaitHealth(name, "healthy")
+	s.Require().Len(workload.Instances, 1)
+
+	reported := workload.Instances[0].Health
+	s.Require().NotNil(reported)
+	s.Equal("healthy", reported.Status)
+	s.Empty(reported.Error)
+	s.False(reported.CheckedAt.IsZero())
+
+	// A passing check must leave the workload alone: the instance it is running is
+	// the one it started with.
+	instance := workload.Instances[0].ID
+	s.Never(func() bool {
+		return s.instanceID(name) != instance
+	}, 5*time.Second, time.Second)
+}
+
+// TestUnhealthyWorkloadIsReplaced covers a workload the runtime reports as running
+// but which fails its check, which is the entire reason for checking it.
+func (s *Suite) TestUnhealthyWorkloadIsReplaced() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name, manifest.Port{To: 80})
+	// nginx answers 404 for a path it does not serve, so the container is up and
+	// listening while the check fails — exactly the case docker's own health support
+	// reports but never acts on.
+	spec.Health = &manifest.Health{
+		HTTP:     "/nothing-is-served-here",
+		Interval: time.Second,
+		Timeout:  time.Second,
+		Retries:  2,
+	}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	original := s.awaitInstance(name)
+
+	workload := s.awaitHealth(name, "unhealthy")
+	s.Require().Len(workload.Instances, 1)
+
+	reported := workload.Instances[0].Health
+	s.Require().NotNil(reported)
+	s.Contains(reported.Error, "404")
+	s.NotZero(*reported.Failures)
+
+	// The workload is failed rather than running, so it takes the same paced restart
+	// a crashed container does — and keeps being replaced while it cannot serve.
+	s.Require().Eventuallyf(func() bool {
+		workload, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(workload.Instances) == 0 {
+			return false
+		}
+
+		return workload.Instances[0].ID != original
+	}, convergeTimeout, 500*time.Millisecond, "workload %q never replaced instance %s", name, original)
+}
+
+// TestWarmingWorkloadIsNotReplaced covers the start period, which exists so that a
+// workload slow to become ready is not killed for failing checks it was never going
+// to pass yet.
+func (s *Suite) TestWarmingWorkloadIsNotReplaced() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name, manifest.Port{To: 80})
+	spec.Health = &manifest.Health{
+		HTTP:     "/nothing-is-served-here",
+		Interval: time.Second,
+		Timeout:  time.Second,
+		Retries:  1,
+		// Long enough that the check cannot exhaust its retries within the window
+		// this test observes.
+		StartPeriod: 5 * time.Minute,
+	}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	original := s.awaitInstance(name)
+
+	// Failures inside the start period are expected rather than meaningful, so the
+	// workload stays as it is however many of them accumulate.
+	s.Never(func() bool {
+		workload, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(workload.Instances) == 0 {
+			return false
+		}
+
+		return workload.Instances[0].ID != original
+	}, 15*time.Second, time.Second)
+
+	workload, err := s.client.Get(s.ctx(), name)
+	s.Require().NoError(err)
+	s.Require().Len(workload.Instances, 1)
+
+	reported := workload.Instances[0].Health
+	s.Require().NotNil(reported)
+	s.Equal("starting", reported.Status)
+	// It is failing, and being given the chance to stop.
+	s.NotZero(*reported.Failures)
+}
+
 // TestUnsupportedRuntimeIsRejected covers the runtime the API describes but no driver
 // implements, which must be refused rather than accepted and never run.
 func (s *Suite) TestUnsupportedRuntimeIsRejected() {
