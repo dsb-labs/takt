@@ -3,7 +3,7 @@ name: example
 health:
   http: /healthz
   tcp: true
+ports:
+  - to: 8080
 container:
   image: example/example:latest
-  ports:
-    - to: 8080

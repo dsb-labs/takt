@@ -124,7 +124,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 			Name: "rejects a port outside the usable range",
 			Spec: func() api.WorkloadSpec {
 				spec := containerSpec("example", "example/example:latest")
-				spec.Container.Ports = &[]api.PortMapping{{To: 70000}}
+				spec.Ports = &[]api.PortMapping{{To: 70000}}
 				return spec
 			}(),
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
@@ -564,7 +564,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 		// The caller asked for this port specifically, so retrying would be picking
 		// a different one behind their back.
 		spec := containerSpec("example", "example/example:latest")
-		spec.Container.Ports = &[]api.PortMapping{{To: 8080, From: new(4141)}}
+		spec.Ports = &[]api.PortMapping{{To: 8080, From: new(4141)}}
 
 		_, _, err := svc.Apply(t.Context(), spec)
 		assert.ErrorIs(t, err, service.ErrHostPortTaken)
@@ -590,7 +590,7 @@ func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 
 	// A workload has to actually want a host port for allocation to be reached.
 	spec := containerSpec("example", "example/example:latest")
-	spec.Container.Ports = &[]api.PortMapping{{To: 8080}}
+	spec.Ports = &[]api.PortMapping{{To: 8080}}
 
 	// An exhausted range is a capacity problem rather than a fault or a bad request,
 	// and the API depends on this translation to answer 503 rather than 500.

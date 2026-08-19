@@ -26,6 +26,23 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 	spec.Restart = manifest.WireRestart(s.Restart)
 	spec.Health = manifest.WireHealth(s.Health)
 
+	if len(s.Ports) > 0 {
+		mappings := make([]api.PortMapping, 0, len(s.Ports))
+		for _, port := range s.Ports {
+			mapping := api.PortMapping{To: port.To}
+
+			// An unset host port is sent as absent rather than as zero, which is how
+			// the server is asked to allocate one.
+			if port.From != 0 {
+				mapping.From = new(port.From)
+			}
+
+			mappings = append(mappings, mapping)
+		}
+
+		spec.Ports = &mappings
+	}
+
 	if s.Container != nil {
 		spec.Container = &api.ContainerSpec{Image: s.Container.Image}
 
@@ -34,22 +51,6 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 		}
 		if len(s.Container.Env) > 0 {
 			spec.Container.Env = new(s.Container.Env)
-		}
-		if len(s.Container.Ports) > 0 {
-			mappings := make([]api.PortMapping, 0, len(s.Container.Ports))
-			for _, port := range s.Container.Ports {
-				mapping := api.PortMapping{To: port.To}
-
-				// An unset host port is sent as absent rather than as zero, which is
-				// how the server is asked to allocate one.
-				if port.From != 0 {
-					mapping.From = new(port.From)
-				}
-
-				mappings = append(mappings, mapping)
-			}
-
-			spec.Container.Ports = &mappings
 		}
 	}
 

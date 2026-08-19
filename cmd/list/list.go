@@ -28,7 +28,7 @@ func Command() *cobra.Command {
 			"  orca list -q '$.labels.app=web' -q '$.labels.env=prod'\n" +
 			"  orca list -q '$.container.image=nginx:1.27-alpine'\n\n" +
 			"Values are compared as text, so a number is matched by its digits\n" +
-			"($.container.ports[0].to=80). A boolean is stored as 1 or 0 and has to be\n" +
+			"($.ports[0].to=80). A boolean is stored as 1 or 0 and has to be\n" +
 			"written that way.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

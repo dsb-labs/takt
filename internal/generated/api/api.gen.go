@@ -160,11 +160,6 @@ type ContainerSpec struct {
 	//
 	// Examples: example/example:latest
 	Image string `json:"image"`
-
-	// Ports The ports to publish. Each entry names a port inside the container and,
-	// optionally, the host port that should reach it; when the host port is
-	// omitted the server allocates one.
-	Ports *[]PortMapping `json:"ports,omitempty"`
 }
 
 // ErrorResponse The body returned for any unsuccessful request.
@@ -436,6 +431,18 @@ type WorkloadSpec struct {
 	//
 	// Examples: example
 	Name string `json:"name"`
+
+	// Ports The ports to publish. Each entry names a port inside the workload and,
+	// optionally, the host port that should reach it; when the host port is
+	// omitted the server allocates one.
+	//
+	// The ports sit alongside the runtime blocks because reaching a workload is
+	// a question about the workload. A runtime with nothing to publish rejects
+	// them rather than ignoring them, so a manifest that could never work says
+	// so when it is applied.
+	//
+	// The workload reports back what the server settled on, in the same place.
+	Ports *[]PortMapping `json:"ports,omitempty"`
 
 	// Restart What the server does when a workload's instance ends.
 	//

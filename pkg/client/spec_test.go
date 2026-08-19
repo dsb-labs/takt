@@ -28,7 +28,7 @@ func TestWireSpec(t *testing.T) {
 		require.NotNil(t, wire.Container)
 		assert.Nil(t, wire.Container.Command)
 		assert.Nil(t, wire.Container.Env)
-		assert.Nil(t, wire.Container.Ports)
+		assert.Nil(t, wire.Ports)
 		assert.Nil(t, wire.Script)
 	})
 
@@ -41,11 +41,11 @@ func TestWireSpec(t *testing.T) {
 			// Resolved rather than empty, because a round trip runs the value
 			// through NewSpec, which applies the default.
 			Restart: manifest.RestartAlways,
+			Ports:   []manifest.Port{{To: 8080, From: 4141}},
 			Container: &manifest.Container{
 				Image:   "example/example:latest",
 				Command: []string{"sh", "-c", "exit 0"},
 				Env:     map[string]string{"EXAMPLE": "EXAMPLE"},
-				Ports:   []manifest.Port{{To: 8080, From: 4141}},
 			},
 		}
 

@@ -30,6 +30,9 @@ type (
 		Schedule string
 		// Arbitrary key-value pairs attached to the workload.
 		Labels map[string]string
+		// The ports to publish, which is how the workload is reached. A runtime with
+		// nothing to publish rejects them rather than ignoring them.
+		Ports []Port
 		// What to do when the workload's instance ends. Empty means RestartAlways,
 		// which Parse and NewSpec both resolve before validation.
 		Restart RestartPolicy
@@ -81,8 +84,6 @@ type (
 		Command []string
 		// Environment variables set inside the container.
 		Env map[string]string
-		// The ports to publish.
-		Ports []Port
 	}
 
 	// The Port type describes a port to publish.
@@ -174,6 +175,17 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 	if spec.Restart != nil {
 		out.Restart = RestartPolicy(*spec.Restart)
 	}
+	if spec.Ports != nil {
+		out.Ports = make([]Port, 0, len(*spec.Ports))
+		for _, mapping := range *spec.Ports {
+			port := Port{To: mapping.To}
+			if mapping.From != nil {
+				port.From = *mapping.From
+			}
+
+			out.Ports = append(out.Ports, port)
+		}
+	}
 
 	out.Restart = out.Restart.orDefault()
 	out.Health = newHealth(spec.Health)
@@ -186,17 +198,6 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 		}
 		if spec.Container.Env != nil {
 			out.Container.Env = *spec.Container.Env
-		}
-		if spec.Container.Ports != nil {
-			out.Container.Ports = make([]Port, 0, len(*spec.Container.Ports))
-			for _, mapping := range *spec.Container.Ports {
-				port := Port{To: mapping.To}
-				if mapping.From != nil {
-					port.From = *mapping.From
-				}
-
-				out.Container.Ports = append(out.Container.Ports, port)
-			}
 		}
 	}
 

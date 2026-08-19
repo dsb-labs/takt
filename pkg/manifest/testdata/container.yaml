@@ -4,12 +4,12 @@ schedule: "*/5 * * * *"
 restart: on-failure
 labels:
   some-key: some-value
+ports:
+  - to: 8080
+    from: 4141
+  - to: 9090
 container:
   image: example/example:latest
   command: ["sh", "-c", "exit 0"]
   env:
     EXAMPLE: EXAMPLE
-  ports:
-    - to: 8080
-      from: 4141
-    - to: 9090

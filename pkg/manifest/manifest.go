@@ -98,6 +98,10 @@ func Validate(spec Spec) error {
 		return fmt.Errorf("invalid manifest: %w", err)
 	}
 
+	if err = validatePorts(spec, runtime); err != nil {
+		return err
+	}
+
 	if err = validateHealth(spec, runtime); err != nil {
 		return err
 	}
@@ -110,6 +114,23 @@ func Validate(spec Spec) error {
 	default:
 		return nil
 	}
+}
+
+// validatePorts reports whether the workload's ports are ones its runtime can publish.
+//
+// A runtime with nothing to publish rejects them rather than ignoring them, for the
+// same reason a check it cannot perform is rejected: a workload whose ports never
+// reach anything looks like orca failing rather than the manifest being wrong.
+func validatePorts(spec Spec, runtime Runtime) error {
+	if len(spec.Ports) == 0 {
+		return nil
+	}
+
+	if runtime != RuntimeContainer {
+		return fmt.Errorf("invalid ports: the %s runtime cannot publish ports", runtime)
+	}
+
+	return validPorts(spec.Ports)
 }
 
 // validateHealth reports whether the workload's health check is one its runtime can
@@ -159,25 +180,25 @@ func validateHealth(spec Spec, runtime Runtime) error {
 		return fmt.Errorf("invalid health: the %s runtime cannot be probed", runtime)
 	}
 
-	return validateHealthPort(*health, *spec.Container)
+	return validateHealthPort(*health, spec.Ports)
 }
 
 // validateHealthPort reports whether the check names a port the workload actually
 // publishes, since a probe is performed against a published address.
-func validateHealthPort(health Health, container Container) error {
-	if len(container.Ports) == 0 {
+func validateHealthPort(health Health, ports []Port) error {
+	if len(ports) == 0 {
 		return errors.New("invalid health: the workload publishes no ports to check")
 	}
 
 	if health.Port == 0 {
-		if len(container.Ports) > 1 {
+		if len(ports) > 1 {
 			return errors.New("invalid health: port is required when more than one port is published")
 		}
 
 		return nil
 	}
 
-	if !slices.ContainsFunc(container.Ports, func(port Port) bool { return port.To == health.Port }) {
+	if !slices.ContainsFunc(ports, func(port Port) bool { return port.To == health.Port }) {
 		return fmt.Errorf("invalid health: port %d is not published by the workload", health.Port)
 	}
 
@@ -206,7 +227,6 @@ func validateContainer(spec Container) error {
 	err := validation.ValidateStruct(&spec,
 		validation.Field(&spec.Image, validation.Required),
 		validation.Field(&spec.Command, validation.By(validCommand)),
-		validation.Field(&spec.Ports, validation.By(validPorts)),
 	)
 	if err != nil {
 		return fmt.Errorf("invalid container: %w", err)
@@ -257,10 +277,9 @@ func validateScript(spec Script) error {
 }
 
 // validPorts checks that every published port is usable and that no two entries
-// describe the same port, either inside the container or on the host.
-func validPorts(value any) error {
-	ports, ok := value.([]Port)
-	if !ok || len(ports) == 0 {
+// describe the same port, either inside the workload or on the host.
+func validPorts(ports []Port) error {
+	if len(ports) == 0 {
 		return nil
 	}
 

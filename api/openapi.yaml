@@ -270,6 +270,21 @@ components:
           description: Arbitrary key-value pairs attached to the workload.
           additionalProperties:
             type: string
+        ports:
+          type: array
+          description: |
+            The ports to publish. Each entry names a port inside the workload and,
+            optionally, the host port that should reach it; when the host port is
+            omitted the server allocates one.
+
+            The ports sit alongside the runtime blocks because reaching a workload is
+            a question about the workload. A runtime with nothing to publish rejects
+            them rather than ignoring them, so a manifest that could never work says
+            so when it is applied.
+
+            The workload reports back what the server settled on, in the same place.
+          items:
+            $ref: "#/components/schemas/PortMapping"
         restart:
           $ref: "#/components/schemas/RestartPolicy"
         health:
@@ -307,14 +322,6 @@ components:
           description: Environment variables set inside the container.
           additionalProperties:
             type: string
-        ports:
-          type: array
-          description: |
-            The ports to publish. Each entry names a port inside the container and,
-            optionally, the host port that should reach it; when the host port is
-            omitted the server allocates one.
-          items:
-            $ref: "#/components/schemas/PortMapping"
 
     RestartPolicy:
       type: string

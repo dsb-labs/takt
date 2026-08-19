@@ -1,6 +1,6 @@
 version: v1
 name: example
+ports:
+  - to: 70000
 container:
   image: example/example:latest
-  ports:
-    - to: 70000

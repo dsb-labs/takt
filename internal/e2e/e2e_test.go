@@ -133,7 +133,7 @@ func (s *Suite) TestListQuery() {
 
 	// A number in the specification is matched by its digits, since a caller only
 	// ever has strings to hand.
-	byPort, err := s.client.List(s.ctx(), "$.container.ports[0].to=80")
+	byPort, err := s.client.List(s.ctx(), "$.ports[0].to=80")
 	s.Require().NoError(err)
 	s.Len(byPort, 2)
 

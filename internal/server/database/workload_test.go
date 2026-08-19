@@ -162,8 +162,8 @@ func TestWorkloadRepository_List_Query(t *testing.T) {
 		t.Helper()
 
 		specs := map[string]string{
-			"alpha":   `{"name":"alpha","labels":{"app":"web","env":"prod"},"container":{"image":"nginx:1.27","ports":[{"to":80,"from":8080}]}}`,
-			"bravo":   `{"name":"bravo","labels":{"app":"api","env":"prod"},"container":{"image":"redis:7","ports":[{"to":6379}]}}`,
+			"alpha":   `{"name":"alpha","labels":{"app":"web","env":"prod"},"ports":[{"to":80,"from":8080}],"container":{"image":"nginx:1.27"}}`,
+			"bravo":   `{"name":"bravo","labels":{"app":"api","env":"prod"},"ports":[{"to":6379}],"container":{"image":"redis:7"}}`,
 			"charlie": `{"name":"charlie","labels":{"app":"web","env":"dev"},"container":{"image":"nginx:1.27"}}`,
 		}
 
@@ -209,7 +209,7 @@ func TestWorkloadRepository_List_Query(t *testing.T) {
 			Name: "matches a number written as text",
 			// A caller with only strings — a CLI, a URL parameter — has to be able
 			// to match a number in the specification.
-			Queries:  []database.Query{{Path: "$.container.ports[0].to", Value: "80"}},
+			Queries:  []database.Query{{Path: "$.ports[0].to", Value: "80"}},
 			Expected: []string{"alpha"},
 		},
 		{
@@ -221,7 +221,7 @@ func TestWorkloadRepository_List_Query(t *testing.T) {
 			Name: "a path absent from some workloads matches only those that have it",
 			// charlie publishes no ports, so the path is missing rather than
 			// different: that must skip the row rather than fail the query.
-			Queries:  []database.Query{{Path: "$.container.ports[0].to", Value: "6379"}},
+			Queries:  []database.Query{{Path: "$.ports[0].to", Value: "6379"}},
 			Expected: []string{"bravo"},
 		},
 	}

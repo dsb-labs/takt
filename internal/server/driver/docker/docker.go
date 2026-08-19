@@ -132,9 +132,9 @@ func NewWorkload(row database.Workload) (Workload, error) {
 	if spec.Container.Env != nil {
 		w.Env = *spec.Container.Env
 	}
-	if spec.Container.Ports != nil {
-		w.Ports = make([]Port, 0, len(*spec.Container.Ports))
-		for _, mapping := range *spec.Container.Ports {
+	if spec.Ports != nil {
+		w.Ports = make([]Port, 0, len(*spec.Ports))
+		for _, mapping := range *spec.Ports {
 			// A specification reaching the driver has had its ports resolved, so a
 			// mapping with no host port is a workload the server has not finished
 			// settling and is left for a later pass rather than published wrongly.

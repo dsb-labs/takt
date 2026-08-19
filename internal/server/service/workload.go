@@ -593,18 +593,18 @@ func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map
 // makes a reallocated port replace the container running on the old one: to the
 // reconciler it is simply a specification that has changed.
 func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.WorkloadSpec {
-	if spec.Container == nil || len(ports) == 0 {
+	if spec.Ports == nil || len(ports) == 0 {
 		return spec
 	}
 
-	byContainer := make(map[int]database.Port, len(ports))
+	byPort := make(map[int]database.Port, len(ports))
 	for _, port := range ports {
-		byContainer[port.Container] = port
+		byPort[port.Container] = port
 	}
 
 	mappings := make([]api.PortMapping, 0, len(ports))
-	for _, mapping := range *spec.Container.Ports {
-		resolved, ok := byContainer[mapping.To]
+	for _, mapping := range *spec.Ports {
+		resolved, ok := byPort[mapping.To]
 		if !ok {
 			continue
 		}
@@ -612,11 +612,9 @@ func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.Workloa
 		mappings = append(mappings, api.PortMapping{To: mapping.To, From: new(resolved.Host)})
 	}
 
-	// The container block is a pointer into the caller's specification, so it is
-	// copied rather than written through.
-	container := *spec.Container
-	container.Ports = &mappings
-	spec.Container = &container
+	// The specification is taken by value, so assigning the mappings here replaces
+	// only this copy's slice header and leaves the caller's alone.
+	spec.Ports = &mappings
 
 	return spec
 }
@@ -641,11 +639,11 @@ func newResolvedPorts(ports []database.Port) []api.ResolvedPort {
 
 // portMappings returns the port mappings a specification publishes.
 func portMappings(spec api.WorkloadSpec) []api.PortMapping {
-	if spec.Container == nil || spec.Container.Ports == nil {
+	if spec.Ports == nil {
 		return nil
 	}
 
-	return *spec.Container.Ports
+	return *spec.Ports
 }
 
 func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (Workload, error) {

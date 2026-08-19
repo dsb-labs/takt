@@ -2,7 +2,7 @@ version: v1
 name: example
 health:
   interval: 5s
+ports:
+  - to: 8080
 container:
   image: example/example:latest
-  ports:
-    - to: 8080

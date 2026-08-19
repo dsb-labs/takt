@@ -14,14 +14,14 @@ version: v1
 name: example
 labels:
   some-key: some-value
+ports:
+  - to: 80            # the port the workload listens on
+  - to: 443
+    from: 8443        # optional: pin the host port instead
 container:
   image: nginx:1.27-alpine
   env:
     EXAMPLE: EXAMPLE
-  ports:
-    - to: 80          # the port the container listens on
-    - to: 443
-      from: 8443      # optional: pin the host port instead
 ```
 
 A workload names exactly one runtime block, and which block it is selects the
@@ -42,7 +42,7 @@ Leave it out to run what the image already declares, which is the usual case.
 
 ### Ports
 
-`to` is the port your process listens on inside the container. `from` is the host
+`to` is the port your process listens on inside the workload. `from` is the host
 port that reaches it, and leaving it out is the usual case — orca allocates one and
 reports it back, so you never have to invent unique host ports by hand:
 
@@ -53,8 +53,13 @@ orca get example | jq '.Ports'
 
 An allocated port is sticky: it stays the same across restarts and image bumps, so
 anything pointing at it keeps working. Pin `from` only when something outside orca
-has to know the address up front; pinning one another workload already holds is
+has to know the address up front. Pinning one another workload already holds is
 rejected when you apply it, rather than failing quietly later.
+
+Ports sit alongside the runtime blocks rather than inside one, because reaching a
+workload is a question about the workload. A runtime that publishes nothing rejects
+them rather than ignoring them, so a manifest that could never work says so when you
+apply it.
 
 ### Health
 
@@ -72,10 +77,10 @@ health:
   timeout: 2s
   retries: 3
   startPeriod: 30s
+ports:
+  - to: 80
 container:
   image: example/example:latest
-  ports:
-    - to: 80
 ```
 
 orca performs the check itself, from the host, against the port it allocated — so an
@@ -152,7 +157,7 @@ adding a query narrows the result:
 orca list -q '$.labels.app=web'
 orca list -q '$.labels.app=web' -q '$.labels.env=prod'
 orca list -q '$.container.image=nginx:1.27-alpine'
-orca list -q '$.container.ports[0].to=80'
+orca list -q '$.ports[0].to=80'
 ```
 
 Labels are just part of the specification, so they need no special syntax. Values

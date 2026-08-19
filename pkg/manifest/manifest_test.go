@@ -37,7 +37,7 @@ func TestParse(t *testing.T) {
 				require.NotNil(t, spec.Container)
 				assert.Equal(t, "example/example:latest", spec.Container.Image)
 				assert.Equal(t, map[string]string{"EXAMPLE": "EXAMPLE"}, spec.Container.Env)
-				assert.Equal(t, []manifest.Port{{To: 8080, From: 4141}, {To: 9090}}, spec.Container.Ports)
+				assert.Equal(t, []manifest.Port{{To: 8080, From: 4141}, {To: 9090}}, spec.Ports)
 
 				assert.Nil(t, spec.Script)
 			},
@@ -49,7 +49,7 @@ func TestParse(t *testing.T) {
 				require.NotNil(t, spec.Container)
 				assert.Equal(t, "example/example:latest", spec.Container.Image)
 				assert.Empty(t, spec.Schedule)
-				assert.Empty(t, spec.Container.Ports)
+				assert.Empty(t, spec.Ports)
 			},
 		},
 		{
@@ -194,14 +194,22 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// A script runs to completion and publishes nothing, so ports it declares
+			// would reach nothing. Rejecting that reports the manifest as wrong rather
+			// than leaving orca looking broken.
+			Name:         "rejects ports on a runtime that cannot publish them",
+			File:         "script_ports.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name: "a manifest asking for an allocated host port",
 			File: "dynamic_ports.yaml",
 			Assert: func(t *testing.T, spec manifest.Spec) {
-				require.Len(t, spec.Container.Ports, 1)
-				assert.Equal(t, 8080, spec.Container.Ports[0].To)
+				require.Len(t, spec.Ports, 1)
+				assert.Equal(t, 8080, spec.Ports[0].To)
 
 				// An unset host port is what asks the server to allocate one.
-				assert.Zero(t, spec.Container.Ports[0].From)
+				assert.Zero(t, spec.Ports[0].From)
 			},
 		},
 		{
@@ -435,5 +443,5 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	assert.NotEmpty(t, spec.Container.Image)
 	assert.NotEmpty(t, spec.Container.Command)
 	assert.NotEmpty(t, spec.Container.Env)
-	assert.NotEmpty(t, spec.Container.Ports)
+	assert.NotEmpty(t, spec.Ports)
 }

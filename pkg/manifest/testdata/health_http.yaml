@@ -6,7 +6,7 @@ health:
   timeout: 1s
   retries: 2
   startPeriod: 15s
+ports:
+  - to: 8080
 container:
   image: example/example:latest
-  ports:
-    - to: 8080

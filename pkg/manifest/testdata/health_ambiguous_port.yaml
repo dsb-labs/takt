@@ -2,8 +2,8 @@ version: v1
 name: example
 health:
   http: /healthz
+ports:
+  - to: 8080
+  - to: 9090
 container:
   image: example/example:latest
-  ports:
-    - to: 8080
-    - to: 9090

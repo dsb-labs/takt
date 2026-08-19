@@ -1,9 +1,9 @@
 version: v1
 name: example
+ports:
+  - to: 8080
+    from: 4141
+  - to: 9090
+    from: 4141
 container:
   image: example/example:latest
-  ports:
-    - to: 8080
-      from: 4141
-    - to: 9090
-      from: 4141
