@@ -117,6 +117,17 @@ func (r *PortRepository) ListAll(ctx context.Context) (map[string][]Port, error)
 // Returns ErrHostPortTaken when one of the host ports is allocated to a different
 // workload.
 func (r *PortRepository) Claim(ctx context.Context, workloadID string, ports []Port) error {
+	// The clear and the inserts have to be atomic: a failure between them would
+	// otherwise release the workload's ports without claiming its new ones, leaving
+	// it reachable on nothing.
+	return transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
+		return claim(ctx, tx, workloadID, ports)
+	})
+}
+
+// claim replaces a workload's port allocation inside an existing transaction, so that
+// it can be composed with the write of the workload itself.
+func claim(ctx context.Context, tx *sql.Tx, workloadID string, ports []Port) error {
 	const (
 		clear  = `DELETE FROM workload_port WHERE workload_id = ?`
 		insert = `
@@ -125,26 +136,21 @@ func (r *PortRepository) Claim(ctx context.Context, workloadID string, ports []P
 		`
 	)
 
-	// The clear and the inserts have to be atomic: a failure between them would
-	// otherwise release the workload's ports without claiming its new ones, leaving
-	// it reachable on nothing.
-	return transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
-		if _, err := tx.ExecContext(ctx, clear, workloadID); err != nil {
-			return fmt.Errorf("failed to clear workload ports: %w", err)
-		}
+	if _, err := tx.ExecContext(ctx, clear, workloadID); err != nil {
+		return fmt.Errorf("failed to clear workload ports: %w", err)
+	}
 
-		for _, port := range ports {
-			_, err := tx.ExecContext(ctx, insert, workloadID, port.Container, port.Host, port.Dynamic)
-			switch {
-			case IsUniqueError(err):
-				return fmt.Errorf("%w: %d", ErrHostPortTaken, port.Host)
-			case err != nil:
-				return fmt.Errorf("failed to claim workload port: %w", err)
-			}
+	for _, port := range ports {
+		_, err := tx.ExecContext(ctx, insert, workloadID, port.Container, port.Host, port.Dynamic)
+		switch {
+		case IsUniqueError(err):
+			return fmt.Errorf("%w: %d", ErrHostPortTaken, port.Host)
+		case err != nil:
+			return fmt.Errorf("failed to claim workload port: %w", err)
 		}
+	}
 
-		return nil
-	})
+	return nil
 }
 
 // Release removes every port allocated to the workload with the given identifier.

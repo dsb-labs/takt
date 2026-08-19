@@ -88,38 +88,55 @@ func NewWorkloadRepository(db *sql.DB) *WorkloadRepository {
 //
 // The Version, CreatedAt and UpdatedAt fields of w are ignored; the repository
 // assigns them.
-func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload) (Workload, bool, error) {
+func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Port) (Workload, bool, error) {
 	labels, err := marshalLabels(w.Labels)
 	if err != nil {
 		return Workload{}, false, err
 	}
 
-	existing, err := r.Get(ctx, w.Name)
-	switch {
-	case errors.Is(err, ErrWorkloadNotFound):
-		created, err := r.insert(ctx, w, labels)
-		if err != nil {
-			return Workload{}, false, err
+	var stored Workload
+	var created bool
+
+	// The row and its port allocations are written together. A workload whose ports
+	// could not be claimed must not exist at all: the reconciler would otherwise
+	// start it against a specification naming host ports nothing holds, so the
+	// caller would be told the apply failed while orca ran it anyway.
+	err = transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
+		existing, err := get(ctx, tx, w.Name)
+		switch {
+		case errors.Is(err, ErrWorkloadNotFound):
+			if stored, err = insert(ctx, tx, w, labels); err != nil {
+				return err
+			}
+
+			created = true
+		case err != nil:
+			return err
+		case existing.SpecHash == w.SpecHash:
+			// Nothing about the specification changed, so the row is left alone. The
+			// ports are still reclaimed below, since an allocation may have been
+			// released and re-resolved to the same values.
+			stored = existing
+		default:
+			if stored, err = update(ctx, tx, w, labels, existing); err != nil {
+				return err
+			}
 		}
 
-		return created, true, nil
-	case err != nil:
-		return Workload{}, false, err
-	}
+		for i := range ports {
+			ports[i].WorkloadID = stored.ID
+		}
 
-	if existing.SpecHash == w.SpecHash {
-		return existing, false, nil
-	}
-
-	updated, err := r.update(ctx, w, labels, existing)
+		return claim(ctx, tx, stored.ID, ports)
+	})
 	if err != nil {
 		return Workload{}, false, err
 	}
 
-	return updated, false, nil
+	return stored, created, nil
 }
 
-func (r *WorkloadRepository) insert(ctx context.Context, w Workload, labels string) (Workload, error) {
+func insert(ctx context.Context, tx *sql.Tx, w Workload, labels string) (Workload, error) {
 	const q = `
 		INSERT INTO workload (id, name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, jsonb(?), ?, jsonb(?), ?, ?)
@@ -130,7 +147,7 @@ func (r *WorkloadRepository) insert(ctx context.Context, w Workload, labels stri
 
 	id := xid.New().String()
 
-	_, err := r.db.ExecContext(ctx, q, id, w.Name, 1, w.Runtime, w.Schedule, string(w.Spec), w.SpecHash, labels, timestamp, timestamp)
+	_, err := tx.ExecContext(ctx, q, id, w.Name, 1, w.Runtime, w.Schedule, string(w.Spec), w.SpecHash, labels, timestamp, timestamp)
 	if err != nil {
 		return Workload{}, fmt.Errorf("failed to insert workload: %w", err)
 	}
@@ -143,7 +160,7 @@ func (r *WorkloadRepository) insert(ctx context.Context, w Workload, labels stri
 	return w, nil
 }
 
-func (r *WorkloadRepository) update(ctx context.Context, w Workload, labels string, existing Workload) (Workload, error) {
+func update(ctx context.Context, tx *sql.Tx, w Workload, labels string, existing Workload) (Workload, error) {
 	const q = `
 		UPDATE workload
 		SET version = ?, runtime = ?, schedule = ?, spec = jsonb(?), spec_hash = ?, labels = jsonb(?), updated_at = ?
@@ -153,7 +170,7 @@ func (r *WorkloadRepository) update(ctx context.Context, w Workload, labels stri
 	now := time.Now().UTC()
 	version := existing.Version + 1
 
-	tag, err := r.db.ExecContext(ctx, q, version, w.Runtime, w.Schedule, string(w.Spec), w.SpecHash, labels, formatTime(now), w.Name)
+	tag, err := tx.ExecContext(ctx, q, version, w.Runtime, w.Schedule, string(w.Spec), w.SpecHash, labels, formatTime(now), w.Name)
 	if err != nil {
 		return Workload{}, fmt.Errorf("failed to update workload: %w", err)
 	}
@@ -177,7 +194,18 @@ func (r *WorkloadRepository) update(ctx context.Context, w Workload, labels stri
 // Get returns the workload with the given name, returning ErrWorkloadNotFound
 // when no such workload exists.
 func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, error) {
-	const q = `
+	return get(ctx, r.db, name)
+}
+
+// The querier interface lets a read run either on the pool or inside a transaction,
+// so Upsert can check for an existing workload without leaving the transaction it is
+// about to write in.
+type querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func get(ctx context.Context, q querier, name string) (Workload, error) {
+	const query = `
 		SELECT id, name, version, runtime, schedule, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at
 		FROM workload
 		WHERE name = ?
@@ -189,7 +217,7 @@ func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, er
 		createdAt, updatedAt, deletedAt string
 	)
 
-	err := r.db.QueryRowContext(ctx, q, name).Scan(
+	err := q.QueryRowContext(ctx, query, name).Scan(
 		&w.ID, &w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt,
 	)
 	switch {

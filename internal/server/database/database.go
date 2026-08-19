@@ -62,10 +62,19 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 	// journal_mode=wal lets readers run while a write is in progress, which matters
 	// because reads are not rare here: every list and get reads the workload table
 	// while the reconciler may be writing to it.
+	//
+	// _txlock=immediate makes a transaction take the write lock as it opens rather
+	// than on its first write. Orca's transactions read before they write — an upsert
+	// looks for an existing workload before storing one — and SQLite gives such a
+	// transaction a shared lock it must later upgrade. Two of them each holding a
+	// shared lock cannot both upgrade, so rather than queueing on the busy timeout
+	// they fail immediately: thirty-nine of fifty concurrent writes, measured. Taking
+	// the write lock up front makes them queue as intended.
 	db, err := sql.Open("sqlite", config.Path+
 		"?_pragma=foreign_keys(1)"+
 		"&_pragma=busy_timeout(5000)"+
-		"&_pragma=journal_mode(wal)")
+		"&_pragma=journal_mode(wal)"+
+		"&_txlock=immediate")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
