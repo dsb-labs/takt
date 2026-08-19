@@ -3,6 +3,7 @@ package client_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,29 @@ import (
 // The client declares its own rather than re-exporting the generated ones, so that a
 // consumer never sees an internal type — which means nothing but this test stops the
 // two drifting when the specification gains a state or renames one.
+func TestClient_Logs_LimitsTheErrorItReads(t *testing.T) {
+	t.Parallel()
+
+	// Far more than any error message, and more than the client is willing to read.
+	endless := strings.Repeat("a", (1<<16)+(1<<20))
+
+	c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+
+		// Deliberately malformed once truncated, which is what proves the client
+		// stopped reading rather than consuming the lot.
+		_, _ = fmt.Fprintf(w, `{"error":%q}`, endless)
+	})
+
+	err := c.Logs(t.Context(), io.Discard, "example", 10)
+	require.Error(t, err)
+
+	// The request fails, and the message the client ends up reporting is bounded by
+	// what it was prepared to read rather than by what it was sent.
+	assert.Less(t, len(err.Error()), 1<<17)
+}
+
 func TestStatesCoverTheWireFormat(t *testing.T) {
 	t.Parallel()
 

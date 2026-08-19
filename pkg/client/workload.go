@@ -355,9 +355,13 @@ func (c *Client) Logs(ctx context.Context, out io.Writer, name string, tail int)
 
 // logsError turns an unsuccessful logs response into an error, decoding the server's
 // message where it sent one.
+//
+// The body is read under a limit because this is the one response the client decodes
+// itself: an error message is a sentence, and something answering this endpoint with
+// an endless one should cost the caller a failed request rather than its memory.
 func (c *Client) logsError(resp *http.Response) error {
 	var body api.ErrorResponse
-	_ = json.NewDecoder(resp.Body).Decode(&body)
+	_ = json.NewDecoder(io.LimitReader(resp.Body, maxErrorBody)).Decode(&body)
 
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("%w: %s", ErrWorkloadNotFound, body.Error)

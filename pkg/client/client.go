@@ -35,6 +35,11 @@ type (
 	}
 )
 
+// The largest error body the client will read. An error message is a sentence, so
+// this is generous for anything the server legitimately sends while refusing to read
+// an endless response into memory.
+const maxErrorBody = 1 << 16
+
 // New returns a Client that targets the orca server at the given address.
 //
 // An invalid address is rejected here so that callers see the problem at
