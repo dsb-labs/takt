@@ -79,7 +79,11 @@ type (
 func DefaultConfig() Config {
 	return Config{
 		HTTP: HTTPConfig{
-			Address: ":7373",
+			// Loopback rather than every interface. The API has no authentication,
+			// and it can start containers — so reaching the port is enough to run
+			// code on the host. Binding it to the network is a decision an operator
+			// should have to make, not one a default makes for them.
+			Address: "127.0.0.1:7373",
 		},
 		Data: DataConfig{
 			Directory: defaultDataDir(),

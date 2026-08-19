@@ -1,6 +1,8 @@
 package server_test
 
 import (
+	"net"
+	"net/netip"
 	"path/filepath"
 	"testing"
 	"time"
@@ -83,11 +85,23 @@ func TestDefaultConfig(t *testing.T) {
 		config := server.DefaultConfig()
 		require.NoError(t, config.Validate())
 
-		assert.NotEmpty(t, config.HTTP.Address)
 		assert.NotEmpty(t, config.Data.Directory)
 		assert.Positive(t, config.Reconcile.Interval)
 		assert.Positive(t, config.Ports.Min)
 		assert.Positive(t, config.Ports.Max)
+	})
+
+	t.Run("binds to loopback", func(t *testing.T) {
+		// The API has no authentication and applying a workload runs a container, so
+		// reaching the port is enough to run code on the host. Exposing that to a
+		// network has to be something an operator chose.
+		host, _, err := net.SplitHostPort(server.DefaultConfig().HTTP.Address)
+		require.NoError(t, err)
+
+		address, err := netip.ParseAddr(host)
+		require.NoError(t, err, "the default address must name an interface explicitly")
+
+		assert.True(t, address.IsLoopback(), "the default address is reachable off-host: %s", host)
 	})
 }
 

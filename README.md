@@ -155,7 +155,7 @@ only has to describe what it changes.
 
 ```toml
 [http]
-address = ":7373"
+address = "127.0.0.1:7373"   # loopback by default; see below before widening it
 
 [data]
 directory = "~/.local/share/orca"   # the SQLite database lives here
@@ -173,6 +173,21 @@ max = 32000
 [logging]
 level = "info"                       # debug, info, warn, error
 ```
+
+### Exposure
+
+The API has no authentication, and applying a workload runs a container. Anything
+that can reach the port can therefore run code on the host, with whatever access the
+docker socket grants — which is usually root-equivalent.
+
+The default address is loopback for that reason. Before binding it to a network,
+put something in front of it that authenticates: a reverse proxy requiring a
+credential, a WireGuard or Tailscale interface, an SSH tunnel. Treat the port as
+equivalent to the docker socket, because in practice it is.
+
+The state directory holds each workload's stored specification, environment
+included, so orca keeps it and the SQLite files inside it readable only by the user
+running the server.
 
 ## Development
 
