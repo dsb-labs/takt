@@ -270,6 +270,8 @@ components:
           description: Arbitrary key-value pairs attached to the workload.
           additionalProperties:
             type: string
+        health:
+          $ref: "#/components/schemas/HealthSpec"
         container:
           $ref: "#/components/schemas/ContainerSpec"
         script:
@@ -298,6 +300,69 @@ components:
             omitted the server allocates one.
           items:
             $ref: "#/components/schemas/PortMapping"
+
+    HealthSpec:
+      type: object
+      description: |
+        How the server decides whether a workload is working, rather than merely
+        started. Without one, a workload counts as running as soon as its runtime
+        reports it started, which says nothing about whether the process inside is
+        able to serve.
+
+        The check is performed by the server against the workload's published
+        address, not by the runtime inside the workload, so it needs nothing
+        installed alongside the process and works for an image carrying no shell.
+
+        It sits alongside the runtime blocks rather than inside one because whether a
+        workload is working is a question about the workload. Which fields apply
+        does depend on the runtime, and a probe a runtime cannot perform is rejected
+        rather than ignored.
+      properties:
+        http:
+          type: string
+          description: |
+            The path to request. The workload is healthy when the request answers
+            with a 2xx status. Requires the workload to publish exactly one port, or
+            for `port` to name which of several to use.
+          examples: ["/healthz"]
+        tcp:
+          type: boolean
+          description: |
+            Whether to check that the port merely accepts a connection, for a
+            workload that speaks something other than HTTP.
+        port:
+          type: integer
+          description: |
+            Which of the workload's ports to check, named as the port inside the
+            workload. Only needed when it publishes more than one.
+          minimum: 1
+          maximum: 65535
+        interval:
+          type: string
+          description: How often to perform the check.
+          default: 10s
+          examples: ["10s"]
+        timeout:
+          type: string
+          description: How long a single check may take before it counts as failed.
+          default: 2s
+          examples: ["2s"]
+        retries:
+          type: integer
+          description: |
+            How many consecutive failures mark the workload as failed. Until that
+            many have accumulated the workload is reported as pending rather than
+            failed, so a check that fails once does not cause a replacement.
+          default: 3
+          minimum: 1
+        startPeriod:
+          type: string
+          description: |
+            How long after starting to allow before failures are counted. A workload
+            that takes time to become ready would otherwise be replaced for failing
+            checks it was never going to pass yet.
+          default: 30s
+          examples: ["30s"]
 
     PortMapping:
       type: object
@@ -422,6 +487,8 @@ components:
       description: A single unit of work the driver is running for a workload.
       required: [id, state, specHash]
       properties:
+        health:
+          $ref: "#/components/schemas/InstanceHealth"
         id:
           type: string
           description: |
@@ -464,6 +531,39 @@ components:
         - terminating
         - stopped
         - failed
+
+    InstanceHealth:
+      type: object
+      description: |
+        The result of the workload's health check for this instance, absent when the
+        workload declares no check and its runtime reports none of its own.
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/HealthStatus"
+        failures:
+          type: integer
+          description: |
+            How many consecutive checks have failed. Reset by a check that passes.
+          minimum: 0
+        checkedAt:
+          type: string
+          format: date-time
+          description: When the check last ran.
+        error:
+          type: string
+          description: Why the last check failed, when it did.
+
+    HealthStatus:
+      type: string
+      description: |
+        Whether the workload is working. An instance is starting while it is inside
+        its start period or has not yet passed a check, healthy once one passes, and
+        unhealthy once enough consecutive checks have failed to exhaust its retries.
+      enum:
+        - starting
+        - healthy
+        - unhealthy
 
     InstanceState:
       type: string

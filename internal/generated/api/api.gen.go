@@ -20,6 +20,27 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for HealthStatus.
+const (
+	Healthy   HealthStatus = "healthy"
+	Starting  HealthStatus = "starting"
+	Unhealthy HealthStatus = "unhealthy"
+)
+
+// Valid indicates whether the value is a known member of the HealthStatus enum.
+func (e HealthStatus) Valid() bool {
+	switch e {
+	case Healthy:
+		return true
+	case Starting:
+		return true
+	case Unhealthy:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for InstanceState.
 const (
 	InstanceStateExited      InstanceState = "exited"
@@ -114,11 +135,74 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// HealthSpec How the server decides whether a workload is working, rather than merely
+// started. Without one, a workload counts as running as soon as its runtime
+// reports it started, which says nothing about whether the process inside is
+// able to serve.
+//
+// The check is performed by the server against the workload's published
+// address, not by the runtime inside the workload, so it needs nothing
+// installed alongside the process and works for an image carrying no shell.
+//
+// It sits alongside the runtime blocks rather than inside one because whether a
+// workload is working is a question about the workload. Which fields apply
+// does depend on the runtime, and a probe a runtime cannot perform is rejected
+// rather than ignored.
+type HealthSpec struct {
+	// HTTP The path to request. The workload is healthy when the request answers
+	// with a 2xx status. Requires the workload to publish exactly one port, or
+	// for `port` to name which of several to use.
+	//
+	//
+	// Examples: /healthz
+	HTTP *string `json:"http,omitempty"`
+
+	// Interval How often to perform the check.
+	//
+	// Examples: 10s
+	Interval *string `json:"interval,omitempty"`
+
+	// Port Which of the workload's ports to check, named as the port inside the
+	// workload. Only needed when it publishes more than one.
+	Port *int `json:"port,omitempty"`
+
+	// Retries How many consecutive failures mark the workload as failed. Until that
+	// many have accumulated the workload is reported as pending rather than
+	// failed, so a check that fails once does not cause a replacement.
+	Retries *int `json:"retries,omitempty"`
+
+	// StartPeriod How long after starting to allow before failures are counted. A workload
+	// that takes time to become ready would otherwise be replaced for failing
+	// checks it was never going to pass yet.
+	//
+	//
+	// Examples: 30s
+	StartPeriod *string `json:"startPeriod,omitempty"`
+
+	// TCP Whether to check that the port merely accepts a connection, for a
+	// workload that speaks something other than HTTP.
+	TCP *bool `json:"tcp,omitempty"`
+
+	// Timeout How long a single check may take before it counts as failed.
+	//
+	// Examples: 2s
+	Timeout *string `json:"timeout,omitempty"`
+}
+
+// HealthStatus Whether the workload is working. An instance is starting while it is inside
+// its start period or has not yet passed a check, healthy once one passes, and
+// unhealthy once enough consecutive checks have failed to exhaust its retries.
+type HealthStatus string
+
 // Instance A single unit of work the driver is running for a workload.
 type Instance struct {
 	// ExitCode The exit code. Absent while the instance is still running, since it
 	// has not yet ended in any particular way.
 	ExitCode *int `json:"exitCode,omitempty"`
+
+	// Health The result of the workload's health check for this instance, absent when the
+	// workload declares no check and its runtime reports none of its own.
+	Health *InstanceHealth `json:"health,omitempty"`
 
 	// ID The driver's opaque handle for this instance. A container ID for the
 	// docker driver.
@@ -135,6 +219,24 @@ type Instance struct {
 	// terminating while it is being torn down, which happens when an outdated
 	// instance is replaced or its workload is deleted.
 	State InstanceState `json:"state"`
+}
+
+// InstanceHealth The result of the workload's health check for this instance, absent when the
+// workload declares no check and its runtime reports none of its own.
+type InstanceHealth struct {
+	// CheckedAt When the check last ran.
+	CheckedAt *time.Time `json:"checkedAt,omitempty"`
+
+	// Error Why the last check failed, when it did.
+	Error *string `json:"error,omitempty"`
+
+	// Failures How many consecutive checks have failed. Reset by a check that passes.
+	Failures *int `json:"failures,omitempty"`
+
+	// Status Whether the workload is working. An instance is starting while it is inside
+	// its start period or has not yet passed a check, healthy once one passes, and
+	// unhealthy once enough consecutive checks have failed to exhaust its retries.
+	Status HealthStatus `json:"status"`
 }
 
 // InstanceState The state of a single instance as reported by its driver. An instance is
@@ -244,6 +346,21 @@ type Workload struct {
 type WorkloadSpec struct {
 	// Container The container runtime block, run by the docker driver.
 	Container *ContainerSpec `json:"container,omitempty"`
+
+	// Health How the server decides whether a workload is working, rather than merely
+	// started. Without one, a workload counts as running as soon as its runtime
+	// reports it started, which says nothing about whether the process inside is
+	// able to serve.
+	//
+	// The check is performed by the server against the workload's published
+	// address, not by the runtime inside the workload, so it needs nothing
+	// installed alongside the process and works for an image carrying no shell.
+	//
+	// It sits alongside the runtime blocks rather than inside one because whether a
+	// workload is working is a question about the workload. Which fields apply
+	// does depend on the runtime, and a probe a runtime cannot perform is rejected
+	// rather than ignored.
+	Health *HealthSpec `json:"health,omitempty"`
 
 	// Labels Arbitrary key-value pairs attached to the workload.
 	Labels *map[string]string `json:"labels,omitempty"`
