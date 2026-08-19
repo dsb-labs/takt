@@ -305,8 +305,6 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 			}, nil).Once()
 
 			checker.EXPECT().Result("example").Return(tc.Result, tc.Checked)
-			checker.EXPECT().Forget("example").Maybe()
-			checker.EXPECT().Set("example", mock.Anything).Maybe()
 
 			svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 				Logger:    newTestLogger(t),

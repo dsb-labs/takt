@@ -149,6 +149,45 @@ func TestClient_Get(t *testing.T) {
 		assert.Equal(t, "container-one", got.Instances[0].ID)
 	})
 
+	t.Run("reports the health of a checked instance", func(t *testing.T) {
+		checked := workload("example", api.WorkloadStateFailed)
+		checkedAt := time.Now().UTC().Truncate(time.Second)
+
+		(*checked.Instances)[0].Health = &api.InstanceHealth{
+			Status:    api.Unhealthy,
+			Failures:  new(3),
+			CheckedAt: &checkedAt,
+			Error:     new("/healthz answered 500"),
+		}
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusOK, checked)
+		})
+
+		got, err := c.Get(t.Context(), "example")
+		require.NoError(t, err)
+		require.Len(t, got.Instances, 1)
+
+		reported := got.Instances[0].Health
+		require.NotNil(t, reported)
+		assert.Equal(t, "unhealthy", reported.Status)
+		require.NotNil(t, reported.Failures)
+		assert.Equal(t, 3, *reported.Failures)
+		assert.Equal(t, checkedAt, reported.CheckedAt)
+		assert.Equal(t, "/healthz answered 500", reported.Error)
+	})
+
+	t.Run("reports no health for an unchecked instance", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusOK, workload("example", api.WorkloadStateRunning))
+		})
+
+		got, err := c.Get(t.Context(), "example")
+		require.NoError(t, err)
+		require.Len(t, got.Instances, 1)
+		assert.Nil(t, got.Instances[0].Health)
+	})
+
 	t.Run("reports a missing workload", func(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})

@@ -332,8 +332,6 @@ func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Worklo
 
 	workloads := make([]Workload, 0, len(rows))
 	for _, row := range rows {
-		s.registerCheck(row, ports[row.ID])
-
 		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.health(row.Name))
 		if err != nil {
 			return nil, err
@@ -655,10 +653,6 @@ func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (W
 	if err != nil {
 		return Workload{}, fmt.Errorf("failed to read workload ports: %w", err)
 	}
-
-	// Registering here rather than only on apply means a restarted server starts
-	// checking the workloads it adopted, without waiting for someone to re-apply them.
-	s.registerCheck(row, ports)
 
 	return newWorkload(row, s.observe(ctx)[row.Name], ports, s.health(row.Name))
 }

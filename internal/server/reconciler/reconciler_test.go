@@ -17,6 +17,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
+	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 )
 
@@ -269,6 +270,234 @@ func TestReconciler_Run(t *testing.T) {
 			require.NoError(t, <-done)
 		})
 	}
+}
+
+func TestReconciler_Run_Health(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name          string
+		Result        health.Result
+		Checked       bool
+		ExpectRestart bool
+	}{
+		{
+			Name:    "leaves a workload passing its check alone",
+			Result:  health.Result{Status: health.StatusHealthy},
+			Checked: true,
+		},
+		{
+			Name:    "leaves a workload still starting alone",
+			Result:  health.Result{Status: health.StatusStarting},
+			Checked: true,
+			// A workload inside its start period has not failed anything — replacing
+			// it would mean it never got the chance to become ready.
+			ExpectRestart: false,
+		},
+		{
+			Name:    "replaces a workload failing its check",
+			Result:  health.Result{Status: health.StatusUnhealthy, Failures: 3},
+			Checked: true,
+			// The container is up as far as docker is concerned, and cannot serve.
+			// Reacting to that is the entire reason for checking it.
+			ExpectRestart: true,
+		},
+		{
+			Name:    "leaves an unchecked workload alone",
+			Checked: false,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+			ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+
+			row := storedWorkload("example", "hash-one")
+			row.ID = "workload-one"
+
+			repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+			ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+				"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+			}, nil)
+
+			// The stored spec declares no check, so the reconciler has nothing to
+			// register — the result is what decides the outcome here.
+			checker.EXPECT().Forget("example").Maybe()
+			checker.EXPECT().Result("example").Return(tc.Result, tc.Checked)
+
+			if tc.ExpectRestart {
+				d.EXPECT().Stop(mock.Anything, "example").Return(nil).Once()
+				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w docker.Workload) bool {
+					return w.Name == "example"
+				})).Return("container-two", nil).Once()
+			}
+
+			events := make(chan driver.Event)
+			d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+			passes := newCounter()
+			d.EXPECT().Observe(mock.Anything).
+				RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+					passes.inc()
+
+					return []driver.Instance{{
+						ID:       "container-one",
+						Workload: "example",
+						SpecHash: "hash-one",
+						State:    driver.StateRunning,
+					}}, nil
+				})
+
+			r := reconciler.New(reconciler.Config{
+				Logger:    newTestLogger(t),
+				Driver:    d,
+				Workloads: repo,
+				Ports:     ports,
+				Checker:   checker,
+				Interval:  time.Hour,
+			})
+
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+
+			go func() { done <- r.Run(ctx) }()
+
+			passes.wait(t, 1)
+
+			cancel()
+			require.NoError(t, <-done)
+		})
+	}
+}
+
+func TestReconciler_Run_RegistersChecks(t *testing.T) {
+	t.Parallel()
+
+	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+
+	checked := storedWorkload("example", "hash-one")
+	checked.ID = "workload-one"
+	checked.Spec = specWithHealth("example")
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{checked}, nil)
+
+	ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+		"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+	}, nil)
+
+	// The address is resolved from the host port orca allocated, and probed over
+	// loopback so the check never leaves the host.
+	registered := make(chan health.Check, 1)
+	checker.EXPECT().Set("example", mock.Anything).
+		Run(func(_ string, check health.Check) {
+			select {
+			case registered <- check:
+			default:
+			}
+		}).Return()
+
+	checker.EXPECT().Result("example").Return(health.Result{Status: health.StatusHealthy}, true)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return []driver.Instance{{
+				ID:       "container-one",
+				Workload: "example",
+				SpecHash: "hash-one",
+				State:    driver.StateRunning,
+			}}, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Driver:    d,
+		Workloads: repo,
+		Ports:     ports,
+		Checker:   checker,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+
+	cancel()
+	require.NoError(t, <-done)
+
+	got := <-registered
+	assert.Equal(t, "127.0.0.1:20080", got.Address)
+	assert.Equal(t, "/healthz", got.HTTP)
+}
+
+func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
+	t.Parallel()
+
+	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+
+	// A workload on its way out is not worth probing, and results for one nothing
+	// runs any more would otherwise accumulate for the life of the server.
+	deleting := storedWorkload("example", "hash-one")
+	deleting.ID = "workload-one"
+	deleting.Spec = specWithHealth("example")
+	deleting.DeletedAt = time.Now()
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{deleting}, nil)
+	repo.EXPECT().Delete(mock.Anything, "example").Return(nil).Once()
+
+	ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+		"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+	}, nil)
+
+	forgotten := make(chan struct{}, 1)
+	checker.EXPECT().Forget("example").Run(func(string) {
+		select {
+		case forgotten <- struct{}{}:
+		default:
+		}
+	}).Return()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+			return nil, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Driver:    d,
+		Workloads: repo,
+		Ports:     ports,
+		Checker:   checker,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	<-forgotten
+
+	cancel()
+	require.NoError(t, <-done)
 }
 
 func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
@@ -534,6 +763,22 @@ func (c *counter) wait(t *testing.T, passes int) {
 	require.Eventually(t, func() bool {
 		return c.get() >= passes
 	}, time.Second, time.Millisecond)
+}
+
+// specWithHealth returns a stored specification declaring a check, so the reconciler
+// has something to resolve into a probe.
+func specWithHealth(name string) []byte {
+	spec, err := json.Marshal(api.WorkloadSpec{
+		Version:   "v1",
+		Name:      name,
+		Container: &api.ContainerSpec{Image: "example/example:latest"},
+		Health:    &api.HealthSpec{HTTP: new("/healthz")},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return spec
 }
 
 func storedWorkload(name, hash string) database.Workload {

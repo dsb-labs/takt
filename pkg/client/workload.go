@@ -64,6 +64,23 @@ type (
 		ExitCode *int
 		// When the instance last started, if it has started at all.
 		StartedAt time.Time
+		// What the most recent health check established. Nil when the instance is
+		// not checked at all.
+		Health *Health
+	}
+
+	// The Health type is the client-side view of a health check's outcome.
+	Health struct {
+		// Whether the instance is working: "starting", "healthy" or "unhealthy".
+		Status string
+		// How many consecutive checks have failed. Nil when the check is the
+		// runtime's own rather than one orca performs, since orca counts no
+		// failures against a check it did not run.
+		Failures *int
+		// When the check last ran, if it has run at all.
+		CheckedAt time.Time
+		// Why the last check failed, when it did.
+		Error string
 	}
 )
 
@@ -333,6 +350,20 @@ func newWorkload(w api.Workload) Workload {
 
 		if instance.StartedAt != nil {
 			mapped.StartedAt = *instance.StartedAt
+		}
+
+		if instance.Health != nil {
+			mapped.Health = &Health{
+				Status:   string(instance.Health.Status),
+				Failures: instance.Health.Failures,
+			}
+
+			if instance.Health.CheckedAt != nil {
+				mapped.Health.CheckedAt = *instance.Health.CheckedAt
+			}
+			if instance.Health.Error != nil {
+				mapped.Health.Error = *instance.Health.Error
+			}
 		}
 
 		workload.Instances = append(workload.Instances, mapped)

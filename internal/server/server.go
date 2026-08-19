@@ -66,6 +66,8 @@ func Run(ctx context.Context, config Config) error {
 		Logger:    logger,
 		Driver:    driver,
 		Workloads: workloads,
+		Ports:     ports,
+		Checker:   checker,
 		Reallocate: func(ctx context.Context, workload string) (bool, error) {
 			return svc.Reallocate(ctx, workload)
 		},

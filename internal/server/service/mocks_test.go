@@ -41,46 +41,6 @@ func (_m *MockChecker) EXPECT() *MockChecker_Expecter {
 	return &MockChecker_Expecter{mock: &_m.Mock}
 }
 
-// Forget provides a mock function for the type MockChecker
-func (_mock *MockChecker) Forget(workload string) {
-	_mock.Called(workload)
-	return
-}
-
-// MockChecker_Forget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Forget'
-type MockChecker_Forget_Call struct {
-	*mock.Call
-}
-
-// Forget is a helper method to define mock.On call
-//   - workload string
-func (_e *MockChecker_Expecter) Forget(workload any) *MockChecker_Forget_Call {
-	return &MockChecker_Forget_Call{Call: _e.mock.On("Forget", workload)}
-}
-
-func (_c *MockChecker_Forget_Call) Run(run func(workload string)) *MockChecker_Forget_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		run(
-			arg0,
-		)
-	})
-	return _c
-}
-
-func (_c *MockChecker_Forget_Call) Return() *MockChecker_Forget_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockChecker_Forget_Call) RunAndReturn(run func(workload string)) *MockChecker_Forget_Call {
-	_c.Run(run)
-	return _c
-}
-
 // Result provides a mock function for the type MockChecker
 func (_mock *MockChecker) Result(workload string) (health.Result, bool) {
 	ret := _mock.Called(workload)
@@ -138,52 +98,6 @@ func (_c *MockChecker_Result_Call) Return(result health.Result, b bool) *MockChe
 
 func (_c *MockChecker_Result_Call) RunAndReturn(run func(workload string) (health.Result, bool)) *MockChecker_Result_Call {
 	_c.Call.Return(run)
-	return _c
-}
-
-// Set provides a mock function for the type MockChecker
-func (_mock *MockChecker) Set(workload string, check health.Check) {
-	_mock.Called(workload, check)
-	return
-}
-
-// MockChecker_Set_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Set'
-type MockChecker_Set_Call struct {
-	*mock.Call
-}
-
-// Set is a helper method to define mock.On call
-//   - workload string
-//   - check health.Check
-func (_e *MockChecker_Expecter) Set(workload any, check any) *MockChecker_Set_Call {
-	return &MockChecker_Set_Call{Call: _e.mock.On("Set", workload, check)}
-}
-
-func (_c *MockChecker_Set_Call) Run(run func(workload string, check health.Check)) *MockChecker_Set_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
-		if args[0] != nil {
-			arg0 = args[0].(string)
-		}
-		var arg1 health.Check
-		if args[1] != nil {
-			arg1 = args[1].(health.Check)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockChecker_Set_Call) Return() *MockChecker_Set_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockChecker_Set_Call) RunAndReturn(run func(workload string, check health.Check)) *MockChecker_Set_Call {
-	_c.Run(run)
 	return _c
 }
 

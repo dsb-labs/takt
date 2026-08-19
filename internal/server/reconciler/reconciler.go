@@ -4,6 +4,7 @@ package reconciler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -13,6 +14,8 @@ import (
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
+	"github.com/dsb-labs/orca/internal/server/health"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 type (
@@ -40,6 +43,26 @@ type (
 		Delete(ctx context.Context, name string) error
 	}
 
+	// The PortRepository interface describes the port lookup the reconciler uses to
+	// resolve the address a workload's health check should probe.
+	PortRepository interface {
+		// ListAll should return the ports allocated to every workload, keyed by
+		// workload identifier.
+		ListAll(ctx context.Context) (map[string][]database.Port, error)
+	}
+
+	// The Checker interface describes how the reconciler registers and reads what
+	// orca established about a workload's health.
+	Checker interface {
+		// Set should register the check for a workload, replacing any it already had.
+		Set(workload string, check health.Check)
+		// Forget should drop the check for a workload that no longer exists.
+		Forget(workload string)
+		// Result should return the most recent outcome for a workload, reporting
+		// false when it has no check registered.
+		Result(workload string) (health.Result, bool)
+	}
+
 	// The Reconciler type drives the running state of the node towards the desired
 	// state held in the repository.
 	//
@@ -52,6 +75,8 @@ type (
 		logger     *slog.Logger
 		driver     Driver
 		workloads  WorkloadRepository
+		ports      PortRepository
+		checker    Checker
 		reallocate func(ctx context.Context, workload string) (bool, error)
 		interval   time.Duration
 		backoff    map[string]backoff
@@ -66,6 +91,12 @@ type (
 		Driver Driver
 		// The repository holding desired state.
 		Workloads WorkloadRepository
+		// The repository holding port allocations, used to resolve the address a
+		// health check probes. May be nil, in which case no checks are registered.
+		Ports PortRepository
+		// Reports what orca's own health checks established. May be nil, in which
+		// case only the state the driver reports is acted on.
+		Checker Checker
 		// Called to abandon the host ports orca chose for a workload when it fails
 		// to start, reporting whether anything changed. May be nil, in which case
 		// ports are never reallocated.
@@ -107,12 +138,14 @@ const (
 )
 
 // New returns a Reconciler that converges the driver in config onto the desired
-// state in its repository.
+// state in its repository.https://github.com/octplane
 func New(config Config) *Reconciler {
 	return &Reconciler{
 		logger:     config.Logger.With("component", "reconciler"),
 		driver:     config.Driver,
 		workloads:  config.Workloads,
+		ports:      config.Ports,
+		checker:    config.Checker,
 		reallocate: config.Reallocate,
 		interval:   config.Interval,
 		backoff:    make(map[string]backoff),
@@ -194,8 +227,10 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 
 	observed := make(map[string][]driver.Instance, len(instances))
 	for _, instance := range instances {
-		observed[instance.Workload] = append(observed[instance.Workload], instance)
+		observed[instance.Workload] = append(observed[instance.Workload], r.checked(instance))
 	}
+
+	r.register(ctx, rows)
 
 	desired := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
@@ -275,6 +310,121 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	}
 
 	return r.restart(ctx, row, instances)
+}
+
+// register keeps the checker in step with the desired state, so that every workload
+// declaring a check has one and no workload that has gone still does.
+//
+// This belongs to the pass rather than to whoever applies a workload: the reconciler
+// is what runs continuously, so a server that restarts resumes checking the workloads
+// it adopts without waiting for anything to be applied or read again.
+func (r *Reconciler) register(ctx context.Context, rows []database.Workload) {
+	if r.checker == nil || r.ports == nil {
+		return
+	}
+
+	allocations, err := r.ports.ListAll(ctx)
+	if err != nil {
+		r.logger.With("error", err).Error("failed to read workload ports")
+		return
+	}
+
+	for _, row := range rows {
+		check, ok, err := healthCheck(row, allocations[row.ID])
+		switch {
+		case err != nil:
+			// The specification was validated before it was stored, so a check that
+			// cannot be resolved now means the two have diverged rather than that the
+			// operator made a mistake.
+			r.logger.With("workload", row.Name, "error", err).Error("failed to resolve health check")
+		case ok && row.DeletedAt.IsZero():
+			r.checker.Set(row.Name, check)
+		default:
+			// Either the workload declares no check or it is on its way out, and
+			// neither is worth probing.
+			r.checker.Forget(row.Name)
+		}
+	}
+}
+
+// healthCheck resolves a stored workload's health check into something probeable,
+// reporting false when the workload declares none.
+func healthCheck(row database.Workload, ports []database.Port) (health.Check, bool, error) {
+	var spec api.WorkloadSpec
+	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+		return health.Check{}, false, fmt.Errorf("failed to decode workload spec: %w", err)
+	}
+
+	resolved := manifest.NewSpec(spec)
+	if resolved.Health == nil {
+		return health.Check{}, false, nil
+	}
+
+	host, err := healthPort(*resolved.Health, ports)
+	if err != nil {
+		return health.Check{}, false, err
+	}
+
+	return health.Check{
+		// Probing the loopback address rather than the published interface keeps the
+		// check to traffic that never leaves the host.
+		Address:     fmt.Sprintf("127.0.0.1:%d", host),
+		HTTP:        resolved.Health.HTTP,
+		Interval:    resolved.Health.Interval,
+		Timeout:     resolved.Health.Timeout,
+		Retries:     resolved.Health.Retries,
+		StartPeriod: resolved.Health.StartPeriod,
+	}, true, nil
+}
+
+// healthPort finds the host port that reaches the port the check names.
+func healthPort(check manifest.Health, ports []database.Port) (int, error) {
+	if len(ports) == 0 {
+		return 0, fmt.Errorf("workload publishes no ports to check")
+	}
+
+	// Validation requires the port to be named when several are published, so an
+	// unnamed one can only mean the single port the workload has.
+	if check.Port == 0 {
+		return ports[0].Host, nil
+	}
+
+	for _, port := range ports {
+		if port.Container == check.Port {
+			return port.Host, nil
+		}
+	}
+
+	return 0, fmt.Errorf("port %d is not published by the workload", check.Port)
+}
+
+// checked folds what orca's health check established into an instance's state, so
+// that a workload the driver reports as running but which cannot serve converges
+// instead of being left alone.
+//
+// A failing check makes the instance failed, which routes it into the same paced
+// restart a crashed container takes: the reaction to "not working" is the same
+// whether the process died or merely stopped answering. A check that has not passed
+// yet makes it pending, which the pass treats as up — a workload still starting
+// must not be replaced for not having answered yet.
+func (r *Reconciler) checked(instance driver.Instance) driver.Instance {
+	if r.checker == nil || instance.State != driver.StateRunning {
+		return instance
+	}
+
+	result, ok := r.checker.Result(instance.Workload)
+	if !ok {
+		return instance
+	}
+
+	switch result.Status {
+	case health.StatusUnhealthy:
+		instance.State = driver.StateFailed
+	case health.StatusStarting:
+		instance.State = driver.StatePending
+	}
+
+	return instance
 }
 
 // teardown removes a workload that has been marked for deletion, and its desired
