@@ -24,6 +24,7 @@ func TestWireSpec(t *testing.T) {
 		// manifest look like an update.
 		assert.Nil(t, wire.Schedule)
 		assert.Nil(t, wire.Labels)
+		assert.Nil(t, wire.Restart)
 		require.NotNil(t, wire.Container)
 		assert.Nil(t, wire.Container.Env)
 		assert.Nil(t, wire.Container.Ports)
@@ -36,6 +37,9 @@ func TestWireSpec(t *testing.T) {
 			Name:     "example",
 			Schedule: "*/5 * * * *",
 			Labels:   map[string]string{"some-key": "some-value"},
+			// Resolved rather than empty, because a round trip runs the value
+			// through NewSpec, which applies the default.
+			Restart: manifest.RestartAlways,
 			Container: &manifest.Container{
 				Image: "example/example:latest",
 				Env:   map[string]string{"EXAMPLE": "EXAMPLE"},
@@ -52,6 +56,7 @@ func TestWireSpec(t *testing.T) {
 		spec := manifest.Spec{
 			Version: "v1",
 			Name:    "example",
+			Restart: manifest.RestartAlways,
 			Script:  &manifest.Script{Raw: `echo "hello world"`},
 		}
 

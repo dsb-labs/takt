@@ -1,0 +1,5 @@
+version: v1
+name: example
+restart: sometimes
+container:
+  image: example/example:latest

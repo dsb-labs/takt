@@ -23,6 +23,7 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 		spec.Labels = new(s.Labels)
 	}
 
+	spec.Restart = manifest.WireRestart(s.Restart)
 	spec.Health = manifest.WireHealth(s.Health)
 
 	if s.Container != nil {

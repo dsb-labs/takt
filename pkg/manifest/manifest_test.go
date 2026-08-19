@@ -3,12 +3,14 @@ package manifest_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -178,6 +180,13 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// A policy nobody recognises is a typo, and defaulting it silently would
+			// leave a job the operator meant to run once running forever.
+			Name:         "rejects an unknown restart policy",
+			File:         "bad_restart.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name: "a manifest asking for an allocated host port",
 			File: "dynamic_ports.yaml",
 			Assert: func(t *testing.T, spec manifest.Spec) {
@@ -297,6 +306,107 @@ func TestRuntimeOf(t *testing.T) {
 // the lowercased Go field name, which works only while every manifest key is a
 // single word. Adding a multi-word field to the specification — spelled camelCase
 // in JSON — would fail to decode here, and this test is what catches it.
+func TestRestartPolicy_Restarts(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name           string
+		Policy         manifest.RestartPolicy
+		ExitCode       int
+		ExpectRestarts bool
+	}{
+		{
+			Name:           "always restarts a clean exit",
+			Policy:         manifest.RestartAlways,
+			ExpectRestarts: true,
+		},
+		{
+			Name:           "always restarts a failure",
+			Policy:         manifest.RestartAlways,
+			ExitCode:       1,
+			ExpectRestarts: true,
+		},
+		{
+			// The workload did what it was asked to do, which is the whole point of
+			// this policy: a job that finishes is finished.
+			Name:           "on-failure leaves a clean exit alone",
+			Policy:         manifest.RestartOnFailure,
+			ExpectRestarts: false,
+		},
+		{
+			Name:           "on-failure restarts a failure",
+			Policy:         manifest.RestartOnFailure,
+			ExitCode:       1,
+			ExpectRestarts: true,
+		},
+		{
+			Name:           "never leaves a clean exit alone",
+			Policy:         manifest.RestartNever,
+			ExpectRestarts: false,
+		},
+		{
+			Name:           "never leaves a failure alone",
+			Policy:         manifest.RestartNever,
+			ExitCode:       137,
+			ExpectRestarts: false,
+		},
+		{
+			// Validation rejects an unknown policy, so reaching this means the stored
+			// specification and the rules have diverged. Restarting is the better
+			// failure: a service kept running beats one silently retired.
+			Name:           "an unrecognised policy restarts",
+			Policy:         "sometimes",
+			ExpectRestarts: true,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			assert.Equal(t, tc.ExpectRestarts, tc.Policy.Restarts(tc.ExitCode))
+		})
+	}
+}
+
+func TestRestartPolicy_Default(t *testing.T) {
+	t.Parallel()
+
+	// A manifest reaches the server two ways, decoded from YAML and converted from
+	// the wire. A default applied to only one of them would make the same manifest
+	// behave differently depending on the route it took.
+	t.Run("parsing a manifest that says nothing", func(t *testing.T) {
+		spec, err := manifest.Parse(strings.NewReader(`
+version: v1
+name: example
+container:
+  image: example/example:latest
+`))
+		require.NoError(t, err)
+		assert.Equal(t, manifest.RestartAlways, spec.Restart)
+	})
+
+	t.Run("converting a wire specification that says nothing", func(t *testing.T) {
+		spec := manifest.NewSpec(api.WorkloadSpec{
+			Version:   "v1",
+			Name:      "example",
+			Container: &api.ContainerSpec{Image: "example/example:latest"},
+		})
+
+		assert.Equal(t, manifest.RestartAlways, spec.Restart)
+	})
+
+	t.Run("a policy the manifest states is kept", func(t *testing.T) {
+		spec, err := manifest.Parse(strings.NewReader(`
+version: v1
+name: example
+restart: never
+container:
+  image: example/example:latest
+`))
+		require.NoError(t, err)
+		assert.Equal(t, manifest.RestartNever, spec.Restart)
+	})
+}
+
 func TestParse_EveryFieldDecodes(t *testing.T) {
 	t.Parallel()
 
@@ -312,6 +422,7 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	assert.NotEmpty(t, spec.Version)
 	assert.NotEmpty(t, spec.Name)
 	assert.NotEmpty(t, spec.Schedule)
+	assert.NotEmpty(t, spec.Restart)
 	assert.NotEmpty(t, spec.Labels)
 	require.NotNil(t, spec.Container)
 	assert.NotEmpty(t, spec.Container.Image)

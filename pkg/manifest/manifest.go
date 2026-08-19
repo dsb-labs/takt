@@ -56,8 +56,10 @@ func Parse(r io.Reader) (Spec, error) {
 		return Spec{}, fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
-	// Timing left unset in the file is resolved before validation, so the rules check
-	// the values that will actually be used rather than zeroes.
+	// Values left unset in the file are resolved before validation, so the rules check
+	// what will actually be used rather than zeroes.
+	spec.Restart = spec.Restart.orDefault()
+
 	if spec.Health != nil {
 		spec.Health.defaults()
 	}
@@ -82,6 +84,10 @@ func Validate(spec Spec) error {
 			validation.Match(namePattern).Error("must be lowercase alphanumeric, optionally separated by dashes"),
 		),
 		validation.Field(&spec.Schedule, validation.By(validCron)),
+		validation.Field(&spec.Restart,
+			validation.In(RestartAlways, RestartOnFailure, RestartNever).
+				Error(fmt.Sprintf("must be %q, %q or %q", RestartAlways, RestartOnFailure, RestartNever)),
+		),
 	)
 	if err != nil {
 		return fmt.Errorf("invalid manifest: %w", err)

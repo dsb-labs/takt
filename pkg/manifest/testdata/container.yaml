@@ -1,6 +1,7 @@
 version: v1
 name: example
 schedule: "*/5 * * * *"
+restart: on-failure
 labels:
   some-key: some-value
 container:
