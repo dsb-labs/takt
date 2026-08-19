@@ -4,9 +4,9 @@ CREATE TABLE IF NOT EXISTS workload (
     version    INTEGER NOT NULL,
     runtime    TEXT    NOT NULL,
     schedule   TEXT    NOT NULL DEFAULT '',
-    spec       TEXT    NOT NULL,
+    spec       BLOB    NOT NULL,
     spec_hash  TEXT    NOT NULL,
-    labels     TEXT    NOT NULL DEFAULT '{}',
+    labels     BLOB    NOT NULL DEFAULT '{}',
     created_at TEXT    NOT NULL,
     updated_at TEXT    NOT NULL,
     deleted_at TEXT    NOT NULL DEFAULT ''

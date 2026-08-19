@@ -106,7 +106,7 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload) (Workload, 
 func (r *WorkloadRepository) insert(ctx context.Context, w Workload, labels string) (Workload, error) {
 	const q = `
 		INSERT INTO workload (id, name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, jsonb(?), ?, jsonb(?), ?, ?)
 	`
 
 	now := time.Now().UTC()
@@ -130,7 +130,7 @@ func (r *WorkloadRepository) insert(ctx context.Context, w Workload, labels stri
 func (r *WorkloadRepository) update(ctx context.Context, w Workload, labels string, existing Workload) (Workload, error) {
 	const q = `
 		UPDATE workload
-		SET version = ?, runtime = ?, schedule = ?, spec = ?, spec_hash = ?, labels = ?, updated_at = ?
+		SET version = ?, runtime = ?, schedule = ?, spec = jsonb(?), spec_hash = ?, labels = jsonb(?), updated_at = ?
 		WHERE name = ?
 	`
 
@@ -162,7 +162,7 @@ func (r *WorkloadRepository) update(ctx context.Context, w Workload, labels stri
 // when no such workload exists.
 func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, error) {
 	const q = `
-		SELECT id, name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at, deleted_at
+		SELECT id, name, version, runtime, schedule, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at
 		FROM workload
 		WHERE name = ?
 	`
@@ -193,7 +193,7 @@ func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, er
 // List returns every workload, ordered by name.
 func (r *WorkloadRepository) List(ctx context.Context) ([]Workload, error) {
 	const q = `
-		SELECT id, name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at, deleted_at
+		SELECT id, name, version, runtime, schedule, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at
 		FROM workload
 		ORDER BY name ASC
 	`
