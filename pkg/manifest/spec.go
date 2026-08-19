@@ -76,6 +76,9 @@ type (
 	Container struct {
 		// The image reference to run.
 		Image string
+		// The command to run, replacing the one the image declares. Empty runs what
+		// the image already declares.
+		Command []string
 		// Environment variables set inside the container.
 		Env map[string]string
 		// The ports to publish.
@@ -178,6 +181,9 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 	if spec.Container != nil {
 		out.Container = &Container{Image: spec.Container.Image}
 
+		if spec.Container.Command != nil {
+			out.Container.Command = *spec.Container.Command
+		}
 		if spec.Container.Env != nil {
 			out.Container.Env = *spec.Container.Env
 		}

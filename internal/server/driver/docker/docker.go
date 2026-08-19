@@ -82,6 +82,9 @@ type (
 		SpecHash string
 		// The image the container runs.
 		Image string
+		// The command the container runs, replacing the one the image declares. Empty
+		// runs what the image already declares.
+		Command []string
 		// The environment variables set inside the container.
 		Env map[string]string
 		// The ports to publish, each already resolved to a host port.
@@ -123,6 +126,9 @@ func NewWorkload(row database.Workload) (Workload, error) {
 		Labels:   row.Labels,
 	}
 
+	if spec.Container.Command != nil {
+		w.Command = *spec.Container.Command
+	}
 	if spec.Container.Env != nil {
 		w.Env = *spec.Container.Env
 	}
@@ -168,7 +174,10 @@ func (d *Driver) Start(ctx context.Context, w Workload) (string, error) {
 
 	created, err := d.client.ContainerCreate(ctx,
 		&container.Config{
-			Image:        w.Image,
+			Image: w.Image,
+			// Nil rather than empty when the workload names no command, so the image
+			// keeps the one it declares. An empty slice would replace it with nothing.
+			Cmd:          w.Command,
 			Env:          environment(w.Env),
 			Labels:       labels,
 			ExposedPorts: exposed,

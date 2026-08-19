@@ -6,6 +6,7 @@ labels:
   some-key: some-value
 container:
   image: example/example:latest
+  command: ["sh", "-c", "exit 0"]
   env:
     EXAMPLE: EXAMPLE
   ports:

@@ -142,6 +142,17 @@ func (e WorkloadState) Valid() bool {
 
 // ContainerSpec The container runtime block, run by the docker driver.
 type ContainerSpec struct {
+	// Command The command to run, replacing the one the image declares. Given as the
+	// command and its arguments rather than as a string, so nothing has to
+	// decide where to split it and no shell is involved.
+	//
+	// Leave it out to run what the image already declares, which is the usual
+	// case.
+	//
+	//
+	// Examples: ["sh","-c","echo hello"]
+	Command *[]string `json:"command,omitempty"`
+
 	// Env Environment variables set inside the container.
 	Env *map[string]string `json:"env,omitempty"`
 

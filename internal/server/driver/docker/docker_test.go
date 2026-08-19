@@ -65,6 +65,60 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
+			Name: "runs the command the workload names",
+			Workload: docker.Workload{
+				Name:     "example",
+				Version:  1,
+				SpecHash: "hash-one",
+				Image:    "example/example:latest",
+				Command:  []string{"sh", "-c", "exit 0"},
+			},
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything,
+					mock.MatchedBy(func(config *dockercontainer.Config) bool {
+						return len(config.Cmd) == 3 && config.Cmd[0] == "sh" && config.Cmd[2] == "exit 0"
+					}),
+					mock.Anything, mock.Anything, mock.Anything, "orca-example-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			// Nil rather than empty, so the image keeps the command it declares. An
+			// empty slice would replace it with nothing, and the container would have
+			// nothing to run.
+			Name: "leaves the image's own command alone when the workload names none",
+			Workload: docker.Workload{
+				Name:     "example",
+				Version:  1,
+				SpecHash: "hash-one",
+				Image:    "example/example:latest",
+			},
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything,
+					mock.MatchedBy(func(config *dockercontainer.Config) bool {
+						return config.Cmd == nil
+					}),
+					mock.Anything, mock.Anything, mock.Anything, "orca-example-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
 			// Ownership is expressed entirely through these labels: Observe reads
 			// them to decide which containers are orca's and which workload each
 			// belongs to. A manifest that could set them would be able to disown a

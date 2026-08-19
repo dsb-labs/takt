@@ -205,10 +205,33 @@ func RuntimeOf(spec Spec) (Runtime, error) {
 func validateContainer(spec Container) error {
 	err := validation.ValidateStruct(&spec,
 		validation.Field(&spec.Image, validation.Required),
+		validation.Field(&spec.Command, validation.By(validCommand)),
 		validation.Field(&spec.Ports, validation.By(validPorts)),
 	)
 	if err != nil {
 		return fmt.Errorf("invalid container: %w", err)
+	}
+
+	return nil
+}
+
+// validCommand reports whether every element of a command is something a runtime can
+// execute.
+//
+// An empty element is rejected rather than dropped. It reaches the runtime as an empty
+// argument, which either means nothing or means something the operator did not write,
+// and a manifest that says nothing about it is easier to fix than a container that
+// behaves oddly.
+func validCommand(value any) error {
+	command, ok := value.([]string)
+	if !ok || len(command) == 0 {
+		return nil
+	}
+
+	for i, part := range command {
+		if strings.TrimSpace(part) == "" {
+			return fmt.Errorf("command element %d is empty", i)
+		}
 	}
 
 	return nil

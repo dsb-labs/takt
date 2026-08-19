@@ -187,6 +187,13 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// An empty element reaches the runtime as an empty argument, which is
+			// either meaningless or means something the operator did not write.
+			Name:         "rejects a command with an empty element",
+			File:         "bad_command.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name: "a manifest asking for an allocated host port",
 			File: "dynamic_ports.yaml",
 			Assert: func(t *testing.T, spec manifest.Spec) {
@@ -426,6 +433,7 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	assert.NotEmpty(t, spec.Labels)
 	require.NotNil(t, spec.Container)
 	assert.NotEmpty(t, spec.Container.Image)
+	assert.NotEmpty(t, spec.Container.Command)
 	assert.NotEmpty(t, spec.Container.Env)
 	assert.NotEmpty(t, spec.Container.Ports)
 }

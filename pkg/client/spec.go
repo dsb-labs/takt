@@ -29,6 +29,9 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 	if s.Container != nil {
 		spec.Container = &api.ContainerSpec{Image: s.Container.Image}
 
+		if len(s.Container.Command) > 0 {
+			spec.Container.Command = new(s.Container.Command)
+		}
 		if len(s.Container.Env) > 0 {
 			spec.Container.Env = new(s.Container.Env)
 		}
