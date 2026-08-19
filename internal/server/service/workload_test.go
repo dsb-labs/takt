@@ -17,6 +17,7 @@ import (
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/service"
 )
@@ -252,6 +253,77 @@ func TestWorkloadService_Get(t *testing.T) {
 		_, err := svc.Get(t.Context(), "nope")
 		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
 	})
+}
+
+func TestWorkloadService_Get_Health(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name        string
+		Result      health.Result
+		Checked     bool
+		ExpectState api.WorkloadState
+	}{
+		{
+			Name:        "a passing check leaves the workload running",
+			Result:      health.Result{Status: health.StatusHealthy},
+			Checked:     true,
+			ExpectState: api.WorkloadStateRunning,
+		},
+		{
+			Name:    "a check that has not passed yet reads as pending",
+			Result:  health.Result{Status: health.StatusStarting},
+			Checked: true,
+			// A workload still warming up must not be replaced for not having
+			// answered yet, so this has to be a state the reconciler treats as up.
+			ExpectState: api.WorkloadStatePending,
+		},
+		{
+			Name:    "a failing check makes the workload failed",
+			Result:  health.Result{Status: health.StatusUnhealthy, Failures: 3},
+			Checked: true,
+			// The container is running as far as docker is concerned, but it cannot
+			// serve — which is the whole point of checking.
+			ExpectState: api.WorkloadStateFailed,
+		},
+		{
+			Name:        "an unchecked workload is unaffected",
+			Checked:     false,
+			ExpectState: api.WorkloadStateRunning,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+			checker := NewMockChecker(t)
+
+			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+			ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
+			d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateRunning},
+			}, nil).Once()
+
+			checker.EXPECT().Result("example").Return(tc.Result, tc.Checked)
+			checker.EXPECT().Forget("example").Maybe()
+			checker.EXPECT().Set("example", mock.Anything).Maybe()
+
+			svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+				Logger:    newTestLogger(t),
+				Driver:    d,
+				Workloads: repo,
+				Ports:     ports,
+				Allocator: allocatorStub{},
+				Checker:   checker,
+			})
+
+			got, err := svc.Get(t.Context(), "example")
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.ExpectState, got.State)
+			assert.Equal(t, tc.Checked, got.Health.Checked)
+		})
+	}
 }
 
 func TestWorkloadService_Get_State(t *testing.T) {

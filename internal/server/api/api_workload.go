@@ -252,6 +252,37 @@ func (r logsResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error 
 	return r.write(w)
 }
 
+// instanceHealth maps what orca established about a workload's health onto the wire
+// format, falling back to what the runtime reports for an image that declares its own
+// check.
+//
+// The check orca performs takes precedence: it is the one the operator asked for,
+// where the runtime's is whatever the image happened to carry.
+func instanceHealth(reported service.Health, instance driver.Instance) *api.InstanceHealth {
+	if reported.Checked {
+		result := api.InstanceHealth{Status: api.HealthStatus(reported.Result.Status)}
+
+		result.Failures = new(reported.Result.Failures)
+
+		if !reported.Result.CheckedAt.IsZero() {
+			result.CheckedAt = new(reported.Result.CheckedAt)
+		}
+		if reported.Result.Error != "" {
+			result.Error = new(reported.Result.Error)
+		}
+
+		return &result
+	}
+
+	if instance.RuntimeHealth == "" {
+		return nil
+	}
+
+	// Reported but not acted on: orca did not ask for this check and has no retry
+	// policy for it, so surfacing it is strictly more useful than discarding it.
+	return &api.InstanceHealth{Status: api.HealthStatus(instance.RuntimeHealth)}
+}
+
 // newWorkload maps the service's view of a workload onto the wire format.
 func newWorkload(w service.Workload) api.Workload {
 	workload := api.Workload{
@@ -282,6 +313,7 @@ func newWorkload(w service.Workload) api.Workload {
 			ID:       instance.ID,
 			SpecHash: instance.SpecHash,
 			State:    api.InstanceState(instance.State),
+			Health:   instanceHealth(w.Health, instance),
 		}
 
 		// An exit code is only meaningful once the instance has stopped; reporting

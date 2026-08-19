@@ -118,6 +118,7 @@ type (
 		workloads WorkloadRepository
 		ports     PortRepository
 		allocator Allocator
+		checker   Checker
 		notify    func()
 	}
 )
@@ -134,6 +135,9 @@ type WorkloadServiceConfig struct {
 	Ports PortRepository
 	// The allocator used to choose host ports.
 	Allocator Allocator
+	// The checker that establishes whether workloads are working. May be nil, in
+	// which case no workload is checked and none reports health.
+	Checker Checker
 	// Called whenever desired state changes, so that the reconciler can converge
 	// immediately rather than waiting for its next tick. May be nil when no
 	// reconciler is running, as in tests.
@@ -148,6 +152,7 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		workloads: config.Workloads,
 		ports:     config.Ports,
 		allocator: config.Allocator,
+		checker:   config.Checker,
 		notify:    config.Notify,
 	}
 }
@@ -327,7 +332,9 @@ func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Worklo
 
 	workloads := make([]Workload, 0, len(rows))
 	for _, row := range rows {
-		workload, err := newWorkload(row, observed[row.Name], ports[row.ID])
+		s.registerCheck(row, ports[row.ID])
+
+		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.health(row.Name))
 		if err != nil {
 			return nil, err
 		}
@@ -649,7 +656,11 @@ func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (W
 		return Workload{}, fmt.Errorf("failed to read workload ports: %w", err)
 	}
 
-	return newWorkload(row, s.observe(ctx)[row.Name], ports)
+	// Registering here rather than only on apply means a restarted server starts
+	// checking the workloads it adopted, without waiting for someone to re-apply them.
+	s.registerCheck(row, ports)
+
+	return newWorkload(row, s.observe(ctx)[row.Name], ports, s.health(row.Name))
 }
 
 // observe groups the driver's instances by workload name.
@@ -716,13 +727,20 @@ func canonicalise(spec api.WorkloadSpec) ([]byte, string, error) {
 	return encoded, hex.EncodeToString(sum[:]), nil
 }
 
-func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port) (Workload, error) {
+func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, reported Health) (Workload, error) {
 	var spec api.WorkloadSpec
 	if err := json.Unmarshal(row.Spec, &spec); err != nil {
 		return Workload{}, fmt.Errorf("failed to decode workload spec: %w", err)
 	}
 
 	deleting := !row.DeletedAt.IsZero()
+
+	// Health is folded into the instance states before the workload's own state is
+	// derived, so a container that is up but not working reads as failed rather than
+	// running — and is replaced by the same paced path a crashed one takes.
+	for i := range instances {
+		instances[i].State = healthState(instances[i].State, reported)
+	}
 
 	return Workload{
 		Name:      row.Name,
@@ -733,6 +751,7 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 		Labels:    row.Labels,
 		Instances: instances,
 		Ports:     newResolvedPorts(ports),
+		Health:    reported,
 		State:     stateOf(instances, deleting),
 		Deleting:  deleting,
 		CreatedAt: row.CreatedAt,
@@ -808,6 +827,8 @@ type Workload struct {
 	Instances []driver.Instance
 	// The port mappings the server settled on, including any it allocated.
 	Ports []api.ResolvedPort
+	// What orca established about whether the workload is working.
+	Health Health
 	// The workload's overall state, derived from its instances and whether it is
 	// being deleted.
 	State api.WorkloadState

@@ -16,6 +16,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
+	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 	"github.com/dsb-labs/orca/internal/server/service"
@@ -52,6 +53,7 @@ func Run(ctx context.Context, config Config) error {
 
 	workloads := database.NewWorkloadRepository(db)
 	ports := database.NewPortRepository(db)
+	checker := health.New()
 	driver := docker.New(docker.Config{Logger: logger, Client: dockerClient})
 
 	// The service and the reconciler each need something from the other: the service
@@ -76,6 +78,7 @@ func Run(ctx context.Context, config Config) error {
 		Workloads: workloads,
 		Ports:     ports,
 		Allocator: port.New(port.Config{Min: config.Ports.Min, Max: config.Ports.Max}),
+		Checker:   checker,
 		Notify:    reconcile.Notify,
 	})
 
@@ -110,6 +113,7 @@ func Run(ctx context.Context, config Config) error {
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error { return reconcile.Run(ctx) })
+	g.Go(func() error { return checker.Run(ctx) })
 	g.Go(server.ListenAndServe)
 	g.Go(func() error {
 		<-ctx.Done()

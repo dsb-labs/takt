@@ -18,6 +18,7 @@ import (
 	generated "github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/service"
 )
 
@@ -216,6 +217,86 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		require.Len(t, *got.Instances, 1)
 		require.NotNil(t, (*got.Instances)[0].ExitCode)
 		assert.Equal(t, 137, *(*got.Instances)[0].ExitCode)
+	})
+
+	t.Run("reports the health of a checked workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+
+		checked := workload("example", generated.WorkloadStateFailed)
+		checked.Health = service.Health{
+			Checked: true,
+			Result: health.Result{
+				Status:    health.StatusUnhealthy,
+				Failures:  3,
+				CheckedAt: time.Now(),
+				Error:     "/healthz answered 500",
+			},
+		}
+
+		svc.EXPECT().Get(mock.Anything, "example").Return(checked, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		var got generated.Workload
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+
+		require.NotNil(t, got.Instances)
+		require.Len(t, *got.Instances, 1)
+
+		reported := (*got.Instances)[0].Health
+		require.NotNil(t, reported)
+		assert.Equal(t, generated.Unhealthy, reported.Status)
+		require.NotNil(t, reported.Failures)
+		assert.Equal(t, 3, *reported.Failures)
+		require.NotNil(t, reported.Error)
+		assert.Equal(t, "/healthz answered 500", *reported.Error)
+		assert.NotNil(t, reported.CheckedAt)
+	})
+
+	t.Run("reports what the runtime says when orca checks nothing", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+
+		// An image carrying its own HEALTHCHECK is being checked by docker whether or
+		// not the manifest declares one, and surfacing that beats discarding it.
+		declared := workload("example", generated.WorkloadStateRunning)
+		declared.Instances = []driver.Instance{
+			{ID: "container-one", State: driver.StateRunning, SpecHash: "hash-one", RuntimeHealth: "healthy"},
+		}
+
+		svc.EXPECT().Get(mock.Anything, "example").Return(declared, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		var got generated.Workload
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+
+		require.NotNil(t, got.Instances)
+		require.Len(t, *got.Instances, 1)
+
+		reported := (*got.Instances)[0].Health
+		require.NotNil(t, reported)
+		assert.Equal(t, generated.Healthy, reported.Status)
+
+		// orca did not run this check, so it counted no failures against it.
+		assert.Nil(t, reported.Failures)
+	})
+
+	t.Run("reports no health for an unchecked workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").
+			Return(workload("example", generated.WorkloadStateRunning), nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		var got generated.Workload
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+
+		require.NotNil(t, got.Instances)
+		require.Len(t, *got.Instances, 1)
+		assert.Nil(t, (*got.Instances)[0].Health)
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
