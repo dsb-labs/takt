@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"strings"
@@ -57,9 +58,9 @@ type (
 	Driver interface {
 		// Observe should report every instance the driver is currently running.
 		Observe(ctx context.Context) ([]driver.Instance, error)
-		// Logs should return the recent output of the named workload, limited to
-		// the last tail lines.
-		Logs(ctx context.Context, workload string, tail int) (string, error)
+		// Logs should write the recent output of the named workload to out, limited
+		// to the last tail lines.
+		Logs(ctx context.Context, out io.Writer, workload string, tail int) error
 	}
 
 	// The WorkloadRepository interface describes the persistence operations the
@@ -357,23 +358,25 @@ func (s *WorkloadService) Delete(ctx context.Context, name string) (Workload, er
 	return s.hydrate(ctx, marked)
 }
 
-// Logs returns the recent output of the named workload, limited to the last tail
-// lines. Returns ErrWorkloadNotFound when no such workload exists.
-func (s *WorkloadService) Logs(ctx context.Context, name string, tail int) (string, error) {
+// Logs writes the recent output of the named workload to out, limited to the last
+// tail lines. Returns ErrWorkloadNotFound when no such workload exists.
+//
+// The output is streamed rather than returned so that a workload with a lot to say
+// doesn't have to be held in memory in its entirety before any of it is sent.
+func (s *WorkloadService) Logs(ctx context.Context, out io.Writer, name string, tail int) error {
 	if _, err := s.workloads.Get(ctx, name); err != nil {
 		if errors.Is(err, database.ErrWorkloadNotFound) {
-			return "", ErrWorkloadNotFound
+			return ErrWorkloadNotFound
 		}
 
-		return "", fmt.Errorf("failed to load workload: %w", err)
+		return fmt.Errorf("failed to load workload: %w", err)
 	}
 
-	logs, err := s.driver.Logs(ctx, name, tail)
-	if err != nil {
-		return "", fmt.Errorf("failed to read workload logs: %w", err)
+	if err := s.driver.Logs(ctx, out, name, tail); err != nil {
+		return fmt.Errorf("failed to read workload logs: %w", err)
 	}
 
-	return logs, nil
+	return nil
 }
 
 // parseQueries turns "path=value" strings into repository queries.

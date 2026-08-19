@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -313,39 +312,47 @@ func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 	return out, nil
 }
 
-// Logs returns the combined output of every container the driver holds for the
-// named workload, limited to the last tail lines of each.
-func (d *Driver) Logs(ctx context.Context, workload string, tail int) (string, error) {
+// Logs writes the combined output of every container the driver holds for the named
+// workload to out, limited to the last tail lines of each.
+//
+// The output is written as it is read rather than accumulated and returned. A
+// workload's logs are unbounded in principle — a chatty container plus a generous
+// tail is as much memory as the caller asks for — so holding the whole response
+// before sending any of it would let one request decide how much the server uses.
+func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, tail int) error {
 	containers, err := d.containers(ctx, workload)
 	if err != nil {
-		return "", err
+		return err
 	}
 
-	var out strings.Builder
 	for _, c := range containers {
-		logs, err := d.client.ContainerLogs(ctx, c.ID, container.LogsOptions{
-			ShowStdout: true,
-			ShowStderr: true,
-			Tail:       strconv.Itoa(tail),
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to read container logs: %w", err)
-		}
-
-		// Docker multiplexes stdout and stderr into a single framed stream for
-		// containers without a TTY, so it has to be demultiplexed rather than
-		// copied straight out.
-		if _, err = stdcopy.StdCopy(&out, &out, logs); err != nil {
-			_ = logs.Close()
-			return "", fmt.Errorf("failed to read container logs: %w", err)
-		}
-
-		if err = logs.Close(); err != nil {
-			return "", fmt.Errorf("failed to close container logs: %w", err)
+		if err = d.containerLogs(ctx, out, c.ID, tail); err != nil {
+			return err
 		}
 	}
 
-	return out.String(), nil
+	return nil
+}
+
+func (d *Driver) containerLogs(ctx context.Context, out io.Writer, id string, tail int) error {
+	logs, err := d.client.ContainerLogs(ctx, id, container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Tail:       strconv.Itoa(tail),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to read container logs: %w", err)
+	}
+	defer logs.Close()
+
+	// Docker multiplexes stdout and stderr into a single framed stream for
+	// containers without a TTY, so it has to be demultiplexed rather than
+	// copied straight out.
+	if _, err = stdcopy.StdCopy(out, out, logs); err != nil {
+		return fmt.Errorf("failed to read container logs: %w", err)
+	}
+
+	return nil
 }
 
 // containers returns the summaries of the containers the driver owns. When

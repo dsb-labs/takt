@@ -353,9 +353,9 @@ func TestDriver_Logs(t *testing.T) {
 
 		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
 
-		logs, err := d.Logs(t.Context(), "example", 20)
-		require.NoError(t, err)
-		assert.Equal(t, "hello world\n", logs)
+		var out strings.Builder
+		require.NoError(t, d.Logs(t.Context(), &out, "example", 20))
+		assert.Equal(t, "hello world\n", out.String())
 	})
 }
 

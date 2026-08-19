@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
@@ -25,8 +26,8 @@ type (
 		// Delete should mark the workload with the given name for deletion,
 		// returning it as it now stands.
 		Delete(ctx context.Context, name string) (service.Workload, error)
-		// Logs should return the recent output of the named workload.
-		Logs(ctx context.Context, name string, tail int) (string, error)
+		// Logs should write the recent output of the named workload to out.
+		Logs(ctx context.Context, out io.Writer, name string, tail int) error
 	}
 
 	// The WorkloadAPI type exposes HTTP endpoints for managing workloads.
@@ -35,9 +36,16 @@ type (
 	}
 )
 
-// The default number of log lines returned when a request doesn't ask for a
-// specific number. Matches the default declared in the specification.
-const defaultLogTail = 100
+const (
+	// The default number of log lines returned when a request doesn't ask for a
+	// specific number. Matches the default declared in the specification.
+	defaultLogTail = 100
+	// The most log lines a request may ask for. The specification declares this
+	// maximum, but the generated code does not enforce it, and the server reads what
+	// it is asked to read — so an uncapped request would let a caller decide how much
+	// work the server does.
+	maxLogTail = 10000
+)
 
 // NewWorkloadAPI returns a new instance of the WorkloadAPI type.
 func NewWorkloadAPI(workloads WorkloadService) *WorkloadAPI {
@@ -195,26 +203,53 @@ func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWork
 func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorkloadLogsRequestObject) (api.GetWorkloadLogsResponseObject, error) {
 	tail := defaultLogTail
 	if request.Params.Tail != nil {
-		tail = *request.Params.Tail
+		tail = min(*request.Params.Tail, maxLogTail)
 	}
 
-	logs, err := a.workloads.Logs(ctx, request.Name, tail)
-	switch {
-	case errors.Is(err, service.ErrWorkloadNotFound):
-		return api.GetWorkloadLogs404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("workload %q does not exist", request.Name),
-			},
-		}, nil
-	case err != nil:
-		return api.GetWorkloadLogs500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: fmt.Sprintf("failed to read workload logs: %v", err),
-			},
-		}, nil
+	// A missing workload is established before anything is written, because once the
+	// first byte of a 200 has been sent there is no way to report a failure. Reading
+	// the logs can still fail midway through; nothing can be done about that but stop
+	// writing, which is exactly why the cheap check happens first.
+	if _, err := a.workloads.Get(ctx, request.Name); err != nil {
+		switch {
+		case errors.Is(err, service.ErrWorkloadNotFound):
+			return api.GetWorkloadLogs404JSONResponse{
+				NotFoundJSONResponse: api.NotFoundJSONResponse{
+					Error: fmt.Sprintf("workload %q does not exist", request.Name),
+				},
+			}, nil
+		default:
+			return api.GetWorkloadLogs500JSONResponse{
+				InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
+					Error: fmt.Sprintf("failed to read workload logs: %v", err),
+				},
+			}, nil
+		}
 	}
 
-	return api.GetWorkloadLogs200TextResponse(logs), nil
+	return logsResponse{
+		write: func(w io.Writer) error {
+			return a.workloads.Logs(ctx, w, request.Name, tail)
+		},
+	}, nil
+}
+
+// The logsResponse type streams a workload's logs to the client.
+//
+// The generated response type for this endpoint is a string, which would mean holding
+// the whole of a workload's output in memory before sending any of it. This writes
+// straight to the response instead, so the server's memory use doesn't scale with how
+// much a container has to say.
+type logsResponse struct {
+	write func(w io.Writer) error
+}
+
+// VisitGetWorkloadLogsResponse writes the logs to w as plain text.
+func (r logsResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+
+	return r.write(w)
 }
 
 // newWorkload maps the service's view of a workload onto the wire format.

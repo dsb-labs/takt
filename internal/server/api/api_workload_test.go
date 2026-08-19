@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -319,7 +320,12 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 
 	t.Run("returns the logs as plain text", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Logs(mock.Anything, "example", 100).Return("hello world\n", nil).Once()
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", generated.WorkloadStateRunning), nil).Once()
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", 100).
+			RunAndReturn(func(_ context.Context, out io.Writer, _ string, _ int) error {
+				_, err := out.Write([]byte("hello world\n"))
+				return err
+			}).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
@@ -330,15 +336,30 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 
 	t.Run("honours the tail parameter", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Logs(mock.Anything, "example", 20).Return("hello world\n", nil).Once()
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", generated.WorkloadStateRunning), nil).Once()
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", 20).Return(nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?tail=20", nil)
 		assert.Equal(t, http.StatusOK, resp.Code)
 	})
 
+	t.Run("caps an unbounded tail", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").
+			Return(workload("example", generated.WorkloadStateRunning), nil).Once()
+
+		// The server reads what it is asked to read, so an uncapped request would let
+		// a caller decide how much work it does.
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", 10000).Return(nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?tail=999999999", nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
 	t.Run("reports a missing workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Logs(mock.Anything, "nope", 100).Return("", service.ErrWorkloadNotFound).Once()
+		svc.EXPECT().Get(mock.Anything, "nope").
+			Return(service.Workload{}, service.ErrWorkloadNotFound).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/nope/logs", nil)
 		assert.Equal(t, http.StatusNotFound, resp.Code)

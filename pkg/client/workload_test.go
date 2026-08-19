@@ -3,8 +3,10 @@ package client_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -297,9 +299,9 @@ func TestClient_Logs(t *testing.T) {
 			_, _ = w.Write([]byte("hello world\n"))
 		})
 
-		logs, err := c.Logs(t.Context(), "example", 20)
-		require.NoError(t, err)
-		assert.Equal(t, "hello world\n", logs)
+		var logs strings.Builder
+		require.NoError(t, c.Logs(t.Context(), &logs, "example", 20))
+		assert.Equal(t, "hello world\n", logs.String())
 	})
 
 	t.Run("leaves the limit to the server when tail is zero", func(t *testing.T) {
@@ -309,8 +311,7 @@ func TestClient_Logs(t *testing.T) {
 			_, _ = w.Write([]byte("hello world\n"))
 		})
 
-		_, err := c.Logs(t.Context(), "example", 0)
-		require.NoError(t, err)
+		require.NoError(t, c.Logs(t.Context(), io.Discard, "example", 0))
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
@@ -318,7 +319,7 @@ func TestClient_Logs(t *testing.T) {
 			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})
 		})
 
-		_, err := c.Logs(t.Context(), "nope", 0)
+		err := c.Logs(t.Context(), io.Discard, "nope", 0)
 		assert.ErrorIs(t, err, client.ErrWorkloadNotFound)
 	})
 }

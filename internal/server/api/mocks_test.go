@@ -6,6 +6,7 @@ package api_test
 
 import (
 	"context"
+	"io"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/service"
@@ -321,29 +322,20 @@ func (_c *MockWorkloadService_List_Call) RunAndReturn(run func(ctx context.Conte
 }
 
 // Logs provides a mock function for the type MockWorkloadService
-func (_mock *MockWorkloadService) Logs(ctx context.Context, name string, tail int) (string, error) {
-	ret := _mock.Called(ctx, name, tail)
+func (_mock *MockWorkloadService) Logs(ctx context.Context, out io.Writer, name string, tail int) error {
+	ret := _mock.Called(ctx, out, name, tail)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Logs")
 	}
 
-	var r0 string
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int) (string, error)); ok {
-		return returnFunc(ctx, name, tail)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int) string); ok {
-		r0 = returnFunc(ctx, name, tail)
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, io.Writer, string, int) error); ok {
+		r0 = returnFunc(ctx, out, name, tail)
 	} else {
-		r0 = ret.Get(0).(string)
+		r0 = ret.Error(0)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int) error); ok {
-		r1 = returnFunc(ctx, name, tail)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
+	return r0
 }
 
 // MockWorkloadService_Logs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Logs'
@@ -353,41 +345,47 @@ type MockWorkloadService_Logs_Call struct {
 
 // Logs is a helper method to define mock.On call
 //   - ctx context.Context
+//   - out io.Writer
 //   - name string
 //   - tail int
-func (_e *MockWorkloadService_Expecter) Logs(ctx any, name any, tail any) *MockWorkloadService_Logs_Call {
-	return &MockWorkloadService_Logs_Call{Call: _e.mock.On("Logs", ctx, name, tail)}
+func (_e *MockWorkloadService_Expecter) Logs(ctx any, out any, name any, tail any) *MockWorkloadService_Logs_Call {
+	return &MockWorkloadService_Logs_Call{Call: _e.mock.On("Logs", ctx, out, name, tail)}
 }
 
-func (_c *MockWorkloadService_Logs_Call) Run(run func(ctx context.Context, name string, tail int)) *MockWorkloadService_Logs_Call {
+func (_c *MockWorkloadService_Logs_Call) Run(run func(ctx context.Context, out io.Writer, name string, tail int)) *MockWorkloadService_Logs_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 io.Writer
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(io.Writer)
 		}
-		var arg2 int
+		var arg2 string
 		if args[2] != nil {
-			arg2 = args[2].(int)
+			arg2 = args[2].(string)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
 }
 
-func (_c *MockWorkloadService_Logs_Call) Return(s string, err error) *MockWorkloadService_Logs_Call {
-	_c.Call.Return(s, err)
+func (_c *MockWorkloadService_Logs_Call) Return(err error) *MockWorkloadService_Logs_Call {
+	_c.Call.Return(err)
 	return _c
 }
 
-func (_c *MockWorkloadService_Logs_Call) RunAndReturn(run func(ctx context.Context, name string, tail int) (string, error)) *MockWorkloadService_Logs_Call {
+func (_c *MockWorkloadService_Logs_Call) RunAndReturn(run func(ctx context.Context, out io.Writer, name string, tail int) error) *MockWorkloadService_Logs_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -2,8 +2,10 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 
@@ -249,29 +251,45 @@ func (c *Client) waitForTeardown(ctx context.Context, name string, interval time
 	}
 }
 
-// Logs returns the recent output of the named workload, limited to the last tail
-// lines. A tail of zero leaves the limit to the server.
-func (c *Client) Logs(ctx context.Context, name string, tail int) (string, error) {
+// Logs writes the recent output of the named workload to out, limited to the last
+// tail lines. A tail of zero leaves the limit to the server.
+//
+// The output is copied as it arrives rather than returned, so a workload with a lot
+// of output doesn't have to fit in the caller's memory before any of it is usable.
+func (c *Client) Logs(ctx context.Context, out io.Writer, name string, tail int) error {
 	var params api.GetWorkloadLogsParams
 	if tail > 0 {
 		params.Tail = new(tail)
 	}
 
-	resp, err := c.api.GetWorkloadLogsWithResponse(ctx, name, &params)
+	resp, err := c.api.GetWorkloadLogs(ctx, name, &params)
 	if err != nil {
-		return "", fmt.Errorf("failed to read workload logs: %w", err)
+		return fmt.Errorf("failed to read workload logs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return c.logsError(resp)
 	}
 
-	switch {
-	case resp.StatusCode() == http.StatusOK:
-		return string(resp.Body), nil
-	case resp.JSON404 != nil:
-		return "", fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
-	case resp.JSON500 != nil:
-		return "", newError(http.StatusInternalServerError, resp.JSON500)
-	default:
-		return "", newError(resp.StatusCode(), nil)
+	if _, err = io.Copy(out, resp.Body); err != nil {
+		return fmt.Errorf("failed to read workload logs: %w", err)
 	}
+
+	return nil
+}
+
+// logsError turns an unsuccessful logs response into an error, decoding the server's
+// message where it sent one.
+func (c *Client) logsError(resp *http.Response) error {
+	var body api.ErrorResponse
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%w: %s", ErrWorkloadNotFound, body.Error)
+	}
+
+	return newError(resp.StatusCode, &body)
 }
 
 func newWorkload(w api.Workload) Workload {

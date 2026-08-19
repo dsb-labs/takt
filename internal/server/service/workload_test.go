@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -575,13 +577,17 @@ func TestWorkloadService_Logs(t *testing.T) {
 		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Logs(mock.Anything, "example", 20).Return("hello world\n", nil).Once()
+		d.EXPECT().Logs(mock.Anything, mock.Anything, "example", 20).
+			RunAndReturn(func(_ context.Context, out io.Writer, _ string, _ int) error {
+				_, err := out.Write([]byte("hello world\n"))
+				return err
+			}).Once()
 
 		svc := newTestService(t, d, repo, ports, nil)
 
-		logs, err := svc.Logs(t.Context(), "example", 20)
-		require.NoError(t, err)
-		assert.Equal(t, "hello world\n", logs)
+		var out strings.Builder
+		require.NoError(t, svc.Logs(t.Context(), &out, "example", 20))
+		assert.Equal(t, "hello world\n", out.String())
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
@@ -591,7 +597,7 @@ func TestWorkloadService_Logs(t *testing.T) {
 
 		svc := newTestService(t, d, repo, ports, nil)
 
-		_, err := svc.Logs(t.Context(), "nope", 20)
+		err := svc.Logs(t.Context(), io.Discard, "nope", 20)
 		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
 	})
 }

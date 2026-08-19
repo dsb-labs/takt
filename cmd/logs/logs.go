@@ -24,14 +24,11 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			logs, err := c.Logs(cmd.Context(), args[0], tail)
-			if err != nil {
+			if err = c.Logs(cmd.Context(), cmd.OutOrStdout(), args[0], tail); err != nil {
 				return fmt.Errorf("failed to read workload logs: %w", err)
 			}
 
-			_, err = fmt.Fprint(cmd.OutOrStdout(), logs)
-
-			return err
+			return nil
 		},
 	}
 

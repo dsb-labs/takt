@@ -302,7 +302,9 @@ type ListWorkloadsParams struct {
 
 // GetWorkloadLogsParams defines parameters for GetWorkloadLogs.
 type GetWorkloadLogsParams struct {
-	// Tail The number of lines to return from the end of the logs.
+	// Tail The number of lines to return from the end of the logs. Capped, because
+	// the server reads what it is asked for and an unbounded request would let
+	// a caller decide how much work the server does.
 	Tail *int `form:"tail,omitempty" json:"tail,omitempty"`
 }
 

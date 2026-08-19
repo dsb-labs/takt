@@ -186,10 +186,14 @@ paths:
         - name: tail
           in: query
           required: false
-          description: The number of lines to return from the end of the logs.
+          description: |
+            The number of lines to return from the end of the logs. Capped, because
+            the server reads what it is asked for and an unbounded request would let
+            a caller decide how much work the server does.
           schema:
             type: integer
             minimum: 1
+            maximum: 10000
             default: 100
       responses:
         "200":

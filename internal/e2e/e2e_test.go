@@ -15,7 +15,9 @@ package e2e_test
 
 import (
 	"fmt"
+	"io"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -75,9 +77,9 @@ func (s *Suite) TestWorkloadLifecycle() {
 
 	// nginx announces itself on startup, so finding it here proves the log stream is
 	// demultiplexed rather than returned as raw framed bytes.
-	logs, err := s.client.Logs(s.ctx(), name, 50)
-	s.Require().NoError(err)
-	s.Contains(logs, "nginx")
+	var logs strings.Builder
+	s.Require().NoError(s.client.Logs(s.ctx(), &logs, name, 50))
+	s.Contains(logs.String(), "nginx")
 
 	workloads, err := s.client.List(s.ctx())
 	s.Require().NoError(err)
@@ -325,6 +327,5 @@ func (s *Suite) TestMissingWorkload() {
 	_, err = s.client.Delete(s.ctx(), "does-not-exist")
 	s.ErrorIs(err, client.ErrWorkloadNotFound)
 
-	_, err = s.client.Logs(s.ctx(), "does-not-exist", 10)
-	s.ErrorIs(err, client.ErrWorkloadNotFound)
+	s.ErrorIs(s.client.Logs(s.ctx(), io.Discard, "does-not-exist", 10), client.ErrWorkloadNotFound)
 }
