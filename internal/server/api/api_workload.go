@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
@@ -32,7 +33,17 @@ type (
 
 	// The WorkloadAPI type exposes HTTP endpoints for managing workloads.
 	WorkloadAPI struct {
+		logger    *slog.Logger
 		workloads WorkloadService
+	}
+
+	// The WorkloadAPIConfig type contains fields used to construct a WorkloadAPI.
+	WorkloadAPIConfig struct {
+		// The logger used to record failures the response deliberately doesn't
+		// describe.
+		Logger *slog.Logger
+		// The service performing the workload operations.
+		Workloads WorkloadService
 	}
 )
 
@@ -48,8 +59,24 @@ const (
 )
 
 // NewWorkloadAPI returns a new instance of the WorkloadAPI type.
-func NewWorkloadAPI(workloads WorkloadService) *WorkloadAPI {
-	return &WorkloadAPI{workloads: workloads}
+func NewWorkloadAPI(config WorkloadAPIConfig) *WorkloadAPI {
+	return &WorkloadAPI{
+		logger:    config.Logger.With("component", "api"),
+		workloads: config.Workloads,
+	}
+}
+
+// internalError logs why a request failed and returns the message the client is told
+// instead.
+//
+// An unexpected failure is described to the operator, not to the caller: the error
+// carries whatever context it was wrapped with on the way up — a filesystem path, the
+// text of a query, a docker endpoint — and none of that is the caller's business or
+// safe to hand them.
+func (a *WorkloadAPI) internalError(operation string, err error) string {
+	a.logger.With("error", err, "operation", operation).Error("failed to serve request")
+
+	return "failed to " + operation
 }
 
 // Register the HTTP endpoints onto the given http.ServeMux.
@@ -111,7 +138,7 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 	case err != nil:
 		return api.ApplyWorkload500JSONResponse{
 			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: fmt.Sprintf("failed to apply workload: %v", err),
+				Error: a.internalError("apply workload", err),
 			},
 		}, nil
 	}
@@ -136,7 +163,7 @@ func (a *WorkloadAPI) GetWorkload(ctx context.Context, request api.GetWorkloadRe
 	case err != nil:
 		return api.GetWorkload500JSONResponse{
 			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: fmt.Sprintf("failed to get workload: %v", err),
+				Error: a.internalError("get workload", err),
 			},
 		}, nil
 	}
@@ -161,7 +188,7 @@ func (a *WorkloadAPI) ListWorkloads(ctx context.Context, request api.ListWorkloa
 	case err != nil:
 		return api.ListWorkloads500JSONResponse{
 			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: fmt.Sprintf("failed to list workloads: %v", err),
+				Error: a.internalError("list workloads", err),
 			},
 		}, nil
 	}
@@ -191,7 +218,7 @@ func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWork
 	case err != nil:
 		return api.DeleteWorkload500JSONResponse{
 			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: fmt.Sprintf("failed to delete workload: %v", err),
+				Error: a.internalError("delete workload", err),
 			},
 		}, nil
 	}
@@ -221,7 +248,7 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 		default:
 			return api.GetWorkloadLogs500JSONResponse{
 				InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-					Error: fmt.Sprintf("failed to read workload logs: %v", err),
+					Error: a.internalError("read workload logs", err),
 				},
 			}, nil
 		}

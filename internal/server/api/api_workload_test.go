@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -170,6 +171,96 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			var got generated.Workload
 			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
 			tc.Assert(t, got)
+		})
+	}
+}
+
+// TestWorkloadAPI_HidesInternalFailures covers every endpoint's unexpected-failure
+// path, since that is the one branch a caller can reach without the server having
+// decided what to tell them.
+func TestWorkloadAPI_HidesInternalFailures(t *testing.T) {
+	t.Parallel()
+
+	// Shaped like the errors that actually arrive here: wrapped on the way up, and
+	// carrying operational detail picked up along the route.
+	internal := errors.New(`failed to query workloads: SELECT id, name FROM workload: ` +
+		`unable to open database file /var/lib/orca/state.db`)
+
+	tt := []struct {
+		Name       string
+		Method     string
+		Target     string
+		Body       any
+		SetupMocks func(*MockWorkloadService)
+	}{
+		{
+			Name:   "apply",
+			Method: http.MethodPut,
+			Target: "/api/v1/workloads/example",
+			Body:   containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Workload{}, false, internal).Once()
+			},
+		},
+		{
+			Name:   "get",
+			Method: http.MethodGet,
+			Target: "/api/v1/workloads/example",
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Get(mock.Anything, "example").Return(service.Workload{}, internal).Once()
+			},
+		},
+		{
+			Name:   "list",
+			Method: http.MethodGet,
+			Target: "/api/v1/workloads",
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().List(mock.Anything).Return(nil, internal).Once()
+			},
+		},
+		{
+			Name:   "delete",
+			Method: http.MethodDelete,
+			Target: "/api/v1/workloads/example",
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Delete(mock.Anything, "example").Return(service.Workload{}, internal).Once()
+			},
+		},
+		{
+			// The logs endpoint establishes the workload exists before it writes
+			// anything, so a failure there is the one it can still report.
+			Name:   "logs",
+			Method: http.MethodGet,
+			Target: "/api/v1/workloads/example/logs",
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Get(mock.Anything, "example").Return(service.Workload{}, internal).Once()
+			},
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			svc := NewMockWorkloadService(t)
+			tc.SetupMocks(svc)
+
+			var body io.Reader
+			if tc.Body != nil {
+				encoded, err := json.Marshal(tc.Body)
+				require.NoError(t, err)
+
+				body = bytes.NewReader(encoded)
+			}
+
+			resp := do(t, svc, tc.Method, tc.Target, body)
+			require.Equal(t, http.StatusInternalServerError, resp.Code)
+
+			// The response says what failed, and nothing about how the server is put
+			// together. A caller learning the database's path or the text of a query
+			// is being handed reconnaissance.
+			assert.NotContains(t, resp.Body.String(), "/var/lib/orca")
+			assert.NotContains(t, resp.Body.String(), "SELECT")
+			assert.NotContains(t, resp.Body.String(), "database file")
 		})
 	}
 }
@@ -451,7 +542,10 @@ func do(t *testing.T, svc *MockWorkloadService, method, target string, body io.R
 	t.Helper()
 
 	mux := http.NewServeMux()
-	api.NewWorkloadAPI(svc).Register(mux)
+	api.NewWorkloadAPI(api.WorkloadAPIConfig{
+		Logger:    slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError})),
+		Workloads: svc,
+	}).Register(mux)
 
 	req := httptest.NewRequest(method, target, body)
 	if body != nil {

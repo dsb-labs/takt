@@ -88,7 +88,7 @@ func Run(ctx context.Context, config Config) error {
 	})
 
 	mux := http.NewServeMux()
-	api.NewWorkloadAPI(svc).Register(mux)
+	api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}).Register(mux)
 
 	var handler http.Handler = mux
 	for _, middleware := range []func(http.Handler) http.Handler{
