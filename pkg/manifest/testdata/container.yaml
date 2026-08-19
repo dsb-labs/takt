@@ -8,4 +8,6 @@ container:
   env:
     EXAMPLE: EXAMPLE
   ports:
-    - "8080:8080"
+    - to: 8080
+      from: 4141
+    - to: 9090

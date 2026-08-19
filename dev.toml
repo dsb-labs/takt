@@ -9,3 +9,7 @@ interval = "5s"
 
 [logging]
 level = "debug"
+
+[ports]
+min = 20000
+max = 32000

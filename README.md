@@ -19,11 +19,29 @@ container:
   env:
     EXAMPLE: EXAMPLE
   ports:
-    - "8080:80"
+    - to: 80          # the port the container listens on
+    - to: 443
+      from: 8443      # optional: pin the host port instead
 ```
 
 A workload names exactly one runtime block, and which block it is selects the
 driver that runs it.
+
+### Ports
+
+`to` is the port your process listens on inside the container. `from` is the host
+port that reaches it, and leaving it out is the usual case — orca allocates one and
+reports it back, so you never have to invent unique host ports by hand:
+
+```sh
+orca get example | jq '.Ports'
+[ { "To": 80, "From": 20000, "Dynamic": true } ]
+```
+
+An allocated port is sticky: it stays the same across restarts and image bumps, so
+anything pointing at it keeps working. Pin `from` only when something outside orca
+has to know the address up front; pinning one another workload already holds is
+rejected when you apply it, rather than failing quietly later.
 
 ## Usage
 
@@ -65,6 +83,10 @@ terminating is rejected rather than resurrecting it half-torn-down.
   container is what identifies it as outdated.
 - **orca owns restarts**, not Docker, so they can be paced by exponential backoff
   and stay visible in the workload's reported state.
+- **Host ports are allocated by orca, not the runtime**, so a workload's address is
+  known when it is applied rather than discovered afterwards, and a driver whose
+  runtime has no allocator of its own inherits the behaviour. A port orca chose is
+  revised if it proves unusable; one you pinned never is.
 - **Only the reconciler touches the runtime.** Deleting a workload records the
   intent and the reconciler performs the teardown, removing the desired state last.
   Nothing races it for the same containers, and a failure part-way leaves a workload
@@ -87,6 +109,10 @@ host = ""                            # empty uses the environment, then the loca
 
 [reconcile]
 interval = "10s"                     # full pass cadence; events make convergence prompt
+
+[ports]
+min = 20000                          # range orca allocates host ports from
+max = 32000
 
 [logging]
 level = "info"                       # debug, info, warn, error

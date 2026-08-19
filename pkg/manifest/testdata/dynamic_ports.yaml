@@ -3,4 +3,4 @@ name: example
 container:
   image: example/example:latest
   ports:
-    - to: 70000
+    - to: 8080

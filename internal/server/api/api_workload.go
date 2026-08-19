@@ -81,6 +81,11 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		return api.ApplyWorkload409JSONResponse{
 			Error: fmt.Sprintf("workload %q is being deleted", request.Name),
 		}, nil
+	case errors.Is(err, service.ErrHostPortTaken):
+		// A pinned host port another workload holds is a conflict with existing
+		// state rather than a malformed request, and the message names the holder
+		// so the fix is obvious.
+		return api.ApplyWorkload409JSONResponse{Error: err.Error()}, nil
 	case errors.Is(err, service.ErrUnsupportedRuntime):
 		return api.ApplyWorkload422JSONResponse{Error: err.Error()}, nil
 	case errors.Is(err, service.ErrNoRuntime), errors.Is(err, service.ErrAmbiguousRuntime):
@@ -207,6 +212,10 @@ func newWorkload(w service.Workload) api.Workload {
 
 	if w.Deleting {
 		workload.Deleting = new(true)
+	}
+
+	if len(w.Ports) > 0 {
+		workload.Ports = new(w.Ports)
 	}
 
 	if len(w.Instances) == 0 {

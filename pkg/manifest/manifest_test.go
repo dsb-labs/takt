@@ -34,7 +34,7 @@ func TestParse(t *testing.T) {
 				require.NotNil(t, spec.Container)
 				assert.Equal(t, "example/example:latest", spec.Container.Image)
 				assert.Equal(t, map[string]string{"EXAMPLE": "EXAMPLE"}, spec.Container.Env)
-				assert.Equal(t, []string{"8080:8080"}, spec.Container.Ports)
+				assert.Equal(t, []manifest.Port{{To: 8080, From: 4141}, {To: 9090}}, spec.Container.Ports)
 
 				assert.Nil(t, spec.Script)
 			},
@@ -102,8 +102,29 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
-			Name:         "rejects port mappings the driver couldn't parse",
+			Name: "a manifest asking for an allocated host port",
+			File: "dynamic_ports.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.Len(t, spec.Container.Ports, 1)
+				assert.Equal(t, 8080, spec.Container.Ports[0].To)
+
+				// An unset host port is what asks the server to allocate one.
+				assert.Zero(t, spec.Container.Ports[0].From)
+			},
+		},
+		{
+			Name:         "rejects a port outside the usable range",
 			File:         "bad_ports.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects the same container port published twice",
+			File:         "duplicate_ports.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects the same host port used twice",
+			File:         "duplicate_host_ports.yaml",
 			ExpectsError: true,
 		},
 		{

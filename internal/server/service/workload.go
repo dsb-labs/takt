@@ -30,6 +30,9 @@ var (
 	// ErrWorkloadDeleting is returned when applying a workload that is currently
 	// being torn down.
 	ErrWorkloadDeleting = errors.New("workload is being deleted")
+	// ErrHostPortTaken is returned when a specification pins a host port that
+	// another workload already holds.
+	ErrHostPortTaken = errors.New("host port already in use")
 )
 
 type (
@@ -62,28 +65,68 @@ type (
 		MarkDeleting(ctx context.Context, name string) (database.Workload, error)
 	}
 
+	// The PortRepository interface describes the port allocation operations the
+	// service uses.
+	PortRepository interface {
+		// List should return the ports allocated to the workload with the given
+		// identifier.
+		List(ctx context.Context, workloadID string) ([]database.Port, error)
+		// Claim should record the given ports as allocated to the workload with the
+		// given identifier, replacing whatever it held before.
+		Claim(ctx context.Context, workloadID string, ports []database.Port) error
+		// HolderOf should name the workload the given host port is allocated to,
+		// reporting false when no workload holds it.
+		HolderOf(ctx context.Context, host int) (string, bool, error)
+		// Allocated should return every host port allocated to any workload.
+		Allocated(ctx context.Context) ([]int, error)
+	}
+
+	// The Allocator interface describes how the service obtains a host port for a
+	// workload that didn't ask for a particular one.
+	Allocator interface {
+		// Allocate should return a free host port, avoiding those in taken.
+		Allocate(taken []int) (int, error)
+	}
+
 	// The WorkloadService type orchestrates the persistence layer and the driver
 	// that runs workloads.
 	WorkloadService struct {
 		logger    *slog.Logger
 		driver    Driver
 		workloads WorkloadRepository
+		ports     PortRepository
+		allocator Allocator
 		notify    func()
 	}
 )
 
-// NewWorkloadService returns a WorkloadService that stores workloads in the given
-// repository and runs them through the given driver.
-//
-// The notify function is called whenever desired state changes, so that the
-// reconciler can converge immediately rather than waiting for its next tick. It
-// may be nil when no reconciler is running, as in tests.
-func NewWorkloadService(logger *slog.Logger, d Driver, workloads WorkloadRepository, notify func()) *WorkloadService {
+// The WorkloadServiceConfig type contains fields used to construct a WorkloadService.
+type WorkloadServiceConfig struct {
+	// The logger used for service events.
+	Logger *slog.Logger
+	// The driver used to observe and read from workloads.
+	Driver Driver
+	// The repository holding desired state.
+	Workloads WorkloadRepository
+	// The repository holding port allocations.
+	Ports PortRepository
+	// The allocator used to choose host ports.
+	Allocator Allocator
+	// Called whenever desired state changes, so that the reconciler can converge
+	// immediately rather than waiting for its next tick. May be nil when no
+	// reconciler is running, as in tests.
+	Notify func()
+}
+
+// NewWorkloadService returns a WorkloadService built from the given configuration.
+func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 	return &WorkloadService{
-		logger:    logger.With("component", "service"),
-		driver:    d,
-		workloads: workloads,
-		notify:    notify,
+		logger:    config.Logger.With("component", "service"),
+		driver:    config.Driver,
+		workloads: config.Workloads,
+		ports:     config.Ports,
+		allocator: config.Allocator,
+		notify:    config.Notify,
 	}
 }
 
@@ -107,11 +150,27 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 	switch {
 	case err != nil && !errors.Is(err, database.ErrWorkloadNotFound):
 		return Workload{}, false, fmt.Errorf("failed to load workload: %w", err)
-	case err == nil && !existing.DeletingAt.IsZero():
+	case err == nil && !existing.DeletedAt.IsZero():
 		return Workload{}, false, ErrWorkloadDeleting
 	}
 
-	encoded, hash, err := canonicalise(spec)
+	// Ports are resolved before the specification is hashed, so the host ports orca
+	// settled on are part of what the reconciler compares against. A reallocation
+	// then reads as an ordinary specification change and replaces the container
+	// bound to the old port.
+	var held []database.Port
+	if err == nil {
+		if held, err = s.ports.List(ctx, existing.ID); err != nil {
+			return Workload{}, false, fmt.Errorf("failed to read workload ports: %w", err)
+		}
+	}
+
+	ports, err := s.resolvePorts(ctx, spec.Name, held, portMappings(spec))
+	if err != nil {
+		return Workload{}, false, err
+	}
+
+	encoded, hash, err := canonicalise(withResolvedPorts(spec, ports))
 	if err != nil {
 		return Workload{}, false, err
 	}
@@ -133,6 +192,20 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 	stored, created, err := s.workloads.Upsert(ctx, row)
 	if err != nil {
 		return Workload{}, false, fmt.Errorf("failed to store workload: %w", err)
+	}
+
+	// Claiming happens after the upsert because an allocation belongs to a workload
+	// row that has to exist first — the workload's identifier is assigned there.
+	for i := range ports {
+		ports[i].WorkloadID = stored.ID
+	}
+
+	if err = s.ports.Claim(ctx, stored.ID, ports); err != nil {
+		if errors.Is(err, database.ErrHostPortTaken) {
+			return Workload{}, false, fmt.Errorf("%w: %v", ErrHostPortTaken, err)
+		}
+
+		return Workload{}, false, fmt.Errorf("failed to claim workload ports: %w", err)
 	}
 
 	s.logger.With("workload", stored.Name, "version", stored.Version, "created", created).Debug("workload applied")
@@ -173,7 +246,12 @@ func (s *WorkloadService) List(ctx context.Context) ([]Workload, error) {
 
 	workloads := make([]Workload, 0, len(rows))
 	for _, row := range rows {
-		workload, err := newWorkload(row, observed[row.Name])
+		ports, err := s.ports.List(ctx, row.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read workload ports: %w", err)
+		}
+
+		workload, err := newWorkload(row, observed[row.Name], ports)
 		if err != nil {
 			return nil, err
 		}
@@ -228,8 +306,240 @@ func (s *WorkloadService) Logs(ctx context.Context, name string, tail int) (stri
 	return logs, nil
 }
 
+// Reallocate gives the named workload fresh host ports for any it holds
+// dynamically, reporting whether anything changed.
+//
+// This exists for the reconciler to call when a workload fails to start, which may
+// be because a host port orca chose has been taken by something outside orca. Only
+// dynamic ports move: a pinned port was asked for explicitly, so replacing it would
+// be overriding the operator rather than revising a guess, and a workload with no
+// dynamic ports is left entirely alone.
+//
+// The workload's stored specification is rewritten with the new ports, which bumps
+// its version. That is what makes the reconciler replace the container bound to the
+// old port rather than leaving it running on an address nothing records.
+func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, error) {
+	row, err := s.workloads.Get(ctx, name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return false, ErrWorkloadNotFound
+	case err != nil:
+		return false, fmt.Errorf("failed to load workload: %w", err)
+	}
+
+	held, err := s.ports.List(ctx, row.ID)
+	if err != nil {
+		return false, fmt.Errorf("failed to read workload ports: %w", err)
+	}
+
+	var spec api.WorkloadSpec
+	if err = json.Unmarshal(row.Spec, &spec); err != nil {
+		return false, fmt.Errorf("failed to decode workload spec: %w", err)
+	}
+
+	// Dropping the dynamic allocations is what makes resolution pick new ports for
+	// them, since resolution only reuses what it finds still held.
+	var pinned []database.Port
+	var dynamic bool
+
+	for _, port := range held {
+		if port.Dynamic {
+			dynamic = true
+			continue
+		}
+
+		pinned = append(pinned, port)
+	}
+
+	if !dynamic {
+		return false, nil
+	}
+
+	// The stored specification already has its host ports filled in, so the dynamic
+	// ones are cleared to ask for a fresh allocation rather than the same port back.
+	ports, err := s.resolvePorts(ctx, name, pinned, requestedMappings(spec, held))
+	if err != nil {
+		return false, err
+	}
+
+	for i := range ports {
+		ports[i].WorkloadID = row.ID
+	}
+
+	if err = s.ports.Claim(ctx, row.ID, ports); err != nil {
+		return false, fmt.Errorf("failed to claim workload ports: %w", err)
+	}
+
+	encoded, hash, err := canonicalise(withResolvedPorts(spec, ports))
+	if err != nil {
+		return false, err
+	}
+
+	row.Spec, row.SpecHash = encoded, hash
+
+	if _, _, err = s.workloads.Upsert(ctx, row); err != nil {
+		return false, fmt.Errorf("failed to store workload: %w", err)
+	}
+
+	s.wake()
+
+	return true, nil
+}
+
+// requestedMappings recovers what a specification originally asked for from the
+// stored one, whose host ports have already been resolved. A mapping whose host port
+// was allocated is returned without it, so resolution allocates afresh; a pinned one
+// keeps it.
+func requestedMappings(spec api.WorkloadSpec, held []database.Port) []api.PortMapping {
+	allocated := make(map[int]struct{}, len(held))
+	for _, port := range held {
+		if port.Dynamic {
+			allocated[port.Container] = struct{}{}
+		}
+	}
+
+	mappings := portMappings(spec)
+	requested := make([]api.PortMapping, 0, len(mappings))
+
+	for _, mapping := range mappings {
+		if _, ok := allocated[mapping.To]; ok {
+			requested = append(requested, api.PortMapping{To: mapping.To})
+			continue
+		}
+
+		requested = append(requested, mapping)
+	}
+
+	return requested
+}
+
+func (s *WorkloadService) resolvePorts(ctx context.Context, name string, existing []database.Port, mappings []api.PortMapping) ([]database.Port, error) {
+	held := make(map[int]database.Port, len(existing))
+	for _, port := range existing {
+		held[port.Container] = port
+	}
+
+	// Ports already promised to any workload are off limits, along with the ones
+	// resolved so far in this specification.
+	allocated, err := s.ports.Allocated(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read allocated ports: %w", err)
+	}
+
+	taken := make([]int, 0, len(allocated)+len(mappings))
+	taken = append(taken, allocated...)
+
+	resolved := make([]database.Port, 0, len(mappings))
+	for _, mapping := range mappings {
+		port, err := s.resolvePort(ctx, name, held, taken, mapping)
+		if err != nil {
+			return nil, err
+		}
+
+		resolved = append(resolved, port)
+		taken = append(taken, port.Host)
+	}
+
+	return resolved, nil
+}
+
+func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map[int]database.Port, taken []int, mapping api.PortMapping) (database.Port, error) {
+	// A pinned host port is a decision orca must not quietly override, so it is
+	// used as given once nothing else holds it.
+	if mapping.From != nil {
+		holder, isHeld, err := s.ports.HolderOf(ctx, *mapping.From)
+		switch {
+		case err != nil:
+			return database.Port{}, fmt.Errorf("failed to look up host port: %w", err)
+		case isHeld && holder != name:
+			return database.Port{}, fmt.Errorf("%w: %d is used by workload %q", ErrHostPortTaken, *mapping.From, holder)
+		}
+
+		return database.Port{Container: mapping.To, Host: *mapping.From}, nil
+	}
+
+	// An existing allocation is kept so that the workload's address doesn't move
+	// every time something unrelated about it changes.
+	if previous, ok := held[mapping.To]; ok && previous.Dynamic {
+		return previous, nil
+	}
+
+	host, err := s.allocator.Allocate(taken)
+	if err != nil {
+		return database.Port{}, fmt.Errorf("failed to allocate host port for %d: %w", mapping.To, err)
+	}
+
+	return database.Port{Container: mapping.To, Host: host, Dynamic: true}, nil
+}
+
+// withResolvedPorts returns spec with every port's host side filled in.
+//
+// The resolved ports are part of the specification that gets hashed, which is what
+// makes a reallocated port replace the container running on the old one: to the
+// reconciler it is simply a specification that has changed.
+func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.WorkloadSpec {
+	if spec.Container == nil || len(ports) == 0 {
+		return spec
+	}
+
+	byContainer := make(map[int]database.Port, len(ports))
+	for _, port := range ports {
+		byContainer[port.Container] = port
+	}
+
+	mappings := make([]api.PortMapping, 0, len(ports))
+	for _, mapping := range *spec.Container.Ports {
+		resolved, ok := byContainer[mapping.To]
+		if !ok {
+			continue
+		}
+
+		mappings = append(mappings, api.PortMapping{To: mapping.To, From: new(resolved.Host)})
+	}
+
+	// The container block is a pointer into the caller's specification, so it is
+	// copied rather than written through.
+	container := *spec.Container
+	container.Ports = &mappings
+	spec.Container = &container
+
+	return spec
+}
+
+// newResolvedPorts maps stored allocations onto the wire format.
+func newResolvedPorts(ports []database.Port) []api.ResolvedPort {
+	if len(ports) == 0 {
+		return nil
+	}
+
+	resolved := make([]api.ResolvedPort, 0, len(ports))
+	for _, port := range ports {
+		resolved = append(resolved, api.ResolvedPort{
+			To:      port.Container,
+			From:    port.Host,
+			Dynamic: port.Dynamic,
+		})
+	}
+
+	return resolved
+}
+
+// portMappings returns the port mappings a specification publishes.
+func portMappings(spec api.WorkloadSpec) []api.PortMapping {
+	if spec.Container == nil || spec.Container.Ports == nil {
+		return nil
+	}
+
+	return *spec.Container.Ports
+}
+
 func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (Workload, error) {
-	return newWorkload(row, s.observe(ctx)[row.Name])
+	ports, err := s.ports.List(ctx, row.ID)
+	if err != nil {
+		return Workload{}, fmt.Errorf("failed to read workload ports: %w", err)
+	}
+
+	return newWorkload(row, s.observe(ctx)[row.Name], ports)
 }
 
 // observe groups the driver's instances by workload name.
@@ -289,13 +599,13 @@ func canonicalise(spec api.WorkloadSpec) ([]byte, string, error) {
 	return encoded, hex.EncodeToString(sum[:]), nil
 }
 
-func newWorkload(row database.Workload, instances []driver.Instance) (Workload, error) {
+func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port) (Workload, error) {
 	var spec api.WorkloadSpec
 	if err := json.Unmarshal(row.Spec, &spec); err != nil {
 		return Workload{}, fmt.Errorf("failed to decode workload spec: %w", err)
 	}
 
-	deleting := !row.DeletingAt.IsZero()
+	deleting := !row.DeletedAt.IsZero()
 
 	return Workload{
 		Name:      row.Name,
@@ -305,6 +615,7 @@ func newWorkload(row database.Workload, instances []driver.Instance) (Workload, 
 		Spec:      spec,
 		Labels:    row.Labels,
 		Instances: instances,
+		Ports:     newResolvedPorts(ports),
 		State:     stateOf(instances, deleting),
 		Deleting:  deleting,
 		CreatedAt: row.CreatedAt,
@@ -378,6 +689,8 @@ type Workload struct {
 	Labels map[string]string
 	// The instances the driver is currently running for the workload.
 	Instances []driver.Instance
+	// The port mappings the server settled on, including any it allocated.
+	Ports []api.ResolvedPort
 	// The workload's overall state, derived from its instances and whether it is
 	// being deleted.
 	State api.WorkloadState

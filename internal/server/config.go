@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/dsb-labs/orca/internal/server/port"
 )
 
 type (
@@ -23,6 +25,8 @@ type (
 		Docker DockerConfig `toml:"docker"`
 		// Reconciliation settings.
 		Reconcile ReconcileConfig `toml:"reconcile"`
+		// Host port allocation settings.
+		Ports PortsConfig `toml:"ports"`
 		// Logging settings.
 		Logging LoggingConfig `toml:"logging"`
 	}
@@ -54,6 +58,15 @@ type (
 		Interval time.Duration `toml:"interval"`
 	}
 
+	// The PortsConfig type contains configuration for the host ports orca allocates
+	// to workloads that don't ask for a particular one.
+	PortsConfig struct {
+		// The lowest host port that may be allocated.
+		Min int `toml:"min"`
+		// The highest host port that may be allocated.
+		Max int `toml:"max"`
+	}
+
 	// The LoggingConfig type contains configuration for application logging.
 	LoggingConfig struct {
 		// The minimum level to emit. One of "debug", "info", "warn", "error".
@@ -73,6 +86,10 @@ func DefaultConfig() Config {
 		},
 		Reconcile: ReconcileConfig{
 			Interval: 10 * time.Second,
+		},
+		Ports: PortsConfig{
+			Min: port.DefaultMin,
+			Max: port.DefaultMax,
 		},
 		Logging: LoggingConfig{
 			Level: "info",
@@ -109,6 +126,7 @@ func (c *Config) Validate() error {
 		c.HTTP.validate(),
 		c.Data.validate(),
 		c.Reconcile.validate(),
+		c.Ports.validate(),
 		c.Logging.validate(),
 	)
 }
@@ -132,6 +150,19 @@ func (c DataConfig) validate() error {
 func (c ReconcileConfig) validate() error {
 	if c.Interval <= 0 {
 		return errors.New("reconcile interval must be greater than zero")
+	}
+
+	return nil
+}
+
+func (c PortsConfig) validate() error {
+	switch {
+	case c.Min < 1 || c.Min > 65535:
+		return errors.New("port range minimum must be between 1 and 65535")
+	case c.Max < 1 || c.Max > 65535:
+		return errors.New("port range maximum must be between 1 and 65535")
+	case c.Min > c.Max:
+		return errors.New("port range minimum must not exceed its maximum")
 	}
 
 	return nil

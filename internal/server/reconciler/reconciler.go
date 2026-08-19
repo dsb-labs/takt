@@ -49,12 +49,13 @@ type (
 	// failed pass, or a server restart all recover on the next pass rather than
 	// leaving the node permanently wrong.
 	Reconciler struct {
-		logger    *slog.Logger
-		driver    Driver
-		workloads WorkloadRepository
-		interval  time.Duration
-		backoff   map[string]backoff
-		nudge     chan struct{}
+		logger     *slog.Logger
+		driver     Driver
+		workloads  WorkloadRepository
+		reallocate func(ctx context.Context, workload string) (bool, error)
+		interval   time.Duration
+		backoff    map[string]backoff
+		nudge      chan struct{}
 	}
 
 	// The Config type contains fields used to construct a Reconciler.
@@ -65,6 +66,10 @@ type (
 		Driver Driver
 		// The repository holding desired state.
 		Workloads WorkloadRepository
+		// Called to abandon the host ports orca chose for a workload when it fails
+		// to start, reporting whether anything changed. May be nil, in which case
+		// ports are never reallocated.
+		Reallocate func(ctx context.Context, workload string) (bool, error)
 		// How often a full reconciliation pass runs regardless of events.
 		Interval time.Duration
 	}
@@ -92,11 +97,12 @@ const (
 // state in its repository.
 func New(config Config) *Reconciler {
 	return &Reconciler{
-		logger:    config.Logger.With("component", "reconciler"),
-		driver:    config.Driver,
-		workloads: config.Workloads,
-		interval:  config.Interval,
-		backoff:   make(map[string]backoff),
+		logger:     config.Logger.With("component", "reconciler"),
+		driver:     config.Driver,
+		workloads:  config.Workloads,
+		reallocate: config.Reallocate,
+		interval:   config.Interval,
+		backoff:    make(map[string]backoff),
 		// Buffered so that a caller signalling a change never blocks: a pass is
 		// already pending, which is all the signal conveys.
 		nudge: make(chan struct{}, 1),
@@ -205,7 +211,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	// A workload marked for deletion is torn down here rather than by whoever
 	// asked, so that one component is responsible for touching the runtime and the
 	// desired state survives until the work described by it is actually gone.
-	if !row.DeletingAt.IsZero() {
+	if !row.DeletedAt.IsZero() {
 		return r.teardown(ctx, row, instances)
 	}
 
@@ -338,12 +344,39 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 
 	id, err := r.driver.Start(ctx, w)
 	if err != nil {
+		// A workload that cannot start may be sitting on a host port something
+		// outside orca has taken, which nothing orca does will free. Rather than
+		// try to recognise that specific failure — docker reports it as an
+		// untyped error whose wording is not part of any contract — any failure
+		// gives up the ports orca chose for itself. Ports the specification
+		// pinned are left alone: they were asked for, so moving them would be
+		// overriding a decision rather than revising a guess.
+		r.abandonPorts(ctx, row)
+
 		return fmt.Errorf("failed to start workload: %w", err)
 	}
 
 	r.logger.With("workload", row.Name, "instance", id, "version", row.Version).Info("workload started")
 
 	return nil
+}
+
+// abandonPorts gives up the host ports orca chose for a workload, so that the next
+// pass tries different ones. Failures are logged rather than returned: the caller is
+// already reporting why the workload didn't start, and a workload that keeps its
+// ports is no worse off than before.
+func (r *Reconciler) abandonPorts(ctx context.Context, row database.Workload) {
+	if r.reallocate == nil {
+		return
+	}
+
+	changed, err := r.reallocate(ctx, row.Name)
+	switch {
+	case err != nil:
+		r.logger.With("workload", row.Name, "error", err).Error("failed to reallocate workload ports")
+	case changed:
+		r.logger.With("workload", row.Name).Info("reallocated host ports after a failed start")
+	}
 }
 
 // staleInstances returns the instances running a specification other than the

@@ -123,7 +123,7 @@ func TestReconciler_Run(t *testing.T) {
 			},
 			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
 				row := storedWorkload("example", "hash-one")
-				row.DeletingAt = time.Now().UTC()
+				row.DeletedAt = time.Now().UTC()
 
 				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
@@ -137,7 +137,7 @@ func TestReconciler_Run(t *testing.T) {
 			Name: "removes the desired state once a deleted workload has no work left",
 			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
 				row := storedWorkload("example", "hash-one")
-				row.DeletingAt = time.Now().UTC()
+				row.DeletedAt = time.Now().UTC()
 
 				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
@@ -153,7 +153,7 @@ func TestReconciler_Run(t *testing.T) {
 			},
 			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
 				row := storedWorkload("example", "hash-one")
-				row.DeletingAt = time.Now().UTC()
+				row.DeletedAt = time.Now().UTC()
 
 				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
@@ -168,7 +168,7 @@ func TestReconciler_Run(t *testing.T) {
 			},
 			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
 				row := storedWorkload("example", "hash-one")
-				row.DeletingAt = time.Now().UTC()
+				row.DeletedAt = time.Now().UTC()
 
 				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
@@ -182,7 +182,7 @@ func TestReconciler_Run(t *testing.T) {
 			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
 				row := storedWorkload("example", "hash-one")
 				row.Runtime = string(api.Script)
-				row.DeletingAt = time.Now().UTC()
+				row.DeletedAt = time.Now().UTC()
 
 				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 

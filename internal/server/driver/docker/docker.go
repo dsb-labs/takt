@@ -38,8 +38,6 @@ const (
 )
 
 var (
-	// ErrInvalidPorts is returned when a workload's port mappings cannot be parsed.
-	ErrInvalidPorts = errors.New("invalid port mapping")
 	// ErrNotContainerWorkload is returned when NewWorkload is given a stored
 	// workload whose specification carries no container block.
 	ErrNotContainerWorkload = errors.New("workload does not describe a container")
@@ -60,6 +58,15 @@ type (
 		Client Client
 	}
 
+	// The Port type describes one published port of a container, with the host port
+	// the server settled on.
+	Port struct {
+		// The port the container listens on.
+		Container int
+		// The host port that reaches it.
+		Host int
+	}
+
 	// The Workload type describes the container a driver should run for a workload.
 	//
 	// It is the driver's own view of desired state, deliberately independent of
@@ -77,8 +84,8 @@ type (
 		Image string
 		// The environment variables set inside the container.
 		Env map[string]string
-		// The port mappings to publish, in Docker's "host:container" form.
-		Ports []string
+		// The ports to publish, each already resolved to a host port.
+		Ports []Port
 		// Arbitrary key-value pairs to attach to the container alongside orca's
 		// own labels.
 		Labels map[string]string
@@ -120,7 +127,17 @@ func NewWorkload(row database.Workload) (Workload, error) {
 		w.Env = *spec.Container.Env
 	}
 	if spec.Container.Ports != nil {
-		w.Ports = *spec.Container.Ports
+		w.Ports = make([]Port, 0, len(*spec.Container.Ports))
+		for _, mapping := range *spec.Container.Ports {
+			// A specification reaching the driver has had its ports resolved, so a
+			// mapping with no host port is a workload the server has not finished
+			// settling and is left for a later pass rather than published wrongly.
+			if mapping.From == nil {
+				continue
+			}
+
+			w.Ports = append(w.Ports, Port{Container: mapping.To, Host: *mapping.From})
+		}
 	}
 
 	return w, nil
@@ -139,10 +156,7 @@ func (d *Driver) Start(ctx context.Context, w Workload) (string, error) {
 		return "", err
 	}
 
-	exposed, bindings, err := nat.ParsePortSpecs(w.Ports)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrInvalidPorts, err)
-	}
+	exposed, bindings := portBindings(w.Ports)
 
 	labels := make(map[string]string, len(w.Labels)+3)
 	for k, v := range w.Labels {
@@ -234,6 +248,7 @@ func (d *Driver) Observe(ctx context.Context) ([]driver.Instance, error) {
 			SpecHash: c.Labels[LabelSpecHash],
 			Version:  version,
 			State:    state(c.State),
+			Ports:    instancePorts(c.Ports),
 		}
 
 		// The summary carries no exit code or start time, so anything that has
@@ -429,6 +444,55 @@ func state(status container.ContainerState) driver.State {
 	default:
 		return driver.StatePending
 	}
+}
+
+// instancePorts reports the published ports docker says a container has, which is the
+// observed counterpart to the allocation the server recorded.
+func instancePorts(ports []container.Port) []driver.Port {
+	if len(ports) == 0 {
+		return nil
+	}
+
+	published := make([]driver.Port, 0, len(ports))
+	for _, port := range ports {
+		// An unpublished exposed port has no host side, so there is nothing for a
+		// caller to reach and nothing worth reporting.
+		if port.PublicPort == 0 {
+			continue
+		}
+
+		published = append(published, driver.Port{
+			Container: int(port.PrivatePort),
+			Host:      int(port.PublicPort),
+		})
+	}
+
+	return published
+}
+
+// portBindings converts resolved ports into the exposed set and host bindings docker
+// expects.
+func portBindings(ports []Port) (nat.PortSet, nat.PortMap) {
+	if len(ports) == 0 {
+		return nil, nil
+	}
+
+	exposed := make(nat.PortSet, len(ports))
+	bindings := make(nat.PortMap, len(ports))
+
+	for _, port := range ports {
+		// Only TCP is published today; a specification has no way to ask for UDP,
+		// and inventing one here would be guessing at the eventual shape.
+		key := nat.Port(strconv.Itoa(port.Container) + "/tcp")
+
+		exposed[key] = struct{}{}
+		bindings[key] = []nat.PortBinding{{
+			HostIP:   "0.0.0.0",
+			HostPort: strconv.Itoa(port.Host),
+		}}
+	}
+
+	return exposed, bindings
 }
 
 func environment(env map[string]string) []string {

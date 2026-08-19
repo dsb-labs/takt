@@ -35,7 +35,7 @@ func TestDriver_Start(t *testing.T) {
 				SpecHash: "hash-two",
 				Image:    "example/example:latest",
 				Env:      map[string]string{"EXAMPLE": "EXAMPLE"},
-				Ports:    []string{"8080:8080"},
+				Ports:    []docker.Port{{Container: 8080, Host: 4141}},
 				Labels:   map[string]string{"some-key": "some-value"},
 			},
 			SetupMocks: func(c *MockClient) {
@@ -53,7 +53,7 @@ func TestDriver_Start(t *testing.T) {
 					}),
 					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
 						bindings := host.PortBindings["8080/tcp"]
-						return len(bindings) == 1 && bindings[0].HostPort == "8080"
+						return len(bindings) == 1 && bindings[0].HostPort == "4141"
 					}),
 					mock.Anything, mock.Anything, "orca-example-2",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
@@ -82,19 +82,6 @@ func TestDriver_Start(t *testing.T) {
 			Assert: func(t *testing.T, id string) {
 				assert.Equal(t, "container-one", id)
 			},
-		},
-		{
-			Name: "rejects unparseable port mappings",
-			Workload: docker.Workload{
-				Name:  "example",
-				Image: "example/example:latest",
-				Ports: []string{"not-a-port"},
-			},
-			SetupMocks: func(c *MockClient) {
-				c.EXPECT().ImageList(mock.Anything, mock.Anything).
-					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
-			},
-			ExpectErr: docker.ErrInvalidPorts,
 		},
 		{
 			Name: "removes the container when it cannot be started",

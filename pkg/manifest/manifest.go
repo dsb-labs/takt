@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"regexp"
 
-	"github.com/docker/go-connections/nat"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v3"
@@ -144,16 +143,49 @@ func validateScript(spec Script) error {
 	return nil
 }
 
-// validPorts checks the port mappings with the same parser the docker driver uses,
-// so a manifest that parses here cannot fail at the point the container is created.
+// validPorts checks that every published port is usable and that no two entries
+// describe the same port, either inside the container or on the host.
 func validPorts(value any) error {
-	ports, ok := value.([]string)
+	ports, ok := value.([]Port)
 	if !ok || len(ports) == 0 {
 		return nil
 	}
 
-	if _, _, err := nat.ParsePortSpecs(ports); err != nil {
-		return fmt.Errorf("must be valid port mappings: %w", err)
+	seenTo := make(map[int]struct{}, len(ports))
+	seenFrom := make(map[int]struct{}, len(ports))
+
+	for _, port := range ports {
+		if err := validPort(port.To, "to"); err != nil {
+			return err
+		}
+
+		if _, ok := seenTo[port.To]; ok {
+			return fmt.Errorf("port %d is published more than once", port.To)
+		}
+		seenTo[port.To] = struct{}{}
+
+		// An unset host port asks for an allocation, so there is nothing to check
+		// and no duplicate to find: each allocation is distinct by construction.
+		if port.From == 0 {
+			continue
+		}
+
+		if err := validPort(port.From, "from"); err != nil {
+			return err
+		}
+
+		if _, ok := seenFrom[port.From]; ok {
+			return fmt.Errorf("host port %d is used more than once", port.From)
+		}
+		seenFrom[port.From] = struct{}{}
+	}
+
+	return nil
+}
+
+func validPort(port int, field string) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("%s must be between 1 and 65535, got %d", field, port)
 	}
 
 	return nil

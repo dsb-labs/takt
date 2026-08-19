@@ -117,8 +117,8 @@ func (s *Suite) ctx() context.Context {
 }
 
 // containerSpec returns a specification for a long-running container publishing the
-// given port mapping.
-func (s *Suite) containerSpec(name, ports string) manifest.Spec {
+// given ports.
+func (s *Suite) containerSpec(name string, ports ...manifest.Port) manifest.Spec {
 	return manifest.Spec{
 		Version: "v1",
 		Name:    name,
@@ -126,7 +126,7 @@ func (s *Suite) containerSpec(name, ports string) manifest.Spec {
 		Container: &manifest.Container{
 			Image: testImage,
 			Env:   map[string]string{"EXAMPLE": "EXAMPLE"},
-			Ports: []string{ports},
+			Ports: ports,
 		},
 	}
 }

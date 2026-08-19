@@ -27,12 +27,26 @@ type (
 		Deleting bool
 		// The specification that was submitted.
 		Spec manifest.Spec
+		// The port mappings the server settled on, including any it allocated. These
+		// are how the workload is reached.
+		Ports []ResolvedPort
 		// The instances the server is currently running for the workload.
 		Instances []Instance
 		// The time the workload was first applied.
 		CreatedAt time.Time
 		// The time the workload's specification last changed.
 		UpdatedAt time.Time
+	}
+
+	// The ResolvedPort type is a port mapping as the server applied it.
+	ResolvedPort struct {
+		// The port the workload listens on inside its runtime.
+		To int
+		// The host port that reaches it.
+		From int
+		// Whether the host port was allocated by the server rather than pinned by
+		// the specification.
+		Dynamic bool
 	}
 
 	// The Instance type is the client-side view of one unit of work the server is
@@ -259,6 +273,17 @@ func newWorkload(w api.Workload) Workload {
 
 	if w.Deleting != nil {
 		workload.Deleting = *w.Deleting
+	}
+
+	if w.Ports != nil {
+		workload.Ports = make([]ResolvedPort, 0, len(*w.Ports))
+		for _, port := range *w.Ports {
+			workload.Ports = append(workload.Ports, ResolvedPort{
+				To:      port.To,
+				From:    port.From,
+				Dynamic: port.Dynamic,
+			})
+		}
 	}
 
 	if w.Instances == nil {

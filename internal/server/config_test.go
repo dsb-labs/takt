@@ -28,6 +28,8 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "/var/lib/orca", config.Data.Directory)
 				assert.Equal(t, "tcp://localhost:2375", config.Docker.Host)
 				assert.Equal(t, 30*time.Second, config.Reconcile.Interval)
+				assert.Equal(t, 25000, config.Ports.Min)
+				assert.Equal(t, 26000, config.Ports.Max)
 				assert.Equal(t, "debug", config.Logging.Level)
 			},
 		},
@@ -84,6 +86,8 @@ func TestDefaultConfig(t *testing.T) {
 		assert.NotEmpty(t, config.HTTP.Address)
 		assert.NotEmpty(t, config.Data.Directory)
 		assert.Positive(t, config.Reconcile.Interval)
+		assert.Positive(t, config.Ports.Min)
+		assert.Positive(t, config.Ports.Max)
 	})
 }
 
@@ -112,6 +116,16 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			Name:         "a zero reconcile interval",
 			Mutate:       func(c *server.Config) { c.Reconcile.Interval = 0 },
+			ExpectsError: true,
+		},
+		{
+			Name:         "a port range minimum above its maximum",
+			Mutate:       func(c *server.Config) { c.Ports.Min, c.Ports.Max = 30000, 20000 },
+			ExpectsError: true,
+		},
+		{
+			Name:         "a port range outside the usable range",
+			Mutate:       func(c *server.Config) { c.Ports.Max = 70000 },
 			ExpectsError: true,
 		},
 		{

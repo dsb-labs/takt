@@ -39,7 +39,7 @@ func TestWireSpec(t *testing.T) {
 			Container: &manifest.Container{
 				Image: "example/example:latest",
 				Env:   map[string]string{"EXAMPLE": "EXAMPLE"},
-				Ports: []string{"8080:8080"},
+				Ports: []manifest.Port{{To: 8080, From: 4141}},
 			},
 		}
 

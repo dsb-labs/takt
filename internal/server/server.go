@@ -16,6 +16,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
+	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 	"github.com/dsb-labs/orca/internal/server/service"
 )
@@ -50,18 +51,33 @@ func Run(ctx context.Context, config Config) error {
 	defer dockerClient.Close()
 
 	workloads := database.NewWorkloadRepository(db)
+	ports := database.NewPortRepository(db)
 	driver := docker.New(docker.Config{Logger: logger, Client: dockerClient})
+
+	// The service and the reconciler each need something from the other: the service
+	// wakes the reconciler when desired state changes, and the reconciler asks the
+	// service to reallocate ports that turned out to be unusable. Both are passed as
+	// functions so neither has to be half-constructed to build the other.
+	var svc *service.WorkloadService
 
 	reconcile := reconciler.New(reconciler.Config{
 		Logger:    logger,
 		Driver:    driver,
 		Workloads: workloads,
-		Interval:  config.Reconcile.Interval,
+		Reallocate: func(ctx context.Context, workload string) (bool, error) {
+			return svc.Reallocate(ctx, workload)
+		},
+		Interval: config.Reconcile.Interval,
 	})
 
-	// The service wakes the reconciler whenever desired state changes, so an
-	// applied workload starts without waiting for the next tick.
-	svc := service.NewWorkloadService(logger, driver, workloads, reconcile.Notify)
+	svc = service.NewWorkloadService(service.WorkloadServiceConfig{
+		Logger:    logger,
+		Driver:    driver,
+		Workloads: workloads,
+		Ports:     ports,
+		Allocator: port.New(port.Config{Min: config.Ports.Min, Max: config.Ports.Max}),
+		Notify:    reconcile.Notify,
+	})
 
 	mux := http.NewServeMux()
 	api.NewWorkloadAPI(svc).Register(mux)

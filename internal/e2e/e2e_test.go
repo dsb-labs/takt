@@ -14,6 +14,7 @@
 package e2e_test
 
 import (
+	"fmt"
 	"os/exec"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestEndToEnd(t *testing.T) {
 // finally deleting it.
 func (s *Suite) TestWorkloadLifecycle() {
 	name := s.workloadName()
-	spec := s.containerSpec(name, "8180:80")
+	spec := s.containerSpec(name, manifest.Port{To: 80, From: 8180})
 
 	workload, created, err := s.client.Apply(s.ctx(), spec)
 	s.Require().NoError(err)
@@ -91,19 +92,66 @@ func (s *Suite) TestWorkloadLifecycle() {
 	s.Empty(s.containers(name))
 }
 
+// TestDynamicPortIsAllocated covers the usual case for a port: the manifest names
+// only the port inside the container and orca picks the host port that reaches it.
+func (s *Suite) TestDynamicPortIsAllocated() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// No `from`, so the server has to choose one.
+	workload, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, manifest.Port{To: 80}))
+	s.Require().NoError(err)
+	s.Require().Len(workload.Ports, 1)
+
+	allocated := workload.Ports[0]
+	s.Equal(80, allocated.To)
+	s.True(allocated.Dynamic)
+	s.NotZero(allocated.From)
+
+	// An allocated port is only useful if it actually reaches the container.
+	s.awaitState(name, "running")
+	s.awaitListening(fmt.Sprintf("127.0.0.1:%d", allocated.From))
+
+	// The allocation is sticky: a change that leaves the port list alone must not
+	// move the address, or anything pointing at it would break on an image bump.
+	changed := s.containerSpec(name, manifest.Port{To: 80})
+	changed.Container.Env = map[string]string{"EXAMPLE": "CHANGED"}
+
+	updated, _, err := s.client.Apply(s.ctx(), changed)
+	s.Require().NoError(err)
+	s.Require().Len(updated.Ports, 1)
+	s.Equal(allocated.From, updated.Ports[0].From)
+}
+
+// TestFixedPortConflictIsRejected covers a host port that another workload already
+// holds, which the operator asked for explicitly and so must hear about at once.
+func (s *Suite) TestFixedPortConflictIsRejected() {
+	first, second := s.workloadName()+"-a", s.workloadName()+"-b"
+	s.T().Cleanup(func() { s.cleanup(first) })
+	s.T().Cleanup(func() { s.cleanup(second) })
+
+	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(first, manifest.Port{To: 80, From: 8185}))
+	s.Require().NoError(err)
+
+	// The same host port for a different workload cannot be honoured, and saying so
+	// now is far better than accepting it and never starting the container.
+	_, _, err = s.client.Apply(s.ctx(), s.containerSpec(second, manifest.Port{To: 80, From: 8185}))
+	s.True(client.IsConflict(err), "expected a conflict error, got %v", err)
+}
+
 // TestWorkloadReplacedWhenSpecChanges covers a specification change, which docker
 // cannot apply to a running container and so has to be a replacement.
 func (s *Suite) TestWorkloadReplacedWhenSpecChanges() {
 	name := s.workloadName()
 	s.T().Cleanup(func() { s.cleanup(name) })
 
-	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, "8181:80"))
+	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, manifest.Port{To: 80, From: 8181}))
 	s.Require().NoError(err)
 
 	s.awaitState(name, "running")
 	first := s.instanceID(name)
 
-	changed := s.containerSpec(name, "8181:80")
+	changed := s.containerSpec(name, manifest.Port{To: 80, From: 8181})
 	changed.Container.Env = map[string]string{"EXAMPLE": "CHANGED"}
 
 	workload, created, err := s.client.Apply(s.ctx(), changed)
@@ -121,7 +169,7 @@ func (s *Suite) TestWorkloadRestartedAfterItDies() {
 	name := s.workloadName()
 	s.T().Cleanup(func() { s.cleanup(name) })
 
-	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, "8182:80"))
+	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, manifest.Port{To: 80, From: 8182}))
 	s.Require().NoError(err)
 
 	s.awaitState(name, "running")
@@ -143,7 +191,7 @@ func (s *Suite) TestWorkloadAdoptedAfterServerRestart() {
 	directory := s.T().TempDir()
 	s.restart(withDataDirectory(directory))
 
-	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, "8183:80"))
+	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, manifest.Port{To: 80, From: 8183}))
 	s.Require().NoError(err)
 
 	s.awaitState(name, "running")
@@ -199,7 +247,7 @@ func (s *Suite) TestApplyDuringTeardownIsRejected() {
 	name := s.workloadName()
 	s.T().Cleanup(func() { s.cleanup(name) })
 
-	spec := s.containerSpec(name, "8184:80")
+	spec := s.containerSpec(name, manifest.Port{To: 80, From: 8184})
 
 	_, _, err := s.client.Apply(s.ctx(), spec)
 	s.Require().NoError(err)

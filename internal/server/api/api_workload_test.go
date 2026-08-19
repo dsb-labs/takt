@@ -105,6 +105,17 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			ExpectStatus: http.StatusConflict,
 		},
 		{
+			Name: "reports a pinned host port another workload holds",
+			Path: "/api/v1/workloads/example",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Workload{}, false, service.ErrHostPortTaken).Once()
+			},
+			// A conflict with state that already exists, not a malformed request.
+			ExpectStatus: http.StatusConflict,
+		},
+		{
 			Name: "reports an unexpected failure",
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),

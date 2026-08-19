@@ -10,5 +10,9 @@ host = "tcp://localhost:2375"
 [reconcile]
 interval = "30s"
 
+[ports]
+min = 25000
+max = 26000
+
 [logging]
 level = "debug"

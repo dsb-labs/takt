@@ -59,6 +59,16 @@ type (
 		ExitCode int
 		// The time the instance last started, if it has started at all.
 		StartedAt time.Time
+		// The ports the instance actually has published, as reported by its runtime.
+		Ports []Port
+	}
+
+	// The Port type describes a published port of an instance.
+	Port struct {
+		// The port the workload listens on inside its runtime.
+		Container int
+		// The host port that reaches it.
+		Host int
 	}
 
 	// The Event type reports that a driver's view of an instance has changed, so

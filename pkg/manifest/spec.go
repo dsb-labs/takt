@@ -33,8 +33,18 @@ type (
 		Image string
 		// Environment variables set inside the container.
 		Env map[string]string
-		// Port mappings to publish, in "host:container" form.
-		Ports []string
+		// The ports to publish.
+		Ports []Port
+	}
+
+	// The Port type describes a port to publish.
+	Port struct {
+		// The port the workload listens on inside its runtime.
+		To int
+		// The host port that reaches it. Left unset to have one allocated, which is
+		// the usual case: the workload keeps a port of its own and callers read the
+		// allocated one back from the workload.
+		From int
 	}
 
 	// The Script type describes the script a workload runs. Exactly one of Source
