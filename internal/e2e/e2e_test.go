@@ -319,10 +319,19 @@ func (s *Suite) TestHealthyWorkloadIsReported() {
 
 	// A passing check must leave the workload alone: the instance it is running is
 	// the one it started with.
+	//
+	// Polled inline rather than with Never, whose condition runs on a goroutine that
+	// outlives the assertion — it would still be reading the suite's client while the
+	// next test's teardown replaced it.
 	instance := workload.Instances[0].ID
-	s.Never(func() bool {
-		return s.instanceID(name) != instance
-	}, 5*time.Second, time.Second)
+	for range 5 {
+		time.Sleep(time.Second)
+
+		current, err := s.client.Get(s.ctx(), name)
+		s.Require().NoError(err)
+		s.Require().Len(current.Instances, 1)
+		s.Equal(instance, current.Instances[0].ID, "a workload passing its check was replaced")
+	}
 }
 
 // TestUnhealthyWorkloadIsReplaced covers a workload the runtime reports as running
@@ -392,14 +401,18 @@ func (s *Suite) TestWarmingWorkloadIsNotReplaced() {
 
 	// Failures inside the start period are expected rather than meaningful, so the
 	// workload stays as it is however many of them accumulate.
-	s.Never(func() bool {
-		workload, err := s.client.Get(s.ctx(), name)
-		if err != nil || len(workload.Instances) == 0 {
-			return false
-		}
+	//
+	// Polled inline rather than with Never, whose condition runs on a goroutine that
+	// outlives the assertion and would still be reading the suite's client once the
+	// next test replaced it.
+	for range 15 {
+		time.Sleep(time.Second)
 
-		return workload.Instances[0].ID != original
-	}, 15*time.Second, time.Second)
+		current, err := s.client.Get(s.ctx(), name)
+		s.Require().NoError(err)
+		s.Require().Len(current.Instances, 1)
+		s.Equal(original, current.Instances[0].ID, "a workload inside its start period was replaced")
+	}
 
 	workload, err := s.client.Get(s.ctx(), name)
 	s.Require().NoError(err)
