@@ -325,6 +325,53 @@ func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 	assert.Equal(t, 1, starts.get(), "a failing workload was retried inside its backoff window")
 }
 
+func TestReconciler_Run_SurvivesAHangingDriver(t *testing.T) {
+	t.Parallel()
+
+	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return(nil, nil)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	// A pass is serial across workloads, so a daemon that accepts a call and never
+	// answers would otherwise stop every workload converging behind it. The call has
+	// to end when its context does.
+	observed := newCounter()
+	d.EXPECT().Observe(mock.Anything).RunAndReturn(func(ctx context.Context) ([]driver.Instance, error) {
+		observed.inc()
+		<-ctx.Done()
+
+		return nil, ctx.Err()
+	})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Driver:    d,
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	// Cancelling the run's context is what the deadline ultimately relies on, so a
+	// shutdown must not be blocked by a driver that is still refusing to answer.
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	observed.wait(t, 1)
+
+	cancel()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not return while the driver was hanging")
+	}
+}
+
 func TestReconciler_Run_ReconcilesOnDriverEvent(t *testing.T) {
 	t.Parallel()
 

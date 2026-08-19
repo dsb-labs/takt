@@ -21,6 +21,11 @@ import (
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
+// How long a read will wait on the driver before reporting desired state without
+// observed state. A caller asking what exists should not be held up indefinitely by a
+// runtime that has stopped answering.
+const observeTimeout = 10 * time.Second
+
 var (
 	// ErrWorkloadNotFound is returned when the requested workload does not exist.
 	ErrWorkloadNotFound = errors.New("workload not found")
@@ -653,7 +658,14 @@ func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (W
 // is still worth reporting, and a read of it shouldn't fail because the runtime is
 // briefly unavailable. The failure is logged and callers see workloads with no
 // instances, which reads as pending.
+//
+// The call is bounded so that a wedged daemon makes a read of desired state slower
+// rather than hanging it: a request that never returns is worse than one that
+// reports what it does know.
 func (s *WorkloadService) observe(ctx context.Context) map[string][]driver.Instance {
+	ctx, cancel := context.WithTimeout(ctx, observeTimeout)
+	defer cancel()
+
 	instances, err := s.driver.Observe(ctx)
 	if err != nil {
 		s.logger.With("error", err).Error("failed to observe driver instances")

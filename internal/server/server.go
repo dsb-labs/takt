@@ -92,9 +92,19 @@ func Run(ctx context.Context, config Config) error {
 	}
 
 	server := &http.Server{
-		Addr:              config.HTTP.Address,
-		Handler:           handler,
+		Addr:    config.HTTP.Address,
+		Handler: handler,
+		// A client that opens a connection and then stalls — mid-header, mid-body, or
+		// while reading a response — otherwise holds it indefinitely. These bound how
+		// long any one request may occupy the server.
+		//
+		// WriteTimeout is deliberately generous: reading a workload's logs streams
+		// its output, and a large tail from a chatty container legitimately takes
+		// longer than answering an ordinary request.
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      5 * time.Minute,
+		IdleTimeout:       2 * time.Minute,
 	}
 
 	g, ctx := errgroup.WithContext(ctx)

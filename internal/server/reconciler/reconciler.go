@@ -85,6 +85,19 @@ type (
 )
 
 const (
+	// How long a pass will wait on the driver before giving up on it.
+	//
+	// A pass is serial across workloads, so a driver that never answers doesn't just
+	// delay one workload — it stops every other workload converging behind it, and a
+	// docker daemon that has wedged will do exactly that. The deadline is generous
+	// enough for a slow daemon under load and short enough that a stuck one costs a
+	// pass rather than the node.
+	//
+	// Starting a workload gets its own, longer deadline: it may have to pull an image
+	// first, which is legitimately slow and not a sign that anything is wrong.
+	driverTimeout = 30 * time.Second
+	// How long starting a workload may take, including pulling its image.
+	startTimeout = 10 * time.Minute
 	// The delay before the first restart of a failed instance, doubled on each
 	// consecutive failure up to maxBackoff.
 	baseBackoff = time.Second
@@ -170,7 +183,10 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 		return
 	}
 
-	instances, err := r.driver.Observe(ctx)
+	observeCtx, cancel := context.WithTimeout(ctx, driverTimeout)
+	defer cancel()
+
+	instances, err := r.driver.Observe(observeCtx)
 	if err != nil {
 		r.logger.With("error", err).Error("failed to observe driver instances")
 		return
@@ -199,7 +215,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 
 		r.logger.With("workload", workload).Debug("stopping orphaned workload")
 
-		if err = r.driver.Stop(ctx, workload); err != nil {
+		if err = r.stop(ctx, workload); err != nil {
 			r.logger.With("workload", workload, "error", err).Error("failed to stop orphaned workload")
 		}
 	}
@@ -238,7 +254,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	if stale := staleInstances(row, instances); len(stale) > 0 {
 		r.logger.With("workload", row.Name, "version", row.Version).Debug("replacing stale workload")
 
-		if err := r.driver.Stop(ctx, row.Name); err != nil {
+		if err := r.stop(ctx, row.Name); err != nil {
 			return fmt.Errorf("failed to stop stale workload: %w", err)
 		}
 
@@ -282,7 +298,7 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 
 		r.logger.With("workload", row.Name).Debug("stopping deleted workload")
 
-		if err := r.driver.Stop(ctx, row.Name); err != nil {
+		if err := r.stop(ctx, row.Name); err != nil {
 			return fmt.Errorf("failed to stop deleted workload: %w", err)
 		}
 
@@ -338,7 +354,7 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, instanc
 	// The stopped instances have to be cleared before new work can take their
 	// place: their container names are derived from the workload and version, so
 	// a replacement would otherwise collide with the corpse.
-	if err := r.driver.Stop(ctx, row.Name); err != nil {
+	if err := r.stop(ctx, row.Name); err != nil {
 		return fmt.Errorf("failed to clear stopped workload: %w", err)
 	}
 
@@ -384,7 +400,10 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 		return err
 	}
 
-	id, err := r.driver.Start(ctx, w)
+	startCtx, cancel := context.WithTimeout(ctx, startTimeout)
+	defer cancel()
+
+	id, err := r.driver.Start(startCtx, w)
 	if err != nil {
 		// A workload that cannot start may be sitting on a host port something
 		// outside orca has taken, which nothing orca does will free. Rather than
@@ -419,6 +438,15 @@ func (r *Reconciler) abandonPorts(ctx context.Context, row database.Workload) {
 	case changed:
 		r.logger.With("workload", row.Name).Info("reallocated host ports after a failed start")
 	}
+}
+
+// stop asks the driver to stop a workload, bounded so that a daemon which never
+// answers costs one pass rather than blocking every workload behind it.
+func (r *Reconciler) stop(ctx context.Context, workload string) error {
+	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
+	defer cancel()
+
+	return r.driver.Stop(ctx, workload)
 }
 
 // staleInstances returns the instances running a specification other than the

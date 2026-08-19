@@ -441,6 +441,46 @@ func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 	repo.AssertNotCalled(t, "Upsert")
 }
 
+func TestWorkloadService_Get_DriverHangs(t *testing.T) {
+	t.Parallel()
+
+	d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+	repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+	// A daemon that accepts the call and never answers is the case a timeout exists
+	// for: the observation is bounded by a context, so it ends when that context does
+	// rather than when the driver decides to reply.
+	d.EXPECT().Observe(mock.Anything).RunAndReturn(func(ctx context.Context) ([]driver.Instance, error) {
+		<-ctx.Done()
+
+		return nil, ctx.Err()
+	}).Once()
+
+	svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+		Logger:    newTestLogger(t),
+		Driver:    d,
+		Workloads: repo,
+		Ports:     ports,
+		Allocator: allocatorStub{},
+	})
+
+	// The caller's own deadline is shorter than the service's, so this proves the
+	// observation honours the context it is given rather than ignoring cancellation.
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+
+	// Desired state is still reported: an unreachable runtime makes a read less
+	// informative, not a failure.
+	got, err := svc.Get(ctx, "example")
+	require.NoError(t, err)
+
+	assert.Equal(t, "example", got.Name)
+	assert.Empty(t, got.Instances)
+	assert.Equal(t, api.WorkloadStatePending, got.State)
+}
+
 func TestWorkloadService_List_Queries(t *testing.T) {
 	t.Parallel()
 
