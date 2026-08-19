@@ -27,6 +27,19 @@ container:
 A workload names exactly one runtime block, and which block it is selects the
 driver that runs it.
 
+### Command
+
+A `command:` replaces the one the image declares, given as the command and its
+arguments rather than as a string, so nothing has to decide where to split it:
+
+```yaml
+container:
+  image: alpine:3.20
+  command: ["sh", "-c", "echo hello"]
+```
+
+Leave it out to run what the image already declares, which is the usual case.
+
 ### Ports
 
 `to` is the port your process listens on inside the container. `from` is the host
@@ -76,6 +89,39 @@ never going to pass yet. Passing one check ends the grace early — it has demon
 started.
 
 Only `http` or `tcp` is required; the timings above are the defaults.
+
+### Restart
+
+A `restart:` policy says what orca does when a workload's container ends. Without one
+a workload is restarted whatever happened, which is what a long-running service wants
+and what makes a one-off job run in a loop.
+
+```yaml
+version: v1
+name: migrate
+restart: on-failure     # always (default), on-failure, never
+container:
+  image: myapp/migrate:1.2.0
+  command: ["migrate", "up"]
+```
+
+| Policy | Behaviour |
+|---|---|
+| `always` | Restart whatever the exit code. The default. |
+| `on-failure` | Restart only a container that exited non-zero. |
+| `never` | Never restart. |
+
+A workload orca will not restart reads as `completed` when it exited cleanly, and
+`failed` when it did not. The policy decides whether to run it again, and the exit
+code decides whether it worked, so a job retired under `never` still reports that it
+failed.
+
+Changing the specification runs a completed workload again, because what already ran
+is then out of date. Applying an unchanged manifest does nothing, so a repeated apply
+does not run a job twice. To run an unchanged job again, delete it and apply it.
+
+A failing workload is retried on a widening delay rather than immediately, so a
+container that cannot start does not spin the daemon.
 
 ## Usage
 

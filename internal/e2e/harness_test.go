@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os/exec"
 	"strings"
@@ -127,6 +128,24 @@ func (s *Suite) containerSpec(name string, ports ...manifest.Port) manifest.Spec
 			Image: testImage,
 			Env:   map[string]string{"EXAMPLE": "EXAMPLE"},
 			Ports: ports,
+		},
+	}
+}
+
+// jobSpec returns a specification for a workload that ends rather than serving, which
+// is what a restart policy exists to describe.
+//
+// The image is the one the rest of the suite uses, so no second image is pulled. The
+// command is what makes it end: a policy cannot be observed on a workload that runs
+// until something stops it.
+func (s *Suite) jobSpec(name string, policy manifest.RestartPolicy, exitCode int) manifest.Spec {
+	return manifest.Spec{
+		Version: "v1",
+		Name:    name,
+		Restart: policy,
+		Container: &manifest.Container{
+			Image:   testImage,
+			Command: []string{"sh", "-c", fmt.Sprintf("exit %d", exitCode)},
 		},
 	}
 }

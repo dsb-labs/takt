@@ -425,6 +425,156 @@ func (s *Suite) TestWarmingWorkloadIsNotReplaced() {
 	s.NotZero(*reported.Failures)
 }
 
+// TestDefaultPolicyStillRestarts covers the compatibility claim. A manifest that says
+// nothing about restarting behaves as it did before the policy existed.
+func (s *Suite) TestDefaultPolicyStillRestarts() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// No restart stanza at all, and a command that ends cleanly. Under the default the
+	// clean exit is not a reason to stop, so orca brings it back.
+	spec := s.jobSpec(name, "", 0)
+	spec.Restart = ""
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	original := s.awaitInstance(name)
+
+	s.Require().Eventuallyf(func() bool {
+		current, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(current.Instances) == 0 {
+			return false
+		}
+
+		return current.Instances[0].ID != original
+	}, convergeTimeout, 500*time.Millisecond, "a workload with no restart policy was not restarted")
+}
+
+// TestCompletedJobIsNotRestarted covers a workload that finishes, which is what the
+// restart policy exists for: the runtime reports it gone, and orca must leave it gone.
+func (s *Suite) TestCompletedJobIsNotRestarted() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	_, _, err := s.client.Apply(s.ctx(), s.jobSpec(name, manifest.RestartOnFailure, 0))
+	s.Require().NoError(err)
+
+	workload := s.awaitState(name, client.WorkloadStateCompleted)
+	s.Require().Len(workload.Instances, 1)
+	s.Equal(client.InstanceStateCompleted, workload.Instances[0].State)
+
+	// The instance that ran stays the instance that ran. Anything else means orca
+	// restarted work nobody asked it to repeat.
+	instance := workload.Instances[0].ID
+	for range 8 {
+		time.Sleep(time.Second)
+
+		current, err := s.client.Get(s.ctx(), name)
+		s.Require().NoError(err)
+		s.Require().Len(current.Instances, 1)
+		s.Equal(instance, current.Instances[0].ID, "a completed workload was restarted")
+		s.Equal(client.WorkloadStateCompleted, current.State)
+	}
+}
+
+// TestFailedJobIsRestarted covers the other half of on-failure: a job that did not
+// succeed is retried, on the same paced schedule a crashed service takes.
+func (s *Suite) TestFailedJobIsRestarted() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	_, _, err := s.client.Apply(s.ctx(), s.jobSpec(name, manifest.RestartOnFailure, 1))
+	s.Require().NoError(err)
+
+	original := s.awaitInstance(name)
+
+	// A non-zero exit is exactly what this policy restarts, so the instance that ran
+	// is replaced rather than left as it is.
+	s.Require().Eventuallyf(func() bool {
+		current, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(current.Instances) == 0 {
+			return false
+		}
+
+		return current.Instances[0].ID != original
+	}, convergeTimeout, 500*time.Millisecond, "a failed job was never retried")
+}
+
+// TestNeverPolicyKeepsAFailureVisible covers a workload retired without being called a
+// success, which is the distinction between what a policy decides and how a workload
+// ended.
+func (s *Suite) TestNeverPolicyKeepsAFailureVisible() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	_, _, err := s.client.Apply(s.ctx(), s.jobSpec(name, manifest.RestartNever, 1))
+	s.Require().NoError(err)
+
+	// Reported as failed rather than completed. The policy says not to run it again,
+	// and the exit code says it did not do its job — an operator needs both.
+	workload := s.awaitState(name, client.WorkloadStateFailed)
+	s.Require().Len(workload.Instances, 1)
+	s.Equal(client.InstanceStateFailed, workload.Instances[0].State)
+
+	instance := workload.Instances[0].ID
+	for range 8 {
+		time.Sleep(time.Second)
+
+		current, err := s.client.Get(s.ctx(), name)
+		s.Require().NoError(err)
+		s.Require().Len(current.Instances, 1)
+		s.Equal(instance, current.Instances[0].ID, "a workload under never was restarted")
+	}
+}
+
+// TestChangingASpecRerunsACompletedJob covers the re-run trigger. A finished job runs
+// again when the operator changes what they asked for, and not otherwise.
+func (s *Suite) TestChangingASpecRerunsACompletedJob() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.jobSpec(name, manifest.RestartOnFailure, 0)
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	first := s.awaitState(name, client.WorkloadStateCompleted)
+	s.Require().Len(first.Instances, 1)
+	original := first.Instances[0].ID
+
+	// Re-applying the same specification changes nothing, so the job stays finished.
+	// This is what stops a repeated apply running a job over and over.
+	unchanged, created, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.False(created)
+	s.Equal(first.Version, unchanged.Version)
+
+	time.Sleep(5 * time.Second)
+
+	still, err := s.client.Get(s.ctx(), name)
+	s.Require().NoError(err)
+	s.Require().Len(still.Instances, 1)
+	s.Equal(original, still.Instances[0].ID, "an unchanged apply re-ran a completed job")
+
+	// A changed specification is a new thing to run, and what already ran is out of
+	// date. That is the same rule that replaces a running service on an image bump.
+	spec.Container.Env = map[string]string{"EXAMPLE": "CHANGED"}
+
+	updated, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.Greater(updated.Version, first.Version)
+
+	s.Require().Eventuallyf(func() bool {
+		current, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(current.Instances) == 0 {
+			return false
+		}
+
+		return current.Instances[0].ID != original
+	}, convergeTimeout, 500*time.Millisecond, "a changed specification did not re-run the job")
+}
+
 // TestUnsupportedRuntimeIsRejected covers the runtime the API describes but no driver
 // implements, which must be refused rather than accepted and never run.
 func (s *Suite) TestUnsupportedRuntimeIsRejected() {
