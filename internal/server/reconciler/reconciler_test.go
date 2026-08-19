@@ -572,6 +572,239 @@ func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_RestartPolicy(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name          string
+		Policy        api.RestartPolicy
+		State         driver.State
+		ExitCode      int
+		ExpectRestart bool
+	}{
+		{
+			Name:          "always restarts a clean exit",
+			Policy:        api.Always,
+			State:         driver.StateExited,
+			ExpectRestart: true,
+		},
+		{
+			Name:          "always restarts a failure",
+			Policy:        api.Always,
+			State:         driver.StateFailed,
+			ExitCode:      1,
+			ExpectRestart: true,
+		},
+		{
+			// The job did what it was asked to do, so running it again would repeat
+			// work nobody asked to repeat.
+			Name:          "on-failure leaves a clean exit alone",
+			Policy:        api.OnFailure,
+			State:         driver.StateExited,
+			ExpectRestart: false,
+		},
+		{
+			Name:          "on-failure restarts a failure",
+			Policy:        api.OnFailure,
+			State:         driver.StateFailed,
+			ExitCode:      1,
+			ExpectRestart: true,
+		},
+		{
+			Name:          "never leaves a clean exit alone",
+			Policy:        api.Never,
+			State:         driver.StateExited,
+			ExpectRestart: false,
+		},
+		{
+			// Retired without being called a success: the reconciler stops acting on
+			// it, and the state it reports still says the workload failed.
+			Name:          "never leaves a failure alone",
+			Policy:        api.Never,
+			State:         driver.StateFailed,
+			ExitCode:      1,
+			ExpectRestart: false,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+
+			row := storedWorkload("example", "hash-one")
+			row.Spec = specWithRestart("example", tc.Policy)
+
+			repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+			if tc.ExpectRestart {
+				// The corpse is cleared first, since container names derive from the
+				// workload and version.
+				d.EXPECT().Stop(mock.Anything, "example").Return(nil)
+				d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil)
+			}
+
+			events := make(chan driver.Event)
+			d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+			passes := newCounter()
+			d.EXPECT().Observe(mock.Anything).
+				RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+					passes.inc()
+
+					return []driver.Instance{{
+						ID:       "container-one",
+						Workload: "example",
+						SpecHash: "hash-one",
+						State:    tc.State,
+						ExitCode: tc.ExitCode,
+					}}, nil
+				})
+
+			r := reconciler.New(reconciler.Config{
+				Logger:    newTestLogger(t),
+				Driver:    d,
+				Workloads: repo,
+				Interval:  time.Hour,
+			})
+
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+
+			go func() { done <- r.Run(ctx) }()
+
+			passes.wait(t, 1)
+
+			cancel()
+			require.NoError(t, <-done)
+		})
+	}
+}
+
+func TestReconciler_Run_RerunsARetiredWorkloadWhenItsSpecChanges(t *testing.T) {
+	t.Parallel()
+
+	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+
+	// The instance that ran carries the old hash, and the stored specification has
+	// moved on. That is what runs a finished job again: the operator changed what they
+	// asked for, so what ran is out of date.
+	row := storedWorkload("example", "hash-two")
+	row.Spec = specWithRestart("example", api.OnFailure)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+	d.EXPECT().Stop(mock.Anything, "example").Return(nil)
+	d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w docker.Workload) bool {
+		return w.SpecHash == "hash-two"
+	})).Return("container-two", nil)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return []driver.Instance{{
+				ID:       "container-one",
+				Workload: "example",
+				SpecHash: "hash-one",
+				State:    driver.StateExited,
+			}}, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Driver:    d,
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
+func TestReconciler_Run_ForgetsChecksOfARetiredWorkload(t *testing.T) {
+	t.Parallel()
+
+	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+
+	row := storedWorkload("example", "hash-one")
+	row.ID = "workload-one"
+	// Declares both a check and a policy that retires it, which is the combination
+	// that matters: the check has to stop when the workload finishes.
+	spec, err := json.Marshal(api.WorkloadSpec{
+		Version:   "v1",
+		Name:      "example",
+		Restart:   new(api.OnFailure),
+		Health:    &api.HealthSpec{HTTP: new("/healthz")},
+		Container: &api.ContainerSpec{Image: "example/example:latest"},
+	})
+	require.NoError(t, err)
+	row.Spec = spec
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+	ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+		"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+	}, nil)
+
+	// A finished workload has nothing listening. Probing it would report it unhealthy
+	// for no longer answering, which says nothing an operator can act on.
+	forgotten := make(chan struct{}, 1)
+	checker.EXPECT().Forget("example").Run(func(string) {
+		select {
+		case forgotten <- struct{}{}:
+		default:
+		}
+	}).Return()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return []driver.Instance{{
+				ID:       "container-one",
+				Workload: "example",
+				SpecHash: "hash-one",
+				State:    driver.StateExited,
+			}}, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Driver:    d,
+		Workloads: repo,
+		Ports:     ports,
+		Checker:   checker,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	<-forgotten
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
 	t.Parallel()
 
@@ -923,6 +1156,21 @@ func specWithHealth(name string) []byte {
 		Name:      name,
 		Container: &api.ContainerSpec{Image: "example/example:latest"},
 		Health:    &api.HealthSpec{HTTP: new("/healthz")},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return spec
+}
+
+// specWithRestart returns a stored specification declaring a restart policy.
+func specWithRestart(name string, policy api.RestartPolicy) []byte {
+	spec, err := json.Marshal(api.WorkloadSpec{
+		Version:   "v1",
+		Name:      name,
+		Restart:   new(policy),
+		Container: &api.ContainerSpec{Image: "example/example:latest"},
 	})
 	if err != nil {
 		panic(err)

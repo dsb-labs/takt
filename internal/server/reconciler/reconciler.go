@@ -237,7 +237,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 		observed[instance.Workload] = append(observed[instance.Workload], r.checked(instance))
 	}
 
-	r.register(ctx, rows)
+	r.register(ctx, rows, observed)
 
 	desired := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
@@ -317,6 +317,20 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		return nil
 	}
 
+	// A workload whose instances have all ended under a policy that asks for nothing
+	// further is finished with. It is left exactly as it is: the containers stay so
+	// that the outcome remains readable, and the stale check above is what runs the
+	// workload again once its specification changes.
+	//
+	// Whether it succeeded is not decided here. A clean exit reads as completed and a
+	// dirty one stays failed, which the service derives from the exit code the driver
+	// reported — so `never` retires a failed workload without calling it a success.
+	if policy := restartPolicy(row); retired(policy, instances) {
+		delete(r.backoff, row.Name)
+
+		return nil
+	}
+
 	if len(instances) == 0 {
 		return r.attempt(ctx, row)
 	}
@@ -330,7 +344,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 // This belongs to the pass rather than to whoever applies a workload: the reconciler
 // is what runs continuously, so a server that restarts resumes checking the workloads
 // it adopts without waiting for anything to be applied or read again.
-func (r *Reconciler) register(ctx context.Context, rows []database.Workload) {
+func (r *Reconciler) register(ctx context.Context, rows []database.Workload, observed map[string][]driver.Instance) {
 	if r.checker == nil || r.ports == nil {
 		return
 	}
@@ -349,14 +363,53 @@ func (r *Reconciler) register(ctx context.Context, rows []database.Workload) {
 			// cannot be resolved now means the two have diverged rather than that the
 			// operator made a mistake.
 			r.logger.With("workload", row.Name, "error", err).Error("failed to resolve health check")
-		case ok && row.DeletedAt.IsZero():
+		case ok && row.DeletedAt.IsZero() && !retired(restartPolicy(row), observed[row.Name]):
 			r.checker.Set(row.Name, check)
 		default:
-			// Either the workload declares no check or it is on its way out, and
-			// neither is worth probing.
+			// The workload declares no check, or is on its way out, or has ended and
+			// will not be restarted. None is worth probing, and probing the last would
+			// report a finished workload as unhealthy for no longer answering.
 			r.checker.Forget(row.Name)
 		}
 	}
+}
+
+// restartPolicy reads what a stored workload asks for when its instance ends.
+//
+// A specification that cannot be decoded falls back to the default. It was validated
+// before it was stored, so failing here means the two have diverged, and continuing to
+// restart a workload is a better failure than retiring it on the strength of a spec
+// nothing could read.
+func restartPolicy(row database.Workload) manifest.RestartPolicy {
+	var spec api.WorkloadSpec
+	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+		return manifest.RestartAlways
+	}
+
+	return manifest.NewSpec(spec).Restart
+}
+
+// retired reports whether every ended instance is one the policy leaves alone, and so
+// whether the workload is finished with rather than waiting to be restarted.
+//
+// This asks only whether to act. How the workload ended is a separate question the
+// caller answers from the exit code, because a workload that will not be restarted
+// still has to say whether it succeeded.
+//
+// A workload with nothing observed at all is not retired. It has yet to run, and
+// treating an empty driver as a finished job would mean a workload never started.
+func retired(policy manifest.RestartPolicy, instances []driver.Instance) bool {
+	if len(instances) == 0 {
+		return false
+	}
+
+	for _, instance := range instances {
+		if policy.Restarts(instance.ExitCode) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // healthCheck resolves a stored workload's health check into something probeable,

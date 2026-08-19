@@ -32,6 +32,19 @@ const (
 	StateTerminating State = "terminating"
 	// StateExited indicates the instance ran to completion and exited cleanly.
 	StateExited State = "exited"
+	// StateCompleted indicates the instance did what it was asked to do: it exited
+	// cleanly, and its workload's restart policy asks for nothing further.
+	//
+	// Only a clean exit reaches this state. An instance that exited non-zero stays
+	// failed however its policy treats it, because how a workload ended and whether
+	// it runs again are separate facts. A workload that will not be restarted still
+	// has to say whether it succeeded.
+	//
+	// No driver reports this. A driver reports what it observed, which is that the
+	// instance exited or failed, and it knows nothing about the policy. The server
+	// decides what that ending means and rewrites the state before anything reads
+	// it, which keeps the policy in one place.
+	StateCompleted State = "completed"
 	// StateFailed indicates the instance exited with a non-zero status, or could
 	// not be started at all.
 	StateFailed State = "failed"
