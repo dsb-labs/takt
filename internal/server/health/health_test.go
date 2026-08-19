@@ -131,6 +131,113 @@ func TestChecker_Run_StartPeriod(t *testing.T) {
 	assert.Equal(t, health.StatusStarting, result.Status)
 }
 
+func TestChecker_Run_SlowProbeDoesNotDelayOthers(t *testing.T) {
+	t.Parallel()
+
+	// A workload that accepts the connection and never answers, so every probe
+	// against it runs until its timeout. This is the case that matters: a workload
+	// which has wedged is one the operator most wants the others still checked
+	// around.
+	hung, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = hung.Close() })
+
+	// Signals that the hung workload's probe has actually connected, so the workload
+	// below is registered into a checker that is demonstrably mid-probe rather than
+	// one that merely ought to be by now.
+	connected := make(chan struct{}, 1)
+
+	go func() {
+		for {
+			// The connection is deliberately neither read nor closed: closing it
+			// would answer the probe, and the request has to hang for the test to
+			// mean anything. It goes away with the listener at cleanup.
+			if _, err := hung.Accept(); err != nil {
+				return
+			}
+
+			select {
+			case connected <- struct{}{}:
+			default:
+			}
+		}
+	}()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	checker := run(t)
+
+	// Registered first and left to get its probe in flight, so the workload below is
+	// registered into a checker that is already busy.
+	slow := check(hung.Addr().String(), "/healthz")
+	slow.Interval = 3 * time.Second
+	slow.Timeout = 3 * time.Second
+	checker.Set("hung", slow)
+
+	select {
+	case <-connected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the hung workload was never probed")
+	}
+
+	// A probe that blocks the loop would make this workload wait out the hung one's
+	// timeout before being checked at all, however short an interval it asked for.
+	started := time.Now()
+	checker.Set("example", check(server.Listener.Addr().String(), "/healthz"))
+
+	require.Eventuallyf(t, func() bool {
+		result, ok := checker.Result("example")
+
+		return ok && result.Status == health.StatusHealthy
+	}, 5*time.Second, 5*time.Millisecond, "workload never became healthy")
+
+	// Generous next to the three seconds the hung probe runs for, and far below it:
+	// the assertion is that the two are unrelated, not that checking is fast.
+	assert.Less(t, time.Since(started), 500*time.Millisecond,
+		"a workload waited on an unrelated hung probe before its first check")
+}
+
+func TestChecker_Run_DoesNotOverlapProbes(t *testing.T) {
+	t.Parallel()
+
+	// Counted rather than asserted per request: the point is how many probes are in
+	// flight at once, which only the handler can see.
+	var concurrent, worst atomic.Int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		inflight := concurrent.Add(1)
+		defer concurrent.Add(-1)
+
+		for {
+			if seen := worst.Load(); inflight <= seen || worst.CompareAndSwap(seen, inflight) {
+				break
+			}
+		}
+
+		// Longer than the interval, so a checker that started a probe per tick
+		// regardless would pile them up.
+		time.Sleep(300 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	checker := run(t)
+
+	spec := check(server.Listener.Addr().String(), "/healthz")
+	spec.Interval = 50 * time.Millisecond
+	spec.Timeout = time.Second
+	checker.Set("example", spec)
+
+	awaitStatus(t, checker, "example", health.StatusHealthy)
+
+	// Not waiting for probes is what removed the barrier between workloads; a
+	// workload must still not accumulate probes faster than it answers them.
+	assert.Equal(t, int64(1), worst.Load(), "a workload was probed while its previous probe was still running")
+}
+
 func TestChecker_Set(t *testing.T) {
 	t.Parallel()
 

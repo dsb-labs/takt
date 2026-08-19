@@ -72,6 +72,9 @@ type (
 		mux    sync.RWMutex
 		client *http.Client
 		checks map[string]*check
+		// Signals that the set of checks has changed, so that the loop recomputes
+		// when it is next needed rather than sleeping on a stale answer.
+		wake chan struct{}
 	}
 
 	// The check type is one workload's check and the state of running it.
@@ -79,6 +82,13 @@ type (
 		spec    Check
 		started time.Time
 		result  Result
+		// Whether a probe for this workload is currently running. A check is not due
+		// while one is, which is what keeps a workload from accumulating probes
+		// faster than they complete without making it wait on any other workload's.
+		inflight bool
+		// Incremented every time the specification changes, so that a probe still
+		// running against the previous one is recognised as stale when it returns.
+		generation int
 	}
 )
 
@@ -86,6 +96,9 @@ type (
 func New() *Checker {
 	return &Checker{
 		checks: make(map[string]*check),
+		// Buffered so that registering a check never blocks on the loop: a
+		// recomputation is already pending, which is all the signal conveys.
+		wake: make(chan struct{}, 1),
 		// Redirects are not followed: a health endpoint answering 302 is telling us
 		// something other than "I am working", and following it would check a
 		// different address than the one asked for.
@@ -111,10 +124,32 @@ func (c *Checker) Set(workload string, spec Check) {
 		return
 	}
 
+	// A probe against the specification being replaced may still be running. Counting
+	// generations is what lets its result be discarded when it returns: it describes
+	// an address or a path this check no longer has.
+	var generation int
+	if existing, ok := c.checks[workload]; ok {
+		generation = existing.generation + 1
+	}
+
 	c.checks[workload] = &check{
-		spec:    spec,
-		started: time.Now(),
-		result:  Result{Status: StatusStarting},
+		spec:       spec,
+		started:    time.Now(),
+		result:     Result{Status: StatusStarting},
+		generation: generation,
+	}
+
+	// A newly registered check is due immediately, and the loop may be sleeping on a
+	// wait computed before it existed — for as long as a second when nothing else is
+	// waiting, or a whole interval otherwise.
+	c.notify()
+}
+
+// notify tells the loop that the set of checks has changed. It never blocks.
+func (c *Checker) notify() {
+	select {
+	case c.wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -151,16 +186,39 @@ func (c *Checker) Result(workload string) (Result, bool) {
 // The loop wakes when the soonest check is next due rather than at a fixed rate. A
 // fixed tick would quietly become a floor on how often anything could be checked, so
 // a workload asking for a half-second interval would get whatever the tick was.
+//
+// Probes run on their own goroutines and the loop does not wait for them, so one
+// workload that accepts a connection and never answers cannot delay the checking of
+// any other. The loop waits only for them to finish before it returns, so a probe
+// never outlives the Checker.
+//
+// Registering a check wakes the loop rather than waiting for whatever it was already
+// sleeping on, so a workload is checked as soon as it is known about.
 func (c *Checker) Run(ctx context.Context) error {
 	timer := time.NewTimer(c.wait())
 	defer timer.Stop()
+
+	var probes sync.WaitGroup
+	defer probes.Wait()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-timer.C:
-			c.checkDue(ctx)
+			c.checkDue(ctx, &probes)
+			timer.Reset(c.wait())
+		case <-c.wake:
+			// A check was registered, which may be due sooner than whatever the timer
+			// was waiting for. Stopping it before resetting keeps the two in step.
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+
+			c.checkDue(ctx, &probes)
 			timer.Reset(c.wait())
 		}
 	}
@@ -183,6 +241,13 @@ func (c *Checker) wait() time.Duration {
 	wait := time.Second
 
 	for _, registered := range c.checks {
+		// A probe already running has no next-due time to compute: it is neither
+		// waiting nor overdue, and treating an unanswered check as due immediately
+		// would spin the loop for as long as the probe took.
+		if registered.inflight {
+			continue
+		}
+
 		if registered.result.CheckedAt.IsZero() {
 			return 0
 		}
@@ -195,32 +260,34 @@ func (c *Checker) wait() time.Duration {
 	return max(wait, 0)
 }
 
-// checkDue probes every workload whose interval has elapsed.
-func (c *Checker) checkDue(ctx context.Context) {
-	var wg sync.WaitGroup
-
+// checkDue starts a probe for every workload whose interval has elapsed, on probes so
+// that Run can wait for them at shutdown without waiting for them here.
+func (c *Checker) checkDue(ctx context.Context, probes *sync.WaitGroup) {
 	for workload, due := range c.due() {
-		wg.Go(func() {
-			c.record(workload, c.probe(ctx, due.spec))
+		probes.Go(func() {
+			c.record(workload, due.generation, c.probe(ctx, due.spec))
 		})
 	}
-
-	// Waiting means a slow check delays the next tick rather than overlapping with
-	// itself, so a workload cannot accumulate probes faster than they complete.
-	wg.Wait()
 }
 
-// due returns a snapshot of the checks that are ready to run. The snapshot means
-// probing doesn't hold the lock, so a check in flight can't block a read of results.
+// due returns a snapshot of the checks that are ready to run, marking each as in
+// flight so that a second probe is not started for a workload still answering the
+// first. The snapshot means probing doesn't hold the lock, so a check in flight can't
+// block a read of results.
 func (c *Checker) due() map[string]check {
-	c.mux.RLock()
-	defer c.mux.RUnlock()
+	c.mux.Lock()
+	defer c.mux.Unlock()
 
 	now := time.Now()
 	due := make(map[string]check, len(c.checks))
 
 	for workload, registered := range c.checks {
+		if registered.inflight {
+			continue
+		}
+
 		if registered.result.CheckedAt.IsZero() || now.Sub(registered.result.CheckedAt) >= registered.spec.Interval {
+			registered.inflight = true
 			due[workload] = *registered
 		}
 	}
@@ -229,16 +296,31 @@ func (c *Checker) due() map[string]check {
 }
 
 // record stores the outcome of a check, deciding what it means for the workload.
-func (c *Checker) record(workload string, err error) {
+//
+// The generation is the one the probe was started against, so that a result arriving
+// after the specification changed is discarded rather than attributed to a check it
+// says nothing about.
+func (c *Checker) record(workload string, generation int, err error) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
 	registered, ok := c.checks[workload]
 	if !ok {
 		// Forgotten while the check was in flight, so the result describes a workload
-		// nothing is running any more.
+		// nothing is running any more. There is no flag left to clear: whatever this
+		// probe was started against is gone.
 		return
 	}
+
+	if registered.generation != generation {
+		// Replaced while this probe was running. The check that replaced it was never
+		// marked in flight, so there is nothing to clear here either.
+		return
+	}
+
+	// Cleared however this probe turned out, so that a failed check doesn't leave the
+	// workload permanently ineligible for the next one.
+	registered.inflight = false
 
 	registered.result.CheckedAt = time.Now()
 
