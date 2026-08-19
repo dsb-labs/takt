@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
@@ -87,6 +88,21 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 	if err = migrateUp(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	// SQLite creates its files world-readable regardless of what the directory
+	// allows, and they hold every workload's specification — including whatever the
+	// operator put in its environment. The write-ahead log and index are covered too:
+	// the contents pass through them, so tightening only the database would leave the
+	// same data readable beside it.
+	//
+	// Done after migrating so the files the journal mode creates exist to be changed.
+	for _, path := range []string{config.Path, config.Path + "-wal", config.Path + "-shm"} {
+		if err = os.Chmod(path, 0o600); err != nil && !os.IsNotExist(err) {
+			_ = db.Close()
+
+			return nil, fmt.Errorf("failed to restrict database permissions: %w", err)
+		}
 	}
 
 	logger.With("path", config.Path).Debug("database opened")

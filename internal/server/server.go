@@ -32,7 +32,10 @@ func Run(ctx context.Context, config Config) error {
 	logger := newLogger(config.Logging)
 	logger.With("address", config.HTTP.Address).Debug("starting orca server")
 
-	if err := os.MkdirAll(config.Data.Directory, 0o755); err != nil {
+	// Only the owner: the database holds every workload's specification, and a
+	// specification carries whatever the operator put in its environment. A
+	// world-readable directory would publish those to every local account.
+	if err := os.MkdirAll(config.Data.Directory, 0o700); err != nil {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 

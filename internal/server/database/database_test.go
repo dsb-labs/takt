@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -66,6 +67,38 @@ func TestOpen_ConcurrentWrites(t *testing.T) {
 	stored, err := repo.List(t.Context())
 	require.NoError(t, err)
 	assert.Len(t, stored, 50)
+}
+
+func TestOpen_RestrictsPermissions(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.db")
+
+	level := slog.LevelError
+	if testing.Verbose() {
+		level = slog.LevelDebug
+	}
+
+	db, err := Open(t.Context(), Config{
+		Logger: slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: level})),
+		Path:   path,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, db.Close()) })
+
+	// The database holds every workload's specification, environment included, and
+	// SQLite creates its files world-readable whatever the directory allows. The log
+	// and index carry the same contents, so all three have to be covered.
+	for _, name := range []string{"state.db", "state.db-wal", "state.db-shm"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if os.IsNotExist(err) {
+			continue
+		}
+
+		require.NoError(t, err)
+		assert.Zero(t, info.Mode().Perm()&0o077, "%s is readable beyond its owner: %v", name, info.Mode().Perm())
+	}
 }
 
 func TestMigrations(t *testing.T) {
