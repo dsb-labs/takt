@@ -270,6 +270,8 @@ components:
           description: Arbitrary key-value pairs attached to the workload.
           additionalProperties:
             type: string
+        restart:
+          $ref: "#/components/schemas/RestartPolicy"
         health:
           $ref: "#/components/schemas/HealthSpec"
         container:
@@ -300,6 +302,30 @@ components:
             omitted the server allocates one.
           items:
             $ref: "#/components/schemas/PortMapping"
+
+    RestartPolicy:
+      type: string
+      description: |
+        What the server does when a workload's instance ends.
+
+        `always` restarts it whatever the exit code, which is what a long-running
+        service wants. `on-failure` restarts it only when it exited non-zero, so a
+        workload that exits cleanly has finished its work and is left alone.
+        `never` leaves it alone whatever the exit code.
+
+        A workload the server will not restart reads as completed. Changing the
+        specification runs it again, because the instance that ran is then out of
+        date. Applying an unchanged specification does nothing, so a repeated apply
+        does not run a completed workload a second time.
+
+        The policy sits alongside the runtime blocks because whether a workload
+        should run again is a question about the workload rather than about the
+        runtime that ran it.
+      enum:
+        - always
+        - on-failure
+        - never
+      default: always
 
     HealthSpec:
       type: object
@@ -525,11 +551,16 @@ components:
         pending until something is running, running while its instances are up,
         terminating while they are being torn down, failed when an instance exited
         non-zero, and stopped when none are running.
+
+        A completed workload has ended and will not be restarted, which its restart
+        policy asked for. That is distinct from stopped, where nothing is running and
+        the server intends to fix it.
       enum:
         - pending
         - running
         - terminating
         - stopped
+        - completed
         - failed
 
     InstanceHealth:
@@ -571,11 +602,16 @@ components:
         The state of a single instance as reported by its driver. An instance is
         terminating while it is being torn down, which happens when an outdated
         instance is replaced or its workload is deleted.
+
+        An instance is completed when it ended and its workload's restart policy
+        says not to run it again. Exited says only that it ended, which is what the
+        driver observed. Completed adds what the policy makes of that.
       enum:
         - pending
         - running
         - terminating
         - exited
+        - completed
         - failed
 
     ErrorResponse:

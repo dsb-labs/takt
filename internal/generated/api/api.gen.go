@@ -43,6 +43,7 @@ func (e HealthStatus) Valid() bool {
 
 // Defines values for InstanceState.
 const (
+	InstanceStateCompleted   InstanceState = "completed"
 	InstanceStateExited      InstanceState = "exited"
 	InstanceStateFailed      InstanceState = "failed"
 	InstanceStatePending     InstanceState = "pending"
@@ -53,6 +54,8 @@ const (
 // Valid indicates whether the value is a known member of the InstanceState enum.
 func (e InstanceState) Valid() bool {
 	switch e {
+	case InstanceStateCompleted:
+		return true
 	case InstanceStateExited:
 		return true
 	case InstanceStateFailed:
@@ -62,6 +65,27 @@ func (e InstanceState) Valid() bool {
 	case InstanceStateRunning:
 		return true
 	case InstanceStateTerminating:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RestartPolicy.
+const (
+	Always    RestartPolicy = "always"
+	Never     RestartPolicy = "never"
+	OnFailure RestartPolicy = "on-failure"
+)
+
+// Valid indicates whether the value is a known member of the RestartPolicy enum.
+func (e RestartPolicy) Valid() bool {
+	switch e {
+	case Always:
+		return true
+	case Never:
+		return true
+	case OnFailure:
 		return true
 	default:
 		return false
@@ -88,6 +112,7 @@ func (e Runtime) Valid() bool {
 
 // Defines values for WorkloadState.
 const (
+	WorkloadStateCompleted   WorkloadState = "completed"
 	WorkloadStateFailed      WorkloadState = "failed"
 	WorkloadStatePending     WorkloadState = "pending"
 	WorkloadStateRunning     WorkloadState = "running"
@@ -98,6 +123,8 @@ const (
 // Valid indicates whether the value is a known member of the WorkloadState enum.
 func (e WorkloadState) Valid() bool {
 	switch e {
+	case WorkloadStateCompleted:
+		return true
 	case WorkloadStateFailed:
 		return true
 	case WorkloadStatePending:
@@ -218,6 +245,10 @@ type Instance struct {
 	// State The state of a single instance as reported by its driver. An instance is
 	// terminating while it is being torn down, which happens when an outdated
 	// instance is replaced or its workload is deleted.
+	//
+	// An instance is completed when it ended and its workload's restart policy
+	// says not to run it again. Exited says only that it ended, which is what the
+	// driver observed. Completed adds what the policy makes of that.
 	State InstanceState `json:"state"`
 }
 
@@ -242,6 +273,10 @@ type InstanceHealth struct {
 // InstanceState The state of a single instance as reported by its driver. An instance is
 // terminating while it is being torn down, which happens when an outdated
 // instance is replaced or its workload is deleted.
+//
+// An instance is completed when it ended and its workload's restart policy
+// says not to run it again. Exited says only that it ended, which is what the
+// driver observed. Completed adds what the policy makes of that.
 type InstanceState string
 
 // PortMapping A port to publish. The `to` port is the one the workload listens on inside
@@ -279,6 +314,23 @@ type ResolvedPort struct {
 	// To The port the workload listens on inside its runtime.
 	To int `json:"to"`
 }
+
+// RestartPolicy What the server does when a workload's instance ends.
+//
+// `always` restarts it whatever the exit code, which is what a long-running
+// service wants. `on-failure` restarts it only when it exited non-zero, so a
+// workload that exits cleanly has finished its work and is left alone.
+// `never` leaves it alone whatever the exit code.
+//
+// A workload the server will not restart reads as completed. Changing the
+// specification runs it again, because the instance that ran is then out of
+// date. Applying an unchanged specification does nothing, so a repeated apply
+// does not run a completed workload a second time.
+//
+// The policy sits alongside the runtime blocks because whether a workload
+// should run again is a question about the workload rather than about the
+// runtime that ran it.
+type RestartPolicy string
 
 // Runtime Which runtime block the workload's specification names.
 type Runtime string
@@ -331,6 +383,10 @@ type Workload struct {
 	// pending until something is running, running while its instances are up,
 	// terminating while they are being torn down, failed when an instance exited
 	// non-zero, and stopped when none are running.
+	//
+	// A completed workload has ended and will not be restarted, which its restart
+	// policy asked for. That is distinct from stopped, where nothing is running and
+	// the server intends to fix it.
 	State WorkloadState `json:"state"`
 
 	// UpdatedAt When the workload's specification last changed.
@@ -370,6 +426,23 @@ type WorkloadSpec struct {
 	// Examples: example
 	Name string `json:"name"`
 
+	// Restart What the server does when a workload's instance ends.
+	//
+	// `always` restarts it whatever the exit code, which is what a long-running
+	// service wants. `on-failure` restarts it only when it exited non-zero, so a
+	// workload that exits cleanly has finished its work and is left alone.
+	// `never` leaves it alone whatever the exit code.
+	//
+	// A workload the server will not restart reads as completed. Changing the
+	// specification runs it again, because the instance that ran is then out of
+	// date. Applying an unchanged specification does nothing, so a repeated apply
+	// does not run a completed workload a second time.
+	//
+	// The policy sits alongside the runtime blocks because whether a workload
+	// should run again is a question about the workload rather than about the
+	// runtime that ran it.
+	Restart *RestartPolicy `json:"restart,omitempty"`
+
 	// Schedule A cron expression describing when the workload should run. Accepted and
 	// stored, but not yet acted on; workloads are run continuously for now.
 	//
@@ -391,6 +464,10 @@ type WorkloadSpec struct {
 // pending until something is running, running while its instances are up,
 // terminating while they are being torn down, failed when an instance exited
 // non-zero, and stopped when none are running.
+//
+// A completed workload has ended and will not be restarted, which its restart
+// policy asked for. That is distinct from stopped, where nothing is running and
+// the server intends to fix it.
 type WorkloadState string
 
 // WorkloadName defines model for WorkloadName.
