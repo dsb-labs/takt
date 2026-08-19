@@ -18,6 +18,79 @@ import (
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
+// TestStatesCoverTheWireFormat pins the client's constants to the values the server
+// actually sends.
+//
+// The client declares its own rather than re-exporting the generated ones, so that a
+// consumer never sees an internal type — which means nothing but this test stops the
+// two drifting when the specification gains a state or renames one.
+func TestStatesCoverTheWireFormat(t *testing.T) {
+	t.Parallel()
+
+	t.Run("workload states", func(t *testing.T) {
+		assert.ElementsMatch(t, []client.WorkloadState{
+			client.WorkloadStatePending,
+			client.WorkloadStateRunning,
+			client.WorkloadStateTerminating,
+			client.WorkloadStateStopped,
+			client.WorkloadStateFailed,
+		}, mapped(t, []api.WorkloadState{
+			api.WorkloadStatePending,
+			api.WorkloadStateRunning,
+			api.WorkloadStateTerminating,
+			api.WorkloadStateStopped,
+			api.WorkloadStateFailed,
+		}, func(state api.WorkloadState) client.WorkloadState {
+			return client.WorkloadState(state)
+		}))
+	})
+
+	t.Run("instance states", func(t *testing.T) {
+		assert.ElementsMatch(t, []client.InstanceState{
+			client.InstanceStatePending,
+			client.InstanceStateRunning,
+			client.InstanceStateTerminating,
+			client.InstanceStateExited,
+			client.InstanceStateFailed,
+		}, mapped(t, []api.InstanceState{
+			api.InstanceStatePending,
+			api.InstanceStateRunning,
+			api.InstanceStateTerminating,
+			api.InstanceStateExited,
+			api.InstanceStateFailed,
+		}, func(state api.InstanceState) client.InstanceState {
+			return client.InstanceState(state)
+		}))
+	})
+
+	t.Run("health statuses", func(t *testing.T) {
+		assert.ElementsMatch(t, []client.HealthStatus{
+			client.HealthStarting,
+			client.HealthHealthy,
+			client.HealthUnhealthy,
+		}, mapped(t, []api.HealthStatus{
+			api.Starting,
+			api.Healthy,
+			api.Unhealthy,
+		}, func(status api.HealthStatus) client.HealthStatus {
+			return client.HealthStatus(status)
+		}))
+	})
+}
+
+// mapped converts the generated constants into their client equivalents, so that the
+// comparison is between the two vocabularies rather than between a list and itself.
+func mapped[From, To comparable](t *testing.T, from []From, convert func(From) To) []To {
+	t.Helper()
+
+	to := make([]To, 0, len(from))
+	for _, value := range from {
+		to = append(to, convert(value))
+	}
+
+	return to
+}
+
 func TestClient_Apply(t *testing.T) {
 	t.Parallel()
 
@@ -52,7 +125,7 @@ func TestClient_Apply(t *testing.T) {
 			Assert: func(t *testing.T, got client.Workload, created bool) {
 				assert.True(t, created)
 				assert.Equal(t, "example", got.Name)
-				assert.Equal(t, string(api.WorkloadStatePending), got.State)
+				assert.Equal(t, client.WorkloadStatePending, got.State)
 			},
 		},
 		{
@@ -62,7 +135,7 @@ func TestClient_Apply(t *testing.T) {
 			},
 			Assert: func(t *testing.T, got client.Workload, created bool) {
 				assert.False(t, created)
-				assert.Equal(t, string(api.WorkloadStateRunning), got.State)
+				assert.Equal(t, client.WorkloadStateRunning, got.State)
 			},
 		},
 		{
@@ -170,7 +243,7 @@ func TestClient_Get(t *testing.T) {
 
 		reported := got.Instances[0].Health
 		require.NotNil(t, reported)
-		assert.Equal(t, "unhealthy", reported.Status)
+		assert.Equal(t, client.HealthUnhealthy, reported.Status)
 		require.NotNil(t, reported.Failures)
 		assert.Equal(t, 3, *reported.Failures)
 		assert.Equal(t, checkedAt, reported.CheckedAt)
@@ -268,7 +341,7 @@ func TestClient_Delete(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.True(t, got.Deleting)
-		assert.Equal(t, string(api.WorkloadStateTerminating), got.State)
+		assert.Equal(t, client.WorkloadStateTerminating, got.State)
 	})
 
 	t.Run("waits for the teardown to finish", func(t *testing.T) {

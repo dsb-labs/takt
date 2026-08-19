@@ -14,6 +14,21 @@ import (
 )
 
 type (
+	// The WorkloadState type describes the overall state of a workload, derived by
+	// the server from the instances it is running.
+	WorkloadState string
+
+	// The InstanceState type describes the state of a single unit of work the server
+	// is running for a workload.
+	//
+	// It is distinct from WorkloadState because the two do not share a vocabulary: an
+	// instance exits, where a workload whose instances have all exited is stopped.
+	InstanceState string
+
+	// The HealthStatus type describes whether a workload is working, as distinct from
+	// whether its runtime reports it started.
+	HealthStatus string
+
 	// The Workload type is the client-side view of a workload: the desired state
 	// that was submitted, together with what the server reports is running for it.
 	Workload struct {
@@ -22,9 +37,9 @@ type (
 		// Incremented every time the workload's specification changes.
 		Version int
 		// Which runtime the specification names.
-		Runtime string
+		Runtime manifest.Runtime
 		// The workload's overall state, derived from its instances.
-		State string
+		State WorkloadState
 		// Whether the workload is being torn down and will shortly disappear.
 		Deleting bool
 		// The specification that was submitted.
@@ -57,7 +72,7 @@ type (
 		// The server's opaque handle for this instance.
 		ID string
 		// The instance's current state.
-		State string
+		State InstanceState
 		// The hash of the specification the instance was started from.
 		SpecHash string
 		// The exit code. Nil while the instance is still running.
@@ -71,8 +86,8 @@ type (
 
 	// The Health type is the client-side view of a health check's outcome.
 	Health struct {
-		// Whether the instance is working: "starting", "healthy" or "unhealthy".
-		Status string
+		// Whether the instance is working.
+		Status HealthStatus
 		// How many consecutive checks have failed. Nil when the check is the
 		// runtime's own rather than one orca performs, since orca counts no
 		// failures against a check it did not run.
@@ -82,6 +97,48 @@ type (
 		// Why the last check failed, when it did.
 		Error string
 	}
+)
+
+const (
+	// WorkloadStatePending indicates nothing is running for the workload yet, either
+	// because it has just been applied or because it is waiting to be restarted.
+	WorkloadStatePending WorkloadState = "pending"
+	// WorkloadStateRunning indicates the workload's instances are up.
+	WorkloadStateRunning WorkloadState = "running"
+	// WorkloadStateTerminating indicates the workload is being torn down and will
+	// shortly disappear.
+	WorkloadStateTerminating WorkloadState = "terminating"
+	// WorkloadStateStopped indicates the workload's instances have all ended without
+	// failing.
+	WorkloadStateStopped WorkloadState = "stopped"
+	// WorkloadStateFailed indicates the workload is not working, whether because an
+	// instance failed or because it is not passing its health check.
+	WorkloadStateFailed WorkloadState = "failed"
+)
+
+const (
+	// InstanceStatePending indicates the instance has been created but is not yet
+	// running.
+	InstanceStatePending InstanceState = "pending"
+	// InstanceStateRunning indicates the instance is up.
+	InstanceStateRunning InstanceState = "running"
+	// InstanceStateTerminating indicates the instance is on its way out.
+	InstanceStateTerminating InstanceState = "terminating"
+	// InstanceStateExited indicates the instance ended without failing.
+	InstanceStateExited InstanceState = "exited"
+	// InstanceStateFailed indicates the instance ended in failure.
+	InstanceStateFailed InstanceState = "failed"
+)
+
+const (
+	// HealthStarting indicates the workload has not yet passed a check, either
+	// because it is inside its start period or because nothing has answered yet.
+	HealthStarting HealthStatus = "starting"
+	// HealthHealthy indicates the workload's most recent check passed.
+	HealthHealthy HealthStatus = "healthy"
+	// HealthUnhealthy indicates enough consecutive checks have failed to exhaust the
+	// workload's retries.
+	HealthUnhealthy HealthStatus = "unhealthy"
 )
 
 // Apply stores spec as the desired state for its name, reporting whether the
@@ -313,8 +370,8 @@ func newWorkload(w api.Workload) Workload {
 	workload := Workload{
 		Name:      w.Name,
 		Version:   w.Version,
-		Runtime:   string(w.Runtime),
-		State:     string(w.State),
+		Runtime:   manifest.Runtime(w.Runtime),
+		State:     WorkloadState(w.State),
 		Spec:      manifest.NewSpec(w.Spec),
 		CreatedAt: w.CreatedAt,
 		UpdatedAt: w.UpdatedAt,
@@ -343,7 +400,7 @@ func newWorkload(w api.Workload) Workload {
 	for _, instance := range *w.Instances {
 		mapped := Instance{
 			ID:       instance.ID,
-			State:    string(instance.State),
+			State:    InstanceState(instance.State),
 			SpecHash: instance.SpecHash,
 			ExitCode: instance.ExitCode,
 		}
@@ -354,7 +411,7 @@ func newWorkload(w api.Workload) Workload {
 
 		if instance.Health != nil {
 			mapped.Health = &Health{
-				Status:   string(instance.Health.Status),
+				Status:   HealthStatus(instance.Health.Status),
 				Failures: instance.Health.Failures,
 			}
 

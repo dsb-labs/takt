@@ -58,9 +58,9 @@ func (s *Suite) TestWorkloadLifecycle() {
 	s.Equal(name, workload.Name)
 	s.Equal(1, workload.Version)
 
-	started := s.awaitState(name, "running")
+	started := s.awaitState(name, client.WorkloadStateRunning)
 	s.Require().Len(started.Instances, 1)
-	s.Equal("running", started.Instances[0].State)
+	s.Equal(client.InstanceStateRunning, started.Instances[0].State)
 	s.NotEmpty(started.Instances[0].SpecHash)
 
 	// The point of a port mapping is that something outside the container can reach
@@ -164,7 +164,7 @@ func (s *Suite) TestDynamicPortIsAllocated() {
 	s.NotZero(allocated.From)
 
 	// An allocated port is only useful if it actually reaches the container.
-	s.awaitState(name, "running")
+	s.awaitState(name, client.WorkloadStateRunning)
 	s.awaitListening(fmt.Sprintf("127.0.0.1:%d", allocated.From))
 
 	// The allocation is sticky: a change that leaves the port list alone must not
@@ -203,7 +203,7 @@ func (s *Suite) TestWorkloadReplacedWhenSpecChanges() {
 	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, manifest.Port{To: 80, From: 8181}))
 	s.Require().NoError(err)
 
-	s.awaitState(name, "running")
+	s.awaitState(name, client.WorkloadStateRunning)
 	first := s.instanceID(name)
 
 	changed := s.containerSpec(name, manifest.Port{To: 80, From: 8181})
@@ -227,7 +227,7 @@ func (s *Suite) TestWorkloadRestartedAfterItDies() {
 	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, manifest.Port{To: 80, From: 8182}))
 	s.Require().NoError(err)
 
-	s.awaitState(name, "running")
+	s.awaitState(name, client.WorkloadStateRunning)
 	original := s.instanceID(name)
 
 	// Killing the container is the closest thing to the workload crashing.
@@ -249,7 +249,7 @@ func (s *Suite) TestWorkloadAdoptedAfterServerRestart() {
 	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, manifest.Port{To: 80, From: 8183}))
 	s.Require().NoError(err)
 
-	s.awaitState(name, "running")
+	s.awaitState(name, client.WorkloadStateRunning)
 	original := s.instanceID(name)
 
 	// The container outlives the server, and nothing about it is persisted, so a
@@ -257,7 +257,7 @@ func (s *Suite) TestWorkloadAdoptedAfterServerRestart() {
 	s.restart(withDataDirectory(directory))
 	s.T().Cleanup(func() { s.cleanup(name) })
 
-	workload := s.awaitState(name, "running")
+	workload := s.awaitState(name, client.WorkloadStateRunning)
 	s.Require().Len(workload.Instances, 1)
 
 	// Adopting means the same container, not a replacement: a server that started a
@@ -306,14 +306,14 @@ func (s *Suite) TestHealthyWorkloadIsReported() {
 	_, _, err := s.client.Apply(s.ctx(), spec)
 	s.Require().NoError(err)
 
-	s.awaitState(name, "running")
+	s.awaitState(name, client.WorkloadStateRunning)
 
-	workload := s.awaitHealth(name, "healthy")
+	workload := s.awaitHealth(name, client.HealthHealthy)
 	s.Require().Len(workload.Instances, 1)
 
 	reported := workload.Instances[0].Health
 	s.Require().NotNil(reported)
-	s.Equal("healthy", reported.Status)
+	s.Equal(client.HealthHealthy, reported.Status)
 	s.Empty(reported.Error)
 	s.False(reported.CheckedAt.IsZero())
 
@@ -347,7 +347,7 @@ func (s *Suite) TestUnhealthyWorkloadIsReplaced() {
 
 	original := s.awaitInstance(name)
 
-	workload := s.awaitHealth(name, "unhealthy")
+	workload := s.awaitHealth(name, client.HealthUnhealthy)
 	s.Require().Len(workload.Instances, 1)
 
 	reported := workload.Instances[0].Health
@@ -407,7 +407,7 @@ func (s *Suite) TestWarmingWorkloadIsNotReplaced() {
 
 	reported := workload.Instances[0].Health
 	s.Require().NotNil(reported)
-	s.Equal("starting", reported.Status)
+	s.Equal(client.HealthStarting, reported.Status)
 	// It is failing, and being given the chance to stop.
 	s.NotZero(*reported.Failures)
 }
@@ -435,7 +435,7 @@ func (s *Suite) TestApplyDuringTeardownIsRejected() {
 	_, _, err := s.client.Apply(s.ctx(), spec)
 	s.Require().NoError(err)
 
-	s.awaitState(name, "running")
+	s.awaitState(name, client.WorkloadStateRunning)
 
 	// Delete returns as soon as the intent is recorded, so the workload is still on
 	// its way out here.

@@ -141,7 +141,7 @@ func (s *Suite) workloadName() string {
 }
 
 // awaitState waits for the named workload to reach the given state and returns it.
-func (s *Suite) awaitState(name, state string) client.Workload {
+func (s *Suite) awaitState(name string, state client.WorkloadState) client.Workload {
 	var workload client.Workload
 
 	s.Require().Eventuallyf(func() bool {
@@ -156,7 +156,7 @@ func (s *Suite) awaitState(name, state string) client.Workload {
 
 // awaitHealth waits for the named workload's instance to reach the given health
 // status and returns the workload.
-func (s *Suite) awaitHealth(name, status string) client.Workload {
+func (s *Suite) awaitHealth(name string, status client.HealthStatus) client.Workload {
 	var workload client.Workload
 
 	s.Require().Eventuallyf(func() bool {
@@ -204,7 +204,7 @@ func (s *Suite) awaitInstanceOtherThan(name, previous string) {
 			return false
 		}
 
-		return workload.Instances[0].ID != previous && workload.Instances[0].State == "running"
+		return workload.Instances[0].ID != previous && workload.Instances[0].State == client.InstanceStateRunning
 	}, convergeTimeout, 500*time.Millisecond, "workload %q never replaced instance %s", name, previous)
 }
 
