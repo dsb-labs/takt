@@ -34,7 +34,7 @@ type (
 	// reconciler uses to read desired state and to finish a deletion.
 	WorkloadRepository interface {
 		// List should return every stored workload.
-		List(ctx context.Context) ([]database.Workload, error)
+		List(ctx context.Context, queries ...database.Query) ([]database.Workload, error)
 		// Delete should remove the workload with the given name, which the
 		// reconciler calls once the driver reports its work is gone.
 		Delete(ctx context.Context, name string) error

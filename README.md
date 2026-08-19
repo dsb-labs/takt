@@ -51,6 +51,7 @@ orca serve config.toml          # run the server from a config file
 
 orca apply example.yaml         # create or update a workload
 orca list                       # list workloads              (alias: ls)
+orca list -q '$.labels.app=web' # ...filtered by a query
 orca get example                # show one workload
 orca logs example --tail 20     # read recent output
 orca delete example             # remove it and stop its work (alias: rm)
@@ -61,6 +62,23 @@ Applying the same file twice is a no-op — a workload's version only changes wh
 its specification does, so re-running `apply` never restarts healthy work. Read
 commands print indented JSON, so they pipe into `jq`.
 
+### Finding workloads
+
+`list` takes repeatable `--query` filters, each a JSON path into the workload's
+specification and the value it must hold. A workload has to match all of them, so
+adding a query narrows the result:
+
+```sh
+orca list -q '$.labels.app=web'
+orca list -q '$.labels.app=web' -q '$.labels.env=prod'
+orca list -q '$.container.image=nginx:1.27-alpine'
+orca list -q '$.container.ports[0].to=80'
+```
+
+Labels are just part of the specification, so they need no special syntax. Values
+are compared as text, which is why a number is matched by its digits; a boolean is
+stored as `1` or `0` and has to be written that way.
+
 Deleting is asynchronous. The workload reads as `terminating` while its containers
 are stopped and disappears once nothing is left running for it, so a teardown can
 be watched by polling `get` until it 404s. Applying a workload that is still
@@ -68,6 +86,10 @@ terminating is rejected rather than resurrecting it half-torn-down.
 
 ## How it works
 
+- **Specifications are queryable.** Labels and specs are stored as SQLite JSONB, so
+  a filter runs in the database rather than by loading every workload and discarding
+  most of them. Storing JSONB also means a malformed specification is rejected as it
+  is written rather than when something later tries to read it.
 - **The database stores desired state only.** What is actually running is observed
   from the driver on demand, so nothing persisted can go stale against reality and
   a restart needs no recovery of orca's own bookkeeping.

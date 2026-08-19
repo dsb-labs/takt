@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
@@ -33,6 +34,8 @@ var (
 	// ErrHostPortTaken is returned when a specification pins a host port that
 	// another workload already holds.
 	ErrHostPortTaken = errors.New("host port already in use")
+	// ErrInvalidQuery is returned when a list query is malformed.
+	ErrInvalidQuery = errors.New("invalid query")
 )
 
 type (
@@ -58,8 +61,9 @@ type (
 		Upsert(ctx context.Context, w database.Workload) (database.Workload, bool, error)
 		// Get should return the workload with the given name.
 		Get(ctx context.Context, name string) (database.Workload, error)
-		// List should return every stored workload.
-		List(ctx context.Context) ([]database.Workload, error)
+		// List should return the workloads matching every one of the given queries,
+		// or all of them when none are given.
+		List(ctx context.Context, queries ...database.Query) ([]database.Workload, error)
 		// MarkDeleting should record that the workload with the given name is to be
 		// deleted, returning it as it now stands.
 		MarkDeleting(ctx context.Context, name string) (database.Workload, error)
@@ -233,10 +237,23 @@ func (s *WorkloadService) Get(ctx context.Context, name string) (Workload, error
 	return s.hydrate(ctx, row)
 }
 
-// List returns every workload, with the state observed from the driver merged in.
-func (s *WorkloadService) List(ctx context.Context) ([]Workload, error) {
-	rows, err := s.workloads.List(ctx)
+// List returns the workloads matching every one of the given queries, with the state
+// observed from the driver merged in. Passing no queries returns every workload.
+//
+// Each query is a "path=value" string, where the path is a JSON path into the stored
+// specification. Returns ErrInvalidQuery when one is malformed.
+func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Workload, error) {
+	parsed, err := parseQueries(queries)
 	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.workloads.List(ctx, parsed...)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidQueryPath) {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
+		}
+
 		return nil, fmt.Errorf("failed to list workloads: %w", err)
 	}
 
@@ -304,6 +321,31 @@ func (s *WorkloadService) Logs(ctx context.Context, name string, tail int) (stri
 	}
 
 	return logs, nil
+}
+
+// parseQueries turns "path=value" strings into repository queries.
+//
+// The value may itself contain an equals sign — a label value could — so only the
+// first one separates the two halves.
+func parseQueries(queries []string) ([]database.Query, error) {
+	if len(queries) == 0 {
+		return nil, nil
+	}
+
+	parsed := make([]database.Query, 0, len(queries))
+	for _, query := range queries {
+		path, value, ok := strings.Cut(query, "=")
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("%w: %q must be in path=value form", ErrInvalidQuery, query)
+		case path == "":
+			return nil, fmt.Errorf("%w: %q has no path", ErrInvalidQuery, query)
+		}
+
+		parsed = append(parsed, database.Query{Path: path, Value: value})
+	}
+
+	return parsed, nil
 }
 
 // Reallocate gives the named workload fresh host ports for any it holds

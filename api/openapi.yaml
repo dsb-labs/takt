@@ -27,19 +27,41 @@ paths:
     get:
       operationId: listWorkloads
       tags: [workloads]
-      summary: List every workload
+      summary: List workloads
       description: |
-        Returns every workload known to the server, with the observed state of each
+        Returns the workloads known to the server, with the observed state of each
         one's instances merged in.
+
+        Repeating the `query` parameter narrows the result: a workload is returned
+        only when it satisfies every query given.
+      parameters:
+        - name: query
+          in: query
+          required: false
+          description: |
+            A `path=value` filter over the workload's specification, where the path
+            is a JSON path such as `$.labels.app`. May be repeated, in which case a
+            workload must match all of them.
+
+            Values are compared as text, so a number in the specification is matched
+            by its digits (`$.container.ports[0].to=80`). A boolean is stored as 1 or
+            0 and must be written that way.
+          schema:
+            type: array
+            items:
+              type: string
+              examples: ["$.labels.app=web"]
       responses:
         "200":
-          description: The workloads known to the server.
+          description: The matching workloads.
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/Workload"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalServerError"
 

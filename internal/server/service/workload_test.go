@@ -305,6 +305,62 @@ func TestWorkloadService_List(t *testing.T) {
 	})
 }
 
+func TestWorkloadService_List_Queries(t *testing.T) {
+	t.Parallel()
+
+	t.Run("passes parsed queries to the repository", func(t *testing.T) {
+		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.labels.app", Value: "web"}}).
+			Return([]database.Workload{storedWorkload("example")}, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		got, err := svc.List(t.Context(), "$.labels.app=web")
+		require.NoError(t, err)
+		assert.Len(t, got, 1)
+	})
+
+	t.Run("keeps an equals sign in the value", func(t *testing.T) {
+		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		// Only the first equals separates path from value, since a value may well
+		// contain one of its own.
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.labels.expr", Value: "a=b"}}).
+			Return(nil, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.List(t.Context(), "$.labels.expr=a=b")
+		require.NoError(t, err)
+	})
+
+	t.Run("rejects a query that is not path=value", func(t *testing.T) {
+		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.List(t.Context(), "$.labels.app")
+		assert.ErrorIs(t, err, service.ErrInvalidQuery)
+	})
+
+	t.Run("reports a path the repository cannot parse", func(t *testing.T) {
+		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().List(mock.Anything, mock.Anything).
+			Return(nil, database.ErrInvalidQueryPath).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		// A bad path is the caller's mistake, so it must not surface as a server
+		// failure.
+		_, err := svc.List(t.Context(), "nonsense=web")
+		assert.ErrorIs(t, err, service.ErrInvalidQuery)
+	})
+}
+
 func TestWorkloadService_Delete(t *testing.T) {
 	t.Parallel()
 

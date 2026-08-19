@@ -114,9 +114,19 @@ func (c *Client) Get(ctx context.Context, name string) (Workload, error) {
 	}
 }
 
-// List returns every workload known to the server.
-func (c *Client) List(ctx context.Context) ([]Workload, error) {
-	resp, err := c.api.ListWorkloadsWithResponse(ctx)
+// List returns the workloads matching every one of the given queries, or all of them
+// when none are given.
+//
+// A query is a "path=value" filter over the workload's specification, where the path
+// is a JSON path such as "$.labels.app". Values are compared as text, so a number is
+// matched by its digits.
+func (c *Client) List(ctx context.Context, queries ...string) ([]Workload, error) {
+	var params api.ListWorkloadsParams
+	if len(queries) > 0 {
+		params.Query = &queries
+	}
+
+	resp, err := c.api.ListWorkloadsWithResponse(ctx, &params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list workloads: %w", err)
 	}
@@ -129,6 +139,8 @@ func (c *Client) List(ctx context.Context) ([]Workload, error) {
 		}
 
 		return workloads, nil
+	case resp.JSON400 != nil:
+		return nil, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON500 != nil:
 		return nil, newError(http.StatusInternalServerError, resp.JSON500)
 	default:

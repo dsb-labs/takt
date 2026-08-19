@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rs/xid"
@@ -13,6 +14,8 @@ import (
 var (
 	// ErrWorkloadNotFound is returned when no workload exists with the requested name.
 	ErrWorkloadNotFound = errors.New("workload not found")
+	// ErrInvalidQueryPath is returned when a query names a path SQLite cannot parse.
+	ErrInvalidQueryPath = errors.New("invalid query path")
 )
 
 type (
@@ -48,6 +51,19 @@ type (
 		// reports its work is gone, so that the teardown is observable and the
 		// reconciler is the only thing that removes running work.
 		DeletedAt time.Time
+	}
+
+	// The Query type matches workloads whose stored specification has the given
+	// value at the given path.
+	//
+	// The path is a SQLite JSON path over the whole specification, so a query can
+	// reach anything the specification holds — including labels, which live under
+	// $.labels.
+	Query struct {
+		// The JSON path into the specification, such as "$.labels.app".
+		Path string
+		// The value the path must hold, compared as text.
+		Value string
 	}
 
 	// The WorkloadRepository type provides persistence operations for the workload domain.
@@ -190,15 +206,25 @@ func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, er
 	return w, nil
 }
 
-// List returns every workload, ordered by name.
-func (r *WorkloadRepository) List(ctx context.Context) ([]Workload, error) {
+// List returns the workloads matching every one of the given queries, ordered by
+// name. Passing no queries returns every workload.
+//
+// Filtering happens in the database rather than in the caller, so a query that
+// matches little doesn't cost a read of everything it discards. Returns
+// ErrInvalidQueryPath when a query names a path SQLite cannot parse.
+func (r *WorkloadRepository) List(ctx context.Context, queries ...Query) ([]Workload, error) {
 	const q = `
 		SELECT id, name, version, runtime, schedule, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at
 		FROM workload
-		ORDER BY name ASC
 	`
 
-	rows, err := r.db.QueryContext(ctx, q)
+	if err := r.validPaths(ctx, queries); err != nil {
+		return nil, err
+	}
+
+	where, args := filter(queries)
+
+	rows, err := r.db.QueryContext(ctx, q+where+"\n\t\tORDER BY name ASC\n\t", args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query workloads: %w", err)
 	}
@@ -284,6 +310,48 @@ func (r *WorkloadRepository) Delete(ctx context.Context, name string) error {
 		return fmt.Errorf("failed to count deleted workloads: %w", err)
 	case affected == 0:
 		return ErrWorkloadNotFound
+	}
+
+	return nil
+}
+
+// filter builds the WHERE clause matching every query, along with its arguments.
+//
+// Each comparison is made as text so that a caller which only has strings — a CLI, a
+// URL query parameter — matches a number in the specification as readily as a string.
+// The path is bound as a parameter rather than interpolated, so a query cannot reach
+// beyond the value it is inspecting.
+func filter(queries []Query) (string, []any) {
+	if len(queries) == 0 {
+		return "", nil
+	}
+
+	clauses := make([]string, 0, len(queries))
+	args := make([]any, 0, len(queries)*2)
+
+	for _, query := range queries {
+		clauses = append(clauses, "CAST(json_extract(spec, ?) AS TEXT) = ?")
+		args = append(args, query.Path, query.Value)
+	}
+
+	return "\n\t\tWHERE " + strings.Join(clauses, "\n\t\t  AND "), args
+}
+
+// validPaths reports whether SQLite can parse every query's path.
+//
+// A malformed path fails the whole query, which would otherwise surface as an
+// internal error well after the caller could have been told they mistyped something.
+// The check asks SQLite to parse each path against an empty object: it needs no data,
+// and agreeing with the engine that will run the query is the point — a hand-written
+// approximation would accept paths the query then rejects.
+func (r *WorkloadRepository) validPaths(ctx context.Context, queries []Query) error {
+	const q = `SELECT json_extract('{}', ?)`
+
+	for _, query := range queries {
+		var ignored sql.NullString
+		if err := r.db.QueryRowContext(ctx, q, query.Path).Scan(&ignored); err != nil {
+			return fmt.Errorf("%w: %q", ErrInvalidQueryPath, query.Path)
+		}
 	}
 
 	return nil

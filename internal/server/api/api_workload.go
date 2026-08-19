@@ -19,8 +19,9 @@ type (
 		Apply(ctx context.Context, spec api.WorkloadSpec) (service.Workload, bool, error)
 		// Get should return the workload with the given name.
 		Get(ctx context.Context, name string) (service.Workload, error)
-		// List should return every workload.
-		List(ctx context.Context) ([]service.Workload, error)
+		// List should return the workloads matching every one of the given queries,
+		// or all of them when none are given.
+		List(ctx context.Context, queries ...string) ([]service.Workload, error)
 		// Delete should mark the workload with the given name for deletion,
 		// returning it as it now stands.
 		Delete(ctx context.Context, name string) (service.Workload, error)
@@ -128,10 +129,21 @@ func (a *WorkloadAPI) GetWorkload(ctx context.Context, request api.GetWorkloadRe
 	return api.GetWorkload200JSONResponse(newWorkload(workload)), nil
 }
 
-// ListWorkloads returns every workload known to the server.
-func (a *WorkloadAPI) ListWorkloads(ctx context.Context, _ api.ListWorkloadsRequestObject) (api.ListWorkloadsResponseObject, error) {
-	workloads, err := a.workloads.List(ctx)
-	if err != nil {
+// ListWorkloads returns the workloads matching the request's queries, or every
+// workload when it carries none.
+func (a *WorkloadAPI) ListWorkloads(ctx context.Context, request api.ListWorkloadsRequestObject) (api.ListWorkloadsResponseObject, error) {
+	var queries []string
+	if request.Params.Query != nil {
+		queries = *request.Params.Query
+	}
+
+	workloads, err := a.workloads.List(ctx, queries...)
+	switch {
+	case errors.Is(err, service.ErrInvalidQuery):
+		return api.ListWorkloads400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+		}, nil
+	case err != nil:
 		return api.ListWorkloads500JSONResponse{
 			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
 				Error: fmt.Sprintf("failed to list workloads: %v", err),

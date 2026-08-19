@@ -288,6 +288,18 @@ type InternalServerError = ErrorResponse
 // NotFound The body returned for any unsuccessful request.
 type NotFound = ErrorResponse
 
+// ListWorkloadsParams defines parameters for ListWorkloads.
+type ListWorkloadsParams struct {
+	// Query A `path=value` filter over the workload's specification, where the path
+	// is a JSON path such as `$.labels.app`. May be repeated, in which case a
+	// workload must match all of them.
+	//
+	// Values are compared as text, so a number in the specification is matched
+	// by its digits (`$.container.ports[0].to=80`). A boolean is stored as 1 or
+	// 0 and must be written that way.
+	Query *[]string `form:"query,omitempty" json:"query,omitempty"`
+}
+
 // GetWorkloadLogsParams defines parameters for GetWorkloadLogs.
 type GetWorkloadLogsParams struct {
 	// Tail The number of lines to return from the end of the logs.
@@ -371,13 +383,16 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
-	// ListWorkloads List every workload
+	// ListWorkloads List workloads
 	//
-	// Returns every workload known to the server, with the observed state of each
+	// Returns the workloads known to the server, with the observed state of each
 	// one's instances merged in.
 	//
+	// Repeating the `query` parameter narrows the result: a workload is returned
+	// only when it satisfies every query given.
+	//
 	// Corresponds with GET /api/v1/workloads (the `ListWorkloads` operationId).
-	ListWorkloads(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListWorkloads(ctx context.Context, params *ListWorkloadsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteWorkload Delete a workload
 	//
@@ -436,14 +451,17 @@ type ClientInterface interface {
 	GetWorkloadLogs(ctx context.Context, name WorkloadName, params *GetWorkloadLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
-// ListWorkloads List every workload
+// ListWorkloads List workloads
 //
-// Returns every workload known to the server, with the observed state of each
+// Returns the workloads known to the server, with the observed state of each
 // one's instances merged in.
 //
+// Repeating the `query` parameter narrows the result: a workload is returned
+// only when it satisfies every query given.
+//
 // Corresponds with GET /api/v1/workloads (the `ListWorkloads` operationId).
-func (c *Client) ListWorkloads(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListWorkloadsRequest(c.Server)
+func (c *Client) ListWorkloads(ctx context.Context, params *ListWorkloadsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListWorkloadsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -561,7 +579,7 @@ func (c *Client) GetWorkloadLogs(ctx context.Context, name WorkloadName, params 
 }
 
 // NewListWorkloadsRequest constructs an http.Request for the ListWorkloads method
-func NewListWorkloadsRequest(server string) (*http.Request, error) {
+func NewListWorkloadsRequest(server string, params *ListWorkloadsParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -577,6 +595,33 @@ func NewListWorkloadsRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Query != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "query", *params.Query, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -807,15 +852,18 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
-	// ListWorkloadsWithResponse List every workload
+	// ListWorkloadsWithResponse List workloads
 	//
-	// Returns every workload known to the server, with the observed state of each
+	// Returns the workloads known to the server, with the observed state of each
 	// one's instances merged in.
+	//
+	// Repeating the `query` parameter narrows the result: a workload is returned
+	// only when it satisfies every query given.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/v1/workloads (the `ListWorkloads` operationId).
-	ListWorkloadsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListWorkloadsResponse, error)
+	ListWorkloadsWithResponse(ctx context.Context, params *ListWorkloadsParams, reqEditors ...RequestEditorFn) (*ListWorkloadsResponse, error)
 
 	// DeleteWorkloadWithResponse Delete a workload
 	//
@@ -885,6 +933,8 @@ type ListWorkloadsResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *[]Workload
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 }
@@ -892,6 +942,11 @@ type ListWorkloadsResponse struct {
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r ListWorkloadsResponse) GetJSON200() *[]Workload {
 	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListWorkloadsResponse) GetJSON400() *BadRequest {
+	return r.JSON400
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -1162,16 +1217,19 @@ func (r GetWorkloadLogsResponse) ContentType() string {
 	return ""
 }
 
-// ListWorkloadsWithResponse List every workload
+// ListWorkloadsWithResponse List workloads
 //
-// Returns every workload known to the server, with the observed state of each
+// Returns the workloads known to the server, with the observed state of each
 // one's instances merged in.
+//
+// Repeating the `query` parameter narrows the result: a workload is returned
+// only when it satisfies every query given.
 //
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/v1/workloads (the `ListWorkloads` operationId).
-func (c *ClientWithResponses) ListWorkloadsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListWorkloadsResponse, error) {
-	rsp, err := c.ListWorkloads(ctx, reqEditors...)
+func (c *ClientWithResponses) ListWorkloadsWithResponse(ctx context.Context, params *ListWorkloadsParams, reqEditors ...RequestEditorFn) (*ListWorkloadsResponse, error) {
+	rsp, err := c.ListWorkloads(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -1290,6 +1348,13 @@ func ParseListWorkloadsResponse(rsp *http.Response) (*ListWorkloadsResponse, err
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -1479,9 +1544,9 @@ func ParseGetWorkloadLogsResponse(rsp *http.Response) (*GetWorkloadLogsResponse,
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// ListWorkloads List every workload
+	// ListWorkloads List workloads
 	// (GET /api/v1/workloads)
-	ListWorkloads(w http.ResponseWriter, r *http.Request)
+	ListWorkloads(w http.ResponseWriter, r *http.Request, params ListWorkloadsParams)
 	// DeleteWorkload Delete a workload
 	// (DELETE /api/v1/workloads/{name})
 	DeleteWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
@@ -1508,8 +1573,27 @@ type MiddlewareFunc func(http.Handler) http.Handler
 // ListWorkloads operation middleware
 func (siw *ServerInterfaceWrapper) ListWorkloads(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWorkloadsParams
+
+	// ------------- Optional query parameter "query" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", r.URL.Query(), &params.Query, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "query"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "query", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListWorkloads(w, r)
+		siw.Handler.ListWorkloads(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1775,6 +1859,7 @@ type InternalServerErrorJSONResponse ErrorResponse
 type NotFoundJSONResponse ErrorResponse
 
 type ListWorkloadsRequestObject struct {
+	Params ListWorkloadsParams
 }
 
 type ListWorkloadsResponseObject interface {
@@ -1791,6 +1876,20 @@ func (response ListWorkloads200JSONResponse) VisitListWorkloadsResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListWorkloads400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListWorkloads400JSONResponse) VisitListWorkloadsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -2062,7 +2161,7 @@ func (response GetWorkloadLogs500JSONResponse) VisitGetWorkloadLogsResponse(w ht
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
-	// ListWorkloads List every workload
+	// ListWorkloads List workloads
 	// (GET /api/v1/workloads)
 	ListWorkloads(ctx context.Context, request ListWorkloadsRequestObject) (ListWorkloadsResponseObject, error)
 	// DeleteWorkload Delete a workload
@@ -2119,8 +2218,10 @@ type strictHandler struct {
 }
 
 // ListWorkloads operation middleware
-func (sh *strictHandler) ListWorkloads(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) ListWorkloads(w http.ResponseWriter, r *http.Request, params ListWorkloadsParams) {
 	var request ListWorkloadsRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListWorkloads(ctx, request.(ListWorkloadsRequestObject))

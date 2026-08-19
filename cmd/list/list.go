@@ -14,19 +14,30 @@ import (
 // server.
 func Command() *cobra.Command {
 	var address string
+	var queries []string
 
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
-		Short:   "List every workload",
-		Args:    cobra.NoArgs,
+		Short:   "List workloads",
+		Long: "List workloads.\n\n" +
+			"Repeat --query to narrow the result; a workload has to match all of them.\n" +
+			"A query is a JSON path into the workload's specification and the value it\n" +
+			"must hold:\n\n" +
+			"  orca list --query '$.labels.app=web'\n" +
+			"  orca list -q '$.labels.app=web' -q '$.labels.env=prod'\n" +
+			"  orca list -q '$.container.image=nginx:1.27-alpine'\n\n" +
+			"Values are compared as text, so a number is matched by its digits\n" +
+			"($.container.ports[0].to=80). A boolean is stored as 1 or 0 and has to be\n" +
+			"written that way.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := client.New(address)
 			if err != nil {
 				return err
 			}
 
-			workloads, err := c.List(cmd.Context())
+			workloads, err := c.List(cmd.Context(), queries...)
 			if err != nil {
 				return fmt.Errorf("failed to list workloads: %w", err)
 			}
@@ -38,7 +49,9 @@ func Command() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
+	flags := cmd.Flags()
+	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
+	flags.StringArrayVarP(&queries, "query", "q", nil, "filter by a path=value query into the specification, repeatable")
 
 	return cmd
 }

@@ -153,6 +153,111 @@ func TestWorkloadRepository_List(t *testing.T) {
 	})
 }
 
+func TestWorkloadRepository_List_Query(t *testing.T) {
+	t.Parallel()
+
+	// Three workloads whose specifications differ in labels, image and port, so a
+	// query can be aimed at each kind of value.
+	seed := func(t *testing.T, repo *database.WorkloadRepository) {
+		t.Helper()
+
+		specs := map[string]string{
+			"alpha":   `{"name":"alpha","labels":{"app":"web","env":"prod"},"container":{"image":"nginx:1.27","ports":[{"to":80,"from":8080}]}}`,
+			"bravo":   `{"name":"bravo","labels":{"app":"api","env":"prod"},"container":{"image":"redis:7","ports":[{"to":6379}]}}`,
+			"charlie": `{"name":"charlie","labels":{"app":"web","env":"dev"},"container":{"image":"nginx:1.27"}}`,
+		}
+
+		for name, spec := range specs {
+			_, _, err := repo.Upsert(t.Context(), database.Workload{
+				Name:     name,
+				Runtime:  "container",
+				Spec:     []byte(spec),
+				SpecHash: "hash-" + name,
+			})
+			require.NoError(t, err)
+		}
+	}
+
+	tt := []struct {
+		Name     string
+		Queries  []database.Query
+		Expected []string
+	}{
+		{
+			Name:     "no queries returns everything",
+			Expected: []string{"alpha", "bravo", "charlie"},
+		},
+		{
+			Name:     "matches a label",
+			Queries:  []database.Query{{Path: "$.labels.app", Value: "web"}},
+			Expected: []string{"alpha", "charlie"},
+		},
+		{
+			Name: "multiple queries are combined with and",
+			Queries: []database.Query{
+				{Path: "$.labels.app", Value: "web"},
+				{Path: "$.labels.env", Value: "prod"},
+			},
+			Expected: []string{"alpha"},
+		},
+		{
+			Name:     "reaches a nested value outside labels",
+			Queries:  []database.Query{{Path: "$.container.image", Value: "nginx:1.27"}},
+			Expected: []string{"alpha", "charlie"},
+		},
+		{
+			Name: "matches a number written as text",
+			// A caller with only strings — a CLI, a URL parameter — has to be able
+			// to match a number in the specification.
+			Queries:  []database.Query{{Path: "$.container.ports[0].to", Value: "80"}},
+			Expected: []string{"alpha"},
+		},
+		{
+			Name:     "a value nothing holds matches nothing",
+			Queries:  []database.Query{{Path: "$.labels.app", Value: "nope"}},
+			Expected: nil,
+		},
+		{
+			Name: "a path absent from some workloads matches only those that have it",
+			// charlie publishes no ports, so the path is missing rather than
+			// different: that must skip the row rather than fail the query.
+			Queries:  []database.Query{{Path: "$.container.ports[0].to", Value: "6379"}},
+			Expected: []string{"bravo"},
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			repo := newTestRepository(t)
+			seed(t, repo)
+
+			got, err := repo.List(t.Context(), tc.Queries...)
+			require.NoError(t, err)
+
+			names := make([]string, 0, len(got))
+			for _, workload := range got {
+				names = append(names, workload.Name)
+			}
+
+			if tc.Expected == nil {
+				assert.Empty(t, names)
+				return
+			}
+
+			assert.Equal(t, tc.Expected, names)
+		})
+	}
+
+	t.Run("reports a path sqlite cannot parse", func(t *testing.T) {
+		repo := newTestRepository(t)
+
+		// A malformed path would otherwise fail the whole query as an internal
+		// error, long after the caller could be told they mistyped it.
+		_, err := repo.List(t.Context(), database.Query{Path: "not a path", Value: "web"})
+		assert.ErrorIs(t, err, database.ErrInvalidQueryPath)
+	})
+}
+
 func TestWorkloadRepository_MarkDeleting(t *testing.T) {
 	t.Parallel()
 

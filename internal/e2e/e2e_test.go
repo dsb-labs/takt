@@ -92,6 +92,59 @@ func (s *Suite) TestWorkloadLifecycle() {
 	s.Empty(s.containers(name))
 }
 
+// TestListQuery covers filtering the list by a query into the stored specification,
+// which is how an operator finds workloads without knowing their names.
+func (s *Suite) TestListQuery() {
+	web, api := s.workloadName()+"-web", s.workloadName()+"-api"
+	s.T().Cleanup(func() { s.cleanup(web) })
+	s.T().Cleanup(func() { s.cleanup(api) })
+
+	first := s.containerSpec(web, manifest.Port{To: 80})
+	first.Labels = map[string]string{"app": "web", "env": "prod"}
+
+	second := s.containerSpec(api, manifest.Port{To: 80})
+	second.Labels = map[string]string{"app": "api", "env": "prod"}
+
+	_, _, err := s.client.Apply(s.ctx(), first)
+	s.Require().NoError(err)
+	_, _, err = s.client.Apply(s.ctx(), second)
+	s.Require().NoError(err)
+
+	// A label is reachable like any other part of the specification.
+	matched, err := s.client.List(s.ctx(), "$.labels.app=web")
+	s.Require().NoError(err)
+	s.Equal([]string{web}, s.names(matched))
+
+	// Queries are combined, so adding one narrows rather than widens.
+	both, err := s.client.List(s.ctx(), "$.labels.env=prod")
+	s.Require().NoError(err)
+	s.Len(both, 2)
+
+	narrowed, err := s.client.List(s.ctx(), "$.labels.env=prod", "$.labels.app=api")
+	s.Require().NoError(err)
+	s.Equal([]string{api}, s.names(narrowed))
+
+	// The query reaches past labels into the rest of the specification.
+	byImage, err := s.client.List(s.ctx(), "$.container.image="+testImage)
+	s.Require().NoError(err)
+	s.Len(byImage, 2)
+
+	// A number in the specification is matched by its digits, since a caller only
+	// ever has strings to hand.
+	byPort, err := s.client.List(s.ctx(), "$.container.ports[0].to=80")
+	s.Require().NoError(err)
+	s.Len(byPort, 2)
+
+	// Nothing matching is an empty result, not an error.
+	none, err := s.client.List(s.ctx(), "$.labels.app=nope")
+	s.Require().NoError(err)
+	s.Empty(none)
+
+	// A malformed query is the caller's mistake and has to be reported as such.
+	_, err = s.client.List(s.ctx(), "$.labels.app")
+	s.True(client.IsBadRequest(err), "expected a bad request error, got %v", err)
+}
+
 // TestDynamicPortIsAllocated covers the usual case for a port: the manifest names
 // only the port inside the container and orca picks the host port that reaches it.
 func (s *Suite) TestDynamicPortIsAllocated() {

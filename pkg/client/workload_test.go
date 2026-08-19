@@ -166,6 +166,26 @@ func TestClient_List(t *testing.T) {
 		assert.Equal(t, "bravo", got[1].Name)
 	})
 
+	t.Run("sends queries as repeated parameters", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, []string{"$.labels.app=web", "$.labels.env=prod"}, r.URL.Query()["query"])
+
+			writeJSON(t, w, http.StatusOK, []api.Workload{})
+		})
+
+		_, err := c.List(t.Context(), "$.labels.app=web", "$.labels.env=prod")
+		require.NoError(t, err)
+	})
+
+	t.Run("reports a malformed query", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusBadRequest, api.ErrorResponse{Error: "invalid query"})
+		})
+
+		_, err := c.List(t.Context(), "nonsense")
+		assert.True(t, client.IsBadRequest(err))
+	})
+
 	t.Run("returns nothing when there are none", func(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(t, w, http.StatusOK, []api.Workload{})

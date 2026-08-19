@@ -372,8 +372,14 @@ func (_c *MockWorkloadRepository_Delete_Call) RunAndReturn(run func(ctx context.
 }
 
 // List provides a mock function for the type MockWorkloadRepository
-func (_mock *MockWorkloadRepository) List(ctx context.Context) ([]database.Workload, error) {
-	ret := _mock.Called(ctx)
+func (_mock *MockWorkloadRepository) List(ctx context.Context, queries ...database.Query) ([]database.Workload, error) {
+	var tmpRet mock.Arguments
+	if len(queries) > 0 {
+		tmpRet = _mock.Called(ctx, queries)
+	} else {
+		tmpRet = _mock.Called(ctx)
+	}
+	ret := tmpRet
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -381,18 +387,18 @@ func (_mock *MockWorkloadRepository) List(ctx context.Context) ([]database.Workl
 
 	var r0 []database.Workload
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]database.Workload, error)); ok {
-		return returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...database.Query) ([]database.Workload, error)); ok {
+		return returnFunc(ctx, queries...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []database.Workload); ok {
-		r0 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...database.Query) []database.Workload); ok {
+		r0 = returnFunc(ctx, queries...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]database.Workload)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, ...database.Query) error); ok {
+		r1 = returnFunc(ctx, queries...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -406,18 +412,27 @@ type MockWorkloadRepository_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockWorkloadRepository_Expecter) List(ctx any) *MockWorkloadRepository_List_Call {
-	return &MockWorkloadRepository_List_Call{Call: _e.mock.On("List", ctx)}
+//   - queries ...database.Query
+func (_e *MockWorkloadRepository_Expecter) List(ctx any, queries ...any) *MockWorkloadRepository_List_Call {
+	return &MockWorkloadRepository_List_Call{Call: _e.mock.On("List",
+		append([]any{ctx}, queries...)...)}
 }
 
-func (_c *MockWorkloadRepository_List_Call) Run(run func(ctx context.Context)) *MockWorkloadRepository_List_Call {
+func (_c *MockWorkloadRepository_List_Call) Run(run func(ctx context.Context, queries ...database.Query)) *MockWorkloadRepository_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
+		var arg1 []database.Query
+		var variadicArgs []database.Query
+		if len(args) > 1 {
+			variadicArgs = args[1].([]database.Query)
+		}
+		arg1 = variadicArgs
 		run(
 			arg0,
+			arg1...,
 		)
 	})
 	return _c
@@ -428,7 +443,7 @@ func (_c *MockWorkloadRepository_List_Call) Return(workloads []database.Workload
 	return _c
 }
 
-func (_c *MockWorkloadRepository_List_Call) RunAndReturn(run func(ctx context.Context) ([]database.Workload, error)) *MockWorkloadRepository_List_Call {
+func (_c *MockWorkloadRepository_List_Call) RunAndReturn(run func(ctx context.Context, queries ...database.Query) ([]database.Workload, error)) *MockWorkloadRepository_List_Call {
 	_c.Call.Return(run)
 	return _c
 }

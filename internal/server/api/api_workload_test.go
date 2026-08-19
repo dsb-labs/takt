@@ -225,6 +225,25 @@ func TestWorkloadAPI_ListWorkloads(t *testing.T) {
 		assert.Equal(t, "bravo", got[1].Name)
 	})
 
+	t.Run("passes queries through", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().List(mock.Anything, []string{"$.labels.app=web", "$.labels.env=prod"}).
+			Return(nil, nil).Once()
+
+		resp := do(t, svc, http.MethodGet,
+			"/api/v1/workloads?query=%24.labels.app%3Dweb&query=%24.labels.env%3Dprod", nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("reports a malformed query", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().List(mock.Anything, mock.Anything).
+			Return(nil, service.ErrInvalidQuery).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads?query=nonsense", nil)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
 	t.Run("returns an empty array when there are none", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().List(mock.Anything).Return(nil, nil).Once()
