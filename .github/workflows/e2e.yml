@@ -1,0 +1,39 @@
+name: e2e
+
+concurrency:
+  group: ${{ github.workflow }}/${{ github.ref_name }}
+
+on:
+  schedule:
+    # Early morning UTC, so a failure is waiting at the start of the day rather
+    # than landing mid-afternoon.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The suite drives a real daemon rather than a mock, so it needs one to be
+      # running. ubuntu-latest ships docker already, so this only proves it is
+      # reachable before the tests assume it.
+      - name: Check docker is available
+        run: docker version
+
+      # The timeout is well above the observed runtime: the tests wait on real
+      # container lifecycles, and the first workload pays to pull the image.
+      - name: Run end-to-end tests
+        run: go test -race -timeout 20m ./internal/e2e/...
+
+      - name: Report leftover containers
+        if: failure()
+        run: docker ps --all --filter label=orca.workload

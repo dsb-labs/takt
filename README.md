@@ -99,8 +99,14 @@ format: the server, client and shared models are all generated from it, so an AP
 change starts there.
 
 ```sh
-go generate ./...        # regenerate the api and the mocks
-go test -race ./...
+go generate ./...          # regenerate the api and the mocks
+go test -race ./...        # everything, including the end-to-end suite
+go test -short ./...       # unit tests only, no docker needed
 go tool staticcheck ./...
-go run . serve dev.toml  # localhost, debug logging, ./data
+go run . serve dev.toml    # localhost, debug logging, ./data
 ```
+
+The end-to-end tests in `internal/e2e` run a real server against a real Docker
+daemon, so they need one running and are skipped by `-short`. They also run on a
+daily schedule, which catches breakage that isn't tied to a code change — a runner
+upgrading Docker, or the image tag they use moving underneath them.
