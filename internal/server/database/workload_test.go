@@ -2,7 +2,6 @@ package database_test
 
 import (
 	"log/slog"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -171,13 +170,13 @@ func TestWorkloadRepository_MarkDeleting(t *testing.T) {
 
 		marked, err := repo.MarkDeleting(ctx, "example")
 		require.NoError(t, err)
-		assert.False(t, marked.DeletingAt.IsZero())
+		assert.False(t, marked.DeletedAt.IsZero())
 
 		// The row has to survive so that the reconciler still knows what to tear
 		// down, and so the teardown stays observable.
 		stored, err := repo.Get(ctx, "example")
 		require.NoError(t, err)
-		assert.False(t, stored.DeletingAt.IsZero())
+		assert.False(t, stored.DeletedAt.IsZero())
 	})
 
 	t.Run("is idempotent", func(t *testing.T) {
@@ -200,7 +199,7 @@ func TestWorkloadRepository_MarkDeleting(t *testing.T) {
 
 		// A repeated delete must not restart the clock, or a caller retrying could
 		// hold a workload in teardown indefinitely.
-		assert.Equal(t, first.DeletingAt, second.DeletingAt)
+		assert.Equal(t, first.DeletedAt, second.DeletedAt)
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
@@ -243,14 +242,7 @@ func TestWorkloadRepository_Delete(t *testing.T) {
 func newTestRepository(t *testing.T) *database.WorkloadRepository {
 	t.Helper()
 
-	db, err := database.Open(t.Context(), database.Config{
-		Logger: newTestLogger(t),
-		Path:   filepath.Join(t.TempDir(), "test.db"),
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, db.Close()) })
-
-	return database.NewWorkloadRepository(db)
+	return database.NewWorkloadRepository(newTestDatabase(t))
 }
 
 func newTestLogger(t *testing.T) *slog.Logger {

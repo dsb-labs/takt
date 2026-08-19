@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/rs/xid"
 )
 
 var (
@@ -18,6 +20,10 @@ type (
 	// by the server. The spec is stored as canonical JSON so that the wire format
 	// remains the single description of a workload's shape.
 	Workload struct {
+		// The identifier the server assigns to the workload. It exists so that rows
+		// referring to a workload do not depend on its name, which is the operator's
+		// handle and could otherwise never change; it is not exposed by the API.
+		ID string
 		// The name that identifies the workload.
 		Name string
 		// Incremented every time the workload's specification changes.
@@ -41,7 +47,7 @@ type (
 		// has not been. A workload being deleted keeps its row until the driver
 		// reports its work is gone, so that the teardown is observable and the
 		// reconciler is the only thing that removes running work.
-		DeletingAt time.Time
+		DeletedAt time.Time
 	}
 
 	// The WorkloadRepository type provides persistence operations for the workload domain.
@@ -99,18 +105,21 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload) (Workload, 
 
 func (r *WorkloadRepository) insert(ctx context.Context, w Workload, labels string) (Workload, error) {
 	const q = `
-		INSERT INTO workload (name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO workload (id, name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`
 
 	now := time.Now().UTC()
 	timestamp := formatTime(now)
 
-	_, err := r.db.ExecContext(ctx, q, w.Name, 1, w.Runtime, w.Schedule, string(w.Spec), w.SpecHash, labels, timestamp, timestamp)
+	id := xid.New().String()
+
+	_, err := r.db.ExecContext(ctx, q, id, w.Name, 1, w.Runtime, w.Schedule, string(w.Spec), w.SpecHash, labels, timestamp, timestamp)
 	if err != nil {
 		return Workload{}, fmt.Errorf("failed to insert workload: %w", err)
 	}
 
+	w.ID = id
 	w.Version = 1
 	w.CreatedAt = now
 	w.UpdatedAt = now
@@ -141,6 +150,7 @@ func (r *WorkloadRepository) update(ctx context.Context, w Workload, labels stri
 		return Workload{}, ErrWorkloadNotFound
 	}
 
+	w.ID = existing.ID
 	w.Version = version
 	w.CreatedAt = existing.CreatedAt
 	w.UpdatedAt = now
@@ -152,19 +162,19 @@ func (r *WorkloadRepository) update(ctx context.Context, w Workload, labels stri
 // when no such workload exists.
 func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, error) {
 	const q = `
-		SELECT name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at, deleting_at
+		SELECT id, name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at, deleted_at
 		FROM workload
 		WHERE name = ?
 	`
 
 	var (
-		w                                Workload
-		spec, labels                     string
-		createdAt, updatedAt, deletingAt string
+		w                               Workload
+		spec, labels                    string
+		createdAt, updatedAt, deletedAt string
 	)
 
 	err := r.db.QueryRowContext(ctx, q, name).Scan(
-		&w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletingAt,
+		&w.ID, &w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt,
 	)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -173,7 +183,7 @@ func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, er
 		return Workload{}, fmt.Errorf("failed to load workload: %w", err)
 	}
 
-	if err = hydrate(&w, spec, labels, createdAt, updatedAt, deletingAt); err != nil {
+	if err = hydrate(&w, spec, labels, createdAt, updatedAt, deletedAt); err != nil {
 		return Workload{}, err
 	}
 
@@ -183,7 +193,7 @@ func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, er
 // List returns every workload, ordered by name.
 func (r *WorkloadRepository) List(ctx context.Context) ([]Workload, error) {
 	const q = `
-		SELECT name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at, deleting_at
+		SELECT id, name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at, deleted_at
 		FROM workload
 		ORDER BY name ASC
 	`
@@ -198,16 +208,16 @@ func (r *WorkloadRepository) List(ctx context.Context) ([]Workload, error) {
 
 	for rows.Next() {
 		var (
-			w                                Workload
-			spec, labels                     string
-			createdAt, updatedAt, deletingAt string
+			w                               Workload
+			spec, labels                    string
+			createdAt, updatedAt, deletedAt string
 		)
 
-		if err = rows.Scan(&w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletingAt); err != nil {
+		if err = rows.Scan(&w.ID, &w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan workload: %w", err)
 		}
 
-		if err = hydrate(&w, spec, labels, createdAt, updatedAt, deletingAt); err != nil {
+		if err = hydrate(&w, spec, labels, createdAt, updatedAt, deletedAt); err != nil {
 			return nil, err
 		}
 
@@ -228,8 +238,8 @@ func (r *WorkloadRepository) List(ctx context.Context) ([]Workload, error) {
 func (r *WorkloadRepository) MarkDeleting(ctx context.Context, name string) (Workload, error) {
 	const q = `
 		UPDATE workload
-		SET deleting_at = ?
-		WHERE name = ? AND deleting_at = ''
+		SET deleted_at = ?
+		WHERE name = ? AND deleted_at = ''
 	`
 
 	existing, err := r.Get(ctx, name)
@@ -237,7 +247,7 @@ func (r *WorkloadRepository) MarkDeleting(ctx context.Context, name string) (Wor
 		return Workload{}, err
 	}
 
-	if !existing.DeletingAt.IsZero() {
+	if !existing.DeletedAt.IsZero() {
 		return existing, nil
 	}
 
@@ -247,7 +257,7 @@ func (r *WorkloadRepository) MarkDeleting(ctx context.Context, name string) (Wor
 		return Workload{}, fmt.Errorf("failed to mark workload for deletion: %w", err)
 	}
 
-	existing.DeletingAt = now
+	existing.DeletedAt = now
 
 	return existing, nil
 }
@@ -261,6 +271,8 @@ func (r *WorkloadRepository) MarkDeleting(ctx context.Context, name string) (Wor
 func (r *WorkloadRepository) Delete(ctx context.Context, name string) error {
 	const q = `DELETE FROM workload WHERE name = ?`
 
+	// The workload's port allocations go with it by ON DELETE CASCADE, which is why
+	// the database is opened with foreign keys enforced.
 	tag, err := r.db.ExecContext(ctx, q, name)
 	if err != nil {
 		return fmt.Errorf("failed to delete workload: %w", err)
@@ -277,7 +289,7 @@ func (r *WorkloadRepository) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
-func hydrate(w *Workload, spec, labels, createdAt, updatedAt, deletingAt string) error {
+func hydrate(w *Workload, spec, labels, createdAt, updatedAt, deletedAt string) error {
 	parsedLabels, err := unmarshalLabels(labels)
 	if err != nil {
 		return err
@@ -288,16 +300,16 @@ func hydrate(w *Workload, spec, labels, createdAt, updatedAt, deletingAt string)
 		return err
 	}
 
-	deleting, err := parseOptionalTime(deletingAt)
+	deleted, err := parseOptionalTime(deletedAt)
 	if err != nil {
-		return fmt.Errorf("failed to parse deleting_at: %w", err)
+		return fmt.Errorf("failed to parse deleted_at: %w", err)
 	}
 
 	w.Spec = []byte(spec)
 	w.Labels = parsedLabels
 	w.CreatedAt = created
 	w.UpdatedAt = updated
-	w.DeletingAt = deleting
+	w.DeletedAt = deleted
 
 	return nil
 }

@@ -43,7 +43,15 @@ type Config struct {
 func Open(ctx context.Context, config Config) (*sql.DB, error) {
 	logger := config.Logger.With("component", "database")
 
-	db, err := sql.Open("sqlite", config.Path)
+	// Foreign keys are off by default in SQLite, and orca relies on them: a
+	// workload's port allocations are removed by ON DELETE CASCADE rather than by
+	// hand, so without enforcement a delete would silently leak host ports that
+	// nothing owns and nothing reclaims.
+	//
+	// The pragma has to travel in the DSN rather than be executed once after
+	// opening: database/sql pools connections, and a one-shot PRAGMA applies only
+	// to whichever connection happened to run it.
+	db, err := sql.Open("sqlite", config.Path+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -71,6 +79,31 @@ func IsUniqueError(err error) bool {
 	}
 
 	return sqliteErr.Code() == sqliteConstraintPrimaryKey || sqliteErr.Code() == sqliteConstraintUnique
+}
+
+// transaction runs fn inside a transaction, committing when it returns nil and
+// rolling back otherwise. A rollback that itself fails is joined onto the original
+// error so neither is lost.
+func transaction(ctx context.Context, db *sql.DB, fn func(ctx context.Context, tx *sql.Tx) error) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	if err = fn(ctx, tx); err != nil {
+		rollbackErr := tx.Rollback()
+		if rollbackErr == nil || errors.Is(rollbackErr, sql.ErrTxDone) {
+			return err
+		}
+
+		return errors.Join(err, rollbackErr)
+	}
+
+	if err = tx.Commit(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
 }
 
 func migrateUp(db *sql.DB) error {
