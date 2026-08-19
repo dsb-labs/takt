@@ -249,6 +249,13 @@ func (d *Driver) Observe(ctx context.Context) ([]driver.Instance, error) {
 			Version:  version,
 			State:    state(c.State),
 			Ports:    instancePorts(c.Ports),
+			// When the container was created, which the summary carries and the
+			// caller uses to tell a container that is up from one that has stayed up.
+			// An inspect would give the moment it actually started, but the two differ
+			// by the time it took to start — not by enough to be worth a call per
+			// container on every pass. Overwritten below where an inspect happens
+			// anyway.
+			StartedAt: time.Unix(c.Created, 0),
 		}
 
 		// The summary carries no exit code or start time, so anything that has

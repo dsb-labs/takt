@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -569,6 +570,84 @@ func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 
 	cancel()
 	require.NoError(t, <-done)
+}
+
+func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
+	t.Parallel()
+
+	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+		storedWorkload("example", "hash-one"),
+	}, nil)
+
+	// A container that exits the moment it starts is observed as running in the
+	// instant between the two, so every pass alternates between seeing it up and
+	// seeing it gone. Treating the former as convergence cleared the backoff each
+	// time, and the workload was restarted as fast as the driver could be asked —
+	// measured at five containers a second, indefinitely.
+	var passes atomic.Int64
+
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			// Alternating, and freshly started every time, which is what an
+			// immediately-exiting container looks like from here.
+			if passes.Add(1)%2 == 1 {
+				return []driver.Instance{{
+					ID:        "container-one",
+					Workload:  "example",
+					SpecHash:  "hash-one",
+					State:     driver.StateRunning,
+					StartedAt: time.Now(),
+				}}, nil
+			}
+
+			return []driver.Instance{{
+				ID:       "container-one",
+				Workload: "example",
+				SpecHash: "hash-one",
+				State:    driver.StateExited,
+			}}, nil
+		})
+
+	var starts atomic.Int64
+
+	d.EXPECT().Stop(mock.Anything, "example").Return(nil).Maybe()
+	d.EXPECT().Start(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, docker.Workload) (string, error) {
+			starts.Add(1)
+
+			return "container-one", nil
+		}).Maybe()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Driver:    d,
+		Workloads: repo,
+		// Short enough that many passes run inside the window below, so an unpaced
+		// workload has every opportunity to restart repeatedly.
+		Interval: 10 * time.Millisecond,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	// Long enough for dozens of passes. The first restart is immediate and the
+	// second waits out the base backoff, so a paced workload starts twice at most.
+	require.Eventually(t, func() bool {
+		return passes.Load() > 20
+	}, 5*time.Second, 10*time.Millisecond)
+
+	cancel()
+	require.NoError(t, <-done)
+
+	assert.LessOrEqual(t, starts.Load(), int64(2),
+		"a workload whose container exits at once was restarted on every pass")
 }
 
 func TestReconciler_Run_PacesFailedStarts(t *testing.T) {

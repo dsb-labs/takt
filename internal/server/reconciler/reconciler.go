@@ -135,6 +135,13 @@ const (
 	// The ceiling on restart backoff, so a persistently broken workload is still
 	// retried periodically.
 	maxBackoff = 2 * time.Minute
+	// How long an instance has to have been running before starting it counts as
+	// having worked, and the workload's restart backoff is cleared.
+	//
+	// Long enough to outlast a container that exits as soon as it starts, and short
+	// enough that a workload which restarts legitimately isn't paced as though it
+	// were failing.
+	settlePeriod = 10 * time.Second
 )
 
 // New returns a Reconciler that converges the driver in config onto the desired
@@ -297,10 +304,15 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	}
 
 	if slices.ContainsFunc(instances, running) {
-		// Something is up and current, so the workload has converged. Clear any
-		// backoff so a workload that failed in the past starts from a clean slate
-		// the next time it does.
-		delete(r.backoff, row.Name)
+		// Something is up and current, so there is nothing to do. Whether the
+		// workload has converged is a separate question: a container that exits the
+		// moment it starts is genuinely observed as running on its way through, so
+		// clearing the backoff on sight of that reset the pacing every cycle and let
+		// such a workload loop at five containers a second indefinitely. It has to
+		// have stayed up to count as settled.
+		if slices.ContainsFunc(instances, settled) {
+			delete(r.backoff, row.Name)
+		}
 
 		return nil
 	}
@@ -624,8 +636,30 @@ func staleInstances(row database.Workload, instances []driver.Instance) []driver
 	return stale
 }
 
+// running reports whether an instance counts as up for the purpose of deciding
+// whether the workload needs anything done to it. Pending counts: a container still
+// starting must not be replaced for not having started yet.
 func running(instance driver.Instance) bool {
 	return instance.State == driver.StateRunning || instance.State == driver.StatePending
+}
+
+// settled reports whether an instance has been running long enough to treat starting
+// it as having achieved something.
+//
+// Starting a container is not evidence that it works: one that exits immediately is
+// observed as running in the instant between the two, so "is it up" and "did starting
+// it help" are different questions. Staying up is the answer to the second, and is
+// what clears a workload's restart backoff.
+//
+// An instance whose start time the driver didn't report is taken at face value rather
+// than held against it, since the alternative is never clearing the backoff of a
+// workload that is running perfectly well.
+func settled(instance driver.Instance) bool {
+	if instance.State != driver.StateRunning {
+		return false
+	}
+
+	return instance.StartedAt.IsZero() || time.Since(instance.StartedAt) >= settlePeriod
 }
 
 func terminating(instance driver.Instance) bool {
