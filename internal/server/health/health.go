@@ -72,9 +72,22 @@ type (
 		mux    sync.RWMutex
 		client *http.Client
 		checks map[string]*check
+		// Counts probes so each has an identity of its own. Guarded by mux rather
+		// than atomic, since it is only ever touched while holding it.
+		probes uint64
 		// Signals that the set of checks has changed, so that the loop recomputes
 		// when it is next needed rather than sleeping on a stale answer.
 		wake chan struct{}
+	}
+
+	// The scheduled type is one check as handed to a probe: the specification to
+	// probe, the context that stops it when the check is replaced or dropped, and the
+	// identity that decides whether its result is still wanted.
+	scheduled struct {
+		spec   Check
+		ctx    context.Context
+		cancel context.CancelFunc
+		probe  uint64
 	}
 
 	// The check type is one workload's check and the state of running it.
@@ -86,9 +99,13 @@ type (
 		// while one is, which is what keeps a workload from accumulating probes
 		// faster than they complete without making it wait on any other workload's.
 		inflight bool
-		// Incremented every time the specification changes, so that a probe still
-		// running against the previous one is recognised as stale when it returns.
-		generation int
+		// Cancels the probe currently in flight, so that replacing or dropping a
+		// check stops the work being done against the specification it replaced
+		// rather than leaving it to run out its timeout. Nil when none is running.
+		cancel context.CancelFunc
+		// Identifies the probe in flight, so that a result arriving from one started
+		// against a specification since replaced is recognised and discarded.
+		probe uint64
 	}
 )
 
@@ -124,19 +141,18 @@ func (c *Checker) Set(workload string, spec Check) {
 		return
 	}
 
-	// A probe against the specification being replaced may still be running. Counting
-	// generations is what lets its result be discarded when it returns: it describes
-	// an address or a path this check no longer has.
-	var generation int
-	if existing, ok := c.checks[workload]; ok {
-		generation = existing.generation + 1
+	// A probe against the specification being replaced may still be running. It is
+	// checking an address or a path this workload no longer has, so it is stopped
+	// rather than left to finish: its verdict is meaningless, and on a workload that
+	// never answers it would otherwise hold a connection open for its whole timeout.
+	if existing, ok := c.checks[workload]; ok && existing.cancel != nil {
+		existing.cancel()
 	}
 
 	c.checks[workload] = &check{
-		spec:       spec,
-		started:    time.Now(),
-		result:     Result{Status: StatusStarting},
-		generation: generation,
+		spec:    spec,
+		started: time.Now(),
+		result:  Result{Status: StatusStarting},
 	}
 
 	// A newly registered check is due immediately, and the loop may be sleeping on a
@@ -158,6 +174,12 @@ func (c *Checker) notify() {
 func (c *Checker) Forget(workload string) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
+
+	// Nothing runs this workload any more, so a probe still in flight against it is
+	// work being done on behalf of something gone.
+	if existing, ok := c.checks[workload]; ok && existing.cancel != nil {
+		existing.cancel()
+	}
 
 	delete(c.checks, workload)
 }
@@ -263,23 +285,29 @@ func (c *Checker) wait() time.Duration {
 // checkDue starts a probe for every workload whose interval has elapsed, on probes so
 // that Run can wait for them at shutdown without waiting for them here.
 func (c *Checker) checkDue(ctx context.Context, probes *sync.WaitGroup) {
-	for workload, due := range c.due() {
+	for workload, due := range c.due(ctx) {
 		probes.Go(func() {
-			c.record(workload, due.generation, c.probe(ctx, due.spec))
+			// Releases the context whether the probe answered, timed out, or was
+			// cancelled by its check being replaced.
+			defer due.cancel()
+
+			c.record(workload, due.probe, c.probe(due.ctx, due.spec))
 		})
 	}
 }
 
-// due returns a snapshot of the checks that are ready to run, marking each as in
-// flight so that a second probe is not started for a workload still answering the
-// first. The snapshot means probing doesn't hold the lock, so a check in flight can't
-// block a read of results.
-func (c *Checker) due() map[string]check {
+// due returns the checks that are ready to run, marking each as in flight so that a
+// second probe is not started for a workload still answering the first, and giving
+// each a context so that replacing or dropping the check stops its probe.
+//
+// The returned specifications are copies, so probing doesn't hold the lock and a check
+// in flight can't block a read of results.
+func (c *Checker) due(ctx context.Context) map[string]scheduled {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
 	now := time.Now()
-	due := make(map[string]check, len(c.checks))
+	due := make(map[string]scheduled, len(c.checks))
 
 	for workload, registered := range c.checks {
 		if registered.inflight {
@@ -287,8 +315,20 @@ func (c *Checker) due() map[string]check {
 		}
 
 		if registered.result.CheckedAt.IsZero() || now.Sub(registered.result.CheckedAt) >= registered.spec.Interval {
+			probeCtx, cancel := context.WithCancel(ctx)
+
+			c.probes++
+
 			registered.inflight = true
-			due[workload] = *registered
+			registered.cancel = cancel
+			registered.probe = c.probes
+
+			due[workload] = scheduled{
+				spec:   registered.spec,
+				ctx:    probeCtx,
+				cancel: cancel,
+				probe:  c.probes,
+			}
 		}
 	}
 
@@ -297,26 +337,27 @@ func (c *Checker) due() map[string]check {
 
 // record stores the outcome of a check, deciding what it means for the workload.
 //
-// The generation is the one the probe was started against, so that a result arriving
-// after the specification changed is discarded rather than attributed to a check it
-// says nothing about.
-func (c *Checker) record(workload string, generation int, err error) {
+// The probe identifier is the one stamped on the check when it was started, so a
+// result arriving after the check was replaced belongs to a specification that no
+// longer exists and is discarded rather than attributed to one it says nothing about.
+func (c *Checker) record(workload string, probe uint64, err error) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
 	registered, ok := c.checks[workload]
 	if !ok {
 		// Forgotten while the check was in flight, so the result describes a workload
-		// nothing is running any more. There is no flag left to clear: whatever this
-		// probe was started against is gone.
+		// nothing is running any more.
 		return
 	}
 
-	if registered.generation != generation {
-		// Replaced while this probe was running. The check that replaced it was never
-		// marked in flight, so there is nothing to clear here either.
+	if registered.probe != probe {
+		// Replaced while this probe was running, and the check that replaced it owns
+		// its own probe state — so there is nothing to clear here.
 		return
 	}
+
+	registered.cancel = nil
 
 	// Cleared however this probe turned out, so that a failed check doesn't leave the
 	// workload permanently ineligible for the next one.

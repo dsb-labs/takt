@@ -5,6 +5,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -276,6 +279,74 @@ func TestChecker_Set(t *testing.T) {
 	})
 }
 
+func TestChecker_Set_CancelsTheProbeItReplaces(t *testing.T) {
+	t.Parallel()
+
+	// A workload that accepts and never answers, so a probe against it is still
+	// running when the specification is replaced.
+	hung, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = hung.Close() })
+
+	connections := make(chan net.Conn, 8)
+
+	go func() {
+		for {
+			conn, err := hung.Accept()
+			if err != nil {
+				return
+			}
+
+			connections <- conn
+		}
+	}()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	checker := run(t)
+
+	slow := check(hung.Addr().String(), "/healthz")
+	slow.Interval = time.Minute
+	slow.Timeout = time.Minute
+	checker.Set("example", slow)
+
+	// Wait for the probe to be genuinely in flight before replacing it.
+	select {
+	case conn := <-connections:
+		t.Cleanup(func() { _ = conn.Close() })
+	case <-time.After(5 * time.Second):
+		t.Fatal("the workload was never probed")
+	}
+
+	// Replacing the check must not leave the old probe running for its whole minute:
+	// it is checking an address this workload no longer has.
+	checker.Set("example", check(server.Listener.Addr().String(), "/healthz"))
+
+	// The new check answers at once, which it could not do if it were waiting on the
+	// probe it replaced.
+	awaitStatus(t, checker, "example", health.StatusHealthy)
+
+	// The abandoned probe must have stopped rather than run out its minute. Its
+	// goroutine is the observable part: the connection it opened stays established
+	// either way, since abandoning a request does not close the socket.
+	assert.Eventually(t, func() bool {
+		return !slices.ContainsFunc(goroutines(t), func(stack string) bool {
+			return strings.Contains(stack, "health.(*Checker).probe")
+		})
+	}, 10*time.Second, 50*time.Millisecond,
+		"a probe was left running against the specification it replaced")
+
+	// And the cancelled probe must not be recorded against the check that replaced
+	// it, which it says nothing about.
+	result, ok := checker.Result("example")
+	require.True(t, ok)
+	assert.Zero(t, result.Failures)
+	assert.Empty(t, result.Error)
+}
+
 func TestChecker_Forget(t *testing.T) {
 	t.Parallel()
 
@@ -331,6 +402,17 @@ func awaitStatus(t *testing.T, checker *health.Checker, workload string, want he
 
 		return ok && result.Status == want
 	}, 10*time.Second, 50*time.Millisecond, "workload %q never reached %q", workload, want)
+}
+
+// goroutines returns the current goroutine stacks, one per entry, so a test can
+// assert on whether particular work is still running.
+func goroutines(t *testing.T) []string {
+	t.Helper()
+
+	buf := make([]byte, 1<<20)
+	n := runtime.Stack(buf, true)
+
+	return strings.Split(string(buf[:n]), "\n\n")
 }
 
 // freeAddress returns an address nothing is listening on, so a check against it is
