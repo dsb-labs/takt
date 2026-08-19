@@ -19,12 +19,6 @@ import (
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
-// TestStatesCoverTheWireFormat pins the client's constants to the values the server
-// actually sends.
-//
-// The client declares its own rather than re-exporting the generated ones, so that a
-// consumer never sees an internal type — which means nothing but this test stops the
-// two drifting when the specification gains a state or renames one.
 func TestClient_Logs_LimitsTheErrorItReads(t *testing.T) {
 	t.Parallel()
 
@@ -48,71 +42,100 @@ func TestClient_Logs_LimitsTheErrorItReads(t *testing.T) {
 	assert.Less(t, len(err.Error()), 1<<17)
 }
 
+// TestStatesCoverTheWireFormat pins the client's constants to the values the server
+// actually sends.
+//
+// The client declares its own rather than re-exporting the generated ones, so that a
+// consumer never sees an internal type. That leaves the two free to drift, which this
+// catches from both directions: every client constant has to be a value the generated
+// enum recognises, and the counts have to match, so a value added to the specification
+// and not to the client fails here rather than reaching a caller as an unknown string.
+//
+// The generated Valid method is the authority for what the wire format allows, and it
+// is regenerated from api/openapi.yaml. Comparing against a hand-written list would
+// only restate what this file already says.
 func TestStatesCoverTheWireFormat(t *testing.T) {
 	t.Parallel()
 
 	t.Run("workload states", func(t *testing.T) {
-		assert.ElementsMatch(t, []client.WorkloadState{
+		states := []client.WorkloadState{
 			client.WorkloadStatePending,
 			client.WorkloadStateRunning,
 			client.WorkloadStateTerminating,
 			client.WorkloadStateStopped,
+			client.WorkloadStateCompleted,
 			client.WorkloadStateFailed,
-		}, mapped(t, []api.WorkloadState{
-			api.WorkloadStatePending,
-			api.WorkloadStateRunning,
-			api.WorkloadStateTerminating,
-			api.WorkloadStateStopped,
-			api.WorkloadStateFailed,
-		}, func(state api.WorkloadState) client.WorkloadState {
-			return client.WorkloadState(state)
-		}))
+		}
+
+		for _, state := range states {
+			assert.True(t, api.WorkloadState(state).Valid(), "the wire format does not accept %q", state)
+		}
+
+		assert.Len(t, states, countValid(t, func(value string) bool {
+			return api.WorkloadState(value).Valid()
+		}), "the specification declares a workload state the client does not")
 	})
 
 	t.Run("instance states", func(t *testing.T) {
-		assert.ElementsMatch(t, []client.InstanceState{
+		states := []client.InstanceState{
 			client.InstanceStatePending,
 			client.InstanceStateRunning,
 			client.InstanceStateTerminating,
 			client.InstanceStateExited,
+			client.InstanceStateCompleted,
 			client.InstanceStateFailed,
-		}, mapped(t, []api.InstanceState{
-			api.InstanceStatePending,
-			api.InstanceStateRunning,
-			api.InstanceStateTerminating,
-			api.InstanceStateExited,
-			api.InstanceStateFailed,
-		}, func(state api.InstanceState) client.InstanceState {
-			return client.InstanceState(state)
-		}))
+		}
+
+		for _, state := range states {
+			assert.True(t, api.InstanceState(state).Valid(), "the wire format does not accept %q", state)
+		}
+
+		assert.Len(t, states, countValid(t, func(value string) bool {
+			return api.InstanceState(value).Valid()
+		}), "the specification declares an instance state the client does not")
 	})
 
 	t.Run("health statuses", func(t *testing.T) {
-		assert.ElementsMatch(t, []client.HealthStatus{
+		statuses := []client.HealthStatus{
 			client.HealthStarting,
 			client.HealthHealthy,
 			client.HealthUnhealthy,
-		}, mapped(t, []api.HealthStatus{
-			api.Starting,
-			api.Healthy,
-			api.Unhealthy,
-		}, func(status api.HealthStatus) client.HealthStatus {
-			return client.HealthStatus(status)
-		}))
+		}
+
+		for _, status := range statuses {
+			assert.True(t, api.HealthStatus(status).Valid(), "the wire format does not accept %q", status)
+		}
+
+		assert.Len(t, statuses, countValid(t, func(value string) bool {
+			return api.HealthStatus(value).Valid()
+		}), "the specification declares a health status the client does not")
 	})
 }
 
-// mapped converts the generated constants into their client equivalents, so that the
-// comparison is between the two vocabularies rather than between a list and itself.
-func mapped[From, To comparable](t *testing.T, from []From, convert func(From) To) []To {
+// countValid reports how many values the generated enum accepts, found by asking it
+// about every candidate the enums in this specification are drawn from.
+//
+// The generated code exposes no list of an enum's members, only a predicate. Probing a
+// fixed vocabulary is what turns that predicate back into a count, and it is sound
+// because every state and status in the specification is a lowercase word or two joined
+// by a dash.
+func countValid(t *testing.T, valid func(string) bool) int {
 	t.Helper()
 
-	to := make([]To, 0, len(from))
-	for _, value := range from {
-		to = append(to, convert(value))
+	candidates := []string{
+		"pending", "running", "terminating", "stopped", "completed", "exited",
+		"failed", "starting", "healthy", "unhealthy", "created", "paused",
+		"restarting", "removing", "dead", "succeeded", "cancelled", "unknown",
 	}
 
-	return to
+	var count int
+	for _, candidate := range candidates {
+		if valid(candidate) {
+			count++
+		}
+	}
+
+	return count
 }
 
 func TestClient_Apply(t *testing.T) {

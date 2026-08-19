@@ -109,8 +109,11 @@ const (
 	// shortly disappear.
 	WorkloadStateTerminating WorkloadState = "terminating"
 	// WorkloadStateStopped indicates the workload's instances have all ended without
-	// failing.
+	// failing, and the server intends to restart them.
 	WorkloadStateStopped WorkloadState = "stopped"
+	// WorkloadStateCompleted indicates the workload ended cleanly and its restart
+	// policy asks for nothing further. Unlike stopped, this is the desired end state.
+	WorkloadStateCompleted WorkloadState = "completed"
 	// WorkloadStateFailed indicates the workload is not working, whether because an
 	// instance failed or because it is not passing its health check.
 	WorkloadStateFailed WorkloadState = "failed"
@@ -126,6 +129,9 @@ const (
 	InstanceStateTerminating InstanceState = "terminating"
 	// InstanceStateExited indicates the instance ended without failing.
 	InstanceStateExited InstanceState = "exited"
+	// InstanceStateCompleted indicates the instance ended cleanly and its workload's
+	// restart policy asks for nothing further.
+	InstanceStateCompleted InstanceState = "completed"
 	// InstanceStateFailed indicates the instance ended in failure.
 	InstanceStateFailed InstanceState = "failed"
 )

@@ -396,6 +396,97 @@ func TestWorkloadService_Get_State(t *testing.T) {
 	}
 }
 
+func TestWorkloadService_Get_Completion(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name      string
+		Policy    api.RestartPolicy
+		Instances []driver.Instance
+		Expected  api.WorkloadState
+	}{
+		{
+			// The default policy restarts whatever happened, so a clean exit is a
+			// workload waiting to come back rather than one that finished.
+			Name:   "a clean exit under always is stopped",
+			Policy: api.Always,
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateExited},
+			},
+			Expected: api.WorkloadStateStopped,
+		},
+		{
+			Name:   "a clean exit under on-failure is completed",
+			Policy: api.OnFailure,
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateExited},
+			},
+			Expected: api.WorkloadStateCompleted,
+		},
+		{
+			// Retired, but not a success. Reporting this as completed would tell an
+			// operator the job did its work when it did not.
+			Name:   "a failure under never is still failed",
+			Policy: api.Never,
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateFailed, ExitCode: 1},
+			},
+			Expected: api.WorkloadStateFailed,
+		},
+		{
+			Name:   "a clean exit under never is completed",
+			Policy: api.Never,
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateExited},
+			},
+			Expected: api.WorkloadStateCompleted,
+		},
+		{
+			// Completion must not mask a problem: the operator needs the failure
+			// first, and the completion is true but not the news.
+			Name:   "a failed instance outranks a completed one",
+			Policy: api.OnFailure,
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateExited},
+				{ID: "container-two", Workload: "example", State: driver.StateFailed, ExitCode: 1},
+			},
+			Expected: api.WorkloadStateFailed,
+		},
+		{
+			Name:   "a running instance outranks a completed one",
+			Policy: api.OnFailure,
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateExited},
+				{ID: "container-two", Workload: "example", State: driver.StateRunning},
+			},
+			Expected: api.WorkloadStateRunning,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+			row := storedWorkload("example")
+			spec := containerSpec("example", "example/example:latest")
+			spec.Restart = new(tc.Policy)
+
+			encoded, err := json.Marshal(spec)
+			require.NoError(t, err)
+			row.Spec = encoded
+
+			repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+			d.EXPECT().Observe(mock.Anything).Return(tc.Instances, nil).Once()
+
+			svc := newTestService(t, d, repo, ports, nil)
+
+			got, err := svc.Get(t.Context(), "example")
+			require.NoError(t, err)
+			assert.Equal(t, tc.Expected, got.State)
+		})
+	}
+}
+
 func TestWorkloadService_List(t *testing.T) {
 	t.Parallel()
 

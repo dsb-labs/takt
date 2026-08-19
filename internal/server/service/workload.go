@@ -728,12 +728,18 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 	}
 
 	deleting := !row.DeletedAt.IsZero()
+	policy := manifest.NewSpec(spec).Restart
 
 	// Health is folded into the instance states before the workload's own state is
 	// derived, so a container that is up but not working reads as failed rather than
 	// running — and is replaced by the same paced path a crashed one takes.
+	//
+	// The restart policy is applied after it, on the instances that have ended. An
+	// instance the policy retires is finished with, so a stale health result must not
+	// reopen the question of whether it is working.
 	for i := range instances {
 		instances[i].State = healthState(instances[i].State, reported)
+		instances[i].State = completionState(instances[i], policy)
 	}
 
 	return Workload{
@@ -751,6 +757,28 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
 	}, nil
+}
+
+// completionState reports the state an ended instance reads as once its workload's
+// restart policy has had its say.
+//
+// Only a clean exit the policy retires becomes completed. An instance that exited
+// non-zero stays failed however the policy treats it, because how a workload ended and
+// whether it runs again are separate facts: a job retired under "never" still has to
+// say that it failed, or an operator reading it would see a success.
+//
+// An instance still running is untouched. The policy describes what happens when work
+// ends, and this one has not ended.
+func completionState(instance driver.Instance, policy manifest.RestartPolicy) driver.State {
+	if instance.State != driver.StateExited {
+		return instance.State
+	}
+
+	if policy.Restarts(instance.ExitCode) {
+		return instance.State
+	}
+
+	return driver.StateCompleted
 }
 
 // stateOf derives a workload's overall state from its instances and whether it is
@@ -776,7 +804,7 @@ func stateOf(instances []driver.Instance, deleting bool) api.WorkloadState {
 		return api.WorkloadStatePending
 	}
 
-	var terminating, failed, exited bool
+	var terminating, failed, exited, completed bool
 	for _, instance := range instances {
 		switch instance.State {
 		case driver.StateRunning:
@@ -787,9 +815,14 @@ func stateOf(instances []driver.Instance, deleting bool) api.WorkloadState {
 			failed = true
 		case driver.StateExited:
 			exited = true
+		case driver.StateCompleted:
+			completed = true
 		}
 	}
 
+	// Ranked so that nothing masks a problem. A workload with one completed instance
+	// and one failed instance is failed: the completion is true but it is not the fact
+	// an operator needs first.
 	switch {
 	case terminating:
 		return api.WorkloadStateTerminating
@@ -797,6 +830,8 @@ func stateOf(instances []driver.Instance, deleting bool) api.WorkloadState {
 		return api.WorkloadStateFailed
 	case exited:
 		return api.WorkloadStateStopped
+	case completed:
+		return api.WorkloadStateCompleted
 	default:
 		return api.WorkloadStatePending
 	}
