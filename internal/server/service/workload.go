@@ -16,6 +16,7 @@ import (
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/port"
 )
 
 var (
@@ -37,6 +38,9 @@ var (
 	ErrHostPortTaken = errors.New("host port already in use")
 	// ErrInvalidQuery is returned when a list query is malformed.
 	ErrInvalidQuery = errors.New("invalid query")
+	// ErrNoPortsAvailable is returned when no host port is free for a workload that
+	// needs one allocated.
+	ErrNoPortsAvailable = errors.New("no host port available")
 )
 
 type (
@@ -57,9 +61,9 @@ type (
 	// The WorkloadRepository interface describes the persistence operations the
 	// service uses.
 	WorkloadRepository interface {
-		// Upsert should store w as the desired state for its name, reporting whether
-		// the workload was newly created.
-		Upsert(ctx context.Context, w database.Workload) (database.Workload, bool, error)
+		// Upsert should store w as the desired state for its name, claiming the given
+		// ports in the same write, and report whether the workload was newly created.
+		Upsert(ctx context.Context, w database.Workload, ports ...database.Port) (database.Workload, bool, error)
 		// Get should return the workload with the given name.
 		Get(ctx context.Context, name string) (database.Workload, error)
 		// List should return the workloads matching every one of the given queries,
@@ -228,23 +232,15 @@ func (s *WorkloadService) store(ctx context.Context, spec api.WorkloadSpec, runt
 			row.Labels = *spec.Labels
 		}
 
-		stored, created, err := s.workloads.Upsert(ctx, row)
-		if err != nil {
-			return database.Workload{}, false, fmt.Errorf("failed to store workload: %w", err)
-		}
-
-		// Claiming happens after the upsert because an allocation belongs to a
-		// workload row that has to exist first — the identifier is assigned there.
-		for i := range ports {
-			ports[i].WorkloadID = stored.ID
-		}
-
-		err = s.ports.Claim(ctx, stored.ID, ports)
+		// The row and its ports are written together, so a claim that loses a race
+		// leaves no workload behind for the reconciler to start against ports
+		// nothing holds.
+		stored, created, err := s.workloads.Upsert(ctx, row, ports...)
 		switch {
 		case err == nil:
 			return stored, created, nil
 		case !errors.Is(err, database.ErrHostPortTaken):
-			return database.Workload{}, false, fmt.Errorf("failed to claim workload ports: %w", err)
+			return database.Workload{}, false, fmt.Errorf("failed to store workload: %w", err)
 		case pinned(portMappings(spec)):
 			return database.Workload{}, false, fmt.Errorf("%w: %v", ErrHostPortTaken, err)
 		}
@@ -549,6 +545,13 @@ func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map
 
 	host, err := s.allocator.Allocate(taken)
 	if err != nil {
+		if errors.Is(err, port.ErrRangeExhausted) {
+			// Every port orca may allocate is in use. The request was valid and will
+			// become servable when a workload is deleted or the range widened, so it
+			// is reported as a capacity problem rather than a fault or a bad request.
+			return database.Port{}, fmt.Errorf("%w for %d: %v", ErrNoPortsAvailable, mapping.To, err)
+		}
+
 		return database.Port{}, fmt.Errorf("failed to allocate host port for %d: %w", mapping.To, err)
 	}
 

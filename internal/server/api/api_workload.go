@@ -87,6 +87,11 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		// state rather than a malformed request, and the message names the holder
 		// so the fix is obvious.
 		return api.ApplyWorkload409JSONResponse{Error: err.Error()}, nil
+	case errors.Is(err, service.ErrNoPortsAvailable):
+		// The request is valid and will be servable once a port frees up, which is
+		// what distinguishes this from a client error: nothing about the manifest
+		// needs to change.
+		return api.ApplyWorkload503JSONResponse{Error: err.Error()}, nil
 	case errors.Is(err, service.ErrUnsupportedRuntime):
 		return api.ApplyWorkload422JSONResponse{Error: err.Error()}, nil
 	case errors.Is(err, service.ErrNoRuntime), errors.Is(err, service.ErrAmbiguousRuntime):

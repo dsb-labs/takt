@@ -81,6 +81,12 @@ func IsConflict(err error) bool {
 	return hasStatus(err, http.StatusConflict)
 }
 
+// IsUnavailable reports whether err is a server-side error with a 503 status, which
+// the server uses when it has no host port to give a workload that needs one.
+func IsUnavailable(err error) bool {
+	return hasStatus(err, http.StatusServiceUnavailable)
+}
+
 func hasStatus(err error, status int) bool {
 	clientErr, ok := errors.AsType[Error](err)
 	if !ok {

@@ -26,6 +26,7 @@ func TestClient_Apply(t *testing.T) {
 		ExpectBadRequest  bool
 		ExpectUnsupported bool
 		ExpectConflict    bool
+		ExpectUnavailable bool
 	}{
 		{
 			Name: "creates a workload",
@@ -77,6 +78,14 @@ func TestClient_Apply(t *testing.T) {
 			ExpectUnsupported: true,
 		},
 		{
+			Name: "reports the server having no host port to allocate",
+			Handler: func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(t, w, http.StatusServiceUnavailable,
+					api.ErrorResponse{Error: "no host port available"})
+			},
+			ExpectUnavailable: true,
+		},
+		{
 			Name: "reports a workload that is being deleted",
 			Handler: func(w http.ResponseWriter, r *http.Request) {
 				writeJSON(t, w, http.StatusConflict, api.ErrorResponse{Error: "workload is being deleted"})
@@ -104,6 +113,9 @@ func TestClient_Apply(t *testing.T) {
 				return
 			case tc.ExpectConflict:
 				assert.True(t, client.IsConflict(err))
+				return
+			case tc.ExpectUnavailable:
+				assert.True(t, client.IsUnavailable(err))
 				return
 			}
 

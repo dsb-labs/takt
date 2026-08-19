@@ -116,6 +116,19 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			ExpectStatus: http.StatusConflict,
 		},
 		{
+			Name: "reports having no host port to allocate",
+			Path: "/api/v1/workloads/example",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Workload{}, false, service.ErrNoPortsAvailable).Once()
+			},
+			// Nothing about the request needs to change: it becomes servable once a
+			// workload is deleted or the range widened, which is what separates this
+			// from the 4xx cases above.
+			ExpectStatus: http.StatusServiceUnavailable,
+		},
+		{
 			Name: "reports an unexpected failure",
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),

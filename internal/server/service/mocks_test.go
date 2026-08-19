@@ -410,8 +410,14 @@ func (_c *MockWorkloadRepository_MarkDeleting_Call) RunAndReturn(run func(ctx co
 }
 
 // Upsert provides a mock function for the type MockWorkloadRepository
-func (_mock *MockWorkloadRepository) Upsert(ctx context.Context, w database.Workload) (database.Workload, bool, error) {
-	ret := _mock.Called(ctx, w)
+func (_mock *MockWorkloadRepository) Upsert(ctx context.Context, w database.Workload, ports ...database.Port) (database.Workload, bool, error) {
+	var tmpRet mock.Arguments
+	if len(ports) > 0 {
+		tmpRet = _mock.Called(ctx, w, ports)
+	} else {
+		tmpRet = _mock.Called(ctx, w)
+	}
+	ret := tmpRet
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
@@ -420,21 +426,21 @@ func (_mock *MockWorkloadRepository) Upsert(ctx context.Context, w database.Work
 	var r0 database.Workload
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, database.Workload) (database.Workload, bool, error)); ok {
-		return returnFunc(ctx, w)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.Workload, ...database.Port) (database.Workload, bool, error)); ok {
+		return returnFunc(ctx, w, ports...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, database.Workload) database.Workload); ok {
-		r0 = returnFunc(ctx, w)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.Workload, ...database.Port) database.Workload); ok {
+		r0 = returnFunc(ctx, w, ports...)
 	} else {
 		r0 = ret.Get(0).(database.Workload)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, database.Workload) bool); ok {
-		r1 = returnFunc(ctx, w)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, database.Workload, ...database.Port) bool); ok {
+		r1 = returnFunc(ctx, w, ports...)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, database.Workload) error); ok {
-		r2 = returnFunc(ctx, w)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, database.Workload, ...database.Port) error); ok {
+		r2 = returnFunc(ctx, w, ports...)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -449,11 +455,13 @@ type MockWorkloadRepository_Upsert_Call struct {
 // Upsert is a helper method to define mock.On call
 //   - ctx context.Context
 //   - w database.Workload
-func (_e *MockWorkloadRepository_Expecter) Upsert(ctx any, w any) *MockWorkloadRepository_Upsert_Call {
-	return &MockWorkloadRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, w)}
+//   - ports ...database.Port
+func (_e *MockWorkloadRepository_Expecter) Upsert(ctx any, w any, ports ...any) *MockWorkloadRepository_Upsert_Call {
+	return &MockWorkloadRepository_Upsert_Call{Call: _e.mock.On("Upsert",
+		append([]any{ctx, w}, ports...)...)}
 }
 
-func (_c *MockWorkloadRepository_Upsert_Call) Run(run func(ctx context.Context, w database.Workload)) *MockWorkloadRepository_Upsert_Call {
+func (_c *MockWorkloadRepository_Upsert_Call) Run(run func(ctx context.Context, w database.Workload, ports ...database.Port)) *MockWorkloadRepository_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -463,9 +471,16 @@ func (_c *MockWorkloadRepository_Upsert_Call) Run(run func(ctx context.Context, 
 		if args[1] != nil {
 			arg1 = args[1].(database.Workload)
 		}
+		var arg2 []database.Port
+		var variadicArgs []database.Port
+		if len(args) > 2 {
+			variadicArgs = args[2].([]database.Port)
+		}
+		arg2 = variadicArgs
 		run(
 			arg0,
 			arg1,
+			arg2...,
 		)
 	})
 	return _c
@@ -476,7 +491,7 @@ func (_c *MockWorkloadRepository_Upsert_Call) Return(workload database.Workload,
 	return _c
 }
 
-func (_c *MockWorkloadRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, w database.Workload) (database.Workload, bool, error)) *MockWorkloadRepository_Upsert_Call {
+func (_c *MockWorkloadRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, w database.Workload, ports ...database.Port) (database.Workload, bool, error)) *MockWorkloadRepository_Upsert_Call {
 	_c.Call.Return(run)
 	return _c
 }

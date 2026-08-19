@@ -15,6 +15,7 @@ import (
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/service"
 )
 
@@ -40,7 +41,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 						w.Runtime == string(api.Container) &&
 						w.SpecHash != "" &&
 						len(w.Spec) > 0
-				})).RunAndReturn(func(_ context.Context, w database.Workload) (database.Workload, bool, error) {
+				})).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
 					w.Version = 1
 					return w, true, nil
 				}).Once()
@@ -65,7 +66,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 					Return(storedWorkload("example"), nil).Once()
 
 				repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-					RunAndReturn(func(_ context.Context, w database.Workload) (database.Workload, bool, error) {
+					RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
 						w.Version = 2
 						return w, false, nil
 					}).Once()
@@ -140,7 +141,7 @@ func TestWorkloadService_Apply_NotifiesReconciler(t *testing.T) {
 	repo.EXPECT().Get(mock.Anything, "example").
 		Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 	repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, w database.Workload) (database.Workload, bool, error) {
+		RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
 			w.Version = 1
 			return w, true, nil
 		}).Once()
@@ -313,11 +314,6 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload) (database.Workload, bool, error) {
-				w.ID, w.Version = "id-one", 1
-				return w, true, nil
-			})
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil)
 		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
 		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
@@ -325,22 +321,23 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 		// Two applies racing each other can pick the same free port, and the unique
 		// constraint means one loses. Since orca chose the port, losing is its
 		// problem to resolve rather than something to report to the caller.
-		var claims int
-		ports.EXPECT().Claim(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(context.Context, string, []database.Port) error {
-				claims++
-				if claims == 1 {
-					return database.ErrHostPortTaken
+		var attempts int
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				attempts++
+				if attempts == 1 {
+					return database.Workload{}, false, database.ErrHostPortTaken
 				}
 
-				return nil
+				w.ID, w.Version = "id-one", 1
+				return w, true, nil
 			})
 
 		svc := newTestService(t, d, repo, ports, nil)
 
 		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
 		require.NoError(t, err)
-		assert.Equal(t, 2, claims)
+		assert.Equal(t, 2, attempts)
 	})
 
 	t.Run("reports a pinned port that collides", func(t *testing.T) {
@@ -348,16 +345,11 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload) (database.Workload, bool, error) {
-				w.ID = "id-one"
-				return w, true, nil
-			})
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			Return(database.Workload{}, false, database.ErrHostPortTaken)
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
 		ports.EXPECT().HolderOf(mock.Anything, 4141).Return("", false, nil)
-		ports.EXPECT().Claim(mock.Anything, mock.Anything, mock.Anything).
-			Return(database.ErrHostPortTaken)
 
 		svc := newTestService(t, d, repo, ports, nil)
 
@@ -369,6 +361,37 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 		_, _, err := svc.Apply(t.Context(), spec)
 		assert.ErrorIs(t, err, service.ErrHostPortTaken)
 	})
+}
+
+func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
+	t.Parallel()
+
+	d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+	repo.EXPECT().Get(mock.Anything, "example").
+		Return(database.Workload{}, database.ErrWorkloadNotFound)
+	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
+
+	svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+		Logger:    newTestLogger(t),
+		Driver:    d,
+		Workloads: repo,
+		Ports:     ports,
+		Allocator: allocatorStub{err: port.ErrRangeExhausted},
+	})
+
+	// A workload has to actually want a host port for allocation to be reached.
+	spec := containerSpec("example", "example/example:latest")
+	spec.Container.Ports = &[]api.PortMapping{{To: 8080}}
+
+	// An exhausted range is a capacity problem rather than a fault or a bad request,
+	// and the API depends on this translation to answer 503 rather than 500.
+	_, _, err := svc.Apply(t.Context(), spec)
+	assert.ErrorIs(t, err, service.ErrNoPortsAvailable)
+
+	// The workload must not have been stored: it has no reachable address, and the
+	// caller was told the apply failed.
+	repo.AssertNotCalled(t, "Upsert")
 }
 
 func TestWorkloadService_List_Queries(t *testing.T) {
@@ -551,9 +574,17 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 
 // The allocatorStub type hands out ports from a fixed base, so a test can predict
 // what a workload will be allocated without standing up the real allocator.
-type allocatorStub struct{}
+type allocatorStub struct {
+	// err is returned instead of a port, so a test can exercise what the service
+	// does when the range has nothing left.
+	err error
+}
 
-func (allocatorStub) Allocate(taken []int) (int, error) {
+func (a allocatorStub) Allocate(taken []int) (int, error) {
+	if a.err != nil {
+		return 0, a.err
+	}
+
 	return 20000 + len(taken), nil
 }
 

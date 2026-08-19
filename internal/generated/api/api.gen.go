@@ -1108,6 +1108,8 @@ type ApplyWorkloadResponse struct {
 	JSON422 *ErrorResponse
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *ErrorResponse
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -1138,6 +1140,11 @@ func (r ApplyWorkloadResponse) GetJSON422() *ErrorResponse {
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
 func (r ApplyWorkloadResponse) GetJSON500() *InternalServerError {
 	return r.JSON500
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r ApplyWorkloadResponse) GetJSON503() *ErrorResponse {
+	return r.JSON503
 }
 
 // GetBody returns the raw response body bytes
@@ -1503,6 +1510,13 @@ func ParseApplyWorkloadResponse(rsp *http.Response) (*ApplyWorkloadResponse, err
 			return nil, err
 		}
 		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -2105,6 +2119,20 @@ func (response ApplyWorkload500JSONResponse) VisitApplyWorkloadResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyWorkload503JSONResponse ErrorResponse
+
+func (response ApplyWorkload503JSONResponse) VisitApplyWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }

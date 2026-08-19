@@ -138,6 +138,15 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
+        "503":
+          description: |
+            The workload needs a host port allocated and none is free. The request
+            was valid and becomes servable once a workload is deleted or the
+            configured range is widened.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
     delete:
       operationId: deleteWorkload

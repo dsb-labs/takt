@@ -87,6 +87,8 @@ func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool,
 		return Workload{}, false, newError(http.StatusConflict, resp.JSON409)
 	case resp.JSON422 != nil:
 		return Workload{}, false, newError(http.StatusUnprocessableEntity, resp.JSON422)
+	case resp.JSON503 != nil:
+		return Workload{}, false, newError(http.StatusServiceUnavailable, resp.JSON503)
 	case resp.JSON500 != nil:
 		return Workload{}, false, newError(http.StatusInternalServerError, resp.JSON500)
 	default:
