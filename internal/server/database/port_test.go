@@ -107,6 +107,44 @@ func TestPortRepository_Claim(t *testing.T) {
 	})
 }
 
+func TestPortRepository_ListAll(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns every workload's ports in one read", func(t *testing.T) {
+		ports, example, other := newTestPorts(t)
+		ctx := t.Context()
+
+		require.NoError(t, ports.Claim(ctx, example, []database.Port{
+			{WorkloadID: example, Container: 8080, Host: 20000, Dynamic: true},
+			{WorkloadID: example, Container: 9090, Host: 20001, Dynamic: true},
+		}))
+		require.NoError(t, ports.Claim(ctx, other, []database.Port{
+			{WorkloadID: other, Container: 8080, Host: 4141},
+		}))
+
+		// Listing workloads reads this once rather than once per workload, which is
+		// what keeps a list of many workloads from costing a query each.
+		got, err := ports.ListAll(ctx)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+
+		require.Len(t, got[example], 2)
+		assert.Equal(t, 8080, got[example][0].Container)
+		assert.Equal(t, 9090, got[example][1].Container)
+
+		require.Len(t, got[other], 1)
+		assert.Equal(t, 4141, got[other][0].Host)
+	})
+
+	t.Run("returns nothing when no ports are allocated", func(t *testing.T) {
+		ports, _, _ := newTestPorts(t)
+
+		got, err := ports.ListAll(t.Context())
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+}
+
 func TestPortRepository_HolderOf(t *testing.T) {
 	t.Parallel()
 

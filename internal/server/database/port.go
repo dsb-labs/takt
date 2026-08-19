@@ -75,6 +75,39 @@ func (r *PortRepository) List(ctx context.Context, workloadID string) ([]Port, e
 	return ports, rows.Err()
 }
 
+// ListAll returns the ports allocated to every workload, keyed by workload
+// identifier.
+//
+// This exists so that listing workloads costs one query rather than one per
+// workload: the per-workload form is fine for a single read but turns a list of two
+// hundred workloads into two hundred round trips.
+func (r *PortRepository) ListAll(ctx context.Context) (map[string][]Port, error) {
+	const q = `
+		SELECT workload_id, container_port, host_port, is_dynamic
+		FROM workload_port
+		ORDER BY workload_id ASC, container_port ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query workload ports: %w", err)
+	}
+
+	ports := make(map[string][]Port)
+	defer rows.Close()
+
+	for rows.Next() {
+		var port Port
+		if err = rows.Scan(&port.WorkloadID, &port.Container, &port.Host, &port.Dynamic); err != nil {
+			return nil, fmt.Errorf("failed to scan workload port: %w", err)
+		}
+
+		ports[port.WorkloadID] = append(ports[port.WorkloadID], port)
+	}
+
+	return ports, rows.Err()
+}
+
 // Claim records the given ports as allocated to the workload with the given
 // identifier, replacing whatever was allocated to it before.
 //
