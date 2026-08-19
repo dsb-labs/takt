@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -81,6 +82,9 @@ type (
 		// HolderOf should name the workload the given host port is allocated to,
 		// reporting false when no workload holds it.
 		HolderOf(ctx context.Context, host int) (string, bool, error)
+		// ListAll should return the ports allocated to every workload, keyed by
+		// workload identifier.
+		ListAll(ctx context.Context) (map[string][]database.Port, error)
 		// Allocated should return every host port allocated to any workload.
 		Allocated(ctx context.Context) ([]int, error)
 	}
@@ -169,47 +173,9 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 		}
 	}
 
-	ports, err := s.resolvePorts(ctx, spec.Name, held, portMappings(spec))
+	stored, created, err := s.store(ctx, spec, runtime, held)
 	if err != nil {
 		return Workload{}, false, err
-	}
-
-	encoded, hash, err := canonicalise(withResolvedPorts(spec, ports))
-	if err != nil {
-		return Workload{}, false, err
-	}
-
-	row := database.Workload{
-		Name:     spec.Name,
-		Runtime:  string(runtime),
-		Spec:     encoded,
-		SpecHash: hash,
-	}
-
-	if spec.Schedule != nil {
-		row.Schedule = *spec.Schedule
-	}
-	if spec.Labels != nil {
-		row.Labels = *spec.Labels
-	}
-
-	stored, created, err := s.workloads.Upsert(ctx, row)
-	if err != nil {
-		return Workload{}, false, fmt.Errorf("failed to store workload: %w", err)
-	}
-
-	// Claiming happens after the upsert because an allocation belongs to a workload
-	// row that has to exist first — the workload's identifier is assigned there.
-	for i := range ports {
-		ports[i].WorkloadID = stored.ID
-	}
-
-	if err = s.ports.Claim(ctx, stored.ID, ports); err != nil {
-		if errors.Is(err, database.ErrHostPortTaken) {
-			return Workload{}, false, fmt.Errorf("%w: %v", ErrHostPortTaken, err)
-		}
-
-		return Workload{}, false, fmt.Errorf("failed to claim workload ports: %w", err)
 	}
 
 	s.logger.With("workload", stored.Name, "version", stored.Version, "created", created).Debug("workload applied")
@@ -221,6 +187,81 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 	}
 
 	return workload, created, nil
+}
+
+// store resolves the specification's ports, writes it, and claims the ports it
+// settled on.
+//
+// Allocation reads the ports already promised and then claims one, so two applies
+// racing each other can choose the same free port; the unique constraint on the
+// claim means one of them loses. That collision is orca's to resolve rather than the
+// caller's, so a dynamic port is simply resolved again against what is now allocated.
+// A pinned port that collides is a different matter entirely: the caller asked for
+// something specific and has to be told it isn't available.
+func (s *WorkloadService) store(ctx context.Context, spec api.WorkloadSpec, runtime api.Runtime, held []database.Port) (database.Workload, bool, error) {
+	// Bounded because a caller waiting on a request would rather hear that orca
+	// couldn't settle its ports than wait indefinitely for a quiet moment.
+	const attempts = 5
+
+	for attempt := range attempts {
+		ports, err := s.resolvePorts(ctx, spec.Name, held, portMappings(spec))
+		if err != nil {
+			return database.Workload{}, false, err
+		}
+
+		encoded, hash, err := canonicalise(withResolvedPorts(spec, ports))
+		if err != nil {
+			return database.Workload{}, false, err
+		}
+
+		row := database.Workload{
+			Name:     spec.Name,
+			Runtime:  string(runtime),
+			Spec:     encoded,
+			SpecHash: hash,
+		}
+
+		if spec.Schedule != nil {
+			row.Schedule = *spec.Schedule
+		}
+		if spec.Labels != nil {
+			row.Labels = *spec.Labels
+		}
+
+		stored, created, err := s.workloads.Upsert(ctx, row)
+		if err != nil {
+			return database.Workload{}, false, fmt.Errorf("failed to store workload: %w", err)
+		}
+
+		// Claiming happens after the upsert because an allocation belongs to a
+		// workload row that has to exist first — the identifier is assigned there.
+		for i := range ports {
+			ports[i].WorkloadID = stored.ID
+		}
+
+		err = s.ports.Claim(ctx, stored.ID, ports)
+		switch {
+		case err == nil:
+			return stored, created, nil
+		case !errors.Is(err, database.ErrHostPortTaken):
+			return database.Workload{}, false, fmt.Errorf("failed to claim workload ports: %w", err)
+		case pinned(portMappings(spec)):
+			return database.Workload{}, false, fmt.Errorf("%w: %v", ErrHostPortTaken, err)
+		}
+
+		s.logger.With("workload", spec.Name, "attempt", attempt+1).
+			Debug("host port was claimed by another workload, allocating again")
+	}
+
+	return database.Workload{}, false, fmt.Errorf("%w: gave up after %d attempts", ErrHostPortTaken, attempts)
+}
+
+// pinned reports whether any mapping names a host port explicitly, which decides
+// whether a claim collision is the caller's problem or orca's to retry.
+func pinned(mappings []api.PortMapping) bool {
+	return slices.ContainsFunc(mappings, func(mapping api.PortMapping) bool {
+		return mapping.From != nil
+	})
 }
 
 // Get returns the workload with the given name, with the state observed from the
@@ -257,18 +298,18 @@ func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Worklo
 		return nil, fmt.Errorf("failed to list workloads: %w", err)
 	}
 
-	// One observation covers every workload, so the driver is asked once rather
-	// than once per row.
+	// One observation covers every workload, and so does one read of the port
+	// allocations: asking per row would turn a list into a query per workload.
 	observed := s.observe(ctx)
+
+	ports, err := s.ports.ListAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read workload ports: %w", err)
+	}
 
 	workloads := make([]Workload, 0, len(rows))
 	for _, row := range rows {
-		ports, err := s.ports.List(ctx, row.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read workload ports: %w", err)
-		}
-
-		workload, err := newWorkload(row, observed[row.Name], ports)
+		workload, err := newWorkload(row, observed[row.Name], ports[row.ID])
 		if err != nil {
 			return nil, err
 		}

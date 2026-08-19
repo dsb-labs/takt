@@ -10,6 +10,7 @@ package port
 import (
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"strconv"
 )
@@ -53,9 +54,13 @@ func New(config Config) *Allocator {
 // Allocate returns a free host port, avoiding both the ports in taken and any port
 // something on the host is already listening on.
 //
-// Ports are offered in ascending order so that a given set of workloads tends to
-// receive the same ports across restarts, which makes them predictable enough to
-// write down. Returns ErrRangeExhausted when nothing in the range is available.
+// The search starts at a random point in the range and wraps, rather than scanning
+// from the bottom every time. Scanning from the bottom made concurrent allocations
+// contend maximally: several callers reading the same set of taken ports would all
+// choose the same lowest free one, and all but one would lose the race to claim it.
+// Starting at different points means they rarely pick the same port at all.
+//
+// Returns ErrRangeExhausted when nothing in the range is available.
 //
 // A port that is free here can still be taken by the time a runtime binds it, since
 // nothing outside orca is holding it in the meantime. The check makes that race
@@ -67,7 +72,12 @@ func (a *Allocator) Allocate(taken []int) (int, error) {
 		claimed[port] = struct{}{}
 	}
 
-	for candidate := a.min; candidate <= a.max; candidate++ {
+	size := a.max - a.min + 1
+	offset := rand.IntN(size)
+
+	for i := range size {
+		candidate := a.min + (offset+i)%size
+
 		if _, ok := claimed[candidate]; ok {
 			continue
 		}

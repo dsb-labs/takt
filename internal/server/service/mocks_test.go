@@ -773,6 +773,68 @@ func (_c *MockPortRepository_List_Call) RunAndReturn(run func(ctx context.Contex
 	return _c
 }
 
+// ListAll provides a mock function for the type MockPortRepository
+func (_mock *MockPortRepository) ListAll(ctx context.Context) (map[string][]database.Port, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListAll")
+	}
+
+	var r0 map[string][]database.Port
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (map[string][]database.Port, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) map[string][]database.Port); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string][]database.Port)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockPortRepository_ListAll_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAll'
+type MockPortRepository_ListAll_Call struct {
+	*mock.Call
+}
+
+// ListAll is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockPortRepository_Expecter) ListAll(ctx any) *MockPortRepository_ListAll_Call {
+	return &MockPortRepository_ListAll_Call{Call: _e.mock.On("ListAll", ctx)}
+}
+
+func (_c *MockPortRepository_ListAll_Call) Run(run func(ctx context.Context)) *MockPortRepository_ListAll_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockPortRepository_ListAll_Call) Return(stringToPorts map[string][]database.Port, err error) *MockPortRepository_ListAll_Call {
+	_c.Call.Return(stringToPorts, err)
+	return _c
+}
+
+func (_c *MockPortRepository_ListAll_Call) RunAndReturn(run func(ctx context.Context) (map[string][]database.Port, error)) *MockPortRepository_ListAll_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockAllocator creates a new instance of MockAllocator. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockAllocator(t interface {

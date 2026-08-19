@@ -305,6 +305,72 @@ func TestWorkloadService_List(t *testing.T) {
 	})
 }
 
+func TestWorkloadService_Apply_PortCollision(t *testing.T) {
+	t.Parallel()
+
+	t.Run("allocates again when another workload claims the port first", func(t *testing.T) {
+		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload) (database.Workload, bool, error) {
+				w.ID, w.Version = "id-one", 1
+				return w, true, nil
+			})
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil)
+		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+		// Two applies racing each other can pick the same free port, and the unique
+		// constraint means one loses. Since orca chose the port, losing is its
+		// problem to resolve rather than something to report to the caller.
+		var claims int
+		ports.EXPECT().Claim(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(context.Context, string, []database.Port) error {
+				claims++
+				if claims == 1 {
+					return database.ErrHostPortTaken
+				}
+
+				return nil
+			})
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
+		require.NoError(t, err)
+		assert.Equal(t, 2, claims)
+	})
+
+	t.Run("reports a pinned port that collides", func(t *testing.T) {
+		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload) (database.Workload, bool, error) {
+				w.ID = "id-one"
+				return w, true, nil
+			})
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
+		ports.EXPECT().HolderOf(mock.Anything, 4141).Return("", false, nil)
+		ports.EXPECT().Claim(mock.Anything, mock.Anything, mock.Anything).
+			Return(database.ErrHostPortTaken)
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		// The caller asked for this port specifically, so retrying would be picking
+		// a different one behind their back.
+		spec := containerSpec("example", "example/example:latest")
+		spec.Container.Ports = &[]api.PortMapping{{To: 8080, From: new(4141)}}
+
+		_, _, err := svc.Apply(t.Context(), spec)
+		assert.ErrorIs(t, err, service.ErrHostPortTaken)
+	})
+}
+
 func TestWorkloadService_List_Queries(t *testing.T) {
 	t.Parallel()
 
@@ -468,6 +534,7 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 	t.Helper()
 
 	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().Claim(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	ports.EXPECT().HolderOf(mock.Anything, mock.Anything).Return("", false, nil).Maybe()

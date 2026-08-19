@@ -14,38 +14,58 @@ import (
 func TestAllocator_Allocate(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns the lowest free port in the range", func(t *testing.T) {
+	t.Run("returns a port from the range", func(t *testing.T) {
 		allocator := port.New(port.Config{Min: 29310, Max: 29320})
 
 		got, err := allocator.Allocate(nil)
 		require.NoError(t, err)
 
-		// Ascending order means a given set of workloads tends to get the same
-		// ports across restarts, which is what makes them predictable.
-		assert.Equal(t, 29310, got)
+		assert.GreaterOrEqual(t, got, 29310)
+		assert.LessOrEqual(t, got, 29320)
 	})
 
 	t.Run("skips ports already allocated to a workload", func(t *testing.T) {
-		allocator := port.New(port.Config{Min: 29330, Max: 29340})
+		allocator := port.New(port.Config{Min: 29330, Max: 29332})
 
-		got, err := allocator.Allocate([]int{29330, 29331})
+		// Only one port in the range is unclaimed, so the allocator has to find it
+		// wherever it starts looking.
+		got, err := allocator.Allocate([]int{29330, 29332})
 		require.NoError(t, err)
-		assert.Equal(t, 29332, got)
+		assert.Equal(t, 29331, got)
 	})
 
 	t.Run("skips a port something on the host is listening on", func(t *testing.T) {
-		allocator := port.New(port.Config{Min: 29350, Max: 29360})
-
 		// A listener orca knows nothing about is exactly the case the bind check
 		// exists for: the database has no record of it, so only trying the port
-		// reveals that it is unusable.
+		// reveals that it is unusable. Narrowing the range to two ports and holding
+		// one leaves exactly one answer.
 		listener, err := net.Listen("tcp", "127.0.0.1:29350")
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, listener.Close()) })
 
+		allocator := port.New(port.Config{Min: 29350, Max: 29351})
+
 		got, err := allocator.Allocate(nil)
 		require.NoError(t, err)
 		assert.Equal(t, 29351, got)
+	})
+
+	t.Run("spreads allocations across the range", func(t *testing.T) {
+		allocator := port.New(port.Config{Min: 29400, Max: 29500})
+
+		// Concurrent callers each read the same set of taken ports, so an allocator
+		// that always chose the lowest free one would have them all pick the same
+		// port and all but one lose the race to claim it. Spreading the starting
+		// point is what keeps that contention rare.
+		seen := make(map[int]struct{})
+		for range 20 {
+			got, err := allocator.Allocate(nil)
+			require.NoError(t, err)
+
+			seen[got] = struct{}{}
+		}
+
+		assert.Greater(t, len(seen), 1, "every allocation chose the same port")
 	})
 
 	t.Run("reports an exhausted range", func(t *testing.T) {
