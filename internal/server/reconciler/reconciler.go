@@ -266,7 +266,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 
 		r.logger.With("workload", workload).Debug("stopping orphaned workload")
 
-		if err = r.stop(ctx, workload); err != nil {
+		if err = r.stopOrphan(ctx, workload); err != nil {
 			r.logger.With("workload", workload, "error", err).Error("failed to stop orphaned workload")
 		}
 	}
@@ -306,7 +306,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	if stale := staleInstances(row, instances); len(stale) > 0 {
 		r.logger.With("workload", row.Name, "version", row.Version).Debug("replacing stale workload")
 
-		if err := r.stop(ctx, row.Name); err != nil {
+		if err := r.stop(ctx, row); err != nil {
 			return fmt.Errorf("failed to stop stale workload: %w", err)
 		}
 
@@ -523,7 +523,7 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 
 		r.logger.With("workload", row.Name).Debug("stopping deleted workload")
 
-		if err := r.stop(ctx, row.Name); err != nil {
+		if err := r.stop(ctx, row); err != nil {
 			return fmt.Errorf("failed to stop deleted workload: %w", err)
 		}
 
@@ -579,7 +579,7 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, instanc
 	// The stopped instances have to be cleared before new work can take their
 	// place: their container names are derived from the workload and version, so
 	// a replacement would otherwise collide with the corpse.
-	if err := r.stop(ctx, row.Name); err != nil {
+	if err := r.stop(ctx, row); err != nil {
 		return fmt.Errorf("failed to clear stopped workload: %w", err)
 	}
 
@@ -755,30 +755,65 @@ func (r *Reconciler) abandonPorts(ctx context.Context, row database.Workload) {
 	}
 }
 
-// stop asks the driver to stop a workload, bounded so that a daemon which never
-// answers costs one pass rather than blocking every workload behind it.
-func (r *Reconciler) stop(ctx context.Context, workload string) error {
+// stop asks the driver that runs a workload to stop it, bounded so that a daemon which
+// never answers costs one pass rather than blocking every workload behind it.
+//
+// Only that driver is asked. Asking every driver cost a round trip per workload per
+// pass to runtimes that were never going to have anything — measured as the dominant
+// cost of tearing down a hundred mixed workloads, where each pass repeated the waste
+// for every workload still left.
+func (r *Reconciler) stop(ctx context.Context, row database.Workload) error {
+	runtime, ok := r.driverFor(row)
+	if !ok {
+		// Nothing runs this runtime, so nothing can be running for it. The check is
+		// still dropped, since the workload is on its way out either way.
+		r.forget(row.Name)
+
+		return nil
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
 
-	// Every driver is asked, rather than the one the workload's runtime names. A
-	// workload being stopped may have no row left to read a runtime from — an orphan
-	// has none by definition — and a driver with nothing for the name does nothing.
+	if err := runtime.Stop(ctx, row.Name); err != nil {
+		return fmt.Errorf("failed to stop workload on the %s runtime: %w", runtime.Name(), err)
+	}
+
+	r.forget(row.Name)
+
+	return nil
+}
+
+// stopOrphan stops work nothing asked for, which means asking every driver.
+//
+// An orphan has no stored workload by definition, so there is no runtime to read and
+// no way to know which driver owns it. A driver with nothing for the name does nothing,
+// so asking all of them is the only way to be sure it is gone.
+func (r *Reconciler) stopOrphan(ctx context.Context, workload string) error {
+	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
+	defer cancel()
+
 	for _, runtime := range r.drivers {
 		if err := runtime.Stop(ctx, workload); err != nil {
 			return fmt.Errorf("failed to stop workload on the %s runtime: %w", runtime.Name(), err)
 		}
 	}
 
-	// The check history describes work that no longer exists. Keeping it would
-	// condemn the replacement for failures the departed container produced, and deny
-	// it the start period a newly started workload is owed — so a workload replaced
-	// for being unhealthy could never demonstrate that it had recovered.
+	r.forget(workload)
+
+	return nil
+}
+
+// forget drops a workload's health check, once the work it described is gone.
+//
+// The check history describes work that no longer exists. Keeping it would condemn the
+// replacement for failures the departed container produced, and deny it the start
+// period a newly started workload is owed — so a workload replaced for being unhealthy
+// could never demonstrate that it had recovered.
+func (r *Reconciler) forget(workload string) {
 	if r.checker != nil {
 		r.checker.Forget(workload)
 	}
-
-	return nil
 }
 
 // staleInstances returns the instances running a specification other than the

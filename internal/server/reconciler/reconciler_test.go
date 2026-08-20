@@ -628,6 +628,114 @@ func TestReconciler_Run_RoutesByRuntime(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_StopsOnlyTheDriverThatRunsIt(t *testing.T) {
+	t.Parallel()
+
+	container, other := newMockDriver(t), NewMockDriver(t)
+	other.EXPECT().Name().Return("other").Maybe()
+
+	repo := NewMockWorkloadRepository(t)
+
+	// A deleted workload belonging to one runtime. Asking the other to stop it costs a
+	// round trip to something that was never going to have it, and a pass repeats that
+	// for every workload — which was measured as the dominant cost of a teardown.
+	row := storedWorkload("example", "hash-one")
+	row.DeletedAt = time.Now().UTC()
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+	repo.EXPECT().Delete(mock.Anything, "example").Return(nil).Maybe()
+
+	container.EXPECT().Stop(mock.Anything, "example").Return(nil)
+
+	// No Stop is expected on the other driver at all, which is the assertion: the mock
+	// fails the test if one arrives.
+	events := make(chan driver.Event)
+	container.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+	other.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+	passes := newCounter()
+	container.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return []driver.Instance{{
+				ID:       "container-one",
+				Workload: "example",
+				SpecHash: "hash-one",
+				State:    driver.StateRunning,
+			}}, nil
+		})
+	other.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: container, "other": other},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
+func TestReconciler_Run_StopsAnOrphanOnEveryDriver(t *testing.T) {
+	t.Parallel()
+
+	container, other := newMockDriver(t), NewMockDriver(t)
+	other.EXPECT().Name().Return("other").Maybe()
+
+	repo := NewMockWorkloadRepository(t)
+	repo.EXPECT().List(mock.Anything).Return(nil, nil)
+
+	// An orphan has no stored workload by definition, so there is no runtime to read
+	// and no way to know which driver owns it. Both are asked, and a driver with
+	// nothing for the name does nothing.
+	container.EXPECT().Stop(mock.Anything, "orphan").Return(nil)
+	other.EXPECT().Stop(mock.Anything, "orphan").Return(nil)
+
+	events := make(chan driver.Event)
+	container.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+	other.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+	passes := newCounter()
+	container.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return []driver.Instance{{
+				ID:       "container-one",
+				Workload: "orphan",
+				SpecHash: "hash-one",
+				State:    driver.StateRunning,
+			}}, nil
+		})
+	other.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: container, "other": other},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_LeavesARuntimeWithNoDriverAlone(t *testing.T) {
 	t.Parallel()
 
