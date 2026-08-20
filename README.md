@@ -1,11 +1,43 @@
 # orca
 
-A single-node workload orchestrator for Docker containers.
+A single-node workload orchestrator.
 
-You describe a workload in a YAML file and submit it. orca stores that as the
-desired state and continuously reconciles the machine against it: starting what
-should be running, replacing what is running an outdated specification, restarting
-what died, and stopping what nothing asked for.
+You describe a workload in a YAML file and submit it. orca stores that as the desired
+state and reconciles the machine against it continuously. It starts what should be
+running, replaces what runs an outdated specification, restarts what died, and stops
+what nothing asked for.
+
+A workload runs either as a Docker container or as a command on the host.
+
+## Quick start
+
+Download an archive for your platform from the
+[releases](https://github.com/dsb-labs/orca/releases) page and put `orca` on your
+`PATH`. Then start the server:
+
+```sh
+orca serve          # listens on 127.0.0.1:7373
+```
+
+Write a manifest and apply it:
+
+```sh
+cat > example.yaml <<'EOF'
+version: v1
+name: example
+ports:
+  - to: 80
+container:
+  image: nginx:1.27-alpine
+EOF
+
+orca apply example.yaml
+orca get example
+```
+
+`get` reports the host port orca allocated, which is how the workload is reached.
+
+The server is also published as a container image at `ghcr.io/dsb-labs/orca`.
 
 ## A workload
 
@@ -15,274 +47,35 @@ name: example
 labels:
   some-key: some-value
 ports:
-  - to: 80            # the port the workload listens on
-  - to: 443
-    from: 8443        # optional: pin the host port instead
+  - to: 80
 env:
   EXAMPLE: EXAMPLE
+restart: always
+health:
+  http: /healthz
 container:
   image: nginx:1.27-alpine
 ```
 
-A workload names exactly one runtime block, and which block it is selects the
-driver that runs it. `container:` runs an image, and `exec:` runs a command on the
-host.
+A workload names exactly one runtime block. `container:` runs an image and `exec:`
+runs a command on the host. Everything else applies to either.
 
-A workload starts with only the environment `env:` names. It does not inherit the
-server's own environment, which may hold credentials the workload has no business
-reading.
+## Documentation
 
-### Command
+- [Manifest reference](docs/manifest.md) — every field a workload can name.
+- [Command line](docs/cli.md) — every command and flag.
+- [Configuration](docs/configuration.md) — the server's TOML file.
+- [Operating orca](docs/operating.md) — exposure, state on disk, and reading logs.
+- [Design](docs/design.md) — how reconciliation works and why it is built this way.
 
-A `command:` replaces the one the image declares, given as the command and its
-arguments rather than as a string, so nothing has to decide where to split it:
+[CONTRIBUTING.md](CONTRIBUTING.md) covers building and testing orca.
 
-```yaml
-container:
-  image: alpine:3.20
-  command: ["sh", "-c", "echo hello"]
-```
+## Requirements
 
-Leave it out to run what the image already declares, which is the usual case.
+- Linux. The `exec:` runtime reads `/proc` to identify the processes it started.
+- A Docker daemon, for workloads that name `container:`. The `exec:` runtime needs
+  nothing beyond the host.
 
-### Exec
+## Licence
 
-An `exec:` workload runs a command on the host rather than in a container. The
-command is given the same way `container.command` is, so no shell is involved unless
-the command names one:
-
-```yaml
-version: v1
-name: backup
-restart: on-failure
-exec:
-  command: ["/usr/local/bin/backup", "--target", "/data"]
-```
-
-The server creates a directory for each version of the workload and runs the command
-inside it. Output is captured there, which is what `orca logs` reads.
-
-An exec workload may publish ports and declare a health check, the same as a
-container. The one difference is that it has to name the host port it binds:
-the process binds a port on the host directly, so there is no mapping for orca to
-choose. It records the port so no other workload is given it.
-
-### Ports
-
-`to` is the port your process listens on inside the workload. `from` is the host
-port that reaches it, and leaving it out is the usual case for a container — orca
-allocates one and reports it back, so you never have to invent unique host ports by
-hand:
-
-```sh
-orca get example | jq '.Ports'
-[ { "To": 80, "From": 20000, "Dynamic": true } ]
-```
-
-An allocated port is sticky: it stays the same across restarts and image bumps, so
-anything pointing at it keeps working. Pin `from` only when something outside orca
-has to know the address up front. Pinning one another workload already holds is
-rejected when you apply it, rather than failing quietly later.
-
-Ports sit alongside the runtime blocks rather than inside one, because reaching a
-workload is a question about the workload. A runtime that publishes nothing rejects
-them rather than ignoring them, so a manifest that could never work says so when you
-apply it.
-
-### Health
-
-A `health:` block tells orca how to check that a workload is actually working, which
-is a different question from whether its runtime reports it started. A process that
-is listening and answering errors looks fine to docker:
-
-```yaml
-version: v1
-name: example
-health:
-  http: /healthz    # or `tcp: true` to just check the port accepts a connection
-  port: 80          # only needed when the workload publishes more than one
-  interval: 10s
-  timeout: 2s
-  retries: 3
-  startPeriod: 30s
-ports:
-  - to: 80
-container:
-  image: example/example:latest
-```
-
-orca performs the check itself, from the host, against the port it allocated — so an
-image carrying no shell can still be checked, and any driver gets the behaviour by
-publishing an address rather than implementing checks of its own.
-
-A workload that exhausts its retries is restarted on the same paced schedule a
-crashed one takes. `startPeriod` is the grace it gets first: failures inside it don't
-count, so a workload slow to become ready isn't killed for failing checks it was
-never going to pass yet. Passing one check ends the grace early — it has demonstrably
-started.
-
-Only `http` or `tcp` is required; the timings above are the defaults.
-
-### Restart
-
-A `restart:` policy says what orca does when a workload's container ends. Without one
-a workload is restarted whatever happened, which is what a long-running service wants
-and what makes a one-off job run in a loop.
-
-```yaml
-version: v1
-name: migrate
-restart: on-failure     # always (default), on-failure, never
-container:
-  image: myapp/migrate:1.2.0
-  command: ["migrate", "up"]
-```
-
-| Policy | Behaviour |
-|---|---|
-| `always` | Restart whatever the exit code. The default. |
-| `on-failure` | Restart only a container that exited non-zero. |
-| `never` | Never restart. |
-
-A workload orca will not restart reads as `completed` when it exited cleanly, and
-`failed` when it did not. The policy decides whether to run it again, and the exit
-code decides whether it worked, so a job retired under `never` still reports that it
-failed.
-
-Changing the specification runs a completed workload again, because what already ran
-is then out of date. Applying an unchanged manifest does nothing, so a repeated apply
-does not run a job twice. To run an unchanged job again, delete it and apply it.
-
-A failing workload is retried on a widening delay rather than immediately, so a
-container that cannot start does not spin the daemon.
-
-## Usage
-
-```sh
-orca serve                      # run the server, all defaults
-orca serve config.toml          # run the server from a config file
-
-orca apply example.yaml         # create or update a workload
-orca list                       # list workloads              (alias: ls)
-orca list -q '$.labels.app=web' # ...filtered by a query
-orca get example                # show one workload
-orca logs example --tail 20     # read recent output
-orca delete example             # remove it and stop its work (alias: rm)
-orca delete example --wait      # ...and block until it's gone
-```
-
-Applying the same file twice is a no-op — a workload's version only changes when
-its specification does, so re-running `apply` never restarts healthy work. Read
-commands print indented JSON, so they pipe into `jq`.
-
-### Finding workloads
-
-`list` takes repeatable `--query` filters, each a JSON path into the workload's
-specification and the value it must hold. A workload has to match all of them, so
-adding a query narrows the result:
-
-```sh
-orca list -q '$.labels.app=web'
-orca list -q '$.labels.app=web' -q '$.labels.env=prod'
-orca list -q '$.container.image=nginx:1.27-alpine'
-orca list -q '$.ports[0].to=80'
-```
-
-Labels are just part of the specification, so they need no special syntax. Values
-are compared as text, which is why a number is matched by its digits; a boolean is
-stored as `1` or `0` and has to be written that way.
-
-Deleting is asynchronous. The workload reads as `terminating` while its containers
-are stopped and disappears once nothing is left running for it, so a teardown can
-be watched by polling `get` until it 404s. Applying a workload that is still
-terminating is rejected rather than resurrecting it half-torn-down.
-
-## How it works
-
-- **Specifications are queryable.** Labels and specs are stored as SQLite JSONB, so
-  a filter runs in the database rather than by loading every workload and discarding
-  most of them. Storing JSONB also means a malformed specification is rejected as it
-  is written rather than when something later tries to read it.
-- **The database stores desired state only.** What is actually running is observed
-  from the driver on demand, so nothing persisted can go stale against reality and
-  a restart needs no recovery of orca's own bookkeeping.
-- **Ownership lives in container labels** (`orca.workload`, `orca.spec-hash`,
-  `orca.version`), which is how the driver rediscovers its work. Restart the server
-  and it adopts the containers already running rather than duplicating them.
-- **Reconciliation is level-triggered.** Every pass reads the full desired state,
-  asks the driver what is running, and acts on the difference. A ticker guarantees
-  convergence; Docker's event stream makes it prompt. A missed event costs
-  responsiveness, never correctness.
-- **A changed specification replaces rather than mutates**, because Docker cannot
-  change most of a container's configuration in place. The spec hash recorded on a
-  container is what identifies it as outdated.
-- **orca owns restarts**, not Docker, so they can be paced by exponential backoff
-  and stay visible in the workload's reported state.
-- **Host ports are allocated by orca, not the runtime**, so a workload's address is
-  known when it is applied rather than discovered afterwards, and a driver whose
-  runtime has no allocator of its own inherits the behaviour. A port orca chose is
-  revised if it proves unusable; one you pinned never is.
-- **Only the reconciler touches the runtime.** Deleting a workload records the
-  intent and the reconciler performs the teardown, removing the desired state last.
-  Nothing races it for the same containers, and a failure part-way leaves a workload
-  that gets torn down again rather than containers nothing records.
-
-## Configuration
-
-Every value has a default, so `orca serve` works with no file at all. A config file
-only has to describe what it changes.
-
-```toml
-[http]
-address = "127.0.0.1:7373"   # loopback by default; see below before widening it
-
-[data]
-directory = "~/.local/share/orca"   # the SQLite database lives here
-
-[docker]
-host = ""                            # empty uses the environment, then the local socket
-
-[reconcile]
-interval = "10s"                     # full pass cadence; events make convergence prompt
-
-[ports]
-min = 20000                          # range orca allocates host ports from
-max = 32000
-
-[logging]
-level = "info"                       # debug, info, warn, error
-```
-
-### Exposure
-
-The API has no authentication, and applying a workload runs a container. Anything
-that can reach the port can therefore run code on the host, with whatever access the
-docker socket grants — which is usually root-equivalent.
-
-The default address is loopback for that reason. Before binding it to a network,
-put something in front of it that authenticates: a reverse proxy requiring a
-credential, a WireGuard or Tailscale interface, an SSH tunnel. Treat the port as
-equivalent to the docker socket, because in practice it is.
-
-The state directory holds each workload's stored specification, environment
-included, so orca keeps it and the SQLite files inside it readable only by the user
-running the server.
-
-## Development
-
-The OpenAPI document in `api/openapi.yaml` is the source of truth for the wire
-format: the server, client and shared models are all generated from it, so an API
-change starts there.
-
-```sh
-go generate ./...          # regenerate the api and the mocks
-go test -race ./...        # everything, including the end-to-end suite
-go test -short ./...       # unit tests only, no docker needed
-go tool staticcheck ./...
-go run . serve dev.toml    # localhost, debug logging, ./data
-```
-
-The end-to-end tests in `internal/e2e` run a real server against a real Docker
-daemon, so they need one running and are skipped by `-short`. They also run on a
-daily schedule, which catches breakage that isn't tied to a code change — a runner
-upgrading Docker, or the image tag they use moving underneath them.
+MIT. See [LICENSE.md](LICENSE.md).

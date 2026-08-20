@@ -1,0 +1,108 @@
+# Operating orca
+
+## Exposure
+
+Applying a workload runs code, with whatever access the Docker socket grants. Treat
+orca's port as equivalent to that socket, because in practice it is.
+
+The default address is loopback for that reason. Restrict who can reach it before
+binding it to a network:
+
+- A reverse proxy that requires a credential.
+- A WireGuard or Tailscale interface, so the port is only reachable inside it.
+- An SSH tunnel, for occasional access from one machine.
+
+## State on disk
+
+Everything orca keeps lives under the data directory, `~/.local/share/orca` by
+default:
+
+```
+state.db          the workloads that have been applied
+state.db-wal      SQLite's write-ahead log
+state.db-shm      SQLite's shared-memory index
+workload/         one directory per exec workload
+```
+
+The database holds each workload's stored specification, environment included, so orca
+creates the directory and its files readable only by the user running the server.
+
+The database holds desired state only. What is actually running is observed from the
+runtime when asked, so nothing persisted can go stale against reality. A restarted
+server needs no recovery of orca's own bookkeeping.
+
+## Exec workload directories
+
+Each version of an `exec` workload gets a directory of its own:
+
+```
+workload/<name>/<version>/
+  cwd/            the process's working directory
+  output.log      the process's output, both streams combined
+  state.json      the process orca started, and how it ended
+```
+
+The process runs in `cwd`, which is separate from orca's own files so that a workload
+writing to its working directory cannot overwrite them.
+
+`output.log` grows for as long as the workload runs. orca does not rotate or truncate
+it, so a workload that writes continuously needs watching.
+
+`state.json` records the process identifier and the kernel's start time for that
+process. Both have to match for orca to claim the workload is still running. A process
+identifier alone is reused, so a record naming one that is alive may be describing
+something else.
+
+A workload's directories are removed when the workload is deleted, so its output
+survives for as long as the workload does.
+
+## Restarting the server
+
+A container keeps running when the server stops, and so does an exec process. orca
+rediscovers both on its next start rather than duplicating them, so restarting the
+server is a different thing from restarting the workloads it runs.
+
+Containers are found by the labels orca sets on them. Exec processes are found from the
+records in their workload directories, which is why those directories have to outlive
+the server that wrote them.
+
+One thing does not survive. Only a process's parent can collect its exit code, so an
+exec workload that ends while the server is down leaves none.
+
+orca reports that as a failure rather than a clean exit. A job which may not have
+finished is better run again than assumed complete. Under `restart: always` it changes
+nothing, and under `on-failure` it means such a job runs again.
+
+## Reading logs
+
+```sh
+orca logs example --tail 20
+```
+
+For a container, orca reads the logs from the Docker daemon. For an exec workload it
+reads `output.log`. Either way both output streams come back combined in the order
+they were written.
+
+## Watching what orca is doing
+
+At `info` the server is quiet unless something is wrong. Setting the level to `debug`
+reports each decision a reconciliation pass makes. Turn it on when a workload is not
+behaving the way its manifest says it should:
+
+```toml
+[logging]
+level = "debug"
+```
+
+Every log line carries the workload it concerns, so filtering by name shows one
+workload's history.
+
+## Host ports
+
+orca allocates a host port for a container port that names none, from the range in the
+configuration. An allocation is sticky: it survives restarts and specification changes,
+so anything pointing at it keeps working.
+
+A port orca chose is revised if the workload fails to start on it, since something
+outside orca may hold it. A port a manifest pinned is never moved, because it was asked
+for.
