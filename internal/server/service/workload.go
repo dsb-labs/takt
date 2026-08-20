@@ -768,7 +768,41 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 		Deleting:  deleting,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
+		NextRun:   nextRun(manifest.NewSpec(spec).Schedule, instances, row.UpdatedAt),
 	}, nil
+}
+
+// nextRun reports when a scheduled workload runs again, or the zero time when it runs
+// continuously or has not run yet.
+//
+// Derived on read rather than stored, like every other observed value: the occurrence
+// is a function of the expression and the last run, both of which are already known.
+func nextRun(schedule *manifest.Schedule, instances []driver.Instance, applied time.Time) time.Time {
+	if schedule == nil {
+		return time.Time{}
+	}
+
+	parsed, err := schedule.Parsed()
+	if err != nil {
+		// Validated before it was stored, so this means the specification and the
+		// rules have diverged. Nothing useful can be reported.
+		return time.Time{}
+	}
+
+	var last time.Time
+	for _, instance := range instances {
+		if instance.StartedAt.After(last) {
+			last = instance.StartedAt
+		}
+	}
+
+	// Counted from the last run, or from when the specification was applied for a
+	// workload that has not run yet, which is what the reconciler does.
+	if last.IsZero() {
+		last = applied
+	}
+
+	return parsed.Next(last)
 }
 
 // completionState reports the state an ended instance reads as once its workload's
@@ -880,4 +914,7 @@ type Workload struct {
 	CreatedAt time.Time
 	// The time the workload's specification last changed.
 	UpdatedAt time.Time
+	// When the workload next runs, for one that names a schedule. Zero for a workload
+	// that runs continuously, and for a scheduled one that has not run yet.
+	NextRun time.Time
 }

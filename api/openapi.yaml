@@ -601,6 +601,16 @@ components:
           type: string
           format: date-time
           description: When the workload's specification last changed.
+        nextRun:
+          type: string
+          format: date-time
+          description: |
+            When the workload next runs, for one that names a schedule. Absent for a
+            workload that runs continuously, and for a scheduled one that has not run
+            yet and so has no occurrence to count from.
+
+            Derived when the workload is read rather than stored, like everything else
+            about what is actually happening.
 
     Instance:
       type: object

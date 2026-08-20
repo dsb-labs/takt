@@ -467,6 +467,14 @@ type Workload struct {
 	// Name The name that identifies the workload.
 	Name string `json:"name"`
 
+	// NextRun When the workload next runs, for one that names a schedule. Absent for a
+	// workload that runs continuously, and for a scheduled one that has not run
+	// yet and so has no occurrence to count from.
+	//
+	// Derived when the workload is read rather than stored, like everything else
+	// about what is actually happening.
+	NextRun *time.Time `json:"nextRun,omitempty"`
+
 	// Ports The port mappings the server settled on for this workload, including the
 	// host ports it allocated. These are how a caller reaches the workload, and
 	// are reported whether or not anything is currently running.

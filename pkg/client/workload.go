@@ -53,6 +53,9 @@ type (
 		CreatedAt time.Time
 		// The time the workload's specification last changed.
 		UpdatedAt time.Time
+		// When the workload next runs, for one that names a schedule. Zero for a
+		// workload that runs continuously.
+		NextRun time.Time
 	}
 
 	// The ResolvedPort type is a port mapping as the server applied it.
@@ -387,6 +390,9 @@ func newWorkload(w api.Workload) Workload {
 		UpdatedAt: w.UpdatedAt,
 	}
 
+	if w.NextRun != nil {
+		workload.NextRun = *w.NextRun
+	}
 	if w.Deleting != nil {
 		workload.Deleting = *w.Deleting
 	}

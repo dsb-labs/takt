@@ -22,8 +22,8 @@ ports:
 env:
   EXAMPLE: EXAMPLE
 
-restart: always
-schedule: "*/5 * * * *"
+restart:
+  policy: always
 
 health:
   http: /healthz
@@ -45,8 +45,8 @@ container:
 | `labels` | no | Arbitrary key-value pairs. |
 | `ports` | no | The ports the workload publishes. |
 | `env` | no | Environment variables set for the workload. |
-| `restart` | no | What happens when the workload ends. Defaults to `always`. |
-| `schedule` | no | A cron expression. Stored and validated, and not acted on. |
+| `restart` | no | What happens when the workload ends. |
+| `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
 | `health` | no | How orca decides the workload is working. |
 | `container` | one of | Run the workload as a Docker container. |
 | `exec` | one of | Run the workload as a command on the host. |
@@ -139,12 +139,21 @@ environment, which may hold credentials the workload has no business reading.
 ## Restart
 
 ```yaml
-restart: on-failure
+restart:
+  policy: on-failure
+  attempts: 5
+  delay: 10s
 ```
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `policy` | no | `always` | Whether to run the workload again. |
+| `attempts` | no | unlimited | Consecutive restarts before orca gives up. |
+| `delay` | no | `1s` | How long to wait before the first restart. |
 
 | Policy | Behaviour |
 |---|---|
-| `always` | Restart whatever the exit code. The default. |
+| `always` | Restart whatever the exit code. |
 | `on-failure` | Restart only after a non-zero exit. |
 | `never` | Never restart. |
 
@@ -160,7 +169,9 @@ Changing the specification runs a completed workload again, because what already
 is then out of date. Applying an unchanged manifest does nothing, so a repeated apply
 does not run a job twice. To run an unchanged job again, delete it and apply it.
 
-A workload that keeps failing is retried on a widening delay rather than immediately.
+`delay` is the first wait, and each consecutive failure doubles it up to a ceiling
+orca sets. A workload that reaches `attempts` is left exactly as it ended, so its
+outcome stays readable. Changing its specification starts it again.
 
 ## Health
 
@@ -204,7 +215,42 @@ A health check needs a published port, whatever the runtime.
 ## Schedule
 
 ```yaml
-schedule: "*/5 * * * *"
+schedule:
+  cron: "*/5 * * * *"
+  overlap: replace
 ```
 
-Validated as a cron expression and stored with the workload. orca does not act on it.
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `cron` | yes | | A cron expression, in the standard five-field form. |
+| `overlap` | no | `replace` | What to do when an occurrence is due and the previous run has not finished. |
+
+A scheduled workload runs at the times its expression names and waits in between. It
+is not started when it is applied: a schedule says when to run, and the moment of
+applying is not one of those times.
+
+The expression is read in the server's local time.
+
+| Overlap | Behaviour |
+|---|---|
+| `replace` | Stop the running instance and start the occurrence. |
+| `skip` | Leave the running instance alone and miss the occurrence. |
+
+`replace` keeps the schedule honest, so a run that outlasts its interval never
+finishes. `skip` is for a job that must not be interrupted. Either way the workload
+runs one instance at a time.
+
+The schedule outranks the restart policy. An occurrence coming due starts the workload
+whatever the last run did, so the policy applies only between occurrences. There it
+retries a run that failed.
+
+A run that ended cleanly is not restarted. Starting it again would run the workload at
+a time its schedule does not name.
+
+Occurrences missed while the server was down are missed. The occurrence orca runs is
+the first after the last run, so a workload down for several does not run once for each.
+
+A scheduled workload cannot declare a health check. A check restarts a workload that
+stops answering, and a scheduled workload is expected to end.
+
+`orca get` reports when a scheduled workload next runs, once it has run at least once.

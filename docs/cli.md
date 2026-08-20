@@ -71,6 +71,8 @@ orca get example
 Prints one workload: the specification that was submitted, the ports orca settled on,
 and what the runtime reports about each instance.
 
+A workload that names a schedule also reports when it next runs.
+
 ## logs
 
 ```sh

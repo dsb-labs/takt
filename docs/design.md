@@ -50,6 +50,29 @@ The specification hash recorded on an instance is what identifies it as outdated
 hash covers the resolved specification, host ports included, so a reallocated port reads
 as an ordinary change and replaces the instance bound to the old one.
 
+## The schedule outranks the restart policy
+
+A workload can say both when to run and what to do when a run ends. Those can disagree,
+so one has to win, and it is the schedule.
+
+An occurrence coming due starts the workload whatever the last run did. The restart
+policy applies only between occurrences, where it retries a run that failed. A failed
+occurrence did not achieve what it asked for, so trying again before the next one is
+due is worth doing.
+
+A run that ended cleanly is not restarted between occurrences, whatever the policy
+says. Starting it again would run the workload at a time its schedule does not name,
+which is the thing a schedule exists to prevent.
+
+Nothing about when a workload ran is stored. The occurrence is derived from the
+expression and the time the last instance started, which the runtime already reports.
+A container that has ended is left in place until the next occurrence replaces it, and
+a workload that has not run yet counts from when its specification was applied.
+
+Occurrences missed while the server was down are missed. The occurrence orca runs is
+the first after the last run, so a workload down for several does not run once for
+each. For a nightly job down a week, that is the difference between one run and seven.
+
 ## orca owns restarts
 
 Neither runtime is asked to restart anything. Docker's restart policy is left unset and

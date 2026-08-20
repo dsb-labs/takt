@@ -572,6 +572,11 @@ func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 	passes.wait(t, 1)
 	<-forgotten
 
+	// The check being forgotten happens during the pass, so the row being removed may
+	// still be in flight. Waiting for the pass to finish is what makes that expectation
+	// deterministic.
+	awaitPasses(t, r, 1)
+
 	cancel()
 	require.NoError(t, <-done)
 }
@@ -939,6 +944,15 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 			ExpectStart: false,
 		},
 		{
+			// The first occurrence after the specification was applied. Nothing has
+			// run, so there is no previous run to count from.
+			Name:        "the first occurrence is due and nothing has ever run",
+			Cron:        daily,
+			Now:         ran.Add(24 * time.Hour),
+			ExpectStart: true,
+			ExpectStop:  true,
+		},
+		{
 			Name: "an occurrence is due and nothing is running",
 			Cron: daily,
 			Now:  ran.Add(24 * time.Hour),
@@ -1018,6 +1032,9 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 
 			row := storedWorkload("example", "hash-one")
 			row.Spec = specWithSchedule("example", tc.Cron, tc.Overlap)
+			// A workload that has not run counts its first occurrence from when its
+			// specification was applied, so the fixture has to say when that was.
+			row.UpdatedAt = ran
 
 			repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 

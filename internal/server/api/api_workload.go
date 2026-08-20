@@ -322,6 +322,10 @@ func newWorkload(w service.Workload) api.Workload {
 		UpdatedAt: w.UpdatedAt,
 	}
 
+	if !w.NextRun.IsZero() {
+		workload.NextRun = new(w.NextRun)
+	}
+
 	if w.Deleting {
 		workload.Deleting = new(true)
 	}

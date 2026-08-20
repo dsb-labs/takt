@@ -700,6 +700,48 @@ func (s *Suite) TestExecWorkloadIsStoppedOnDelete() {
 	}, convergeTimeout, 500*time.Millisecond, "the process outlived the workload it belonged to")
 }
 
+// TestScheduledWorkloadRunsOnItsSchedule covers the schedule against a real daemon: a
+// workload runs at the times its expression names, ends, and runs again.
+//
+// A minute is the finest the standard cron form allows, so this is the slowest scenario
+// in the suite. It earns that by being the only place the whole chain is exercised —
+// the expression, the last run the driver reports, and the occurrence derived from
+// both.
+func (s *Suite) TestScheduledWorkloadRunsOnItsSchedule() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.execSpec(name, "sh", "-c", "echo ran; exit 0")
+	spec.Schedule = &manifest.Schedule{Cron: "* * * * *"}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	// The first occurrence has to arrive before anything runs, since applying a
+	// workload is not one of the times a schedule names.
+	first := s.awaitInstance(name)
+
+	// The workload ends and is left alone rather than restarted, because a run that
+	// ended cleanly did what its occurrence asked of it.
+	s.awaitState(name, client.WorkloadStateStopped)
+
+	// Once it has run, orca reports when it runs again.
+	workload, err := s.client.Get(s.ctx(), name)
+	s.Require().NoError(err)
+	s.False(workload.NextRun.IsZero(), "a workload that has run should report its next occurrence")
+
+	// The next occurrence replaces the run that ended, which is a new instance rather
+	// than the same one started again.
+	s.Require().Eventuallyf(func() bool {
+		current, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(current.Instances) == 0 {
+			return false
+		}
+
+		return current.Instances[0].ID != first
+	}, convergeTimeout, time.Second, "the workload never ran a second occurrence")
+}
+
 // TestApplyDuringTeardownIsRejected covers re-applying a workload that is still being
 // torn down, which would otherwise race the removal.
 func (s *Suite) TestApplyDuringTeardownIsRejected() {

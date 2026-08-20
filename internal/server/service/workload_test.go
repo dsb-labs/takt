@@ -506,6 +506,72 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 	}
 }
 
+func TestWorkloadService_Get_NextRun(t *testing.T) {
+	t.Parallel()
+
+	ran := time.Date(2026, 3, 1, 2, 0, 0, 0, time.UTC)
+	applied := time.Date(2026, 2, 20, 2, 0, 0, 0, time.UTC)
+
+	tt := []struct {
+		Name      string
+		Cron      string
+		Instances []driver.Instance
+		Expected  time.Time
+	}{
+		{
+			// A daily expression names one time a day, so the occurrence after a run
+			// is the same time the next day.
+			Name: "reports the occurrence after the last run",
+			Cron: "0 2 * * *",
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", State: driver.StateExited, StartedAt: ran},
+			},
+			Expected: ran.Add(24 * time.Hour),
+		},
+		{
+			// Nothing has run, so the occurrence is counted from when the
+			// specification was applied, which is what the reconciler waits for.
+			Name:     "reports the first occurrence for a schedule that has not run",
+			Cron:     "0 2 * * *",
+			Expected: applied.Add(24 * time.Hour),
+		},
+		{
+			Name: "reports nothing for a workload that runs continuously",
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", State: driver.StateRunning, StartedAt: ran},
+			},
+			Expected: time.Time{},
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+			row := storedWorkload("example")
+			if tc.Cron != "" {
+				spec := containerSpec("example", "example/example:latest")
+				spec.Schedule = &api.ScheduleSpec{Cron: tc.Cron}
+
+				encoded, err := json.Marshal(spec)
+				require.NoError(t, err)
+				row.Spec = encoded
+			}
+
+			row.UpdatedAt = applied
+
+			repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+			d.EXPECT().Observe(mock.Anything).Return(tc.Instances, nil).Once()
+
+			svc := newTestService(t, d, repo, ports, nil)
+
+			got, err := svc.Get(t.Context(), "example")
+			require.NoError(t, err)
+			assert.Equal(t, tc.Expected, got.NextRun)
+		})
+	}
+}
+
 func TestWorkloadService_List(t *testing.T) {
 	t.Parallel()
 

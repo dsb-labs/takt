@@ -652,24 +652,16 @@ func (r *Reconciler) checked(instance driver.Instance) driver.Instance {
 // asked for, so several passing while the server was down produce one run rather than
 // one each.
 func (r *Reconciler) occurrence(ctx context.Context, row database.Workload, instances []driver.Instance, schedule cron.Schedule) error {
-	last := lastRun(instances)
-
-	// Nothing has ever run. A schedule says when to run, and the moment a workload was
-	// applied is not one of the times it names, so the first occurrence is waited for
-	// rather than treated as due.
-	if last.IsZero() {
-		if len(instances) == 0 {
-			r.settle(row.Name)
-
-			return nil
-		}
-
-		// Something is running but reports no start time, which only a driver that
-		// cannot say would produce. Left alone rather than guessed about.
-		return nil
+	// The occurrence is counted from the last run, or from when the specification was
+	// applied for a workload that has not run yet. A schedule says when to run, and
+	// the moment of applying is not one of the times it names, so the first occurrence
+	// after that is what the workload waits for.
+	since := lastRun(instances)
+	if since.IsZero() {
+		since = row.UpdatedAt
 	}
 
-	if r.now().Before(schedule.Next(last)) {
+	if r.now().Before(schedule.Next(since)) {
 		// Nothing is due. A run that ended stays as it is, so its outcome is readable
 		// until the next occurrence replaces it.
 		return r.between(ctx, row, instances)

@@ -54,7 +54,8 @@ ports:
 env:
   EXAMPLE: EXAMPLE
 
-restart: always
+restart:
+  policy: always
 
 health:
   http: /healthz
