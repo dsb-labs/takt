@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
 )
@@ -22,22 +23,15 @@ func TestDriver_Start(t *testing.T) {
 
 	tt := []struct {
 		Name       string
-		Workload   docker.Workload
+		Workload   driver.Workload
 		SetupMocks func(*MockClient)
 		Assert     func(*testing.T, string)
 		ExpectErr  error
 	}{
 		{
 			Name: "starts a container with orca's ownership labels",
-			Workload: docker.Workload{
-				Name:     "example",
-				Version:  2,
-				SpecHash: "hash-two",
-				Image:    "example/example:latest",
-				Env:      map[string]string{"EXAMPLE": "EXAMPLE"},
-				Ports:    []docker.Port{{Container: 8080, Host: 4141}},
-				Labels:   map[string]string{"some-key": "some-value"},
-			},
+			Workload: workload("example", 2, "hash-two", containerSpec("example/example:latest", nil, map[string]string{"EXAMPLE": "EXAMPLE"}),
+				ports(8080, 4141), map[string]string{"some-key": "some-value"}),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
@@ -65,14 +59,8 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
-			Name: "runs the command the workload names",
-			Workload: docker.Workload{
-				Name:     "example",
-				Version:  1,
-				SpecHash: "hash-one",
-				Image:    "example/example:latest",
-				Command:  []string{"sh", "-c", "exit 0"},
-			},
+			Name:     "runs the command the workload names",
+			Workload: workload("example", 1, "hash-one", containerSpec("example/example:latest", []string{"sh", "-c", "exit 0"}, nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
@@ -94,13 +82,8 @@ func TestDriver_Start(t *testing.T) {
 			// Nil rather than empty, so the image keeps the command it declares. An
 			// empty slice would replace it with nothing, and the container would have
 			// nothing to run.
-			Name: "leaves the image's own command alone when the workload names none",
-			Workload: docker.Workload{
-				Name:     "example",
-				Version:  1,
-				SpecHash: "hash-one",
-				Image:    "example/example:latest",
-			},
+			Name:     "leaves the image's own command alone when the workload names none",
+			Workload: workload("example", 1, "hash-one", containerSpec("example/example:latest", nil, nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
@@ -124,17 +107,11 @@ func TestDriver_Start(t *testing.T) {
 			// belongs to. A manifest that could set them would be able to disown a
 			// container or claim another workload's, so orca's own must win.
 			Name: "refuses to let a manifest overwrite the ownership labels",
-			Workload: docker.Workload{
-				Name:     "example",
-				Version:  2,
-				SpecHash: "hash-two",
-				Image:    "example/example:latest",
-				Labels: map[string]string{
-					docker.LabelWorkload: "someone-elses-workload",
-					docker.LabelSpecHash: "forged-hash",
-					docker.LabelVersion:  "999",
-				},
-			},
+			Workload: workload("example", 2, "hash-two", containerSpec("example/example:latest", nil, nil), nil, map[string]string{
+				docker.LabelWorkload: "someone-elses-workload",
+				docker.LabelSpecHash: "forged-hash",
+				docker.LabelVersion:  "999",
+			}),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
@@ -155,11 +132,8 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
-			Name: "pulls the image when it isn't present locally",
-			Workload: docker.Workload{
-				Name:  "example",
-				Image: "example/example:latest",
-			},
+			Name:     "pulls the image when it isn't present locally",
+			Workload: workload("example", 0, "", containerSpec("example/example:latest", nil, nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return(nil, nil).Once()
@@ -174,11 +148,8 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
-			Name: "removes the container when it cannot be started",
-			Workload: docker.Workload{
-				Name:  "example",
-				Image: "example/example:latest",
-			},
+			Name:     "removes the container when it cannot be started",
+			Workload: workload("example", 0, "", containerSpec("example/example:latest", nil, nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
@@ -475,4 +446,48 @@ func newTestLogger(t *testing.T) *slog.Logger {
 		AddSource: testing.Verbose(),
 		Level:     level,
 	}))
+}
+
+// workload builds the neutral shape a driver is handed, so a test names only the
+// fields it cares about.
+func workload(name string, version int, hash string, spec api.ContainerSpec, ports []driver.Port, labels map[string]string) driver.Workload {
+	w := driver.Workload{
+		Name:     name,
+		Version:  version,
+		SpecHash: hash,
+		Ports:    ports,
+		Labels:   labels,
+		Spec: api.WorkloadSpec{
+			Version:   "v1",
+			Name:      name,
+			Container: &spec,
+		},
+	}
+
+	// Lifted out of the block the same way NewWorkload does it, so a test exercises
+	// the field the driver actually reads.
+	if spec.Env != nil {
+		w.Env = *spec.Env
+	}
+
+	return w
+}
+
+// containerSpec builds a container block, taking nil for the parts a test leaves out.
+func containerSpec(image string, command []string, env map[string]string) api.ContainerSpec {
+	spec := api.ContainerSpec{Image: image}
+
+	if command != nil {
+		spec.Command = &command
+	}
+	if env != nil {
+		spec.Env = &env
+	}
+
+	return spec
+}
+
+// ports builds a single published port, which is all any of these tests needs.
+func ports(container, host int) []driver.Port {
+	return []driver.Port{{Container: container, Host: host}}
 }

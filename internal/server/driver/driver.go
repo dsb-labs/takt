@@ -10,7 +10,12 @@
 package driver
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
+
+	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/orca/internal/server/database"
 )
 
 // The State type describes the state of a single instance as reported by its driver.
@@ -51,6 +56,36 @@ const (
 )
 
 type (
+	// The Workload type describes the work a driver should run, in terms every runtime
+	// shares.
+	//
+	// It is desired state, where Instance is observed state. The two are deliberately
+	// separate: what the server wants and what a runtime reports are different things,
+	// and a driver is what turns one into the other.
+	//
+	// The runtime-specific part of a specification stays behind Spec rather than being
+	// spread across fields only one driver reads. A driver takes what it recognises and
+	// ignores the rest, so a new runtime adds a block rather than widening this type.
+	Workload struct {
+		// The name of the workload, which identifies it to the operator and to the
+		// driver's own bookkeeping.
+		Name string
+		// The version of the specification this work is created from.
+		Version int
+		// The hash of the specification this work is created from, recorded by the
+		// driver so that drift can be detected later.
+		SpecHash string
+		// The environment variables set for the work.
+		Env map[string]string
+		// The ports the work publishes, each already resolved to a host port.
+		Ports []Port
+		// Arbitrary key-value pairs the operator attached to the workload.
+		Labels map[string]string
+		// The specification the workload was stored with, which carries the runtime
+		// block the driver reads.
+		Spec api.WorkloadSpec
+	}
+
 	// The Instance type describes one unit of work a driver is running on behalf of
 	// a workload. It is observed state: every field reflects what the driver found
 	// when asked, never what the server wishes were true.
@@ -103,3 +138,47 @@ type (
 		Workload string
 	}
 )
+
+// NewWorkload maps a stored workload onto the shape a driver runs, decoding the
+// specification the server persisted.
+//
+// The runtime block is left in Spec rather than pulled apart here: which block matters
+// is the driver's business, and a server that understood each of them would have to
+// change every time a runtime was added.
+func NewWorkload(row database.Workload) (Workload, error) {
+	var spec api.WorkloadSpec
+	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+		return Workload{}, fmt.Errorf("failed to decode workload spec: %w", err)
+	}
+
+	w := Workload{
+		Name:     row.Name,
+		Version:  row.Version,
+		SpecHash: row.SpecHash,
+		Labels:   row.Labels,
+		Spec:     spec,
+	}
+
+	// Read from the container block because that is where the specification carries it
+	// today. It moves to the top level with the exec runtime, which is what makes it
+	// meaningful to a driver that runs no container.
+	if spec.Container != nil && spec.Container.Env != nil {
+		w.Env = *spec.Container.Env
+	}
+
+	if spec.Ports != nil {
+		w.Ports = make([]Port, 0, len(*spec.Ports))
+		for _, mapping := range *spec.Ports {
+			// A specification reaching a driver has had its ports resolved, so a
+			// mapping with no host port is a workload the server has not finished
+			// settling. It is left for a later pass rather than published wrongly.
+			if mapping.From == nil {
+				continue
+			}
+
+			w.Ports = append(w.Ports, Port{Container: mapping.To, Host: *mapping.From})
+		}
+	}
+
+	return w, nil
+}

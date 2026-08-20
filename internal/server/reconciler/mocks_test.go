@@ -9,7 +9,6 @@ import (
 
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/driver/docker"
 	"github.com/dsb-labs/orca/internal/server/health"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -104,7 +103,7 @@ func (_c *MockDriver_Observe_Call) RunAndReturn(run func(ctx context.Context) ([
 }
 
 // Start provides a mock function for the type MockDriver
-func (_mock *MockDriver) Start(ctx context.Context, w docker.Workload) (string, error) {
+func (_mock *MockDriver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	ret := _mock.Called(ctx, w)
 
 	if len(ret) == 0 {
@@ -113,15 +112,15 @@ func (_mock *MockDriver) Start(ctx context.Context, w docker.Workload) (string, 
 
 	var r0 string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, docker.Workload) (string, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, driver.Workload) (string, error)); ok {
 		return returnFunc(ctx, w)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, docker.Workload) string); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, driver.Workload) string); ok {
 		r0 = returnFunc(ctx, w)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, docker.Workload) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, driver.Workload) error); ok {
 		r1 = returnFunc(ctx, w)
 	} else {
 		r1 = ret.Error(1)
@@ -136,20 +135,20 @@ type MockDriver_Start_Call struct {
 
 // Start is a helper method to define mock.On call
 //   - ctx context.Context
-//   - w docker.Workload
+//   - w driver.Workload
 func (_e *MockDriver_Expecter) Start(ctx any, w any) *MockDriver_Start_Call {
 	return &MockDriver_Start_Call{Call: _e.mock.On("Start", ctx, w)}
 }
 
-func (_c *MockDriver_Start_Call) Run(run func(ctx context.Context, w docker.Workload)) *MockDriver_Start_Call {
+func (_c *MockDriver_Start_Call) Run(run func(ctx context.Context, w driver.Workload)) *MockDriver_Start_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 docker.Workload
+		var arg1 driver.Workload
 		if args[1] != nil {
-			arg1 = args[1].(docker.Workload)
+			arg1 = args[1].(driver.Workload)
 		}
 		run(
 			arg0,
@@ -164,7 +163,7 @@ func (_c *MockDriver_Start_Call) Return(s string, err error) *MockDriver_Start_C
 	return _c
 }
 
-func (_c *MockDriver_Start_Call) RunAndReturn(run func(ctx context.Context, w docker.Workload) (string, error)) *MockDriver_Start_Call {
+func (_c *MockDriver_Start_Call) RunAndReturn(run func(ctx context.Context, w driver.Workload) (string, error)) *MockDriver_Start_Call {
 	_c.Call.Return(run)
 	return _c
 }

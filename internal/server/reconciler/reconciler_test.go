@@ -17,7 +17,6 @@ import (
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/driver/docker"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 )
@@ -37,7 +36,7 @@ func TestReconciler_Run(t *testing.T) {
 					storedWorkload("example", "hash-one"),
 				}, nil)
 
-				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w docker.Workload) bool {
+				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 					return w.Name == "example" && w.SpecHash == "hash-one"
 				})).Return("container-one", nil)
 			},
@@ -67,7 +66,7 @@ func TestReconciler_Run(t *testing.T) {
 				}, nil)
 
 				d.EXPECT().Stop(mock.Anything, "example").Return(nil)
-				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w docker.Workload) bool {
+				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 					return w.SpecHash == "hash-two"
 				})).Return("container-two", nil)
 			},
@@ -222,11 +221,11 @@ func TestReconciler_Run(t *testing.T) {
 				}, nil)
 
 				// One broken workload must not stop the others converging.
-				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w docker.Workload) bool {
+				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 					return w.Name == "broken"
 				})).Return("", errors.New("no such image"))
 
-				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w docker.Workload) bool {
+				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 					return w.Name == "healthy"
 				})).Return("container-one", nil)
 			},
@@ -330,7 +329,7 @@ func TestReconciler_Run_Health(t *testing.T) {
 
 			if tc.ExpectRestart {
 				d.EXPECT().Stop(mock.Anything, "example").Return(nil).Once()
-				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w docker.Workload) bool {
+				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 					return w.Name == "example"
 				})).Return("container-two", nil).Once()
 			}
@@ -694,7 +693,7 @@ func TestReconciler_Run_RerunsARetiredWorkloadWhenItsSpecChanges(t *testing.T) {
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
 	d.EXPECT().Stop(mock.Anything, "example").Return(nil)
-	d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w docker.Workload) bool {
+	d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 		return w.SpecHash == "hash-two"
 	})).Return("container-two", nil)
 
@@ -847,7 +846,7 @@ func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
 
 	d.EXPECT().Stop(mock.Anything, "example").Return(nil).Maybe()
 	d.EXPECT().Start(mock.Anything, mock.Anything).
-		RunAndReturn(func(context.Context, docker.Workload) (string, error) {
+		RunAndReturn(func(context.Context, driver.Workload) (string, error) {
 			starts.Add(1)
 
 			return "container-one", nil
@@ -900,7 +899,7 @@ func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 	// and every event, achieving nothing but noise.
 	starts := newCounter()
 	d.EXPECT().Start(mock.Anything, mock.Anything).
-		RunAndReturn(func(context.Context, docker.Workload) (string, error) {
+		RunAndReturn(func(context.Context, driver.Workload) (string, error) {
 			starts.inc()
 			return "", errors.New("no such image")
 		})

@@ -3,7 +3,6 @@ package docker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,8 +19,6 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 )
 
@@ -57,42 +54,6 @@ type (
 		// The client used to talk to the Docker daemon.
 		Client Client
 	}
-
-	// The Port type describes one published port of a container, with the host port
-	// the server settled on.
-	Port struct {
-		// The port the container listens on.
-		Container int
-		// The host port that reaches it.
-		Host int
-	}
-
-	// The Workload type describes the container a driver should run for a workload.
-	//
-	// It is the driver's own view of desired state, deliberately independent of
-	// both the wire format and the database schema so that neither has to change
-	// shape when a driver gains a capability.
-	Workload struct {
-		// The name of the workload the container belongs to.
-		Name string
-		// The version of the specification the container is created from.
-		Version int
-		// The hash of the specification the container is created from, recorded on
-		// the container so that drift can be detected later.
-		SpecHash string
-		// The image the container runs.
-		Image string
-		// The command the container runs, replacing the one the image declares. Empty
-		// runs what the image already declares.
-		Command []string
-		// The environment variables set inside the container.
-		Env map[string]string
-		// The ports to publish, each already resolved to a host port.
-		Ports []Port
-		// Arbitrary key-value pairs to attach to the container alongside orca's
-		// own labels.
-		Labels map[string]string
-	}
 )
 
 // New returns a Driver that runs containers through the client in config.
@@ -103,52 +64,6 @@ func New(config Config) *Driver {
 	}
 }
 
-// NewWorkload maps a stored workload onto the driver's own view of it, decoding
-// the container block from the specification the server persisted.
-//
-// Returns ErrNotContainerWorkload when the specification carries no container
-// block, which means it was meant for a different driver.
-func NewWorkload(row database.Workload) (Workload, error) {
-	var spec api.WorkloadSpec
-	if err := json.Unmarshal(row.Spec, &spec); err != nil {
-		return Workload{}, fmt.Errorf("failed to decode workload spec: %w", err)
-	}
-
-	if spec.Container == nil {
-		return Workload{}, ErrNotContainerWorkload
-	}
-
-	w := Workload{
-		Name:     row.Name,
-		Version:  row.Version,
-		SpecHash: row.SpecHash,
-		Image:    spec.Container.Image,
-		Labels:   row.Labels,
-	}
-
-	if spec.Container.Command != nil {
-		w.Command = *spec.Container.Command
-	}
-	if spec.Container.Env != nil {
-		w.Env = *spec.Container.Env
-	}
-	if spec.Ports != nil {
-		w.Ports = make([]Port, 0, len(*spec.Ports))
-		for _, mapping := range *spec.Ports {
-			// A specification reaching the driver has had its ports resolved, so a
-			// mapping with no host port is a workload the server has not finished
-			// settling and is left for a later pass rather than published wrongly.
-			if mapping.From == nil {
-				continue
-			}
-
-			w.Ports = append(w.Ports, Port{Container: mapping.To, Host: *mapping.From})
-		}
-	}
-
-	return w, nil
-}
-
 // Start creates and starts a container for the given workload, pulling its image
 // first when it isn't already present locally.
 //
@@ -157,8 +72,13 @@ func NewWorkload(row database.Workload) (Workload, error) {
 // Docker's own restart policy is deliberately left unset: orca owns restart
 // decisions so that they can be paced by its own backoff and remain visible in
 // the workload's observed state.
-func (d *Driver) Start(ctx context.Context, w Workload) (string, error) {
-	if err := d.ensureImage(ctx, w.Image); err != nil {
+func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
+	spec := w.Spec.Container
+	if spec == nil {
+		return "", ErrNotContainerWorkload
+	}
+
+	if err := d.ensureImage(ctx, spec.Image); err != nil {
 		return "", err
 	}
 
@@ -174,10 +94,10 @@ func (d *Driver) Start(ctx context.Context, w Workload) (string, error) {
 
 	created, err := d.client.ContainerCreate(ctx,
 		&container.Config{
-			Image: w.Image,
+			Image: spec.Image,
 			// Nil rather than empty when the workload names no command, so the image
 			// keeps the one it declares. An empty slice would replace it with nothing.
-			Cmd:          w.Command,
+			Cmd:          command(spec.Command),
 			Env:          environment(w.Env),
 			Labels:       labels,
 			ExposedPorts: exposed,
@@ -515,7 +435,7 @@ func instancePorts(ports []container.Port) []driver.Port {
 
 // portBindings converts resolved ports into the exposed set and host bindings docker
 // expects.
-func portBindings(ports []Port) (nat.PortSet, nat.PortMap) {
+func portBindings(ports []driver.Port) (nat.PortSet, nat.PortMap) {
 	if len(ports) == 0 {
 		return nil, nil
 	}
@@ -560,4 +480,14 @@ func environment(env map[string]string) []string {
 // the old one is still being removed.
 func containerName(workload string, version int) string {
 	return fmt.Sprintf("orca-%s-%d", workload, version)
+}
+
+// command returns the command a container should run, or nil when the specification
+// names none so that the image keeps the one it declares.
+func command(cmd *[]string) []string {
+	if cmd == nil {
+		return nil
+	}
+
+	return *cmd
 }

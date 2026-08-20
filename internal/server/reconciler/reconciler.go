@@ -13,7 +13,6 @@ import (
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/driver/docker"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -23,7 +22,7 @@ type (
 	// converge a workload onto its desired state.
 	Driver interface {
 		// Start should run the given workload, returning the driver's handle for it.
-		Start(ctx context.Context, w docker.Workload) (string, error)
+		Start(ctx context.Context, w driver.Workload) (string, error)
 		// Stop should stop and discard everything the driver runs for the named workload.
 		Stop(ctx context.Context, workload string) error
 		// Observe should report every instance the driver is currently running.
@@ -610,7 +609,7 @@ func (r *Reconciler) hold(workload string) backoff {
 }
 
 func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
-	w, err := docker.NewWorkload(row)
+	w, err := driver.NewWorkload(row)
 	if err != nil {
 		return err
 	}
