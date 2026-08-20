@@ -82,8 +82,13 @@ type (
 		checker    Checker
 		reallocate func(ctx context.Context, workload string) (bool, error)
 		interval   time.Duration
-		backoff    map[string]backoff
 		nudge      chan struct{}
+
+		// Guards backoff, which is the only state a pass carries between workloads
+		// and so the only thing converging them concurrently can contend on.
+		mux sync.Mutex
+		// How long to wait before restarting each workload that keeps failing.
+		backoff map[string]backoff
 	}
 
 	// The Config type contains fields used to construct a Reconciler.
@@ -316,7 +321,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		// such a workload loop at five containers a second indefinitely. It has to
 		// have stayed up to count as settled.
 		if slices.ContainsFunc(instances, settled) {
-			delete(r.backoff, row.Name)
+			r.settle(row.Name)
 		}
 
 		return nil
@@ -331,7 +336,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	// dirty one stays failed, which the service derives from the exit code the driver
 	// reported — so `never` retires a failed workload without calling it a success.
 	if policy := restartPolicy(row); retired(policy, instances) {
-		delete(r.backoff, row.Name)
+		r.settle(row.Name)
 
 		return nil
 	}
@@ -533,7 +538,7 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 
 	// Backoff is keyed by workload and would otherwise outlive it, pacing the
 	// restarts of a later workload that happens to reuse the name.
-	delete(r.backoff, row.Name)
+	r.settle(row.Name)
 
 	r.logger.With("workload", row.Name).Info("workload deleted")
 
@@ -559,7 +564,7 @@ func (r *Reconciler) attempt(ctx context.Context, row database.Workload) error {
 		return err
 	}
 
-	delete(r.backoff, row.Name)
+	r.settle(row.Name)
 
 	return nil
 }
@@ -597,6 +602,9 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, instanc
 
 // waiting reports whether a workload is still inside its backoff window.
 func (r *Reconciler) waiting(workload string) bool {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
 	state := r.backoff[workload]
 
 	return !state.next.IsZero() && time.Now().Before(state.next)
@@ -605,6 +613,9 @@ func (r *Reconciler) waiting(workload string) bool {
 // hold records another attempt against a workload and pushes out the earliest time
 // the next one may happen.
 func (r *Reconciler) hold(workload string) backoff {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
 	state := r.backoff[workload]
 
 	state.attempts++
@@ -612,6 +623,16 @@ func (r *Reconciler) hold(workload string) backoff {
 	r.backoff[workload] = state
 
 	return state
+}
+
+// settle forgets a workload's backoff, which is what starting from a clean slate
+// means: the next failure is paced from the beginning rather than from where the last
+// run of failures left off.
+func (r *Reconciler) settle(workload string) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	delete(r.backoff, workload)
 }
 
 func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
