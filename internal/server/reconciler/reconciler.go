@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/robfig/cron/v3"
+
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
@@ -385,6 +387,14 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		return nil
 	}
 
+	// A scheduled workload runs when its expression says to and waits in between, so
+	// the schedule decides rather than the restart policy. It comes before the stale
+	// check because an occurrence starts the workload from its current specification
+	// anyway, which is what replacing a stale instance would have achieved.
+	if schedule := r.schedule(row); schedule != nil {
+		return r.occurrence(ctx, row, instances, schedule)
+	}
+
 	// A specification change is what makes an instance stale, and replacing it is
 	// the only way to apply the change: docker cannot mutate most of a container's
 	// configuration in place.
@@ -467,6 +477,50 @@ func (r *Reconciler) register(ctx context.Context, rows []database.Workload, obs
 			r.checker.Forget(row.Name)
 		}
 	}
+}
+
+// schedule reads when a stored workload should run, reporting nil when it runs
+// continuously.
+//
+// A specification that cannot be decoded, or an expression that cannot be parsed, is
+// treated as no schedule at all. Both were validated before they were stored, so
+// either means the specification and the rules have diverged — and running a workload
+// continuously is a better failure than never running it again.
+func (r *Reconciler) schedule(row database.Workload) cron.Schedule {
+	var spec api.WorkloadSpec
+	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+		return nil
+	}
+
+	declared := manifest.NewSpec(spec).Schedule
+	if declared == nil {
+		return nil
+	}
+
+	parsed, err := declared.Parsed()
+	if err != nil {
+		r.logger.With("workload", row.Name, "error", err).Error("failed to parse schedule")
+
+		return nil
+	}
+
+	return parsed
+}
+
+// overlap reads what a stored workload asks for when an occurrence comes due while the
+// previous run is still going.
+func overlap(row database.Workload) manifest.OverlapPolicy {
+	var spec api.WorkloadSpec
+	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+		return manifest.OverlapReplace
+	}
+
+	declared := manifest.NewSpec(spec).Schedule
+	if declared == nil {
+		return manifest.OverlapReplace
+	}
+
+	return declared.Overlap
 }
 
 // restartPolicy reads what a stored workload asks for when its instance ends.
@@ -587,6 +641,102 @@ func (r *Reconciler) checked(instance driver.Instance) driver.Instance {
 	return instance
 }
 
+// occurrence runs a scheduled workload when its expression says to.
+//
+// The times come from the expression and the last run, so nothing about when a workload
+// ran has to be persisted: the instance the driver reports carries the time it started,
+// and a container that has ended is left in place until the next occurrence replaces
+// it.
+//
+// Missed occurrences are missed. The next occurrence after the last run is what is
+// asked for, so several passing while the server was down produce one run rather than
+// one each.
+func (r *Reconciler) occurrence(ctx context.Context, row database.Workload, instances []driver.Instance, schedule cron.Schedule) error {
+	last := lastRun(instances)
+
+	// Nothing has ever run. A schedule says when to run, and the moment a workload was
+	// applied is not one of the times it names, so the first occurrence is waited for
+	// rather than treated as due.
+	if last.IsZero() {
+		if len(instances) == 0 {
+			r.settle(row.Name)
+
+			return nil
+		}
+
+		// Something is running but reports no start time, which only a driver that
+		// cannot say would produce. Left alone rather than guessed about.
+		return nil
+	}
+
+	if r.now().Before(schedule.Next(last)) {
+		// Nothing is due. A run that ended stays as it is, so its outcome is readable
+		// until the next occurrence replaces it.
+		return r.between(ctx, row, instances)
+	}
+
+	// An occurrence is due. Anything still running is from the previous one.
+	if slices.ContainsFunc(instances, running) {
+		if overlap(row) == manifest.OverlapSkip {
+			r.logger.With("workload", row.Name).Info("skipped an occurrence, the previous run is still going")
+
+			return nil
+		}
+
+		r.logger.With("workload", row.Name).Debug("replacing a run still going at its next occurrence")
+	}
+
+	// Whatever is there is cleared first: container names derive from the workload and
+	// version, so a new run would collide with the one it replaces.
+	if err := r.stop(ctx, row); err != nil {
+		return fmt.Errorf("failed to clear the previous run: %w", err)
+	}
+
+	r.settle(row.Name)
+
+	return r.start(ctx, row)
+}
+
+// between decides what to do with a scheduled workload when no occurrence is due.
+//
+// Only a failed run is retried. A run that ended cleanly did what the occurrence asked
+// of it, and starting it again would be running the workload at a time its schedule
+// does not name — which is what a schedule exists to prevent, whatever the restart
+// policy would otherwise say.
+//
+// A failure is different: the occurrence did not achieve what it asked for, so the
+// policy decides whether to try again before the next one is due.
+func (r *Reconciler) between(ctx context.Context, row database.Workload, instances []driver.Instance) error {
+	if slices.ContainsFunc(instances, running) {
+		return nil
+	}
+
+	if !slices.ContainsFunc(instances, failed) {
+		return nil
+	}
+
+	policy := restartPolicy(row)
+	if retired(policy, instances) {
+		return nil
+	}
+
+	return r.restart(ctx, row, instances)
+}
+
+// lastRun reports when the workload most recently started, or the zero time when
+// nothing has.
+func lastRun(instances []driver.Instance) time.Time {
+	var last time.Time
+
+	for _, instance := range instances {
+		if instance.StartedAt.After(last) {
+			last = instance.StartedAt
+		}
+	}
+
+	return last
+}
+
 // teardown removes a workload that has been marked for deletion, and its desired
 // state once the driver reports nothing is left.
 //
@@ -644,7 +794,7 @@ func (r *Reconciler) attempt(ctx context.Context, row database.Workload) error {
 	}
 
 	if err := r.start(ctx, row); err != nil {
-		r.hold(row.Name)
+		r.hold(row.Name, restartPolicy(row))
 
 		return err
 	}
@@ -661,6 +811,17 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, instanc
 		return nil
 	}
 
+	policy := restartPolicy(row)
+
+	// A workload told to give up gives up. It is left exactly as it ended, so the
+	// outcome stays readable, and changing its specification starts it again.
+	if !policy.Restarts(exitCodeOf(instances), r.attempts(row.Name)) {
+		r.logger.With("workload", row.Name, "attempts", r.attempts(row.Name)).
+			Info("giving up on a workload that will not stay up")
+
+		return nil
+	}
+
 	// The stopped instances have to be cleared before new work can take their
 	// place: their container names are derived from the workload and version, so
 	// a replacement would otherwise collide with the corpse.
@@ -669,12 +830,12 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, instanc
 	}
 
 	if err := r.start(ctx, row); err != nil {
-		r.hold(row.Name)
+		r.hold(row.Name, policy)
 
 		return err
 	}
 
-	state := r.hold(row.Name)
+	state := r.hold(row.Name, policy)
 
 	r.logger.With(
 		"workload", row.Name,
@@ -697,17 +858,25 @@ func (r *Reconciler) waiting(workload string) bool {
 
 // hold records another attempt against a workload and pushes out the earliest time
 // the next one may happen.
-func (r *Reconciler) hold(workload string) backoff {
+func (r *Reconciler) hold(workload string, restart *manifest.Restart) backoff {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
 	state := r.backoff[workload]
 
 	state.attempts++
-	state.next = r.now().Add(delay(state.attempts))
+	state.next = r.now().Add(delay(state.attempts, restart.Delay))
 	r.backoff[workload] = state
 
 	return state
+}
+
+// attempts reports how many restarts a workload has been given.
+func (r *Reconciler) attempts(workload string) int {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	return r.backoff[workload].attempts
 }
 
 // settle forgets a workload's backoff, which is what starting from a clean slate
@@ -940,6 +1109,10 @@ func settled(instance driver.Instance, now time.Time) bool {
 	return instance.StartedAt.IsZero() || now.Sub(instance.StartedAt) >= settlePeriod
 }
 
+func failed(instance driver.Instance) bool {
+	return instance.State == driver.StateFailed
+}
+
 func terminating(instance driver.Instance) bool {
 	return instance.State == driver.StateTerminating
 }
@@ -956,9 +1129,15 @@ func exitCodeOf(instances []driver.Instance) int {
 
 // delay returns how long to wait before the given restart attempt, doubling with
 // each consecutive failure up to maxBackoff.
-func delay(attempts int) time.Duration {
-	d := baseBackoff << min(attempts, 8)
-	if d > maxBackoff {
+func delay(attempts int, base time.Duration) time.Duration {
+	if base <= 0 {
+		base = baseBackoff
+	}
+
+	d := base << min(attempts, 8)
+	if d > maxBackoff || d <= 0 {
+		// The shift overflows for a base a workload could legitimately name, so the
+		// ceiling catches that as well as an ordinary long wait.
 		return maxBackoff
 	}
 

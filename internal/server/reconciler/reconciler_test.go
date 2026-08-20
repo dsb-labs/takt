@@ -913,6 +913,211 @@ func TestReconciler_Run_LeavesARuntimeWithNoDriverAlone(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_Schedule(t *testing.T) {
+	t.Parallel()
+
+	// A daily expression, so the times a test names are unambiguous.
+	const daily = "0 2 * * *"
+
+	ran := time.Date(2026, 3, 1, 2, 0, 0, 0, time.UTC)
+
+	tt := []struct {
+		Name        string
+		Cron        string
+		Overlap     api.OverlapPolicy
+		Now         time.Time
+		Instances   []driver.Instance
+		ExpectStart bool
+		ExpectStop  bool
+	}{
+		{
+			// A schedule says when to run, and the moment a workload was applied is
+			// not one of the times it names.
+			Name:        "nothing has run and no occurrence is due",
+			Cron:        daily,
+			Now:         ran,
+			ExpectStart: false,
+		},
+		{
+			Name: "an occurrence is due and nothing is running",
+			Cron: daily,
+			Now:  ran.Add(24 * time.Hour),
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateExited, StartedAt: ran},
+			},
+			ExpectStart: true,
+			ExpectStop:  true,
+		},
+		{
+			// The previous run is still going. Replace is what the schedule winning
+			// means: the occurrence is honoured and the run is cut short.
+			Name:    "an occurrence is due while a run is still going, replace",
+			Cron:    daily,
+			Overlap: api.Replace,
+			Now:     ran.Add(24 * time.Hour),
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning, StartedAt: ran},
+			},
+			ExpectStart: true,
+			ExpectStop:  true,
+		},
+		{
+			// Skip is for a job that must not be interrupted. The occurrence is missed
+			// rather than the run being cut short.
+			Name:    "an occurrence is due while a run is still going, skip",
+			Cron:    daily,
+			Overlap: api.Skip,
+			Now:     ran.Add(24 * time.Hour),
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning, StartedAt: ran},
+			},
+			ExpectStart: false,
+			ExpectStop:  false,
+		},
+		{
+			// Between occurrences a run that ended stays as it is, so its outcome is
+			// readable rather than being replaced the moment it finishes.
+			Name: "no occurrence is due and the last run ended",
+			Cron: daily,
+			Now:  ran.Add(time.Hour),
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateExited, StartedAt: ran},
+			},
+			ExpectStart: false,
+		},
+		{
+			// A failed run did not achieve what its occurrence asked for, so the
+			// restart policy decides whether to try again before the next one is due.
+			Name: "no occurrence is due and the last run failed",
+			Cron: daily,
+			Now:  ran.Add(time.Hour),
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateFailed, ExitCode: 1, StartedAt: ran},
+			},
+			ExpectStart: true,
+			ExpectStop:  true,
+		},
+		{
+			// Several occurrences passed while the server was down. The next
+			// occurrence after the last run is what is asked for, so the workload runs
+			// once rather than once per occurrence missed.
+			Name: "several occurrences were missed",
+			Cron: daily,
+			Now:  ran.Add(5 * 24 * time.Hour),
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateExited, StartedAt: ran},
+			},
+			ExpectStart: true,
+			ExpectStop:  true,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+			row := storedWorkload("example", "hash-one")
+			row.Spec = specWithSchedule("example", tc.Cron, tc.Overlap)
+
+			repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+			if tc.ExpectStop {
+				d.EXPECT().Stop(mock.Anything, "example").Return(nil)
+			}
+			if tc.ExpectStart {
+				d.EXPECT().Start(mock.Anything, mock.Anything).Return("two", nil)
+			}
+
+			events := make(chan driver.Event)
+			d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+			passes := newCounter()
+			d.EXPECT().Observe(mock.Anything).
+				RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+					passes.inc()
+
+					return tc.Instances, nil
+				})
+
+			r := reconciler.New(reconciler.Config{
+				Logger:    newTestLogger(t),
+				Drivers:   map[string]reconciler.Driver{docker.Name: d},
+				Workloads: repo,
+				Interval:  time.Hour,
+				Now:       func() time.Time { return tc.Now },
+			})
+
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+
+			go func() { done <- r.Run(ctx) }()
+
+			passes.wait(t, 1)
+			awaitPasses(t, r, 1)
+
+			cancel()
+			require.NoError(t, <-done)
+		})
+	}
+}
+
+func TestReconciler_Run_GivesUpAfterTheAttemptsAllowed(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	// One attempt allowed. The workload has already had it, so the pass leaves it as
+	// it ended rather than trying again.
+	row := storedWorkload("example", "hash-one")
+	row.Spec = specWithAttempts("example", 1)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+	// The first pass restarts it, which uses the one attempt. Nothing after that.
+	d.EXPECT().Stop(mock.Anything, "example").Return(nil).Once()
+	d.EXPECT().Start(mock.Anything, mock.Anything).Return("two", nil).Once()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return []driver.Instance{{
+				ID:       "one",
+				Workload: "example",
+				SpecHash: "hash-one",
+				State:    driver.StateFailed,
+				ExitCode: 1,
+			}}, nil
+		})
+
+	// A clock that does not advance, so the backoff never expires on its own and the
+	// attempts cap is the only thing that can stop the retries.
+	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  10 * time.Millisecond,
+		Now:       func() time.Time { return now },
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 5)
+	awaitPasses(t, r, 5)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_RestartPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -1517,6 +1722,42 @@ func specWithHealth(name string) []byte {
 		Name:      name,
 		Container: &api.ContainerSpec{Image: "example/example:latest"},
 		Health:    &api.HealthSpec{HTTP: new("/healthz")},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return spec
+}
+
+// specWithSchedule returns a stored specification declaring a schedule.
+func specWithSchedule(name, expression string, overlap api.OverlapPolicy) []byte {
+	schedule := api.ScheduleSpec{Cron: expression}
+	if overlap != "" {
+		schedule.Overlap = new(overlap)
+	}
+
+	spec, err := json.Marshal(api.WorkloadSpec{
+		Version:   "v1",
+		Name:      name,
+		Schedule:  &schedule,
+		Container: &api.ContainerSpec{Image: "example/example:latest"},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return spec
+}
+
+// specWithAttempts returns a stored specification capping how many times a workload is
+// restarted.
+func specWithAttempts(name string, attempts int) []byte {
+	spec, err := json.Marshal(api.WorkloadSpec{
+		Version:   "v1",
+		Name:      name,
+		Restart:   &api.RestartSpec{Attempts: new(attempts)},
+		Container: &api.ContainerSpec{Image: "example/example:latest"},
 	})
 	if err != nil {
 		panic(err)
