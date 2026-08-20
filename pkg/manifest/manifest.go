@@ -57,7 +57,18 @@ func Parse(r io.Reader) (Spec, error) {
 
 	// Values left unset in the file are resolved before validation, so the rules check
 	// what will actually be used rather than zeroes.
-	spec.Restart = spec.Restart.orDefault()
+	//
+	// Every workload has an answer to what happens when it ends, so a manifest naming
+	// no policy still gets one.
+	if spec.Restart == nil {
+		spec.Restart = new(Restart)
+	}
+
+	spec.Restart.defaults()
+
+	if spec.Schedule != nil {
+		spec.Schedule.defaults()
+	}
 
 	if spec.Health != nil {
 		spec.Health.defaults()
@@ -82,14 +93,17 @@ func Validate(spec Spec) error {
 			validation.Length(1, 63),
 			validation.Match(namePattern).Error("must be lowercase alphanumeric, optionally separated by dashes"),
 		),
-		validation.Field(&spec.Schedule, validation.By(validCron)),
-		validation.Field(&spec.Restart,
-			validation.In(RestartAlways, RestartOnFailure, RestartNever).
-				Error(fmt.Sprintf("must be %q, %q or %q", RestartAlways, RestartOnFailure, RestartNever)),
-		),
 	)
 	if err != nil {
 		return fmt.Errorf("invalid manifest: %w", err)
+	}
+
+	if err = validateRestart(spec.Restart); err != nil {
+		return err
+	}
+
+	if err = validateSchedule(spec); err != nil {
+		return err
 	}
 
 	runtime, err := RuntimeOf(spec)
@@ -113,6 +127,58 @@ func Validate(spec Spec) error {
 	default:
 		return nil
 	}
+}
+
+// validateRestart reports whether the workload's restart policy is usable.
+func validateRestart(restart *Restart) error {
+	if restart == nil {
+		return nil
+	}
+
+	if restart.invalidDelay != "" {
+		return fmt.Errorf("invalid restart: %q is not a duration", restart.invalidDelay)
+	}
+
+	switch {
+	case restart.Policy != RestartAlways && restart.Policy != RestartOnFailure && restart.Policy != RestartNever:
+		return fmt.Errorf("invalid restart: policy must be %q, %q or %q",
+			RestartAlways, RestartOnFailure, RestartNever)
+	case restart.Attempts < 0:
+		return errors.New("invalid restart: attempts must not be negative")
+	case restart.Delay <= 0:
+		return errors.New("invalid restart: delay must be greater than zero")
+	}
+
+	return nil
+}
+
+// validateSchedule reports whether the workload's schedule is one orca can act on.
+func validateSchedule(spec Spec) error {
+	schedule := spec.Schedule
+	if schedule == nil {
+		return nil
+	}
+
+	if schedule.Cron == "" {
+		return errors.New("invalid schedule: cron is required")
+	}
+
+	if _, err := cron.ParseStandard(schedule.Cron); err != nil {
+		return errors.New("invalid schedule: cron must be a valid expression")
+	}
+
+	if schedule.Overlap != OverlapReplace && schedule.Overlap != OverlapSkip {
+		return fmt.Errorf("invalid schedule: overlap must be %q or %q", OverlapReplace, OverlapSkip)
+	}
+
+	// A check restarts a workload that stops answering, and a scheduled workload is
+	// expected to end. Together they would have the check fighting the schedule, so
+	// the pair is rejected rather than left to whichever acts first.
+	if spec.Health != nil {
+		return errors.New("invalid schedule: a scheduled workload cannot declare a health check")
+	}
+
+	return nil
 }
 
 // validatePorts reports whether the workload's ports are ones its runtime can publish.
@@ -332,21 +398,6 @@ func validPorts(ports []Port) error {
 func validPort(port int, field string) error {
 	if port < 1 || port > 65535 {
 		return fmt.Errorf("%s must be between 1 and 65535, got %d", field, port)
-	}
-
-	return nil
-}
-
-func validCron(value any) error {
-	schedule, ok := value.(string)
-	if !ok || schedule == "" {
-		return nil
-	}
-
-	// The standard five-field form, matching what an operator would put in a
-	// crontab, rather than the seconds-resolution variant.
-	if _, err := cron.ParseStandard(schedule); err != nil {
-		return errors.New("must be a valid cron expression")
 	}
 
 	return nil

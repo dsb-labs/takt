@@ -1,6 +1,7 @@
 version: v1
 name: example
-restart: on-failure
+restart:
+  policy: on-failure
 env:
   EXAMPLE: EXAMPLE
 exec:

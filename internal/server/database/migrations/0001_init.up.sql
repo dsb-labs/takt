@@ -3,7 +3,6 @@ CREATE TABLE IF NOT EXISTS workload (
     name       TEXT    NOT NULL UNIQUE,
     version    INTEGER NOT NULL,
     runtime    TEXT    NOT NULL,
-    schedule   TEXT    NOT NULL DEFAULT '',
     spec       BLOB    NOT NULL,
     spec_hash  TEXT    NOT NULL,
     labels     BLOB    NOT NULL DEFAULT '{}',

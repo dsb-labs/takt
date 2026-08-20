@@ -257,9 +257,6 @@ func (s *WorkloadService) store(ctx context.Context, spec api.WorkloadSpec, runt
 			SpecHash: hash,
 		}
 
-		if spec.Schedule != nil {
-			row.Schedule = *spec.Schedule
-		}
 		if spec.Labels != nil {
 			row.Labels = *spec.Labels
 		}
@@ -762,7 +759,6 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 		Name:      row.Name,
 		Version:   row.Version,
 		Runtime:   api.Runtime(row.Runtime),
-		Schedule:  row.Schedule,
 		Spec:      spec,
 		Labels:    row.Labels,
 		Instances: instances,
@@ -785,12 +781,15 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 //
 // An instance still running is untouched. The policy describes what happens when work
 // ends, and this one has not ended.
-func completionState(instance driver.Instance, policy manifest.RestartPolicy) driver.State {
+func completionState(instance driver.Instance, restart *manifest.Restart) driver.State {
 	if instance.State != driver.StateExited {
 		return instance.State
 	}
 
-	if policy.Restarts(instance.ExitCode) {
+	// Attempts are not counted here. A workload that gave up has ended, and how it
+	// ended is what this reports: giving up is the reconciler's decision about whether
+	// to run it again.
+	if restart.Policy.Restarts(instance.ExitCode) {
 		return instance.State
 	}
 
@@ -862,8 +861,6 @@ type Workload struct {
 	Version int
 	// Which runtime the specification names.
 	Runtime api.Runtime
-	// The cron expression describing when the workload should run, if any.
-	Schedule string
 	// The specification that was submitted.
 	Spec api.WorkloadSpec
 	// Arbitrary key-value pairs attached to the workload.

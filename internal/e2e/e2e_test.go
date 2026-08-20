@@ -437,7 +437,7 @@ func (s *Suite) TestDefaultPolicyStillRestarts() {
 	// No restart stanza at all, and a command that ends cleanly. Under the default the
 	// clean exit is not a reason to stop, so orca brings it back.
 	spec := s.jobSpec(name, "", 0)
-	spec.Restart = ""
+	spec.Restart = nil
 
 	_, _, err := s.client.Apply(s.ctx(), spec)
 	s.Require().NoError(err)
@@ -585,7 +585,7 @@ func (s *Suite) TestExecJobRunsAndCompletes() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 
 	spec := s.execSpec(name, "sh", "-c", "echo did-the-work; exit 0")
-	spec.Restart = manifest.RestartOnFailure
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartOnFailure}
 
 	_, _, err := s.client.Apply(s.ctx(), spec)
 	s.Require().NoError(err)
@@ -608,7 +608,7 @@ func (s *Suite) TestExecWorkloadPassesOnlyItsOwnEnvironment() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 
 	spec := s.execSpec(name, "sh", "-c", `echo "[$GREETING]"; exit 0`)
-	spec.Restart = manifest.RestartOnFailure
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartOnFailure}
 	spec.Env = map[string]string{"GREETING": "hello"}
 
 	_, _, err := s.client.Apply(s.ctx(), spec)
@@ -628,7 +628,7 @@ func (s *Suite) TestExecJobIsRestartedWhenItFails() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 
 	spec := s.execSpec(name, "sh", "-c", "exit 1")
-	spec.Restart = manifest.RestartOnFailure
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartOnFailure}
 
 	_, _, err := s.client.Apply(s.ctx(), spec)
 	s.Require().NoError(err)

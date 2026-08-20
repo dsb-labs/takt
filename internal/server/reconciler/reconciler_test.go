@@ -1031,7 +1031,7 @@ func TestReconciler_Run_ForgetsChecksOfARetiredWorkload(t *testing.T) {
 	spec, err := json.Marshal(api.WorkloadSpec{
 		Version:   "v1",
 		Name:      "example",
-		Restart:   new(api.OnFailure),
+		Restart:   &api.RestartSpec{Policy: new(api.OnFailure)},
 		Health:    &api.HealthSpec{HTTP: new("/healthz")},
 		Container: &api.ContainerSpec{Image: "example/example:latest"},
 	})
@@ -1473,7 +1473,7 @@ func specWithRestart(name string, policy api.RestartPolicy) []byte {
 	spec, err := json.Marshal(api.WorkloadSpec{
 		Version:   "v1",
 		Name:      name,
-		Restart:   new(policy),
+		Restart:   &api.RestartSpec{Policy: new(policy)},
 		Container: &api.ContainerSpec{Image: "example/example:latest"},
 	})
 	if err != nil {

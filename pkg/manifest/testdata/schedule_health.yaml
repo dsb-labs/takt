@@ -1,6 +1,14 @@
 version: v1
 name: example
+
 schedule:
-  cron: "not a cron expression"
+  cron: "*/5 * * * *"
+
+health:
+  http: /healthz
+
+ports:
+  - to: 80
+
 container:
   image: example/example:latest

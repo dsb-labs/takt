@@ -1,6 +1,8 @@
 version: v1
 name: example
-restart:
-  policy: sometimes
+
+schedule:
+  overlap: replace
+
 container:
   image: example/example:latest

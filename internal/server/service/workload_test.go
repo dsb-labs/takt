@@ -115,7 +115,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 			Name: "rejects a schedule that is not cron",
 			Spec: func() api.WorkloadSpec {
 				spec := containerSpec("example", "example/example:latest")
-				spec.Schedule = new("not a cron")
+				spec.Schedule = &api.ScheduleSpec{Cron: "not a cron"}
 				return spec
 			}(),
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
@@ -488,7 +488,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 
 			row := storedWorkload("example")
 			spec := containerSpec("example", "example/example:latest")
-			spec.Restart = new(tc.Policy)
+			spec.Restart = &api.RestartSpec{Policy: new(tc.Policy)}
 
 			encoded, err := json.Marshal(spec)
 			require.NoError(t, err)

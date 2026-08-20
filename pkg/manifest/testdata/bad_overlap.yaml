@@ -1,6 +1,9 @@
 version: v1
 name: example
-restart:
-  policy: sometimes
+
+schedule:
+  cron: "*/5 * * * *"
+  overlap: sometimes
+
 container:
   image: example/example:latest

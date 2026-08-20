@@ -1,6 +1,8 @@
 version: v1
 name: example
+
 restart:
-  policy: sometimes
+  delay: soon
+
 container:
   image: example/example:latest

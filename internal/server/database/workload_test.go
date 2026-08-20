@@ -19,7 +19,6 @@ func TestWorkloadRepository_Upsert(t *testing.T) {
 		created, isNew, err := repo.Upsert(t.Context(), database.Workload{
 			Name:     "example",
 			Runtime:  "container",
-			Schedule: "*/5 * * * *",
 			Spec:     []byte(`{"name":"example"}`),
 			SpecHash: "hash-one",
 			Labels:   map[string]string{"some-key": "some-value"},
@@ -29,7 +28,6 @@ func TestWorkloadRepository_Upsert(t *testing.T) {
 		assert.True(t, isNew)
 		assert.Equal(t, 1, created.Version)
 		assert.Equal(t, "container", created.Runtime)
-		assert.Equal(t, "*/5 * * * *", created.Schedule)
 		assert.Equal(t, map[string]string{"some-key": "some-value"}, created.Labels)
 		assert.False(t, created.CreatedAt.IsZero())
 		assert.Equal(t, created.CreatedAt, created.UpdatedAt)

@@ -1,7 +1,14 @@
 version: v1
 name: example
-schedule: "*/5 * * * *"
-restart: on-failure
+schedule:
+  cron: "*/5 * * * *"
+  overlap: skip
+
+restart:
+  policy: on-failure
+  attempts: 5
+  delay: 10s
+
 labels:
   some-key: some-value
 ports:

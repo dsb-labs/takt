@@ -1,7 +1,10 @@
 package manifest
 
 import (
+	"fmt"
 	"time"
+
+	"github.com/robfig/cron/v3"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 )
@@ -14,6 +17,35 @@ type (
 	// The RestartPolicy type names what happens when a workload's instance ends.
 	RestartPolicy string
 
+	// The OverlapPolicy type names what happens when an occurrence comes due while
+	// the previous run is still going.
+	OverlapPolicy string
+
+	// The Schedule type describes when a workload runs.
+	Schedule struct {
+		// The cron expression, in the standard five-field form.
+		Cron string
+		// What to do when an occurrence comes due and the previous run has not
+		// finished. Empty means OverlapReplace.
+		Overlap OverlapPolicy
+	}
+
+	// The Restart type describes what happens when a workload's instance ends.
+	Restart struct {
+		// Whether to run the workload again. Empty means RestartAlways.
+		Policy RestartPolicy
+		// How many consecutive restarts to attempt before giving up. Zero means
+		// orca keeps trying.
+		Attempts int
+		// How long to wait before the first restart, doubling on each consecutive
+		// failure. Zero means DefaultRestartDelay.
+		Delay time.Duration
+
+		// The delay field as written when it did not parse, reported by validation
+		// so that a typo is an error rather than a silent default.
+		invalidDelay string
+	}
+
 	// The Spec type describes the desired state of a workload.
 	//
 	// It is the canonical shape of a workload throughout orca's public API: what
@@ -25,9 +57,9 @@ type (
 		Version string
 		// The name that identifies the workload.
 		Name string
-		// The cron expression describing when the workload should run. Accepted
-		// and stored, but not yet acted on.
-		Schedule string
+		// When the workload runs, rather than running continuously. Nil runs it
+		// continuously.
+		Schedule *Schedule
 		// Arbitrary key-value pairs attached to the workload.
 		Labels map[string]string
 		// The ports to publish, which is how the workload is reached. A runtime with
@@ -36,9 +68,9 @@ type (
 		// The environment variables set for the workload. A workload starts with only
 		// these, rather than inheriting the server's own environment.
 		Env map[string]string
-		// What to do when the workload's instance ends. Empty means RestartAlways,
-		// which Parse and NewSpec both resolve before validation.
-		Restart RestartPolicy
+		// What to do when the workload's instance ends. Never nil once a Spec has
+		// been through Parse or NewSpec, both of which resolve the defaults.
+		Restart *Restart
 		// How to tell whether the workload is working, rather than merely started.
 		Health *Health
 		// The container to run. Exactly one runtime must be set.
@@ -136,6 +168,19 @@ const (
 	RestartNever RestartPolicy = "never"
 )
 
+const (
+	// OverlapReplace stops the running instance and starts the occurrence, so the
+	// schedule is always honoured. It is the default.
+	OverlapReplace OverlapPolicy = "replace"
+	// OverlapSkip leaves the running instance alone and misses the occurrence, which
+	// is what a job that must not be interrupted wants.
+	OverlapSkip OverlapPolicy = "skip"
+)
+
+// DefaultRestartDelay is how long to wait before the first restart when the manifest
+// does not say.
+const DefaultRestartDelay = time.Second
+
 // Restarts reports whether the policy calls for another run after an instance ended
 // with the given exit code.
 //
@@ -165,14 +210,11 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 		Name:    spec.Name,
 	}
 
-	if spec.Schedule != nil {
-		out.Schedule = *spec.Schedule
-	}
+	out.Schedule = newSchedule(spec.Schedule)
+	out.Restart = newRestart(spec.Restart)
+
 	if spec.Labels != nil {
 		out.Labels = *spec.Labels
-	}
-	if spec.Restart != nil {
-		out.Restart = RestartPolicy(*spec.Restart)
 	}
 	if spec.Env != nil {
 		out.Env = *spec.Env
@@ -189,7 +231,6 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 		}
 	}
 
-	out.Restart = out.Restart.orDefault()
 	out.Health = newHealth(spec.Health)
 
 	if spec.Container != nil {
@@ -258,17 +299,102 @@ func newHealth(spec *api.HealthSpec) *Health {
 	return &health
 }
 
-// orDefault resolves an unset policy to the default.
+// Parsed returns the schedule's expression ready to ask for occurrence times.
+//
+// Validation proves the expression parses, so an error here means the stored
+// specification and the rules have diverged rather than that the operator made a
+// mistake.
+func (s *Schedule) Parsed() (cron.Schedule, error) {
+	parsed, err := cron.ParseStandard(s.Cron)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse cron expression %q: %w", s.Cron, err)
+	}
+
+	return parsed, nil
+}
+
+// newSchedule maps a wire schedule onto the canonical shape.
+func newSchedule(spec *api.ScheduleSpec) *Schedule {
+	if spec == nil {
+		return nil
+	}
+
+	schedule := Schedule{Cron: spec.Cron}
+
+	if spec.Overlap != nil {
+		schedule.Overlap = OverlapPolicy(*spec.Overlap)
+	}
+
+	schedule.defaults()
+
+	return &schedule
+}
+
+// newRestart maps a wire restart policy onto the canonical shape.
+//
+// A nil policy still produces one, since every workload has an answer to what happens
+// when it ends and the answer is the default.
+//
+// A delay that does not parse is recorded rather than returned, because this is also
+// the path a client uses to read a workload back, where an error about a value the
+// server already accepted would be nothing the caller could act on. Validation reports
+// it instead.
+func newRestart(spec *api.RestartSpec) *Restart {
+	restart := new(Restart)
+
+	if spec != nil {
+		if spec.Policy != nil {
+			restart.Policy = RestartPolicy(*spec.Policy)
+		}
+		if spec.Attempts != nil {
+			restart.Attempts = *spec.Attempts
+		}
+		if spec.Delay != nil && *spec.Delay != "" {
+			if parsed, err := time.ParseDuration(*spec.Delay); err == nil {
+				restart.Delay = parsed
+			} else {
+				restart.invalidDelay = *spec.Delay
+			}
+		}
+	}
+
+	restart.defaults()
+
+	return restart
+}
+
+// defaults fills in what a schedule left unset.
 //
 // This runs however a Spec was built, decoded from YAML or converted from the wire,
 // because a default that applied to only one of those would make the same manifest
 // behave differently depending on how it reached the server.
-func (p RestartPolicy) orDefault() RestartPolicy {
-	if p == "" {
-		return RestartAlways
+func (s *Schedule) defaults() {
+	if s.Overlap == "" {
+		s.Overlap = OverlapReplace
+	}
+}
+
+// defaults fills in what a restart policy left unset.
+func (r *Restart) defaults() {
+	if r.Policy == "" {
+		r.Policy = RestartAlways
+	}
+	if r.Delay == 0 {
+		r.Delay = DefaultRestartDelay
+	}
+}
+
+// Restarts reports whether the policy calls for another run after an instance ended
+// with the given exit code, having already been attempted the given number of times.
+//
+// Attempts are counted so that a workload can be told to give up. Zero means orca
+// keeps trying, which is what a long-running service wants.
+func (r *Restart) Restarts(exitCode, attempts int) bool {
+	if r.Attempts > 0 && attempts >= r.Attempts {
+		return false
 	}
 
-	return p
+	return r.Policy.Restarts(exitCode)
 }
 
 // defaults fills in the timing fields the manifest left unset, so that everything
@@ -293,13 +419,40 @@ func (h *Health) defaults() {
 	}
 }
 
-// WireRestart maps the canonical restart policy onto the wire format.
-func WireRestart(policy RestartPolicy) *api.RestartPolicy {
-	if policy == "" {
+// WireSchedule maps the canonical schedule onto the wire format.
+func WireSchedule(schedule *Schedule) *api.ScheduleSpec {
+	if schedule == nil {
 		return nil
 	}
 
-	return new(api.RestartPolicy(policy))
+	spec := api.ScheduleSpec{Cron: schedule.Cron}
+
+	if schedule.Overlap != "" {
+		spec.Overlap = new(api.OverlapPolicy(schedule.Overlap))
+	}
+
+	return &spec
+}
+
+// WireRestart maps the canonical restart policy onto the wire format.
+func WireRestart(restart *Restart) *api.RestartSpec {
+	if restart == nil {
+		return nil
+	}
+
+	spec := api.RestartSpec{}
+
+	if restart.Policy != "" {
+		spec.Policy = new(api.RestartPolicy(restart.Policy))
+	}
+	if restart.Attempts > 0 {
+		spec.Attempts = new(restart.Attempts)
+	}
+	if restart.Delay > 0 {
+		spec.Delay = new(restart.Delay.String())
+	}
+
+	return &spec
 }
 
 // WireHealth maps the canonical health check onto the wire format.

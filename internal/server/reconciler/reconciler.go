@@ -457,10 +457,10 @@ func (r *Reconciler) register(ctx context.Context, rows []database.Workload, obs
 // before it was stored, so failing here means the two have diverged, and continuing to
 // restart a workload is a better failure than retiring it on the strength of a spec
 // nothing could read.
-func restartPolicy(row database.Workload) manifest.RestartPolicy {
+func restartPolicy(row database.Workload) *manifest.Restart {
 	var spec api.WorkloadSpec
 	if err := json.Unmarshal(row.Spec, &spec); err != nil {
-		return manifest.RestartAlways
+		return &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay}
 	}
 
 	return manifest.NewSpec(spec).Restart
@@ -475,13 +475,13 @@ func restartPolicy(row database.Workload) manifest.RestartPolicy {
 //
 // A workload with nothing observed at all is not retired. It has yet to run, and
 // treating an empty driver as a finished job would mean a workload never started.
-func retired(policy manifest.RestartPolicy, instances []driver.Instance) bool {
+func retired(restart *manifest.Restart, instances []driver.Instance) bool {
 	if len(instances) == 0 {
 		return false
 	}
 
 	for _, instance := range instances {
-		if policy.Restarts(instance.ExitCode) {
+		if restart.Policy.Restarts(instance.ExitCode) {
 			return false
 		}
 	}

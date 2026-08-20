@@ -152,7 +152,7 @@ func (s *Suite) jobSpec(name string, policy manifest.RestartPolicy, exitCode int
 	return manifest.Spec{
 		Version: "v1",
 		Name:    name,
-		Restart: policy,
+		Restart: &manifest.Restart{Policy: policy},
 		Container: &manifest.Container{
 			Image:   testImage,
 			Command: []string{"sh", "-c", fmt.Sprintf("exit %d", exitCode)},

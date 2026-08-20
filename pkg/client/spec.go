@@ -16,9 +16,7 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 		Name:    s.Name,
 	}
 
-	if s.Schedule != "" {
-		spec.Schedule = new(s.Schedule)
-	}
+	spec.Schedule = manifest.WireSchedule(s.Schedule)
 	if len(s.Labels) > 0 {
 		spec.Labels = new(s.Labels)
 	}

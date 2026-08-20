@@ -31,7 +31,10 @@ func TestParse(t *testing.T) {
 				assert.Equal(t, "v1", spec.Version)
 				assert.Equal(t, "example", spec.Name)
 
-				assert.Equal(t, "*/5 * * * *", spec.Schedule)
+				require.NotNil(t, spec.Schedule)
+				assert.Equal(t, "*/5 * * * *", spec.Schedule.Cron)
+				assert.Equal(t, manifest.OverlapSkip, spec.Schedule.Overlap)
+
 				assert.Equal(t, map[string]string{"some-key": "some-value"}, spec.Labels)
 
 				require.NotNil(t, spec.Container)
@@ -205,6 +208,31 @@ func TestParse(t *testing.T) {
 			// leave a job the operator meant to run once running forever.
 			Name:         "rejects an unknown restart policy",
 			File:         "bad_restart.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects an unknown overlap policy",
+			File:         "bad_overlap.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a restart delay that is not a duration",
+			File:         "bad_delay.yaml",
+			ExpectsError: true,
+		},
+		{
+			// A schedule with no expression names no times, so there is nothing for
+			// orca to act on.
+			Name:         "rejects a schedule naming no expression",
+			File:         "no_cron.yaml",
+			ExpectsError: true,
+		},
+		{
+			// A check restarts a workload that stops answering, and a scheduled
+			// workload is expected to end. Together the check would fight the
+			// schedule.
+			Name:         "rejects a schedule alongside a health check",
+			File:         "schedule_health.yaml",
 			ExpectsError: true,
 		},
 		{
@@ -395,7 +423,71 @@ func TestRestartPolicy_Restarts(t *testing.T) {
 	}
 }
 
-func TestRestartPolicy_Default(t *testing.T) {
+func TestRestart_Restarts(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name           string
+		Restart        manifest.Restart
+		ExitCode       int
+		Attempts       int
+		ExpectRestarts bool
+	}{
+		{
+			Name:           "always restarts however many times it has tried",
+			Restart:        manifest.Restart{Policy: manifest.RestartAlways},
+			Attempts:       100,
+			ExpectRestarts: true,
+		},
+		{
+			// The workload did what it was asked to do, which is the whole point of
+			// this policy: a job that finishes is finished.
+			Name:           "on-failure leaves a clean exit alone",
+			Restart:        manifest.Restart{Policy: manifest.RestartOnFailure},
+			ExpectRestarts: false,
+		},
+		{
+			Name:           "on-failure restarts a failure",
+			Restart:        manifest.Restart{Policy: manifest.RestartOnFailure},
+			ExitCode:       1,
+			ExpectRestarts: true,
+		},
+		{
+			Name:           "never leaves a failure alone",
+			Restart:        manifest.Restart{Policy: manifest.RestartNever},
+			ExitCode:       137,
+			ExpectRestarts: false,
+		},
+		{
+			Name:           "attempts not yet exhausted still restarts",
+			Restart:        manifest.Restart{Policy: manifest.RestartAlways, Attempts: 3},
+			Attempts:       2,
+			ExpectRestarts: true,
+		},
+		{
+			// A workload told to give up gives up, whatever its policy would
+			// otherwise say.
+			Name:           "attempts exhausted gives up",
+			Restart:        manifest.Restart{Policy: manifest.RestartAlways, Attempts: 3},
+			Attempts:       3,
+			ExpectRestarts: false,
+		},
+		{
+			Name:           "unset attempts never gives up",
+			Restart:        manifest.Restart{Policy: manifest.RestartAlways},
+			Attempts:       1000,
+			ExpectRestarts: true,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			assert.Equal(t, tc.ExpectRestarts, tc.Restart.Restarts(tc.ExitCode, tc.Attempts))
+		})
+	}
+}
+
+func TestRestart_Defaults(t *testing.T) {
 	t.Parallel()
 
 	// A manifest reaches the server two ways, decoded from YAML and converted from
@@ -409,7 +501,10 @@ container:
   image: example/example:latest
 `))
 		require.NoError(t, err)
-		assert.Equal(t, manifest.RestartAlways, spec.Restart)
+		require.NotNil(t, spec.Restart)
+		assert.Equal(t, manifest.RestartAlways, spec.Restart.Policy)
+		assert.Equal(t, manifest.DefaultRestartDelay, spec.Restart.Delay)
+		assert.Zero(t, spec.Restart.Attempts, "unset attempts means orca keeps trying")
 	})
 
 	t.Run("converting a wire specification that says nothing", func(t *testing.T) {
@@ -419,19 +514,68 @@ container:
 			Container: &api.ContainerSpec{Image: "example/example:latest"},
 		})
 
-		assert.Equal(t, manifest.RestartAlways, spec.Restart)
+		require.NotNil(t, spec.Restart)
+		assert.Equal(t, manifest.RestartAlways, spec.Restart.Policy)
+		assert.Equal(t, manifest.DefaultRestartDelay, spec.Restart.Delay)
 	})
 
-	t.Run("a policy the manifest states is kept", func(t *testing.T) {
+	t.Run("what the manifest states is kept", func(t *testing.T) {
 		spec, err := manifest.Parse(strings.NewReader(`
 version: v1
 name: example
-restart: never
+restart:
+  policy: never
+  attempts: 5
+  delay: 30s
 container:
   image: example/example:latest
 `))
 		require.NoError(t, err)
-		assert.Equal(t, manifest.RestartNever, spec.Restart)
+		require.NotNil(t, spec.Restart)
+		assert.Equal(t, manifest.RestartNever, spec.Restart.Policy)
+		assert.Equal(t, 5, spec.Restart.Attempts)
+		assert.Equal(t, 30*time.Second, spec.Restart.Delay)
+	})
+}
+
+func TestSchedule_Defaults(t *testing.T) {
+	t.Parallel()
+
+	t.Run("overlap defaults to replace", func(t *testing.T) {
+		spec, err := manifest.Parse(strings.NewReader(`
+version: v1
+name: example
+schedule:
+  cron: "*/5 * * * *"
+container:
+  image: example/example:latest
+`))
+		require.NoError(t, err)
+		require.NotNil(t, spec.Schedule)
+		assert.Equal(t, manifest.OverlapReplace, spec.Schedule.Overlap)
+	})
+
+	t.Run("no schedule means the workload runs continuously", func(t *testing.T) {
+		spec, err := manifest.Parse(strings.NewReader(`
+version: v1
+name: example
+container:
+  image: example/example:latest
+`))
+		require.NoError(t, err)
+		assert.Nil(t, spec.Schedule)
+	})
+
+	t.Run("the expression parses into occurrence times", func(t *testing.T) {
+		schedule := manifest.Schedule{Cron: "0 2 * * *"}
+
+		parsed, err := schedule.Parsed()
+		require.NoError(t, err)
+
+		// A daily expression names one time a day, so the occurrence after one is the
+		// same time the next day.
+		from := time.Date(2026, 3, 1, 2, 0, 0, 0, time.UTC)
+		assert.Equal(t, time.Date(2026, 3, 2, 2, 0, 0, 0, time.UTC), parsed.Next(from))
 	})
 }
 
@@ -449,8 +593,13 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	// A nil here means a key in the fixture didn't map onto its Go field.
 	assert.NotEmpty(t, spec.Version)
 	assert.NotEmpty(t, spec.Name)
-	assert.NotEmpty(t, spec.Schedule)
-	assert.NotEmpty(t, spec.Restart)
+	require.NotNil(t, spec.Schedule)
+	assert.Equal(t, "*/5 * * * *", spec.Schedule.Cron)
+	assert.Equal(t, manifest.OverlapSkip, spec.Schedule.Overlap)
+	require.NotNil(t, spec.Restart)
+	assert.Equal(t, manifest.RestartOnFailure, spec.Restart.Policy)
+	assert.Equal(t, 5, spec.Restart.Attempts)
+	assert.Equal(t, 10*time.Second, spec.Restart.Delay)
 	assert.NotEmpty(t, spec.Labels)
 	require.NotNil(t, spec.Container)
 	assert.NotEmpty(t, spec.Container.Image)

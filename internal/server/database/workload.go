@@ -33,9 +33,6 @@ type (
 		Version int
 		// Which runtime block the specification names, and so which driver runs it.
 		Runtime string
-		// The cron expression describing when the workload should run, or empty
-		// when it should run continuously.
-		Schedule string
 		// The canonical JSON encoding of the workload's specification.
 		Spec []byte
 		// The hash of Spec, used to detect drift between desired and running state.
@@ -138,8 +135,8 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Po
 
 func insert(ctx context.Context, tx *sql.Tx, w Workload, labels string) (Workload, error) {
 	const q = `
-		INSERT INTO workload (id, name, version, runtime, schedule, spec, spec_hash, labels, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, jsonb(?), ?, jsonb(?), ?, ?)
+		INSERT INTO workload (id, name, version, runtime, spec, spec_hash, labels, created_at, updated_at)
+		VALUES (?, ?, ?, ?, jsonb(?), ?, jsonb(?), ?, ?)
 	`
 
 	now := time.Now().UTC()
@@ -147,7 +144,7 @@ func insert(ctx context.Context, tx *sql.Tx, w Workload, labels string) (Workloa
 
 	id := xid.New().String()
 
-	_, err := tx.ExecContext(ctx, q, id, w.Name, 1, w.Runtime, w.Schedule, string(w.Spec), w.SpecHash, labels, timestamp, timestamp)
+	_, err := tx.ExecContext(ctx, q, id, w.Name, 1, w.Runtime, string(w.Spec), w.SpecHash, labels, timestamp, timestamp)
 	if err != nil {
 		return Workload{}, fmt.Errorf("failed to insert workload: %w", err)
 	}
@@ -163,14 +160,14 @@ func insert(ctx context.Context, tx *sql.Tx, w Workload, labels string) (Workloa
 func update(ctx context.Context, tx *sql.Tx, w Workload, labels string, existing Workload) (Workload, error) {
 	const q = `
 		UPDATE workload
-		SET version = ?, runtime = ?, schedule = ?, spec = jsonb(?), spec_hash = ?, labels = jsonb(?), updated_at = ?
+		SET version = ?, runtime = ?, spec = jsonb(?), spec_hash = ?, labels = jsonb(?), updated_at = ?
 		WHERE name = ?
 	`
 
 	now := time.Now().UTC()
 	version := existing.Version + 1
 
-	tag, err := tx.ExecContext(ctx, q, version, w.Runtime, w.Schedule, string(w.Spec), w.SpecHash, labels, formatTime(now), w.Name)
+	tag, err := tx.ExecContext(ctx, q, version, w.Runtime, string(w.Spec), w.SpecHash, labels, formatTime(now), w.Name)
 	if err != nil {
 		return Workload{}, fmt.Errorf("failed to update workload: %w", err)
 	}
@@ -206,7 +203,7 @@ type querier interface {
 
 func get(ctx context.Context, q querier, name string) (Workload, error) {
 	const query = `
-		SELECT id, name, version, runtime, schedule, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at
+		SELECT id, name, version, runtime, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at
 		FROM workload
 		WHERE name = ?
 	`
@@ -218,7 +215,7 @@ func get(ctx context.Context, q querier, name string) (Workload, error) {
 	)
 
 	err := q.QueryRowContext(ctx, query, name).Scan(
-		&w.ID, &w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt,
+		&w.ID, &w.Name, &w.Version, &w.Runtime, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt,
 	)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -242,7 +239,7 @@ func get(ctx context.Context, q querier, name string) (Workload, error) {
 // ErrInvalidQueryPath when a query names a path SQLite cannot parse.
 func (r *WorkloadRepository) List(ctx context.Context, queries ...Query) ([]Workload, error) {
 	const q = `
-		SELECT id, name, version, runtime, schedule, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at
+		SELECT id, name, version, runtime, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at
 		FROM workload
 	`
 
@@ -267,7 +264,7 @@ func (r *WorkloadRepository) List(ctx context.Context, queries ...Query) ([]Work
 			createdAt, updatedAt, deletedAt string
 		)
 
-		if err = rows.Scan(&w.ID, &w.Name, &w.Version, &w.Runtime, &w.Schedule, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt); err != nil {
+		if err = rows.Scan(&w.ID, &w.Name, &w.Version, &w.Runtime, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan workload: %w", err)
 		}
 
