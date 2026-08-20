@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -266,6 +267,7 @@ func TestReconciler_Run(t *testing.T) {
 			go func() { done <- r.Run(ctx) }()
 
 			passes.wait(t, 1)
+			awaitPasses(t, r, 1)
 
 			cancel()
 			require.NoError(t, <-done)
@@ -366,6 +368,7 @@ func TestReconciler_Run_Health(t *testing.T) {
 			go func() { done <- r.Run(ctx) }()
 
 			passes.wait(t, 1)
+			awaitPasses(t, r, 1)
 
 			cancel()
 			require.NoError(t, <-done)
@@ -433,6 +436,7 @@ func TestReconciler_Run_RegistersChecks(t *testing.T) {
 	go func() { done <- r.Run(ctx) }()
 
 	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
 
 	cancel()
 	require.NoError(t, <-done)
@@ -623,9 +627,80 @@ func TestReconciler_Run_RoutesByRuntime(t *testing.T) {
 	go func() { done <- r.Run(ctx) }()
 
 	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
 
 	cancel()
 	require.NoError(t, <-done)
+}
+
+func TestReconciler_Run_ConvergesWorkloadsConcurrently(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	const workloads = 16
+
+	rows := make([]database.Workload, 0, workloads)
+	for i := range workloads {
+		rows = append(rows, storedWorkload(fmt.Sprintf("w%02d", i), "hash-one"))
+	}
+
+	repo.EXPECT().List(mock.Anything).Return(rows, nil)
+
+	// Every start blocks, which is what converging in turn made so expensive: most of
+	// what a workload costs is waiting, so a serial pass adds those waits up.
+	var inflight, worst atomic.Int64
+
+	d.EXPECT().Start(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, driver.Workload) (string, error) {
+			concurrent := inflight.Add(1)
+			defer inflight.Add(-1)
+
+			for {
+				if seen := worst.Load(); concurrent <= seen || worst.CompareAndSwap(seen, concurrent) {
+					break
+				}
+			}
+
+			time.Sleep(100 * time.Millisecond)
+
+			return "id", nil
+		})
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+			return nil, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	started := time.Now()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
+
+	cancel()
+	require.NoError(t, <-done)
+
+	// Serially this would be sixteen hundred milliseconds. The bound is at least four,
+	// so the pass has to be several times faster than that.
+	assert.Less(t, time.Since(started), time.Second, "the pass converged workloads in turn")
+	assert.Greater(t, worst.Load(), int64(1), "no two workloads were converged at once")
 }
 
 func TestReconciler_Run_StopsOnlyTheDriverThatRunsIt(t *testing.T) {
@@ -680,6 +755,7 @@ func TestReconciler_Run_StopsOnlyTheDriverThatRunsIt(t *testing.T) {
 	go func() { done <- r.Run(ctx) }()
 
 	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
 
 	cancel()
 	require.NoError(t, <-done)
@@ -731,6 +807,7 @@ func TestReconciler_Run_StopsAnOrphanOnEveryDriver(t *testing.T) {
 	go func() { done <- r.Run(ctx) }()
 
 	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
 
 	cancel()
 	require.NoError(t, <-done)
@@ -773,6 +850,7 @@ func TestReconciler_Run_LeavesARuntimeWithNoDriverAlone(t *testing.T) {
 	// One pass is enough: the mocks expect no Start or Stop at all, so reaching the
 	// end of a pass without either is the assertion.
 	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
 
 	cancel()
 	require.NoError(t, <-done)
@@ -879,6 +957,7 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 			go func() { done <- r.Run(ctx) }()
 
 			passes.wait(t, 1)
+			awaitPasses(t, r, 1)
 
 			cancel()
 			require.NoError(t, <-done)
@@ -933,6 +1012,7 @@ func TestReconciler_Run_RerunsARetiredWorkloadWhenItsSpecChanges(t *testing.T) {
 	go func() { done <- r.Run(ctx) }()
 
 	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
 
 	cancel()
 	require.NoError(t, <-done)
@@ -1346,12 +1426,30 @@ func (c *counter) get() int {
 	return c.count
 }
 
+// wait blocks until at least the given number of passes have begun.
+//
+// Observing is the first thing a pass does, so this says a pass started rather than
+// that it finished. Use awaitPasses to wait for the work of a pass to be done.
 func (c *counter) wait(t *testing.T, passes int) {
 	t.Helper()
 
 	require.Eventually(t, func() bool {
 		return c.get() >= passes
-	}, time.Second, time.Millisecond)
+	}, 5*time.Second, time.Millisecond)
+}
+
+// awaitPasses blocks until the reconciler reports the given number of completed
+// passes, which is what says the work of a pass has finished.
+//
+// Workloads are converged concurrently, so a mock expectation may still be in flight
+// when a pass is observed to have started. The reconciler counts what it has finished,
+// which is a signal rather than a guess.
+func awaitPasses(t *testing.T, r *reconciler.Reconciler, passes uint64) {
+	t.Helper()
+
+	require.Eventuallyf(t, func() bool {
+		return r.Passes() >= passes
+	}, 5*time.Second, time.Millisecond, "the reconciler completed fewer than %d passes", passes)
 }
 
 // specWithHealth returns a stored specification declaring a check, so the reconciler

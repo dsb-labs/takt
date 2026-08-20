@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
@@ -89,6 +91,9 @@ type (
 		mux sync.Mutex
 		// How long to wait before restarting each workload that keeps failing.
 		backoff map[string]backoff
+		// Counts completed passes, so that a caller can tell a pass has finished
+		// rather than inferring it from something a pass happens to do first.
+		passes atomic.Uint64
 	}
 
 	// The Config type contains fields used to construct a Reconciler.
@@ -223,9 +228,21 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	}
 }
 
+// Passes reports how many reconciliation passes have completed.
+//
+// A pass observes the runtimes before it acts, so nothing a pass does first says that
+// it has finished — and workloads are converged concurrently, so the last of them may
+// still be in flight when the loop moves on. This counts what a caller actually wants
+// to know.
+func (r *Reconciler) Passes() uint64 {
+	return r.passes.Load()
+}
+
 // reconcile runs a single pass. Errors affecting one workload are logged and the
 // pass continues, so one broken workload can't stop the others converging.
 func (r *Reconciler) reconcile(ctx context.Context) {
+	defer r.passes.Add(1)
+
 	rows, err := r.workloads.List(ctx)
 	if err != nil {
 		r.logger.With("error", err).Error("failed to list workloads")
@@ -251,14 +268,12 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	desired := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
 		desired[row.Name] = struct{}{}
-
-		if err = r.converge(ctx, row, observed[row.Name]); err != nil {
-			r.logger.With("workload", row.Name, "error", err).Error("failed to reconcile workload")
-		}
 	}
 
-	// Anything the driver is running that nothing asked for is an orphan — most
-	// often the remnant of a workload deleted while the server was down.
+	r.convergeAll(ctx, rows, observed)
+
+	// Anything a driver is running that nothing asked for is an orphan — most often
+	// the remnant of a workload deleted while the server was down.
 	for workload := range observed {
 		if _, ok := desired[workload]; ok {
 			continue
@@ -270,6 +285,58 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 			r.logger.With("workload", workload, "error", err).Error("failed to stop orphaned workload")
 		}
 	}
+}
+
+// convergeAll converges every workload, several at a time.
+//
+// Workloads are independent of one another, and converging them in turn made the
+// slowest of them the rate at which any of them could be handled. Most of what
+// converging costs is waiting — on a daemon, on a process to stop, on an image to
+// pull — so one workload waiting used to hold up every workload behind it. Measured
+// tearing down a hundred workloads: each of sixty exec workloads waited out its own
+// ten-second grace period in turn, and the teardown took five minutes rather than the
+// ten seconds it should.
+//
+// Concurrency is bounded rather than unbounded. A pass over a thousand workloads
+// should not open a thousand connections to a daemon that will queue them anyway, and
+// a bound keeps the load orca offers a runtime a property of the server rather than of
+// how many workloads happen to exist.
+func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, observed map[string][]driver.Instance) {
+	var wg sync.WaitGroup
+
+	slots := make(chan struct{}, convergeLimit())
+
+	for _, row := range rows {
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
+			// Shutting down. Whatever has not been reached converges on the next
+			// server's first pass, which is what level-triggered reconciliation means.
+			wg.Wait()
+
+			return
+		}
+
+		wg.Go(func() {
+			defer func() { <-slots }()
+
+			if err := r.converge(ctx, row, observed[row.Name]); err != nil {
+				r.logger.With("workload", row.Name, "error", err).Error("failed to reconcile workload")
+			}
+		})
+	}
+
+	wg.Wait()
+}
+
+// convergeLimit reports how many workloads a pass converges at once.
+//
+// Scaled to the machine rather than fixed, since the work is mostly waiting and the
+// right number is about how much a runtime will accept at once rather than about how
+// much computing there is to do. The floor matters on a single-core machine, where a
+// limit of one would restore the serial behaviour this exists to avoid.
+func convergeLimit() int {
+	return max(runtime.NumCPU(), 4)
 }
 
 // converge brings a single workload's running state into line with its desired
@@ -644,13 +711,13 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 	startCtx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 
-	runtime, ok := r.driverFor(row)
+	d, ok := r.driverFor(row)
 	if !ok {
 		// Nothing runs this workload's runtime, which converge has already reported.
 		return nil
 	}
 
-	id, err := runtime.Start(startCtx, w)
+	id, err := d.Start(startCtx, w)
 	if err != nil {
 		// A workload that cannot start may be sitting on a host port something
 		// outside orca has taken, which nothing orca does will free. Rather than
@@ -672,9 +739,9 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 // driverFor returns the driver that runs a workload's runtime, reporting false when
 // nothing does.
 func (r *Reconciler) driverFor(row database.Workload) (Driver, bool) {
-	runtime, ok := r.drivers[row.Runtime]
+	d, ok := r.drivers[row.Runtime]
 
-	return runtime, ok
+	return d, ok
 }
 
 // observe collects the instances every driver is running.
@@ -685,10 +752,10 @@ func (r *Reconciler) driverFor(row database.Workload) (Driver, bool) {
 func (r *Reconciler) observe(ctx context.Context) ([]driver.Instance, error) {
 	var instances []driver.Instance
 
-	for _, runtime := range r.drivers {
-		observed, err := runtime.Observe(ctx)
+	for _, d := range r.drivers {
+		observed, err := d.Observe(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to observe the %s runtime: %w", runtime.Name(), err)
+			return nil, fmt.Errorf("failed to observe the %s runtime: %w", d.Name(), err)
 		}
 
 		instances = append(instances, observed...)
@@ -705,10 +772,10 @@ func (r *Reconciler) observe(ctx context.Context) ([]driver.Instance, error) {
 // single driver's stream ended.
 func (r *Reconciler) watch(ctx context.Context) (<-chan driver.Event, error) {
 	streams := make([]<-chan driver.Event, 0, len(r.drivers))
-	for _, runtime := range r.drivers {
-		events, err := runtime.Watch(ctx)
+	for _, d := range r.drivers {
+		events, err := d.Watch(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to watch the %s runtime: %w", runtime.Name(), err)
+			return nil, fmt.Errorf("failed to watch the %s runtime: %w", d.Name(), err)
 		}
 
 		streams = append(streams, events)
@@ -763,7 +830,7 @@ func (r *Reconciler) abandonPorts(ctx context.Context, row database.Workload) {
 // cost of tearing down a hundred mixed workloads, where each pass repeated the waste
 // for every workload still left.
 func (r *Reconciler) stop(ctx context.Context, row database.Workload) error {
-	runtime, ok := r.driverFor(row)
+	d, ok := r.driverFor(row)
 	if !ok {
 		// Nothing runs this runtime, so nothing can be running for it. The check is
 		// still dropped, since the workload is on its way out either way.
@@ -775,8 +842,8 @@ func (r *Reconciler) stop(ctx context.Context, row database.Workload) error {
 	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
 
-	if err := runtime.Stop(ctx, row.Name); err != nil {
-		return fmt.Errorf("failed to stop workload on the %s runtime: %w", runtime.Name(), err)
+	if err := d.Stop(ctx, row.Name); err != nil {
+		return fmt.Errorf("failed to stop workload on the %s runtime: %w", d.Name(), err)
 	}
 
 	r.forget(row.Name)
@@ -793,9 +860,9 @@ func (r *Reconciler) stopOrphan(ctx context.Context, workload string) error {
 	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
 
-	for _, runtime := range r.drivers {
-		if err := runtime.Stop(ctx, workload); err != nil {
-			return fmt.Errorf("failed to stop workload on the %s runtime: %w", runtime.Name(), err)
+	for _, d := range r.drivers {
+		if err := d.Stop(ctx, workload); err != nil {
+			return fmt.Errorf("failed to stop workload on the %s runtime: %w", d.Name(), err)
 		}
 	}
 
