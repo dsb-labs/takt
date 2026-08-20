@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"sync"
 	"syscall"
@@ -46,9 +47,19 @@ const (
 	stopGrace = 10 * time.Second
 )
 
-// ErrNotExecWorkload is returned when the driver is given a workload whose
-// specification carries no exec block.
-var ErrNotExecWorkload = errors.New("workload does not describe a command")
+var (
+	// ErrNotExecWorkload is returned when the driver is given a workload whose
+	// specification carries no exec block.
+	ErrNotExecWorkload = errors.New("workload does not describe a command")
+	// ErrInvalidWorkloadName is returned when a workload's name could not be used as
+	// a directory beneath the driver's root.
+	ErrInvalidWorkloadName = errors.New("workload name is not usable as a directory")
+)
+
+// Names identify a workload, and this driver turns one into a directory beneath its
+// root. A name is held to the same rule the manifest applies, so that a name reaching
+// the driver from somewhere the manifest never saw cannot describe a path.
+var namePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 type (
 	// The Driver type runs workloads as processes on the host.
@@ -115,6 +126,10 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 
 	if len(spec.Command) == 0 {
 		return "", fmt.Errorf("%w: no command", ErrNotExecWorkload)
+	}
+
+	if _, err := d.dir(w.Name); err != nil {
+		return "", err
 	}
 
 	path := d.path(w.Name, w.Version)
@@ -238,6 +253,16 @@ func (d *Driver) supervise(ctx context.Context, workload string, process *superv
 // started is stopped with it. A group given time to stop and still running is killed:
 // a workload that ignores the request must not be able to block the pass that asked.
 func (d *Driver) Stop(ctx context.Context, workload string) error {
+	dir, err := d.dir(workload)
+	if err != nil {
+		// Nothing this driver runs could have that name, so there is nothing here to
+		// stop. Reported rather than ignored: a name the driver cannot use means
+		// something upstream is describing work orca did not create.
+		d.logger.With("workload", workload, "error", err).Error("refusing to stop a workload")
+
+		return err
+	}
+
 	versions, err := d.versions(workload)
 	if err != nil {
 		return err
@@ -264,7 +289,7 @@ func (d *Driver) Stop(ctx context.Context, workload string) error {
 
 	// Removed only once nothing is running, so a workload's output survives for as
 	// long as the workload does.
-	if err = os.RemoveAll(filepath.Join(d.root, workload)); err != nil {
+	if err = os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("failed to remove workload directory: %w", err)
 	}
 
@@ -273,8 +298,27 @@ func (d *Driver) Stop(ctx context.Context, workload string) error {
 	return nil
 }
 
+// signalable reports whether a pid is one this driver is willing to signal.
+//
+// Signals are sent to the negated pid, which addresses a process group. Two values
+// make that mean something other than "the group this driver started": zero addresses
+// the caller's own group, and one addresses every process the caller may signal at
+// all. Neither can be a process the driver started, so both are refused rather than
+// relied on to be absent.
+//
+// The record a pid comes from lives in a directory the workload can reach, so a
+// workload could name a pid it wants signalled. The identity check on the record is
+// what normally prevents that, and this is what remains if it ever does not.
+func signalable(pid int) bool {
+	return pid > 1
+}
+
 // terminate asks a process group to stop and kills it if it does not.
 func (d *Driver) terminate(ctx context.Context, pid int) error {
+	if !signalable(pid) {
+		return fmt.Errorf("refusing to signal pid %d", pid)
+	}
+
 	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("failed to signal process group: %w", err)
 	}
@@ -297,6 +341,10 @@ func (d *Driver) terminate(ctx context.Context, pid int) error {
 
 // kill ends a process group outright, for one that would not stop when asked.
 func (d *Driver) kill(pid int) error {
+	if !signalable(pid) {
+		return fmt.Errorf("refusing to signal pid %d", pid)
+	}
+
 	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("failed to kill process group: %w", err)
 	}
@@ -455,6 +503,22 @@ func (d *Driver) path(workload string, version int) string {
 	return filepath.Join(d.root, workload, strconv.Itoa(version))
 }
 
+// dir returns the directory holding a workload, refusing a name that could describe
+// anything but a single directory beneath the driver's root.
+//
+// The manifest holds a workload's name to this rule already, so an ordinary workload
+// never fails here. Not every name reaches the driver through a manifest though: an
+// orphan is named by the label on the work found running, which is a value the driver
+// reads rather than one orca wrote. A name containing a traversal would otherwise
+// resolve outside the root, and this driver removes directories.
+func (d *Driver) dir(workload string) (string, error) {
+	if !namePattern.MatchString(workload) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidWorkloadName, workload)
+	}
+
+	return filepath.Join(d.root, workload), nil
+}
+
 // workloads lists the workloads the driver has directories for.
 func (d *Driver) workloads() ([]string, error) {
 	return d.subdirectories(d.root)
@@ -463,7 +527,10 @@ func (d *Driver) workloads() ([]string, error) {
 // versions returns the paths of every version the driver has a directory for, oldest
 // first, so that reading them yields a workload's history in order.
 func (d *Driver) versions(workload string) ([]string, error) {
-	root := filepath.Join(d.root, workload)
+	root, err := d.dir(workload)
+	if err != nil {
+		return nil, err
+	}
 
 	names, err := d.subdirectories(root)
 	if err != nil {

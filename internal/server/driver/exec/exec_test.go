@@ -258,6 +258,71 @@ func TestDriver_Stop(t *testing.T) {
 	})
 }
 
+func TestDriver_Stop_RefusesANameThatIsNotADirectory(t *testing.T) {
+	t.Parallel()
+
+	// Not every name reaches this driver through a manifest. An orphan is named by the
+	// label on the work found running, which is a value the driver reads rather than
+	// one orca wrote — and this driver removes directories.
+	base := t.TempDir()
+	root := filepath.Join(base, "workload")
+	require.NoError(t, os.MkdirAll(root, 0o700))
+
+	outside := filepath.Join(base, "outside")
+	require.NoError(t, os.MkdirAll(outside, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(outside, "keep"), []byte("x"), 0o600))
+
+	d := exec.New(exec.Config{
+		Logger: slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError})),
+		Root:   root,
+	})
+
+	for _, name := range []string{"../outside", "..", "../../etc", "a/../../outside", "", "."} {
+		err := d.Stop(t.Context(), name)
+		assert.ErrorIs(t, err, exec.ErrInvalidWorkloadName, "accepted the name %q", name)
+	}
+
+	_, err := os.Stat(filepath.Join(outside, "keep"))
+	assert.NoError(t, err, "a workload name resolved outside the driver's root")
+}
+
+func TestDriver_Start_RefusesANameThatIsNotADirectory(t *testing.T) {
+	t.Parallel()
+
+	d, _ := newDriver(t)
+
+	w := workload("../escape", 1, "hash-one", "exit 0")
+
+	_, err := d.Start(t.Context(), w)
+	assert.ErrorIs(t, err, exec.ErrInvalidWorkloadName)
+}
+
+func TestDriver_RefusesToSignalPidZeroOrOne(t *testing.T) {
+	t.Parallel()
+
+	// A signal is sent to the negated pid, which addresses a process group. Zero
+	// addresses the driver's own group and one addresses every process it may signal
+	// at all, so neither can be work the driver started.
+	//
+	// The record a pid comes from lives where a workload can reach it, so this is what
+	// remains if the identity check on that record ever does not hold.
+	d, root := newDriver(t)
+
+	for _, pid := range []int{0, 1, -1} {
+		writeInstance(t, root, "example", 1, map[string]any{
+			"pid":        pid,
+			"startTicks": 1,
+			"specHash":   "hash-one",
+			"version":    1,
+			"startedAt":  time.Now().Format(time.RFC3339Nano),
+		})
+
+		// Stop reports the record as not alive, so terminate is not reached. The
+		// driver still must not treat such a pid as signalable at all.
+		require.NoError(t, d.Stop(t.Context(), "example"))
+	}
+}
+
 func TestDriver_Logs(t *testing.T) {
 	t.Parallel()
 
