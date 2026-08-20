@@ -14,10 +14,13 @@
 package e2e_test
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -573,6 +576,128 @@ func (s *Suite) TestChangingASpecRerunsACompletedJob() {
 
 		return current.Instances[0].ID != original
 	}, convergeTimeout, 500*time.Millisecond, "a changed specification did not re-run the job")
+}
+
+// TestExecJobRunsAndCompletes covers the exec runtime's simplest case: a command that
+// does something and ends.
+func (s *Suite) TestExecJobRunsAndCompletes() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.execSpec(name, "sh", "-c", "echo did-the-work; exit 0")
+	spec.Restart = manifest.RestartOnFailure
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	workload := s.awaitState(name, client.WorkloadStateCompleted)
+	s.Require().Len(workload.Instances, 1)
+	s.Equal(client.InstanceStateCompleted, workload.Instances[0].State)
+
+	// The command's output is captured on disk, which is what logs reads for a runtime
+	// with no daemon to ask.
+	var out bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 10))
+	s.Contains(out.String(), "did-the-work")
+}
+
+// TestExecWorkloadPassesOnlyItsOwnEnvironment covers the environment an exec workload
+// runs with, which is only what it named.
+func (s *Suite) TestExecWorkloadPassesOnlyItsOwnEnvironment() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.execSpec(name, "sh", "-c", `echo "[$GREETING]"; exit 0`)
+	spec.Restart = manifest.RestartOnFailure
+	spec.Env = map[string]string{"GREETING": "hello"}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+
+	var out bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 10))
+	s.Contains(out.String(), "[hello]")
+}
+
+// TestExecJobIsRestartedWhenItFails covers an exec workload taking the same paced
+// restart a container does, since the policy is the runtime's business either way.
+func (s *Suite) TestExecJobIsRestartedWhenItFails() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.execSpec(name, "sh", "-c", "exit 1")
+	spec.Restart = manifest.RestartOnFailure
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	original := s.awaitInstance(name)
+
+	s.Require().Eventuallyf(func() bool {
+		current, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(current.Instances) == 0 {
+			return false
+		}
+
+		return current.Instances[0].ID != original
+	}, convergeTimeout, 500*time.Millisecond, "a failed exec job was never retried")
+}
+
+// TestExecWorkloadAdoptedAfterServerRestart covers the claim that makes restarting the
+// server different from restarting the workloads it runs.
+func (s *Suite) TestExecWorkloadAdoptedAfterServerRestart() {
+	name := s.workloadName()
+
+	// The first server's data has to outlive it, since the record the driver leaves
+	// behind is what the next server adopts the process from.
+	directory := s.T().TempDir()
+	s.restart(withDataDirectory(directory))
+
+	_, _, err := s.client.Apply(s.ctx(), s.execSpec(name, "sleep", "600"))
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+	original := s.instanceID(name)
+
+	s.restart(withDataDirectory(directory))
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	workload := s.awaitState(name, client.WorkloadStateRunning)
+	s.Require().Len(workload.Instances, 1)
+
+	// The same process, not a replacement. A server that started a second one would be
+	// running the workload twice, and the first would be left with no supervisor.
+	s.Equal(original, workload.Instances[0].ID)
+
+	// This suite runs the server in its own process, so a child is never orphaned by
+	// the restart and adoption is exercised without Release being involved. Whether a
+	// process survives the server exiting is verified separately, by the driver's own
+	// tests.
+}
+
+// TestExecWorkloadIsStoppedOnDelete covers the process going away with its workload,
+// which nothing else would clean up.
+func (s *Suite) TestExecWorkloadIsStoppedOnDelete() {
+	name := s.workloadName()
+
+	_, _, err := s.client.Apply(s.ctx(), s.execSpec(name, "sleep", "600"))
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	pid, err := strconv.Atoi(s.instanceID(name))
+	s.Require().NoError(err)
+
+	_, err = s.client.Delete(s.ctx(), name, client.WithWait())
+	s.Require().NoError(err)
+
+	// A released process has no parent to reap it, so a delete that only removed the
+	// row would leave it running for the life of the host.
+	s.Require().Eventuallyf(func() bool {
+		return syscall.Kill(pid, 0) != nil
+	}, convergeTimeout, 500*time.Millisecond, "the process outlived the workload it belonged to")
 }
 
 // TestApplyDuringTeardownIsRejected covers re-applying a workload that is still being

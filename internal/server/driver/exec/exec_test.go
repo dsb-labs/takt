@@ -333,8 +333,8 @@ func TestDriver_Release(t *testing.T) {
 	pid, err := strconv.Atoi(instances[0].ID)
 	require.NoError(t, err)
 
-	// Releasing is what makes a long-running workload outlive the server: the process
-	// keeps running and the next start adopts it from its record.
+	// Releasing is what makes a long-running workload outlive the server: the driver
+	// gives up its claim on the process rather than stopping it.
 	d.Release()
 
 	assert.NoError(t, syscall.Kill(pid, 0), "a released process should still be running")
@@ -343,6 +343,11 @@ func TestDriver_Release(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, instances, 1)
 	assert.Equal(t, driver.StateRunning, instances[0].State)
+
+	// The claim is what matters. A driver still holding one would reap the process
+	// when it ended and, in a server that has exited, take it down with itself — so
+	// the released process must no longer be supervised.
+	assert.False(t, d.Supervises("example"), "a released process is still claimed by the driver")
 }
 
 // newDriver returns a driver rooted in a temporary directory, along with that root.

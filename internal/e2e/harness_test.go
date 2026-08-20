@@ -132,6 +132,16 @@ func (s *Suite) containerSpec(name string, ports ...manifest.Port) manifest.Spec
 	}
 }
 
+// execSpec returns a specification that runs a command on the host rather than a
+// container, which is the exec runtime's whole difference.
+func (s *Suite) execSpec(name string, command ...string) manifest.Spec {
+	return manifest.Spec{
+		Version: "v1",
+		Name:    name,
+		Exec:    &manifest.Exec{Command: command},
+	}
+}
+
 // jobSpec returns a specification for a workload that ends rather than serving, which
 // is what a restart policy exists to describe.
 //

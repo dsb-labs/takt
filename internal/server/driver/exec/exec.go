@@ -436,6 +436,20 @@ func (d *Driver) Release() {
 	clear(d.supervised)
 }
 
+// Supervises reports whether the driver is still waiting on a workload's process.
+//
+// A supervised process is one this server started and can collect an exit code from. A
+// released or adopted one is not, which is the difference between a workload that
+// outlives the server and one that does not.
+func (d *Driver) Supervises(workload string) bool {
+	d.mux.Lock()
+	defer d.mux.Unlock()
+
+	_, ok := d.supervised[workload]
+
+	return ok
+}
+
 // path returns the directory holding one version of a workload.
 func (d *Driver) path(workload string, version int) string {
 	return filepath.Join(d.root, workload, strconv.Itoa(version))

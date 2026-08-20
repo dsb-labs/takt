@@ -16,6 +16,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
+	"github.com/dsb-labs/orca/internal/server/driver/exec"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
@@ -58,11 +59,14 @@ func Run(ctx context.Context, config Config) error {
 	ports := database.NewPortRepository(db)
 	checker := health.New()
 
-	// Keyed by the name each driver declares, which is what a workload's runtime is
-	// matched against. A runtime with no driver here is stored and left alone.
-	runtimes := map[string]*docker.Driver{
-		docker.Name: docker.New(docker.Config{Logger: logger, Client: dockerClient}),
-	}
+	// The exec driver keeps each workload's files under the data directory, beside the
+	// database, so that everything orca owns on disk is in one place.
+	execDriver := exec.New(exec.Config{
+		Logger: logger,
+		Root:   filepath.Join(config.Data.Directory, "workload"),
+	})
+
+	dockerDriver := docker.New(docker.Config{Logger: logger, Client: dockerClient})
 
 	// The service and the reconciler each need something from the other: the service
 	// wakes the reconciler when desired state changes, and the reconciler asks the
@@ -70,9 +74,18 @@ func Run(ctx context.Context, config Config) error {
 	// functions so neither has to be half-constructed to build the other.
 	var svc *service.WorkloadService
 
+	// The drivers are keyed by the name each one declares, which is what a workload's
+	// runtime is matched against. A runtime with no driver is stored and left alone.
+	//
+	// Each consumer gets a map of its own interface: the reconciler starts and stops
+	// work where the service only reads, so neither is handed a driver wider than it
+	// needs.
 	reconcile := reconciler.New(reconciler.Config{
-		Logger:    logger,
-		Drivers:   reconcilerDrivers(runtimes),
+		Logger: logger,
+		Drivers: map[string]reconciler.Driver{
+			docker.Name: dockerDriver,
+			exec.Name:   execDriver,
+		},
 		Workloads: workloads,
 		Ports:     ports,
 		Checker:   checker,
@@ -83,8 +96,11 @@ func Run(ctx context.Context, config Config) error {
 	})
 
 	svc = service.NewWorkloadService(service.WorkloadServiceConfig{
-		Logger:    logger,
-		Drivers:   serviceDrivers(runtimes),
+		Logger: logger,
+		Drivers: map[string]service.Driver{
+			docker.Name: dockerDriver,
+			exec.Name:   execDriver,
+		},
 		Workloads: workloads,
 		Ports:     ports,
 		Allocator: port.New(port.Config{Min: config.Ports.Min, Max: config.Ports.Max}),
@@ -124,6 +140,16 @@ func Run(ctx context.Context, config Config) error {
 
 	g.Go(func() error { return reconcile.Run(ctx) })
 	g.Go(func() error { return checker.Run(ctx) })
+	g.Go(func() error {
+		<-ctx.Done()
+
+		// Processes the exec driver started keep running, so that restarting the
+		// server is not the same thing as restarting the workloads it runs. The next
+		// start adopts them from the records the driver left behind.
+		execDriver.Release()
+
+		return nil
+	})
 	g.Go(server.ListenAndServe)
 	g.Go(func() error {
 		<-ctx.Done()
@@ -160,29 +186,4 @@ func newLogger(config LoggingConfig) *slog.Logger {
 	}
 
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-}
-
-// reconcilerDrivers adapts the drivers onto the interface the reconciler consumes.
-//
-// The reconciler and the service take deliberately different views of a driver — one
-// starts and stops work, the other only reads — so each is handed a map of its own
-// interface rather than sharing one wider than either needs. Assigning each driver
-// explicitly keeps that a compile-time check.
-func reconcilerDrivers(runtimes map[string]*docker.Driver) map[string]reconciler.Driver {
-	out := make(map[string]reconciler.Driver, len(runtimes))
-	for name, runtime := range runtimes {
-		out[name] = runtime
-	}
-
-	return out
-}
-
-// serviceDrivers adapts the drivers onto the interface the service consumes.
-func serviceDrivers(runtimes map[string]*docker.Driver) map[string]service.Driver {
-	out := make(map[string]service.Driver, len(runtimes))
-	for name, runtime := range runtimes {
-		out[name] = runtime
-	}
-
-	return out
 }
