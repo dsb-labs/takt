@@ -11,15 +11,20 @@ when you apply the file.
 ```yaml
 version: v1
 name: example
+
 labels:
   some-key: some-value
+
 ports:
   - to: 80
     from: 8080
+
 env:
   EXAMPLE: EXAMPLE
+
 restart: always
 schedule: "*/5 * * * *"
+
 health:
   http: /healthz
   port: 80
@@ -27,6 +32,7 @@ health:
   timeout: 2s
   retries: 3
   startPeriod: 30s
+
 container:
   image: nginx:1.27-alpine
   command: ["nginx", "-g", "daemon off;"]

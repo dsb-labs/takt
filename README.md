@@ -44,15 +44,21 @@ The server is also published as a container image at `ghcr.io/dsb-labs/orca`.
 ```yaml
 version: v1
 name: example
+
 labels:
   some-key: some-value
+
 ports:
   - to: 80
+
 env:
   EXAMPLE: EXAMPLE
+
 restart: always
+
 health:
   http: /healthz
+
 container:
   image: nginx:1.27-alpine
 ```
