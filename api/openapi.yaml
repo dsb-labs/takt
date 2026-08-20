@@ -260,11 +260,7 @@ components:
           maxLength: 63
           examples: ["example"]
         schedule:
-          type: string
-          description: |
-            A cron expression describing when the workload should run. Accepted and
-            stored, but not yet acted on; workloads are run continuously for now.
-          examples: ["*/5 * * * *"]
+          $ref: "#/components/schemas/ScheduleSpec"
         labels:
           type: object
           description: Arbitrary key-value pairs attached to the workload.
@@ -296,7 +292,7 @@ components:
           additionalProperties:
             type: string
         restart:
-          $ref: "#/components/schemas/RestartPolicy"
+          $ref: "#/components/schemas/RestartSpec"
         health:
           $ref: "#/components/schemas/HealthSpec"
         container:
@@ -327,6 +323,71 @@ components:
             type: string
             minLength: 1
           examples: [["sh", "-c", "echo hello"]]
+
+    ScheduleSpec:
+      type: object
+      description: |
+        When a workload runs, rather than running it continuously.
+
+        A scheduled workload runs at the times its expression names and waits in
+        between. It is not started when it is applied, because a schedule says when to
+        run and the moment of applying is not one of the times it names.
+
+        The schedule outranks the restart policy. An occurrence coming due starts the
+        workload whatever the last run did, so the policy paces retries between
+        occurrences rather than deciding when the next one begins.
+      required: [cron]
+      properties:
+        cron:
+          type: string
+          description: |
+            A cron expression in the standard five-field form, read in the server's
+            local time.
+          examples: ["*/5 * * * *", "0 2 * * *"]
+        overlap:
+          $ref: "#/components/schemas/OverlapPolicy"
+
+    OverlapPolicy:
+      type: string
+      description: |
+        What the server does when an occurrence comes due and the previous run has not
+        finished.
+
+        `replace` stops the running instance and starts the occurrence, so the schedule
+        is always honoured and a run that outlasts its interval never finishes.
+        `skip` leaves the running instance alone and misses the occurrence, which is
+        what a job that must not be interrupted wants.
+
+        Either way the workload runs one instance at a time.
+      enum:
+        - replace
+        - skip
+      default: replace
+
+    RestartSpec:
+      type: object
+      description: |
+        What the server does when a workload's instance ends, and how hard it tries.
+      properties:
+        policy:
+          $ref: "#/components/schemas/RestartPolicy"
+        attempts:
+          type: integer
+          description: |
+            How many consecutive restarts to attempt before giving up. Unset means
+            orca keeps trying, which is what a long-running service wants.
+
+            A workload that gives up is left as it ended. Changing its specification
+            starts it again.
+          minimum: 1
+          examples: [5]
+        delay:
+          type: string
+          description: |
+            How long to wait before the first restart. Each consecutive failure
+            doubles the wait, up to a ceiling the server sets.
+          default: 1s
+          examples: ["10s"]
 
     RestartPolicy:
       type: string

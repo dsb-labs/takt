@@ -71,6 +71,24 @@ func (e InstanceState) Valid() bool {
 	}
 }
 
+// Defines values for OverlapPolicy.
+const (
+	Replace OverlapPolicy = "replace"
+	Skip    OverlapPolicy = "skip"
+)
+
+// Valid indicates whether the value is a known member of the OverlapPolicy enum.
+func (e OverlapPolicy) Valid() bool {
+	switch e {
+	case Replace:
+		return true
+	case Skip:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RestartPolicy.
 const (
 	Always    RestartPolicy = "always"
@@ -298,6 +316,17 @@ type InstanceHealth struct {
 // driver observed. Completed adds what the policy makes of that.
 type InstanceState string
 
+// OverlapPolicy What the server does when an occurrence comes due and the previous run has not
+// finished.
+//
+// `replace` stops the running instance and starts the occurrence, so the schedule
+// is always honoured and a run that outlasts its interval never finishes.
+// `skip` leaves the running instance alone and misses the occurrence, which is
+// what a job that must not be interrupted wants.
+//
+// Either way the workload runs one instance at a time.
+type OverlapPolicy string
+
 // PortMapping A port to publish. The `to` port is the one the workload listens on inside
 // its runtime; the `from` port is the one on the host that reaches it.
 //
@@ -351,8 +380,74 @@ type ResolvedPort struct {
 // runtime that ran it.
 type RestartPolicy string
 
+// RestartSpec What the server does when a workload's instance ends, and how hard it tries.
+type RestartSpec struct {
+	// Attempts How many consecutive restarts to attempt before giving up. Unset means
+	// orca keeps trying, which is what a long-running service wants.
+	//
+	// A workload that gives up is left as it ended. Changing its specification
+	// starts it again.
+	//
+	//
+	// Examples: 5
+	Attempts *int `json:"attempts,omitempty"`
+
+	// Delay How long to wait before the first restart. Each consecutive failure
+	// doubles the wait, up to a ceiling the server sets.
+	//
+	//
+	// Examples: 10s
+	Delay *string `json:"delay,omitempty"`
+
+	// Policy What the server does when a workload's instance ends.
+	//
+	// `always` restarts it whatever the exit code, which is what a long-running
+	// service wants. `on-failure` restarts it only when it exited non-zero, so a
+	// workload that exits cleanly has finished its work and is left alone.
+	// `never` leaves it alone whatever the exit code.
+	//
+	// A workload the server will not restart reads as completed. Changing the
+	// specification runs it again, because the instance that ran is then out of
+	// date. Applying an unchanged specification does nothing, so a repeated apply
+	// does not run a completed workload a second time.
+	//
+	// The policy sits alongside the runtime blocks because whether a workload
+	// should run again is a question about the workload rather than about the
+	// runtime that ran it.
+	Policy *RestartPolicy `json:"policy,omitempty"`
+}
+
 // Runtime Which runtime block the workload's specification names.
 type Runtime string
+
+// ScheduleSpec When a workload runs, rather than running it continuously.
+//
+// A scheduled workload runs at the times its expression names and waits in
+// between. It is not started when it is applied, because a schedule says when to
+// run and the moment of applying is not one of the times it names.
+//
+// The schedule outranks the restart policy. An occurrence coming due starts the
+// workload whatever the last run did, so the policy paces retries between
+// occurrences rather than deciding when the next one begins.
+type ScheduleSpec struct {
+	// Cron A cron expression in the standard five-field form, read in the server's
+	// local time.
+	//
+	//
+	// Examples: */5 * * * *, 0 2 * * *
+	Cron string `json:"cron"`
+
+	// Overlap What the server does when an occurrence comes due and the previous run has not
+	// finished.
+	//
+	// `replace` stops the running instance and starts the occurrence, so the schedule
+	// is always honoured and a run that outlasts its interval never finishes.
+	// `skip` leaves the running instance alone and misses the occurrence, which is
+	// what a job that must not be interrupted wants.
+	//
+	// Either way the workload runs one instance at a time.
+	Overlap *OverlapPolicy `json:"overlap,omitempty"`
+}
 
 // Workload A workload's desired state, together with the state observed from the driver
 // that runs it.
@@ -461,29 +556,19 @@ type WorkloadSpec struct {
 	// The workload reports back what the server settled on, in the same place.
 	Ports *[]PortMapping `json:"ports,omitempty"`
 
-	// Restart What the server does when a workload's instance ends.
-	//
-	// `always` restarts it whatever the exit code, which is what a long-running
-	// service wants. `on-failure` restarts it only when it exited non-zero, so a
-	// workload that exits cleanly has finished its work and is left alone.
-	// `never` leaves it alone whatever the exit code.
-	//
-	// A workload the server will not restart reads as completed. Changing the
-	// specification runs it again, because the instance that ran is then out of
-	// date. Applying an unchanged specification does nothing, so a repeated apply
-	// does not run a completed workload a second time.
-	//
-	// The policy sits alongside the runtime blocks because whether a workload
-	// should run again is a question about the workload rather than about the
-	// runtime that ran it.
-	Restart *RestartPolicy `json:"restart,omitempty"`
+	// Restart What the server does when a workload's instance ends, and how hard it tries.
+	Restart *RestartSpec `json:"restart,omitempty"`
 
-	// Schedule A cron expression describing when the workload should run. Accepted and
-	// stored, but not yet acted on; workloads are run continuously for now.
+	// Schedule When a workload runs, rather than running it continuously.
 	//
+	// A scheduled workload runs at the times its expression names and waits in
+	// between. It is not started when it is applied, because a schedule says when to
+	// run and the moment of applying is not one of the times it names.
 	//
-	// Examples: */5 * * * *
-	Schedule *string `json:"schedule,omitempty"`
+	// The schedule outranks the restart policy. An occurrence coming due starts the
+	// workload whatever the last run did, so the policy paces retries between
+	// occurrences rather than deciding when the next one begins.
+	Schedule *ScheduleSpec `json:"schedule,omitempty"`
 
 	// Version The manifest schema version. Only "v1" is understood.
 	//
