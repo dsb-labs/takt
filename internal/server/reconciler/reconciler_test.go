@@ -633,6 +633,63 @@ func TestReconciler_Run_RoutesByRuntime(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_ReadsTheInjectedClock(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+		storedWorkload("example", "hash-one"),
+	}, nil)
+
+	// A clock the test controls, so a timing decision can be made to fall either way
+	// without waiting for it. The backoff is what reads it.
+	now := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+
+	var reads atomic.Int64
+
+	// The workload cannot start, so the pass holds it and the next pass asks the clock
+	// whether the hold has expired.
+	d.EXPECT().Start(mock.Anything, mock.Anything).Return("", errors.New("cannot start"))
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+			return nil, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  10 * time.Millisecond,
+		Now: func() time.Time {
+			reads.Add(1)
+
+			return now
+		},
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 3)
+	awaitPasses(t, r, 3)
+
+	cancel()
+	require.NoError(t, <-done)
+
+	// The clock is the reconciler's only source of the time, so a pass that makes a
+	// timing decision has to have read it.
+	assert.Positive(t, reads.Load(), "the reconciler did not read the injected clock")
+}
+
 func TestReconciler_Run_ConvergesWorkloadsConcurrently(t *testing.T) {
 	t.Parallel()
 

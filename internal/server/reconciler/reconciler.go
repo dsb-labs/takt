@@ -83,6 +83,7 @@ type (
 		ports      PortRepository
 		checker    Checker
 		reallocate func(ctx context.Context, workload string) (bool, error)
+		now        func() time.Time
 		interval   time.Duration
 		nudge      chan struct{}
 
@@ -117,6 +118,12 @@ type (
 		Reallocate func(ctx context.Context, workload string) (bool, error)
 		// How often a full reconciliation pass runs regardless of events.
 		Interval time.Duration
+		// Reports the current time, which every timing decision a pass makes reads
+		// from. May be nil, in which case the wall clock is used.
+		//
+		// A test names the times it wants rather than waiting for them, which matters
+		// most for a schedule: the finest cron expression names one time a minute.
+		Now func() time.Time
 	}
 
 	// The backoff type paces restarts of a workload that keeps failing, so that a
@@ -158,6 +165,16 @@ const (
 	settlePeriod = 10 * time.Second
 )
 
+// clock returns the function a reconciler reads the time from, defaulting to the wall
+// clock so that only a test has to say anything about it.
+func clock(now func() time.Time) func() time.Time {
+	if now == nil {
+		return time.Now
+	}
+
+	return now
+}
+
 // New returns a Reconciler that converges the driver in config onto the desired
 // state in its repository.https://github.com/octplane
 func New(config Config) *Reconciler {
@@ -168,6 +185,7 @@ func New(config Config) *Reconciler {
 		ports:      config.Ports,
 		checker:    config.Checker,
 		reallocate: config.Reallocate,
+		now:        clock(config.Now),
 		interval:   config.Interval,
 		backoff:    make(map[string]backoff),
 		// Buffered so that a caller signalling a change never blocks: a pass is
@@ -387,7 +405,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		// clearing the backoff on sight of that reset the pacing every cycle and let
 		// such a workload loop at five containers a second indefinitely. It has to
 		// have stayed up to count as settled.
-		if slices.ContainsFunc(instances, settled) {
+		if slices.ContainsFunc(instances, func(i driver.Instance) bool { return settled(i, r.now()) }) {
 			r.settle(row.Name)
 		}
 
@@ -674,7 +692,7 @@ func (r *Reconciler) waiting(workload string) bool {
 
 	state := r.backoff[workload]
 
-	return !state.next.IsZero() && time.Now().Before(state.next)
+	return !state.next.IsZero() && r.now().Before(state.next)
 }
 
 // hold records another attempt against a workload and pushes out the earliest time
@@ -686,7 +704,7 @@ func (r *Reconciler) hold(workload string) backoff {
 	state := r.backoff[workload]
 
 	state.attempts++
-	state.next = time.Now().Add(delay(state.attempts))
+	state.next = r.now().Add(delay(state.attempts))
 	r.backoff[workload] = state
 
 	return state
@@ -914,12 +932,12 @@ func running(instance driver.Instance) bool {
 // An instance whose start time the driver didn't report is taken at face value rather
 // than held against it, since the alternative is never clearing the backoff of a
 // workload that is running perfectly well.
-func settled(instance driver.Instance) bool {
+func settled(instance driver.Instance, now time.Time) bool {
 	if instance.State != driver.StateRunning {
 		return false
 	}
 
-	return instance.StartedAt.IsZero() || time.Since(instance.StartedAt) >= settlePeriod
+	return instance.StartedAt.IsZero() || now.Sub(instance.StartedAt) >= settlePeriod
 }
 
 func terminating(instance driver.Instance) bool {
