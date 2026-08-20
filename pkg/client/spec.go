@@ -26,6 +26,9 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 	spec.Restart = manifest.WireRestart(s.Restart)
 	spec.Health = manifest.WireHealth(s.Health)
 
+	if len(s.Env) > 0 {
+		spec.Env = new(s.Env)
+	}
 	if len(s.Ports) > 0 {
 		mappings := make([]api.PortMapping, 0, len(s.Ports))
 		for _, port := range s.Ports {
@@ -49,20 +52,10 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 		if len(s.Container.Command) > 0 {
 			spec.Container.Command = new(s.Container.Command)
 		}
-		if len(s.Container.Env) > 0 {
-			spec.Container.Env = new(s.Container.Env)
-		}
 	}
 
-	if s.Script != nil {
-		spec.Script = new(api.ScriptSpec)
-
-		if s.Script.Source != "" {
-			spec.Script.Source = new(s.Script.Source)
-		}
-		if s.Script.Raw != "" {
-			spec.Script.Raw = new(s.Script.Raw)
-		}
+	if s.Exec != nil {
+		spec.Exec = &api.ExecSpec{Command: s.Exec.Command}
 	}
 
 	return spec

@@ -183,7 +183,7 @@ func TestReconciler_Run(t *testing.T) {
 			Name: "tears down a deleted workload whose runtime has no driver",
 			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
 				row := storedWorkload("example", "hash-one")
-				row.Runtime = string(api.Script)
+				row.Runtime = "nothing-runs-this"
 				row.DeletedAt = time.Now().UTC()
 
 				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
@@ -208,7 +208,7 @@ func TestReconciler_Run(t *testing.T) {
 			Name: "leaves a workload naming an unsupported runtime alone",
 			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
 				row := storedWorkload("example", "hash-one")
-				row.Runtime = string(api.Script)
+				row.Runtime = "nothing-runs-this"
 
 				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 			},

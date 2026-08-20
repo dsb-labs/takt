@@ -1,0 +1,7 @@
+version: v1
+name: example
+ports:
+  - to: 8080
+    from: 8080
+exec:
+  command: ["/usr/local/bin/server"]

@@ -2,5 +2,5 @@ version: v1
 name: example
 ports:
   - to: 8080
-script:
-  raw: echo "hello world"
+exec:
+  command: ["/usr/local/bin/server"]

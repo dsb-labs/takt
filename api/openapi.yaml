@@ -285,14 +285,24 @@ components:
             The workload reports back what the server settled on, in the same place.
           items:
             $ref: "#/components/schemas/PortMapping"
+        env:
+          type: object
+          description: |
+            Environment variables set for the workload.
+
+            These sit alongside the runtime blocks because any runtime that runs a
+            process has an environment to set. A workload starts with only what this
+            names, rather than inheriting the server's own environment.
+          additionalProperties:
+            type: string
         restart:
           $ref: "#/components/schemas/RestartPolicy"
         health:
           $ref: "#/components/schemas/HealthSpec"
         container:
           $ref: "#/components/schemas/ContainerSpec"
-        script:
-          $ref: "#/components/schemas/ScriptSpec"
+        exec:
+          $ref: "#/components/schemas/ExecSpec"
 
     ContainerSpec:
       type: object
@@ -317,11 +327,6 @@ components:
             type: string
             minLength: 1
           examples: [["sh", "-c", "echo hello"]]
-        env:
-          type: object
-          description: Environment variables set inside the container.
-          additionalProperties:
-            type: string
 
     RestartPolicy:
       type: string
@@ -461,20 +466,28 @@ components:
             the specification. A dynamic port is stable for the life of the workload
             but may be reallocated if it turns out to be unusable.
 
-    ScriptSpec:
+    ExecSpec:
       type: object
       description: |
-        The script runtime block. Exactly one of source or raw must be present.
-        Reserved: no driver runs scripts yet.
+        The exec runtime block, which runs a command on the host.
+
+        The command is given as the command and its arguments rather than as a
+        string, so nothing has to decide where to split it and no shell is involved
+        unless the command names one.
+
+        The server creates a working directory for each version of the workload and
+        runs the command inside it. The command's output is captured there, which is
+        what `logs` reads.
+      required: [command]
       properties:
-        source:
-          type: string
-          description: A URL to fetch the script from.
-          examples: ["https://example.com/some_script.sh"]
-        raw:
-          type: string
-          description: The script body, run as-is.
-          examples: ["echo \"hello world\""]
+        command:
+          type: array
+          description: The command to run, and its arguments.
+          minItems: 1
+          items:
+            type: string
+            minLength: 1
+          examples: [["/usr/local/bin/backup", "--target", "/data"]]
 
     Workload:
       type: object
@@ -562,7 +575,7 @@ components:
       description: Which runtime block the workload's specification names.
       enum:
         - container
-        - script
+        - exec
 
     WorkloadState:
       type: string

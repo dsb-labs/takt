@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -109,8 +108,8 @@ func Validate(spec Spec) error {
 	switch runtime {
 	case RuntimeContainer:
 		return validateContainer(*spec.Container)
-	case RuntimeScript:
-		return validateScript(*spec.Script)
+	case RuntimeExec:
+		return validateExec(*spec.Exec)
 	default:
 		return nil
 	}
@@ -126,11 +125,31 @@ func validatePorts(spec Spec, runtime Runtime) error {
 		return nil
 	}
 
-	if runtime != RuntimeContainer {
-		return fmt.Errorf("invalid ports: the %s runtime cannot publish ports", runtime)
+	if err := validPorts(spec.Ports); err != nil {
+		return err
 	}
 
-	return validPorts(spec.Ports)
+	switch runtime {
+	case RuntimeContainer:
+		// A container listens inside its own namespace, so the host port is a mapping
+		// the server is free to choose.
+		return nil
+	case RuntimeExec:
+		// An exec process binds a host port itself, so there is no mapping to make and
+		// nothing for the server to choose. It records the port so that no other
+		// workload is given it, and the process is told which one by whoever wrote the
+		// command.
+		for _, port := range spec.Ports {
+			if port.From == 0 {
+				return fmt.Errorf("invalid ports: port %d must name the host port it binds, "+
+					"which the %s runtime does not allocate", port.To, runtime)
+			}
+		}
+
+		return nil
+	default:
+		return fmt.Errorf("invalid ports: the %s runtime cannot publish ports", runtime)
+	}
 }
 
 // validateHealth reports whether the workload's health check is one its runtime can
@@ -174,10 +193,12 @@ func validateHealth(spec Spec, runtime Runtime) error {
 		return errors.New("invalid health: one of http or tcp is required")
 	}
 
-	if runtime != RuntimeContainer {
-		// Only a container publishes an address today. A script runs to completion,
-		// and whether it worked is its exit status rather than something to poll.
-		return fmt.Errorf("invalid health: the %s runtime cannot be probed", runtime)
+	// A check is performed against an address, so the question is whether the workload
+	// publishes one rather than which runtime it is. Any runtime that publishes a port
+	// can be probed at it, and one that publishes nothing cannot be probed at all.
+	if len(spec.Ports) == 0 {
+		return fmt.Errorf("invalid health: the workload publishes no ports to check, "+
+			"so the %s runtime cannot be probed", runtime)
 	}
 
 	return validateHealthPort(*health, spec.Ports)
@@ -212,12 +233,12 @@ func validateHealthPort(health Health, ports []Port) error {
 // than one is.
 func RuntimeOf(spec Spec) (Runtime, error) {
 	switch {
-	case spec.Container != nil && spec.Script != nil:
+	case spec.Container != nil && spec.Exec != nil:
 		return "", ErrAmbiguousRuntime
 	case spec.Container != nil:
 		return RuntimeContainer, nil
-	case spec.Script != nil:
-		return RuntimeScript, nil
+	case spec.Exec != nil:
+		return RuntimeExec, nil
 	default:
 		return "", ErrNoRuntime
 	}
@@ -257,20 +278,13 @@ func validCommand(value any) error {
 	return nil
 }
 
-func validateScript(spec Script) error {
-	switch {
-	case spec.Source != "" && spec.Raw != "":
-		return errors.New("invalid script: only one of source or raw may be specified")
-	case spec.Source == "" && spec.Raw == "":
-		return errors.New("invalid script: one of source or raw is required")
+func validateExec(spec Exec) error {
+	if len(spec.Command) == 0 {
+		return errors.New("invalid exec: command is required")
 	}
 
-	if spec.Source == "" {
-		return nil
-	}
-
-	if _, err := url.Parse(spec.Source); err != nil {
-		return fmt.Errorf("invalid script: source must be a valid url: %w", err)
+	if err := validCommand(spec.Command); err != nil {
+		return fmt.Errorf("invalid exec: %w", err)
 	}
 
 	return nil

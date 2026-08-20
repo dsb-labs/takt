@@ -1,5 +1,0 @@
-version: v1
-name: example
-script:
-  raw: >-
-    echo "hello world"

@@ -8,8 +8,8 @@ ports:
   - to: 8080
     from: 4141
   - to: 9090
+env:
+  EXAMPLE: EXAMPLE
 container:
   image: example/example:latest
   command: ["sh", "-c", "exit 0"]
-  env:
-    EXAMPLE: EXAMPLE

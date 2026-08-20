@@ -33,6 +33,9 @@ type (
 		// The ports to publish, which is how the workload is reached. A runtime with
 		// nothing to publish rejects them rather than ignoring them.
 		Ports []Port
+		// The environment variables set for the workload. A workload starts with only
+		// these, rather than inheriting the server's own environment.
+		Env map[string]string
 		// What to do when the workload's instance ends. Empty means RestartAlways,
 		// which Parse and NewSpec both resolve before validation.
 		Restart RestartPolicy
@@ -40,8 +43,8 @@ type (
 		Health *Health
 		// The container to run. Exactly one runtime must be set.
 		Container *Container
-		// The script to run. Exactly one runtime must be set.
-		Script *Script
+		// The command to run on the host. Exactly one runtime must be set.
+		Exec *Exec
 	}
 
 	// The Health type describes how to tell whether a workload is working.
@@ -82,8 +85,6 @@ type (
 		// The command to run, replacing the one the image declares. Empty runs what
 		// the image already declares.
 		Command []string
-		// Environment variables set inside the container.
-		Env map[string]string
 	}
 
 	// The Port type describes a port to publish.
@@ -96,13 +97,11 @@ type (
 		From int
 	}
 
-	// The Script type describes the script a workload runs. Exactly one of Source
-	// and Raw must be set.
-	Script struct {
-		// The URL the script is fetched from.
-		Source string
-		// The script body, given inline.
-		Raw string
+	// The Exec type describes the command a workload runs on the host.
+	Exec struct {
+		// The command to run, and its arguments. No shell is involved unless the
+		// command names one.
+		Command []string
 	}
 )
 
@@ -122,8 +121,8 @@ const (
 const (
 	// RuntimeContainer is the runtime that runs a workload as a container.
 	RuntimeContainer Runtime = "container"
-	// RuntimeScript is the runtime that runs a workload as a script.
-	RuntimeScript Runtime = "script"
+	// RuntimeExec is the runtime that runs a workload as a command on the host.
+	RuntimeExec Runtime = "exec"
 )
 
 const (
@@ -175,6 +174,9 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 	if spec.Restart != nil {
 		out.Restart = RestartPolicy(*spec.Restart)
 	}
+	if spec.Env != nil {
+		out.Env = *spec.Env
+	}
 	if spec.Ports != nil {
 		out.Ports = make([]Port, 0, len(*spec.Ports))
 		for _, mapping := range *spec.Ports {
@@ -196,20 +198,10 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 		if spec.Container.Command != nil {
 			out.Container.Command = *spec.Container.Command
 		}
-		if spec.Container.Env != nil {
-			out.Container.Env = *spec.Container.Env
-		}
 	}
 
-	if spec.Script != nil {
-		out.Script = new(Script)
-
-		if spec.Script.Source != nil {
-			out.Script.Source = *spec.Script.Source
-		}
-		if spec.Script.Raw != nil {
-			out.Script.Raw = *spec.Script.Raw
-		}
+	if spec.Exec != nil {
+		out.Exec = &Exec{Command: spec.Exec.Command}
 	}
 
 	return out

@@ -1,0 +1,9 @@
+version: v1
+name: example
+health:
+  http: /healthz
+ports:
+  - to: 8080
+    from: 8080
+exec:
+  command: ["/usr/local/bin/server"]

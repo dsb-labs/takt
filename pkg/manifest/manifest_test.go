@@ -36,10 +36,10 @@ func TestParse(t *testing.T) {
 
 				require.NotNil(t, spec.Container)
 				assert.Equal(t, "example/example:latest", spec.Container.Image)
-				assert.Equal(t, map[string]string{"EXAMPLE": "EXAMPLE"}, spec.Container.Env)
+				assert.Equal(t, map[string]string{"EXAMPLE": "EXAMPLE"}, spec.Env)
 				assert.Equal(t, []manifest.Port{{To: 8080, From: 4141}, {To: 9090}}, spec.Ports)
 
-				assert.Nil(t, spec.Script)
+				assert.Nil(t, spec.Exec)
 			},
 		},
 		{
@@ -53,21 +53,59 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
-			Name: "a script manifest with a raw body",
-			File: "script_raw.yaml",
+			Name: "an exec manifest",
+			File: "exec.yaml",
 			Assert: func(t *testing.T, spec manifest.Spec) {
-				require.NotNil(t, spec.Script)
-				assert.Equal(t, `echo "hello world"`, spec.Script.Raw)
+				require.NotNil(t, spec.Exec)
+				assert.Equal(t, []string{"/usr/local/bin/backup", "--target", "/data"}, spec.Exec.Command)
+				assert.Equal(t, map[string]string{"EXAMPLE": "EXAMPLE"}, spec.Env)
 				assert.Nil(t, spec.Container)
 			},
 		},
 		{
-			Name: "a script manifest with a source url",
-			File: "script_source.yaml",
+			// An exec process binds a host port itself, so the port it binds has to be
+			// named. The server records it rather than choosing it.
+			Name: "an exec manifest pinning the host port it binds",
+			File: "exec_ports_pinned.yaml",
 			Assert: func(t *testing.T, spec manifest.Spec) {
-				require.NotNil(t, spec.Script)
-				assert.Equal(t, "https://example.com/some_script.sh", spec.Script.Source)
+				require.Len(t, spec.Ports, 1)
+				assert.Equal(t, 8080, spec.Ports[0].From)
 			},
+		},
+		{
+			// Ports and a check are both meaningful for a long-running exec workload,
+			// which listens on the host the same way a container listens in its
+			// namespace.
+			Name: "an exec manifest with a health check",
+			File: "exec_health.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Health)
+				assert.Equal(t, "/healthz", spec.Health.HTTP)
+			},
+		},
+		{
+			Name:         "rejects an exec manifest naming no command",
+			File:         "exec_no_command.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects an exec command with an empty element",
+			File:         "exec_empty_command.yaml",
+			ExpectsError: true,
+		},
+		{
+			// The server allocates nothing for exec, so a port with no host port named
+			// would leave the process with nothing to bind.
+			Name:         "rejects exec ports that do not name a host port",
+			File:         "exec_ports_unpinned.yaml",
+			ExpectsError: true,
+		},
+		{
+			// A check is performed against an address, so a workload publishing none
+			// cannot be probed whatever its runtime.
+			Name:         "rejects a check on a workload that publishes no ports",
+			File:         "exec_health_no_ports.yaml",
+			ExpectsError: true,
 		},
 		{
 			Name: "a health check over http",
@@ -126,13 +164,6 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
-			Name: "rejects a probe the runtime cannot perform",
-			File: "health_script.yaml",
-			// A script runs to completion and has no address to probe, so this is
-			// rejected rather than left to sit as starting forever.
-			ExpectsError: true,
-		},
-		{
 			Name:         "rejects a timing field that is not a duration",
 			File:         "health_bad_duration.yaml",
 			ExpectsError: true,
@@ -153,16 +184,6 @@ func TestParse(t *testing.T) {
 			Name:      "rejects a manifest naming two runtimes",
 			File:      "two_runtimes.yaml",
 			ExpectErr: manifest.ErrAmbiguousRuntime,
-		},
-		{
-			Name:         "rejects a script naming both source and raw",
-			File:         "script_both.yaml",
-			ExpectsError: true,
-		},
-		{
-			Name:         "rejects a script naming neither source nor raw",
-			File:         "script_neither.yaml",
-			ExpectsError: true,
 		},
 		{
 			Name:         "rejects an unknown schema version",
@@ -191,14 +212,6 @@ func TestParse(t *testing.T) {
 			// either meaningless or means something the operator did not write.
 			Name:         "rejects a command with an empty element",
 			File:         "bad_command.yaml",
-			ExpectsError: true,
-		},
-		{
-			// A script runs to completion and publishes nothing, so ports it declares
-			// would reach nothing. Rejecting that reports the manifest as wrong rather
-			// than leaving orca looking broken.
-			Name:         "rejects ports on a runtime that cannot publish them",
-			File:         "script_ports.yaml",
 			ExpectsError: true,
 		},
 		{
@@ -283,9 +296,9 @@ func TestRuntimeOf(t *testing.T) {
 			Expected: manifest.RuntimeContainer,
 		},
 		{
-			Name:     "a script block selects the script runtime",
-			Spec:     manifest.Spec{Script: &manifest.Script{Raw: "echo hello"}},
-			Expected: manifest.RuntimeScript,
+			Name:     "an exec block selects the exec runtime",
+			Spec:     manifest.Spec{Exec: &manifest.Exec{Command: []string{"echo", "hello"}}},
+			Expected: manifest.RuntimeExec,
 		},
 		{
 			Name:      "no block at all",
@@ -296,7 +309,7 @@ func TestRuntimeOf(t *testing.T) {
 			Name: "two blocks",
 			Spec: manifest.Spec{
 				Container: &manifest.Container{Image: "example/example:latest"},
-				Script:    &manifest.Script{Raw: "echo hello"},
+				Exec:      &manifest.Exec{Command: []string{"echo", "hello"}},
 			},
 			ExpectErr: manifest.ErrAmbiguousRuntime,
 		},
@@ -442,6 +455,6 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	require.NotNil(t, spec.Container)
 	assert.NotEmpty(t, spec.Container.Image)
 	assert.NotEmpty(t, spec.Container.Command)
-	assert.NotEmpty(t, spec.Container.Env)
+	assert.NotEmpty(t, spec.Env)
 	assert.NotEmpty(t, spec.Ports)
 }

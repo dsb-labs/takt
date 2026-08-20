@@ -95,7 +95,7 @@ func (e RestartPolicy) Valid() bool {
 // Defines values for Runtime.
 const (
 	Container Runtime = "container"
-	Script    Runtime = "script"
+	Exec      Runtime = "exec"
 )
 
 // Valid indicates whether the value is a known member of the Runtime enum.
@@ -103,7 +103,7 @@ func (e Runtime) Valid() bool {
 	switch e {
 	case Container:
 		return true
-	case Script:
+	case Exec:
 		return true
 	default:
 		return false
@@ -153,9 +153,6 @@ type ContainerSpec struct {
 	// Examples: ["sh","-c","echo hello"]
 	Command *[]string `json:"command,omitempty"`
 
-	// Env Environment variables set inside the container.
-	Env *map[string]string `json:"env,omitempty"`
-
 	// Image The image reference to run.
 	//
 	// Examples: example/example:latest
@@ -166,6 +163,22 @@ type ContainerSpec struct {
 type ErrorResponse struct {
 	// Error A human-readable description of what went wrong.
 	Error string `json:"error"`
+}
+
+// ExecSpec The exec runtime block, which runs a command on the host.
+//
+// The command is given as the command and its arguments rather than as a
+// string, so nothing has to decide where to split it and no shell is involved
+// unless the command names one.
+//
+// The server creates a working directory for each version of the workload and
+// runs the command inside it. The command's output is captured there, which is
+// what `logs` reads.
+type ExecSpec struct {
+	// Command The command to run, and its arguments.
+	//
+	// Examples: ["/usr/local/bin/backup","--target","/data"]
+	Command []string `json:"command"`
 }
 
 // HealthSpec How the server decides whether a workload is working, rather than merely
@@ -341,20 +354,6 @@ type RestartPolicy string
 // Runtime Which runtime block the workload's specification names.
 type Runtime string
 
-// ScriptSpec The script runtime block. Exactly one of source or raw must be present.
-// Reserved: no driver runs scripts yet.
-type ScriptSpec struct {
-	// Raw The script body, run as-is.
-	//
-	// Examples: echo "hello world"
-	Raw *string `json:"raw,omitempty"`
-
-	// Source A URL to fetch the script from.
-	//
-	// Examples: https://example.com/some_script.sh
-	Source *string `json:"source,omitempty"`
-}
-
 // Workload A workload's desired state, together with the state observed from the driver
 // that runs it.
 type Workload struct {
@@ -408,6 +407,24 @@ type Workload struct {
 type WorkloadSpec struct {
 	// Container The container runtime block, run by the docker driver.
 	Container *ContainerSpec `json:"container,omitempty"`
+
+	// Env Environment variables set for the workload.
+	//
+	// These sit alongside the runtime blocks because any runtime that runs a
+	// process has an environment to set. A workload starts with only what this
+	// names, rather than inheriting the server's own environment.
+	Env *map[string]string `json:"env,omitempty"`
+
+	// Exec The exec runtime block, which runs a command on the host.
+	//
+	// The command is given as the command and its arguments rather than as a
+	// string, so nothing has to decide where to split it and no shell is involved
+	// unless the command names one.
+	//
+	// The server creates a working directory for each version of the workload and
+	// runs the command inside it. The command's output is captured there, which is
+	// what `logs` reads.
+	Exec *ExecSpec `json:"exec,omitempty"`
 
 	// Health How the server decides whether a workload is working, rather than merely
 	// started. Without one, a workload counts as running as soon as its runtime
@@ -467,10 +484,6 @@ type WorkloadSpec struct {
 	//
 	// Examples: */5 * * * *
 	Schedule *string `json:"schedule,omitempty"`
-
-	// Script The script runtime block. Exactly one of source or raw must be present.
-	// Reserved: no driver runs scripts yet.
-	Script *ScriptSpec `json:"script,omitempty"`
 
 	// Version The manifest schema version. Only "v1" is understood.
 	//

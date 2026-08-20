@@ -29,9 +29,8 @@ func TestDriver_Start(t *testing.T) {
 		ExpectErr  error
 	}{
 		{
-			Name: "starts a container with orca's ownership labels",
-			Workload: workload("example", 2, "hash-two", containerSpec("example/example:latest", nil, map[string]string{"EXAMPLE": "EXAMPLE"}),
-				ports(8080, 4141), map[string]string{"some-key": "some-value"}),
+			Name:     "starts a container with orca's ownership labels",
+			Workload: withEnv(workload("example", 2, "hash-two", containerSpec("example/example:latest", nil), ports(8080, 4141), map[string]string{"some-key": "some-value"}), map[string]string{"EXAMPLE": "EXAMPLE"}),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
@@ -60,7 +59,7 @@ func TestDriver_Start(t *testing.T) {
 		},
 		{
 			Name:     "runs the command the workload names",
-			Workload: workload("example", 1, "hash-one", containerSpec("example/example:latest", []string{"sh", "-c", "exit 0"}, nil), nil, nil),
+			Workload: workload("example", 1, "hash-one", containerSpec("example/example:latest", []string{"sh", "-c", "exit 0"}), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
@@ -83,7 +82,7 @@ func TestDriver_Start(t *testing.T) {
 			// empty slice would replace it with nothing, and the container would have
 			// nothing to run.
 			Name:     "leaves the image's own command alone when the workload names none",
-			Workload: workload("example", 1, "hash-one", containerSpec("example/example:latest", nil, nil), nil, nil),
+			Workload: workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
@@ -107,7 +106,7 @@ func TestDriver_Start(t *testing.T) {
 			// belongs to. A manifest that could set them would be able to disown a
 			// container or claim another workload's, so orca's own must win.
 			Name: "refuses to let a manifest overwrite the ownership labels",
-			Workload: workload("example", 2, "hash-two", containerSpec("example/example:latest", nil, nil), nil, map[string]string{
+			Workload: workload("example", 2, "hash-two", containerSpec("example/example:latest", nil), nil, map[string]string{
 				docker.LabelWorkload: "someone-elses-workload",
 				docker.LabelSpecHash: "forged-hash",
 				docker.LabelVersion:  "999",
@@ -133,7 +132,7 @@ func TestDriver_Start(t *testing.T) {
 		},
 		{
 			Name:     "pulls the image when it isn't present locally",
-			Workload: workload("example", 0, "", containerSpec("example/example:latest", nil, nil), nil, nil),
+			Workload: workload("example", 0, "", containerSpec("example/example:latest", nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return(nil, nil).Once()
@@ -149,7 +148,7 @@ func TestDriver_Start(t *testing.T) {
 		},
 		{
 			Name:     "removes the container when it cannot be started",
-			Workload: workload("example", 0, "", containerSpec("example/example:latest", nil, nil), nil, nil),
+			Workload: workload("example", 0, "", containerSpec("example/example:latest", nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
@@ -451,7 +450,7 @@ func newTestLogger(t *testing.T) *slog.Logger {
 // workload builds the neutral shape a driver is handed, so a test names only the
 // fields it cares about.
 func workload(name string, version int, hash string, spec api.ContainerSpec, ports []driver.Port, labels map[string]string) driver.Workload {
-	w := driver.Workload{
+	return driver.Workload{
 		Name:     name,
 		Version:  version,
 		SpecHash: hash,
@@ -463,25 +462,22 @@ func workload(name string, version int, hash string, spec api.ContainerSpec, por
 			Container: &spec,
 		},
 	}
+}
 
-	// Lifted out of the block the same way NewWorkload does it, so a test exercises
-	// the field the driver actually reads.
-	if spec.Env != nil {
-		w.Env = *spec.Env
-	}
+// withEnv sets the environment on a workload, which lives beside the runtime block
+// rather than inside it.
+func withEnv(w driver.Workload, env map[string]string) driver.Workload {
+	w.Env = env
 
 	return w
 }
 
 // containerSpec builds a container block, taking nil for the parts a test leaves out.
-func containerSpec(image string, command []string, env map[string]string) api.ContainerSpec {
+func containerSpec(image string, command []string) api.ContainerSpec {
 	spec := api.ContainerSpec{Image: image}
 
 	if command != nil {
 		spec.Command = &command
-	}
-	if env != nil {
-		spec.Env = &env
 	}
 
 	return spec

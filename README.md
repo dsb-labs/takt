@@ -18,14 +18,19 @@ ports:
   - to: 80            # the port the workload listens on
   - to: 443
     from: 8443        # optional: pin the host port instead
+env:
+  EXAMPLE: EXAMPLE
 container:
   image: nginx:1.27-alpine
-  env:
-    EXAMPLE: EXAMPLE
 ```
 
 A workload names exactly one runtime block, and which block it is selects the
-driver that runs it.
+driver that runs it. `container:` runs an image, and `exec:` runs a command on the
+host.
+
+A workload starts with only the environment `env:` names. It does not inherit the
+server's own environment, which may hold credentials the workload has no business
+reading.
 
 ### Command
 
@@ -40,11 +45,34 @@ container:
 
 Leave it out to run what the image already declares, which is the usual case.
 
+### Exec
+
+An `exec:` workload runs a command on the host rather than in a container. The
+command is given the same way `container.command` is, so no shell is involved unless
+the command names one:
+
+```yaml
+version: v1
+name: backup
+restart: on-failure
+exec:
+  command: ["/usr/local/bin/backup", "--target", "/data"]
+```
+
+The server creates a directory for each version of the workload and runs the command
+inside it. Output is captured there, which is what `orca logs` reads.
+
+An exec workload may publish ports and declare a health check, the same as a
+container. The one difference is that it has to name the host port it binds:
+the process binds a port on the host directly, so there is no mapping for orca to
+choose. It records the port so no other workload is given it.
+
 ### Ports
 
 `to` is the port your process listens on inside the workload. `from` is the host
-port that reaches it, and leaving it out is the usual case — orca allocates one and
-reports it back, so you never have to invent unique host ports by hand:
+port that reaches it, and leaving it out is the usual case for a container — orca
+allocates one and reports it back, so you never have to invent unique host ports by
+hand:
 
 ```sh
 orca get example | jq '.Ports'

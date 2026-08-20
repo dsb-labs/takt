@@ -1,0 +1,7 @@
+version: v1
+name: example
+restart: on-failure
+env:
+  EXAMPLE: EXAMPLE
+exec:
+  command: ["/usr/local/bin/backup", "--target", "/data"]

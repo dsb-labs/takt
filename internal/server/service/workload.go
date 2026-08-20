@@ -712,12 +712,12 @@ func (s *WorkloadService) wake() {
 // must be present.
 func runtimeOf(spec api.WorkloadSpec) (api.Runtime, error) {
 	switch {
-	case spec.Container != nil && spec.Script != nil:
+	case spec.Container != nil && spec.Exec != nil:
 		return "", ErrAmbiguousRuntime
 	case spec.Container != nil:
 		return api.Container, nil
-	case spec.Script != nil:
-		return api.Script, fmt.Errorf("%w: %q", ErrUnsupportedRuntime, api.Script)
+	case spec.Exec != nil:
+		return api.Exec, nil
 	default:
 		return "", ErrNoRuntime
 	}

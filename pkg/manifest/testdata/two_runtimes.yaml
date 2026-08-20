@@ -2,5 +2,5 @@ version: v1
 name: example
 container:
   image: example/example:latest
-script:
-  raw: echo hello
+exec:
+  command: ["echo", "hello"]

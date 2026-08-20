@@ -159,11 +159,8 @@ func NewWorkload(row database.Workload) (Workload, error) {
 		Spec:     spec,
 	}
 
-	// Read from the container block because that is where the specification carries it
-	// today. It moves to the top level with the exec runtime, which is what makes it
-	// meaningful to a driver that runs no container.
-	if spec.Container != nil && spec.Container.Env != nil {
-		w.Env = *spec.Container.Env
+	if spec.Env != nil {
+		w.Env = *spec.Env
 	}
 
 	if spec.Ports != nil {

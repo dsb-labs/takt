@@ -170,7 +170,7 @@ func (s *Suite) TestDynamicPortIsAllocated() {
 	// The allocation is sticky: a change that leaves the port list alone must not
 	// move the address, or anything pointing at it would break on an image bump.
 	changed := s.containerSpec(name, manifest.Port{To: 80})
-	changed.Container.Env = map[string]string{"EXAMPLE": "CHANGED"}
+	changed.Env = map[string]string{"EXAMPLE": "CHANGED"}
 
 	updated, _, err := s.client.Apply(s.ctx(), changed)
 	s.Require().NoError(err)
@@ -207,7 +207,7 @@ func (s *Suite) TestWorkloadReplacedWhenSpecChanges() {
 	first := s.instanceID(name)
 
 	changed := s.containerSpec(name, manifest.Port{To: 80, From: 8181})
-	changed.Container.Env = map[string]string{"EXAMPLE": "CHANGED"}
+	changed.Env = map[string]string{"EXAMPLE": "CHANGED"}
 
 	workload, created, err := s.client.Apply(s.ctx(), changed)
 	s.Require().NoError(err)
@@ -559,7 +559,7 @@ func (s *Suite) TestChangingASpecRerunsACompletedJob() {
 
 	// A changed specification is a new thing to run, and what already ran is out of
 	// date. That is the same rule that replaces a running service on an image bump.
-	spec.Container.Env = map[string]string{"EXAMPLE": "CHANGED"}
+	spec.Env = map[string]string{"EXAMPLE": "CHANGED"}
 
 	updated, _, err := s.client.Apply(s.ctx(), spec)
 	s.Require().NoError(err)
@@ -573,18 +573,6 @@ func (s *Suite) TestChangingASpecRerunsACompletedJob() {
 
 		return current.Instances[0].ID != original
 	}, convergeTimeout, 500*time.Millisecond, "a changed specification did not re-run the job")
-}
-
-// TestUnsupportedRuntimeIsRejected covers the runtime the API describes but no driver
-// implements, which must be refused rather than accepted and never run.
-func (s *Suite) TestUnsupportedRuntimeIsRejected() {
-	_, _, err := s.client.Apply(s.ctx(), manifest.Spec{
-		Version: "v1",
-		Name:    s.workloadName(),
-		Script:  &manifest.Script{Raw: `echo "hello world"`},
-	})
-
-	s.True(client.IsUnprocessable(err), "expected an unprocessable error, got %v", err)
 }
 
 // TestApplyDuringTeardownIsRejected covers re-applying a workload that is still being

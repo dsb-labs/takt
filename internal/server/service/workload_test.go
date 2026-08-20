@@ -132,14 +132,32 @@ func TestWorkloadService_Apply(t *testing.T) {
 			ExpectErr:  service.ErrInvalidSpec,
 		},
 		{
-			Name: "rejects a script workload as unsupported",
+			// Accepted rather than refused, which is what the exec runtime arriving
+			// means: the service records desired state and the reconciler routes it to
+			// whichever driver runs it.
+			Name: "accepts an exec workload",
 			Spec: api.WorkloadSpec{
 				Version: "v1",
 				Name:    "example",
-				Script:  &api.ScriptSpec{Raw: new(`echo "hello world"`)},
+				Exec:    &api.ExecSpec{Command: []string{"echo", "hello world"}},
 			},
-			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
-			ExpectErr:  service.ErrUnsupportedRuntime,
+			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository, _ *MockPortRepository) {
+				repo.EXPECT().Get(mock.Anything, "example").
+					Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+				repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+					RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+						w.Version = 1
+
+						return w, true, nil
+					}).Once()
+
+				d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+			},
+			Assert: func(t *testing.T, w service.Workload, created bool) {
+				assert.True(t, created)
+				assert.Equal(t, api.Exec, w.Runtime)
+			},
 		},
 		{
 			Name: "rejects a workload naming no runtime",
@@ -156,7 +174,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 				Version:   "v1",
 				Name:      "example",
 				Container: &api.ContainerSpec{Image: "example/example:latest"},
-				Script:    &api.ScriptSpec{Raw: new("echo hello")},
+				Exec:      &api.ExecSpec{Command: []string{"echo", "hello"}},
 			},
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
 			ExpectErr:  service.ErrAmbiguousRuntime,

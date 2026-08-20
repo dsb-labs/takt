@@ -27,9 +27,9 @@ func TestWireSpec(t *testing.T) {
 		assert.Nil(t, wire.Restart)
 		require.NotNil(t, wire.Container)
 		assert.Nil(t, wire.Container.Command)
-		assert.Nil(t, wire.Container.Env)
+		assert.Nil(t, wire.Env)
 		assert.Nil(t, wire.Ports)
-		assert.Nil(t, wire.Script)
+		assert.Nil(t, wire.Exec)
 	})
 
 	t.Run("round-trips a full specification", func(t *testing.T) {
@@ -42,10 +42,10 @@ func TestWireSpec(t *testing.T) {
 			// through NewSpec, which applies the default.
 			Restart: manifest.RestartAlways,
 			Ports:   []manifest.Port{{To: 8080, From: 4141}},
+			Env:     map[string]string{"EXAMPLE": "EXAMPLE"},
 			Container: &manifest.Container{
 				Image:   "example/example:latest",
 				Command: []string{"sh", "-c", "exit 0"},
-				Env:     map[string]string{"EXAMPLE": "EXAMPLE"},
 			},
 		}
 
@@ -54,12 +54,12 @@ func TestWireSpec(t *testing.T) {
 		assert.Equal(t, spec, manifest.NewSpec(wireSpec(spec)))
 	})
 
-	t.Run("round-trips a script specification", func(t *testing.T) {
+	t.Run("round-trips an exec specification", func(t *testing.T) {
 		spec := manifest.Spec{
 			Version: "v1",
 			Name:    "example",
 			Restart: manifest.RestartAlways,
-			Script:  &manifest.Script{Raw: `echo "hello world"`},
+			Exec:    &manifest.Exec{Command: []string{"echo", "hello world"}},
 		}
 
 		assert.Equal(t, spec, manifest.NewSpec(wireSpec(spec)))

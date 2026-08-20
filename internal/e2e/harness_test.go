@@ -125,9 +125,9 @@ func (s *Suite) containerSpec(name string, ports ...manifest.Port) manifest.Spec
 		Name:    name,
 		Labels:  map[string]string{"some-key": "some-value"},
 		Ports:   ports,
+		Env:     map[string]string{"EXAMPLE": "EXAMPLE"},
 		Container: &manifest.Container{
 			Image: testImage,
-			Env:   map[string]string{"EXAMPLE": "EXAMPLE"},
 		},
 	}
 }
