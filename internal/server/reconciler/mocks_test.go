@@ -213,16 +213,16 @@ func (_c *MockDriver_Start_Call) RunAndReturn(run func(ctx context.Context, w dr
 }
 
 // Stop provides a mock function for the type MockDriver
-func (_mock *MockDriver) Stop(ctx context.Context, workload string) error {
-	ret := _mock.Called(ctx, workload)
+func (_mock *MockDriver) Stop(ctx context.Context, id string, workload string) error {
+	ret := _mock.Called(ctx, id, workload)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Stop")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = returnFunc(ctx, workload)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = returnFunc(ctx, id, workload)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -236,12 +236,13 @@ type MockDriver_Stop_Call struct {
 
 // Stop is a helper method to define mock.On call
 //   - ctx context.Context
+//   - id string
 //   - workload string
-func (_e *MockDriver_Expecter) Stop(ctx any, workload any) *MockDriver_Stop_Call {
-	return &MockDriver_Stop_Call{Call: _e.mock.On("Stop", ctx, workload)}
+func (_e *MockDriver_Expecter) Stop(ctx any, id any, workload any) *MockDriver_Stop_Call {
+	return &MockDriver_Stop_Call{Call: _e.mock.On("Stop", ctx, id, workload)}
 }
 
-func (_c *MockDriver_Stop_Call) Run(run func(ctx context.Context, workload string)) *MockDriver_Stop_Call {
+func (_c *MockDriver_Stop_Call) Run(run func(ctx context.Context, id string, workload string)) *MockDriver_Stop_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -251,9 +252,14 @@ func (_c *MockDriver_Stop_Call) Run(run func(ctx context.Context, workload strin
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -264,7 +270,7 @@ func (_c *MockDriver_Stop_Call) Return(err error) *MockDriver_Stop_Call {
 	return _c
 }
 
-func (_c *MockDriver_Stop_Call) RunAndReturn(run func(ctx context.Context, workload string) error) *MockDriver_Stop_Call {
+func (_c *MockDriver_Stop_Call) RunAndReturn(run func(ctx context.Context, id string, workload string) error) *MockDriver_Stop_Call {
 	_c.Call.Return(run)
 	return _c
 }

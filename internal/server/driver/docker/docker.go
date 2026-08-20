@@ -139,12 +139,15 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 
 // Stop stops and removes every container the driver holds for the named workload.
 //
+// The workload's identifier is not used. This driver's ownership is expressed in
+// container labels rather than on disk, so the name is all it needs to find its work.
+//
 // Removal is forced because ContainerStop only asks the container to stop and
 // returns before it necessarily has: an unforced remove races that shutdown and
 // fails with "container is running", which would leave the container behind for
 // every future pass to trip over. The stop is still issued first so the container
 // gets its grace period rather than being killed outright.
-func (d *Driver) Stop(ctx context.Context, workload string) error {
+func (d *Driver) Stop(ctx context.Context, _, workload string) error {
 	containers, err := d.containers(ctx, workload)
 	if err != nil {
 		return err

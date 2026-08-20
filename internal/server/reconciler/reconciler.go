@@ -31,8 +31,12 @@ type (
 		Name() string
 		// Start should run the given workload, returning the driver's handle for it.
 		Start(ctx context.Context, w driver.Workload) (string, error)
-		// Stop should stop and discard everything the driver runs for the named workload.
-		Stop(ctx context.Context, workload string) error
+		// Stop should stop and discard everything the driver runs for a workload.
+		//
+		// The identifier is empty for an orphan, which by definition has no stored
+		// workload to take one from. A driver that keys its own storage on the
+		// identifier has to find such a workload by its name instead.
+		Stop(ctx context.Context, id, workload string) error
 		// Observe should report every instance the driver is currently running.
 		Observe(ctx context.Context) ([]driver.Instance, error)
 		// Watch should report changes to the driver's instances so that the
@@ -1021,7 +1025,7 @@ func (r *Reconciler) stop(ctx context.Context, row database.Workload) error {
 	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
 
-	if err := d.Stop(ctx, row.Name); err != nil {
+	if err := d.Stop(ctx, row.ID, row.Name); err != nil {
 		return fmt.Errorf("failed to stop workload on the %s runtime: %w", d.Name(), err)
 	}
 
@@ -1040,7 +1044,8 @@ func (r *Reconciler) stopOrphan(ctx context.Context, workload string) error {
 	defer cancel()
 
 	for _, d := range r.drivers {
-		if err := d.Stop(ctx, workload); err != nil {
+		// An orphan has no stored workload, so there is no identifier to give.
+		if err := d.Stop(ctx, "", workload); err != nil {
 			return fmt.Errorf("failed to stop workload on the %s runtime: %w", d.Name(), err)
 		}
 	}

@@ -67,7 +67,7 @@ func TestReconciler_Run(t *testing.T) {
 					storedWorkload("example", "hash-two"),
 				}, nil)
 
-				d.EXPECT().Stop(mock.Anything, "example").Return(nil)
+				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
 				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 					return w.SpecHash == "hash-two"
 				})).Return("container-two", nil)
@@ -85,7 +85,7 @@ func TestReconciler_Run(t *testing.T) {
 
 				// The corpse has to be cleared first: container names derive from
 				// the workload and version, so a replacement would collide.
-				d.EXPECT().Stop(mock.Anything, "example").Return(nil)
+				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
 				d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil)
 			},
 		},
@@ -133,7 +133,7 @@ func TestReconciler_Run(t *testing.T) {
 				// The work is stopped, but the row is left for a later pass: the
 				// stop may not have taken effect yet, and removing the desired
 				// state now would leave nothing describing work still running.
-				d.EXPECT().Stop(mock.Anything, "example").Return(nil)
+				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
 			},
 		},
 		{
@@ -177,7 +177,7 @@ func TestReconciler_Run(t *testing.T) {
 
 				// A failed stop must not remove the row, or the container would be
 				// left running with nothing recording that it exists.
-				d.EXPECT().Stop(mock.Anything, "example").Return(errors.New("docker is down"))
+				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(errors.New("docker is down"))
 			},
 		},
 		{
@@ -202,7 +202,7 @@ func TestReconciler_Run(t *testing.T) {
 			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
 				repo.EXPECT().List(mock.Anything).Return(nil, nil)
 
-				d.EXPECT().Stop(mock.Anything, "orphan").Return(nil)
+				d.EXPECT().Stop(mock.Anything, mock.Anything, "orphan").Return(nil)
 			},
 		},
 		{
@@ -331,7 +331,7 @@ func TestReconciler_Run_Health(t *testing.T) {
 			checker.EXPECT().Result("example").Return(tc.Result, tc.Checked)
 
 			if tc.ExpectRestart {
-				d.EXPECT().Stop(mock.Anything, "example").Return(nil).Once()
+				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
 				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 					return w.Name == "example"
 				})).Return("container-two", nil).Once()
@@ -477,7 +477,7 @@ func TestReconciler_Run_ForgetsChecksOnReplacement(t *testing.T) {
 		}
 	}).Return()
 
-	d.EXPECT().Stop(mock.Anything, "example").Return(nil).Once()
+	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
 	d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil).Once()
 
 	events := make(chan driver.Event)
@@ -782,7 +782,7 @@ func TestReconciler_Run_StopsOnlyTheDriverThatRunsIt(t *testing.T) {
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 	repo.EXPECT().Delete(mock.Anything, "example").Return(nil).Maybe()
 
-	container.EXPECT().Stop(mock.Anything, "example").Return(nil)
+	container.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
 
 	// No Stop is expected on the other driver at all, which is the assertion: the mock
 	// fails the test if one arrives.
@@ -835,8 +835,8 @@ func TestReconciler_Run_StopsAnOrphanOnEveryDriver(t *testing.T) {
 	// An orphan has no stored workload by definition, so there is no runtime to read
 	// and no way to know which driver owns it. Both are asked, and a driver with
 	// nothing for the name does nothing.
-	container.EXPECT().Stop(mock.Anything, "orphan").Return(nil)
-	other.EXPECT().Stop(mock.Anything, "orphan").Return(nil)
+	container.EXPECT().Stop(mock.Anything, mock.Anything, "orphan").Return(nil)
+	other.EXPECT().Stop(mock.Anything, mock.Anything, "orphan").Return(nil)
 
 	events := make(chan driver.Event)
 	container.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
@@ -1039,7 +1039,7 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 			repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
 			if tc.ExpectStop {
-				d.EXPECT().Stop(mock.Anything, "example").Return(nil)
+				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
 			}
 			if tc.ExpectStart {
 				d.EXPECT().Start(mock.Anything, mock.Anything).Return("two", nil)
@@ -1091,7 +1091,7 @@ func TestReconciler_Run_GivesUpAfterTheAttemptsAllowed(t *testing.T) {
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
 	// The first pass restarts it, which uses the one attempt. Nothing after that.
-	d.EXPECT().Stop(mock.Anything, "example").Return(nil).Once()
+	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
 	d.EXPECT().Start(mock.Anything, mock.Anything).Return("two", nil).Once()
 
 	events := make(chan driver.Event)
@@ -1202,7 +1202,7 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 			if tc.ExpectRestart {
 				// The corpse is cleared first, since container names derive from the
 				// workload and version.
-				d.EXPECT().Stop(mock.Anything, "example").Return(nil)
+				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
 				d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil)
 			}
 
@@ -1257,7 +1257,7 @@ func TestReconciler_Run_RerunsARetiredWorkloadWhenItsSpecChanges(t *testing.T) {
 
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
-	d.EXPECT().Stop(mock.Anything, "example").Return(nil)
+	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
 	d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 		return w.SpecHash == "hash-two"
 	})).Return("container-two", nil)
@@ -1410,7 +1410,7 @@ func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
 
 	var starts atomic.Int64
 
-	d.EXPECT().Stop(mock.Anything, "example").Return(nil).Maybe()
+	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Maybe()
 	d.EXPECT().Start(mock.Anything, mock.Anything).
 		RunAndReturn(func(context.Context, driver.Workload) (string, error) {
 			starts.Add(1)

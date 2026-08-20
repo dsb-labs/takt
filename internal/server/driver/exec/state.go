@@ -18,6 +18,12 @@ import (
 // server persists desired state only and asks a driver what is actually running. A
 // pidfile is the runtime's own record in the same way a container label is docker's.
 type state struct {
+	// The name of the workload the process belongs to.
+	//
+	// The record carries it because the directory holding the record does not: the
+	// directory is named for the workload's identifier, so nothing has to parse a path
+	// to learn a name, and a name never has to be safe as a path component.
+	Workload string `json:"workload"`
 	// The process the driver started.
 	PID int `json:"pid"`
 	// When the kernel says that process started, in clock ticks since boot.

@@ -48,7 +48,7 @@ func TestDriver_Start(t *testing.T) {
 
 		// Its own directory, and only the owner's: a workload's environment reaches
 		// its command line and its output.
-		info, err := os.Stat(filepath.Join(root, "example", "1"))
+		info, err := os.Stat(filepath.Join(root, "workloads", testID, "1"))
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
 	})
@@ -120,7 +120,7 @@ func TestDriver_Observe(t *testing.T) {
 
 		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = d.Stop(context.Background(), "example") })
+		t.Cleanup(func() { _ = d.Stop(context.Background(), "", "example") })
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -207,7 +207,7 @@ func TestDriver_Observe(t *testing.T) {
 		d, root := newDriver(t)
 
 		// A half-created directory, which describes nothing that can be converged.
-		require.NoError(t, os.MkdirAll(filepath.Join(root, "example", "1"), 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "state", testID, "1"), 0o700))
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -224,14 +224,16 @@ func TestDriver_Stop(t *testing.T) {
 		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
 		require.NoError(t, err)
 
-		require.NoError(t, d.Stop(t.Context(), "example"))
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
 		assert.Empty(t, instances)
 
-		_, err = os.Stat(filepath.Join(root, "example"))
-		assert.True(t, os.IsNotExist(err), "the workload's directory outlived it")
+		for _, tree := range []string{"state", "workloads"} {
+			_, err = os.Stat(filepath.Join(root, tree, testID))
+			assert.True(t, os.IsNotExist(err), "the workload's %s directory outlived it", tree)
+		}
 	})
 
 	t.Run("stops whatever the command started", func(t *testing.T) {
@@ -244,7 +246,7 @@ func TestDriver_Stop(t *testing.T) {
 
 		child := awaitChildPID(t, root, "example", 1)
 
-		require.NoError(t, d.Stop(t.Context(), "example"))
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
 
 		assert.Eventually(t, func() bool {
 			return syscall.Kill(child, 0) != nil
@@ -254,19 +256,55 @@ func TestDriver_Stop(t *testing.T) {
 	t.Run("does nothing for a workload it has never run", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		assert.NoError(t, d.Stop(t.Context(), "nothing-here"))
+		assert.NoError(t, d.Stop(t.Context(), "", "nothing-here"))
 	})
 }
 
-func TestDriver_Stop_RefusesANameThatIsNotADirectory(t *testing.T) {
+func TestDriver_Stop_ResolvesAnOrphanByItsRecordedName(t *testing.T) {
 	t.Parallel()
 
-	// Not every name reaches this driver through a manifest. An orphan is named by the
-	// label on the work found running, which is a value the driver reads rather than
-	// one orca wrote — and this driver removes directories.
+	// An orphan has no stored workload, so no identifier comes with it. The name is
+	// found by reading the records rather than by treating it as a path, which is what
+	// lets directories be named for the identifier.
+	d, root := newDriver(t)
+
+	pid := orphan(t)
+
+	writeInstance(t, root, "example", 1, map[string]any{
+		"pid":        pid,
+		"startTicks": startTicks(t, pid),
+		"specHash":   "hash-one",
+		"version":    1,
+		"startedAt":  time.Now().Format(time.RFC3339Nano),
+	})
+
+	require.NoError(t, d.Stop(t.Context(), "", "example"))
+
+	instances, err := d.Observe(t.Context())
+	require.NoError(t, err)
+	assert.Empty(t, instances, "the orphan was not stopped")
+}
+
+func TestDriver_Stop_IgnoresAWorkloadItDoesNotRun(t *testing.T) {
+	t.Parallel()
+
+	// A name reaches this driver for every orphan, whichever runtime owns it. One it
+	// has no record of is not its work, so there is nothing to do — including for a
+	// name that could never be a path.
+	d, _ := newDriver(t)
+
+	for _, name := range []string{"never-heard-of-it", "../outside", "..", "a/../../etc"} {
+		assert.NoError(t, d.Stop(t.Context(), "", name), "refused a workload it simply does not run: %q", name)
+	}
+}
+
+func TestDriver_RefusesAnIdentifierThatIsNotADirectory(t *testing.T) {
+	t.Parallel()
+
+	// Directories are named for the identifier, so that is the value which has to be
+	// safe as a path component. A driver that removes directories should not build a
+	// path from something it has not looked at.
 	base := t.TempDir()
-	root := filepath.Join(base, "workload")
-	require.NoError(t, os.MkdirAll(root, 0o700))
 
 	outside := filepath.Join(base, "outside")
 	require.NoError(t, os.MkdirAll(outside, 0o700))
@@ -274,27 +312,32 @@ func TestDriver_Stop_RefusesANameThatIsNotADirectory(t *testing.T) {
 
 	d := exec.New(exec.Config{
 		Logger: slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError})),
-		Root:   root,
+		Root:   filepath.Join(base, "root"),
 	})
 
-	for _, name := range []string{"../outside", "..", "../../etc", "a/../../outside", "", "."} {
-		err := d.Stop(t.Context(), name)
-		assert.ErrorIs(t, err, exec.ErrInvalidWorkloadName, "accepted the name %q", name)
+	// An empty identifier is not in this list: Stop treats it as an orphan, which is
+	// resolved by name instead and covered separately.
+	for _, id := range []string{"../outside", "..", "../../etc", ".", "short", "UPPERCASE0000000000A"} {
+		err := d.Stop(t.Context(), id, "example")
+		assert.ErrorIs(t, err, exec.ErrInvalidWorkloadID, "accepted the identifier %q", id)
+
+		w := workload("example", 1, "hash-one", "exit 0")
+		w.ID = id
+
+		_, err = d.Start(t.Context(), w)
+		assert.ErrorIs(t, err, exec.ErrInvalidWorkloadID, "accepted the identifier %q", id)
 	}
 
-	_, err := os.Stat(filepath.Join(outside, "keep"))
-	assert.NoError(t, err, "a workload name resolved outside the driver's root")
-}
+	// Start refuses an empty identifier as well, since a workload it is asked to run
+	// always has one.
+	empty := workload("example", 1, "hash-one", "exit 0")
+	empty.ID = ""
 
-func TestDriver_Start_RefusesANameThatIsNotADirectory(t *testing.T) {
-	t.Parallel()
+	_, err := d.Start(t.Context(), empty)
+	assert.ErrorIs(t, err, exec.ErrInvalidWorkloadID)
 
-	d, _ := newDriver(t)
-
-	w := workload("../escape", 1, "hash-one", "exit 0")
-
-	_, err := d.Start(t.Context(), w)
-	assert.ErrorIs(t, err, exec.ErrInvalidWorkloadName)
+	_, statErr := os.Stat(filepath.Join(outside, "keep"))
+	assert.NoError(t, statErr, "an identifier resolved outside the driver's root")
 }
 
 func TestDriver_RefusesToSignalPidZeroOrOne(t *testing.T) {
@@ -319,7 +362,7 @@ func TestDriver_RefusesToSignalPidZeroOrOne(t *testing.T) {
 
 		// Stop reports the record as not alive, so terminate is not reached. The
 		// driver still must not treat such a pid as signalable at all.
-		require.NoError(t, d.Stop(t.Context(), "example"))
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
 	}
 }
 
@@ -389,7 +432,7 @@ func TestDriver_Release(t *testing.T) {
 
 	_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = d.Stop(context.Background(), "example") })
+	t.Cleanup(func() { _ = d.Stop(context.Background(), "", "example") })
 
 	instances, err := d.Observe(t.Context())
 	require.NoError(t, err)
@@ -432,10 +475,15 @@ func newDriver(t *testing.T) (*exec.Driver, string) {
 	}), root
 }
 
+// The identifier the tests use for their workload. Directories are named for the
+// identifier rather than the name, so a test that looks on disk looks here.
+const testID = "cvhs0dq0kqj4c9r8m1a0"
+
 // workload returns a workload running the given shell script, which is the smallest
 // way to get a command that does something observable.
 func workload(name string, version int, hash, script string) driver.Workload {
 	return driver.Workload{
+		ID:       testID,
 		Name:     name,
 		Version:  version,
 		SpecHash: hash,
@@ -466,7 +514,7 @@ func awaitState(t *testing.T, d *exec.Driver, workload string, want driver.State
 func awaitChildPID(t *testing.T, root, workload string, version int) int {
 	t.Helper()
 
-	path := filepath.Join(root, workload, strconv.Itoa(version), "cwd", "child.pid")
+	path := filepath.Join(root, "workloads", testID, strconv.Itoa(version), "cwd", "child.pid")
 
 	var pid int
 
@@ -489,7 +537,11 @@ func awaitChildPID(t *testing.T, root, workload string, version int) int {
 func writeInstance(t *testing.T, root, workload string, version int, recorded map[string]any) {
 	t.Helper()
 
-	dir := filepath.Join(root, workload, strconv.Itoa(version))
+	// Records live in the driver's own tree, which no workload runs inside, in a
+	// directory named for the identifier. The name is inside the record.
+	recorded["workload"] = workload
+
+	dir := filepath.Join(root, "state", testID, strconv.Itoa(version))
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 
 	data, err := json.Marshal(recorded)

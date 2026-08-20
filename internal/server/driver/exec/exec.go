@@ -39,10 +39,12 @@ const (
 	// that reading it back gives them interleaved in the order they were written,
 	// which is what the docker driver's demultiplexing produces.
 	outputFile = "output.log"
-	// The directory the process runs in, which is separate from the driver's own
-	// files so that a workload writing to its working directory cannot overwrite
-	// them.
+	// The directory the process runs in.
 	workingDir = "cwd"
+	// The tree holding the driver's own records, which no workload runs inside.
+	stateDir = "state"
+	// The tree holding the directories workloads run in.
+	workloadDir = "workloads"
 	// How long a process is given to stop on its own before it is killed.
 	stopGrace = 10 * time.Second
 )
@@ -51,21 +53,28 @@ var (
 	// ErrNotExecWorkload is returned when the driver is given a workload whose
 	// specification carries no exec block.
 	ErrNotExecWorkload = errors.New("workload does not describe a command")
-	// ErrInvalidWorkloadName is returned when a workload's name could not be used as
-	// a directory beneath the driver's root.
-	ErrInvalidWorkloadName = errors.New("workload name is not usable as a directory")
+	// ErrInvalidWorkloadID is returned when a workload's identifier could not be used
+	// as a directory beneath the driver's root.
+	ErrInvalidWorkloadID = errors.New("workload identifier is not usable as a directory")
+	// ErrUnknownWorkload is returned when the driver has no record of a workload it
+	// was asked about by name.
+	ErrUnknownWorkload = errors.New("driver has no record of the workload")
 )
 
-// Names identify a workload, and this driver turns one into a directory beneath its
-// root. A name is held to the same rule the manifest applies, so that a name reaching
-// the driver from somewhere the manifest never saw cannot describe a path.
-var namePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+// The identifiers orca assigns are xid values: twenty lowercase alphanumeric
+// characters. Checked rather than trusted, because this driver removes directories and
+// should not build a path from a value it has not looked at.
+var idPattern = regexp.MustCompile(`^[0-9a-v]{20}$`)
 
 type (
 	// The Driver type runs workloads as processes on the host.
 	Driver struct {
 		logger *slog.Logger
-		root   string
+		// Where the driver keeps its own records, which a workload has no path to.
+		state string
+		// Where a workload keeps its working directory and its output, which it
+		// necessarily can reach.
+		workloads string
 
 		// Guards the supervised set, which the reconciler's goroutine and every
 		// supervising goroutine both touch.
@@ -85,22 +94,29 @@ type (
 	Config struct {
 		// The logger used for driver lifecycle events.
 		Logger *slog.Logger
-		// The directory the driver keeps each workload's files in.
+		// The directory beneath which the driver keeps everything, both its own
+		// records and the directories it gives workloads.
 		Root string
 	}
 
 	// The supervised type is a process this server started.
 	supervised struct {
-		cmd  *exec.Cmd
-		path string
+		cmd *exec.Cmd
+		// Where the record for this process lives, which is in the driver's own tree
+		// rather than the workload's.
+		state string
 	}
 )
 
 // New returns a Driver that runs processes under the root directory in config.
 func New(config Config) *Driver {
 	return &Driver{
-		logger:     config.Logger.With("component", "driver", "driver", Name),
-		root:       config.Root,
+		logger: config.Logger.With("component", "driver", "driver", Name),
+		// Two trees rather than one. A workload runs in a directory of its own and can
+		// reach everything beneath it, so the records the driver trusts to identify a
+		// running process are kept where the workload has no path to them.
+		state:      filepath.Join(config.Root, stateDir),
+		workloads:  filepath.Join(config.Root, workloadDir),
 		supervised: make(map[string]*supervised),
 		// Buffered so that a process ending never blocks its own supervisor on a
 		// reconciler that is mid-pass.
@@ -128,22 +144,31 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", fmt.Errorf("%w: no command", ErrNotExecWorkload)
 	}
 
-	if _, err := d.dir(w.Name); err != nil {
+	workload, err := d.version(d.workloads, w.ID, w.Version)
+	if err != nil {
 		return "", err
 	}
 
-	path := d.path(w.Name, w.Version)
-	if err := os.MkdirAll(filepath.Join(path, workingDir), 0o700); err != nil {
+	recordPath, err := d.version(d.state, w.ID, w.Version)
+	if err != nil {
+		return "", err
+	}
+
+	if err = os.MkdirAll(filepath.Join(workload, workingDir), 0o700); err != nil {
 		return "", fmt.Errorf("failed to create workload directory: %w", err)
 	}
 
-	output, err := os.OpenFile(filepath.Join(path, outputFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err = os.MkdirAll(recordPath, 0o700); err != nil {
+		return "", fmt.Errorf("failed to create state directory: %w", err)
+	}
+
+	output, err := os.OpenFile(filepath.Join(workload, outputFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return "", fmt.Errorf("failed to open workload output: %w", err)
 	}
 
 	cmd := exec.Command(spec.Command[0], spec.Command[1:]...) //nolint:gosec // the command is what the workload is
-	cmd.Dir = filepath.Join(path, workingDir)
+	cmd.Dir = filepath.Join(workload, workingDir)
 	cmd.Stdout, cmd.Stderr = output, output
 	cmd.Env = environment(w.Env)
 
@@ -176,6 +201,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	}
 
 	recorded := state{
+		Workload:   w.Name,
 		PID:        cmd.Process.Pid,
 		StartTicks: ticks,
 		SpecHash:   w.SpecHash,
@@ -183,13 +209,13 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		StartedAt:  time.Now(),
 	}
 
-	if err = writeState(path, recorded); err != nil {
+	if err = writeState(recordPath, recorded); err != nil {
 		_ = d.kill(cmd.Process.Pid)
 
 		return "", err
 	}
 
-	d.supervise(ctx, w.Name, &supervised{cmd: cmd, path: path})
+	d.supervise(ctx, w.Name, &supervised{cmd: cmd, state: recordPath})
 
 	d.logger.With("workload", w.Name, "pid", recorded.PID, "version", w.Version).Debug("process started")
 
@@ -225,11 +251,11 @@ func (d *Driver) supervise(ctx context.Context, workload string, process *superv
 			code = exit.ExitCode()
 		}
 
-		if recorded, readErr := readState(process.path); readErr == nil {
+		if recorded, readErr := readState(process.state); readErr == nil {
 			recorded.Ended = true
 			recorded.ExitCode = code
 
-			if writeErr := writeState(process.path, recorded); writeErr != nil {
+			if writeErr := writeState(process.state, recorded); writeErr != nil {
 				d.logger.With("workload", workload, "error", writeErr).Error("failed to record process exit")
 			}
 		}
@@ -252,18 +278,38 @@ func (d *Driver) supervise(ctx context.Context, workload string, process *superv
 // The process group is signalled rather than the process, so that anything the command
 // started is stopped with it. A group given time to stop and still running is killed:
 // a workload that ignores the request must not be able to block the pass that asked.
-func (d *Driver) Stop(ctx context.Context, workload string) error {
-	dir, err := d.dir(workload)
+func (d *Driver) Stop(ctx context.Context, id, workload string) error {
+	// An orphan has no stored workload, so no identifier comes with it. The record in
+	// each directory carries the name it belongs to, so the identifier is found by
+	// reading those rather than by treating the name as a path.
+	if id == "" {
+		found, err := d.identify(workload)
+		if err != nil {
+			if errors.Is(err, ErrUnknownWorkload) {
+				// Nothing here belongs to that workload, which is what an orphan of
+				// another runtime looks like from here.
+				return nil
+			}
+
+			return err
+		}
+
+		id = found
+	}
+
+	states, err := d.dir(d.state, id)
 	if err != nil {
-		// Nothing this driver runs could have that name, so there is nothing here to
-		// stop. Reported rather than ignored: a name the driver cannot use means
-		// something upstream is describing work orca did not create.
 		d.logger.With("workload", workload, "error", err).Error("refusing to stop a workload")
 
 		return err
 	}
 
-	versions, err := d.versions(workload)
+	directories, err := d.dir(d.workloads, id)
+	if err != nil {
+		return err
+	}
+
+	versions, err := d.versions(d.state, id)
 	if err != nil {
 		return err
 	}
@@ -271,8 +317,8 @@ func (d *Driver) Stop(ctx context.Context, workload string) error {
 	for _, path := range versions {
 		recorded, err := readState(path)
 		if err != nil {
-			// Nothing readable to stop. The directory is still removed below, since a
-			// record that cannot be read describes nothing that can be converged.
+			// Nothing readable to stop. The directories are still removed below, since
+			// a record that cannot be read describes nothing that can be converged.
 			continue
 		}
 
@@ -289,13 +335,48 @@ func (d *Driver) Stop(ctx context.Context, workload string) error {
 
 	// Removed only once nothing is running, so a workload's output survives for as
 	// long as the workload does.
-	if err = os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("failed to remove workload directory: %w", err)
+	for _, path := range []string{states, directories} {
+		if err = os.RemoveAll(path); err != nil {
+			return fmt.Errorf("failed to remove workload directory: %w", err)
+		}
 	}
 
 	d.logger.With("workload", workload).Debug("workload stopped")
 
 	return nil
+}
+
+// identify finds the identifier of a workload the driver has a record for, given only
+// its name.
+//
+// Names are read from inside the records rather than from the directories holding them,
+// which is what lets a directory be named for an identifier while a caller that only
+// has a name can still find it.
+func (d *Driver) identify(workload string) (string, error) {
+	ids, err := d.known()
+	if err != nil {
+		return "", err
+	}
+
+	for _, id := range ids {
+		versions, err := d.versions(d.state, id)
+		if err != nil {
+			continue
+		}
+
+		for _, path := range versions {
+			recorded, err := readState(path)
+			if err != nil {
+				continue
+			}
+
+			if recorded.Workload == workload {
+				return id, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("%w: %q", ErrUnknownWorkload, workload)
 }
 
 // signalable reports whether a pid is one this driver is willing to signal.
@@ -305,10 +386,6 @@ func (d *Driver) Stop(ctx context.Context, workload string) error {
 // the caller's own group, and one addresses every process the caller may signal at
 // all. Neither can be a process the driver started, so both are refused rather than
 // relied on to be absent.
-//
-// The record a pid comes from lives in a directory the workload can reach, so a
-// workload could name a pid it wants signalled. The identity check on the record is
-// what normally prevents that, and this is what remains if it ever does not.
 func signalable(pid int) bool {
 	return pid > 1
 }
@@ -358,17 +435,21 @@ func (d *Driver) kill(pid int) error {
 // process started by an earlier server has no supervisor and would otherwise be
 // invisible — which would read as absent and have the workload started a second time.
 func (d *Driver) Observe(_ context.Context) ([]driver.Instance, error) {
-	workloads, err := d.workloads()
+	ids, err := d.known()
 	if err != nil {
 		return nil, err
 	}
 
 	var instances []driver.Instance
 
-	for _, workload := range workloads {
-		versions, err := d.versions(workload)
+	for _, id := range ids {
+		versions, err := d.versions(d.state, id)
 		if err != nil {
-			return nil, err
+			// A directory the driver cannot have created, so there is nothing here it
+			// can report on.
+			d.logger.With("id", id, "error", err).Error("skipping an unusable state directory")
+
+			continue
 		}
 
 		for _, path := range versions {
@@ -377,12 +458,20 @@ func (d *Driver) Observe(_ context.Context) ([]driver.Instance, error) {
 				// A directory with no readable record describes nothing that can be
 				// converged. Reporting an instance for it would have the reconciler
 				// act on a workload it cannot identify.
-				d.logger.With("workload", workload, "error", err).Debug("skipping unreadable instance state")
+				d.logger.With("id", id, "error", err).Debug("skipping unreadable instance state")
 
 				continue
 			}
 
-			instances = append(instances, instance(workload, recorded))
+			// The name comes from the record rather than from the directory, which is
+			// named for the identifier. Nothing parses a path to learn a name.
+			if recorded.Workload == "" {
+				d.logger.With("id", id).Debug("skipping a record naming no workload")
+
+				continue
+			}
+
+			instances = append(instances, instance(recorded.Workload, recorded))
 		}
 	}
 
@@ -452,7 +541,19 @@ func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 // the process wrote them. A workload the driver has nothing for writes nothing, since
 // the caller does not know which runtime holds it.
 func (d *Driver) Logs(_ context.Context, out io.Writer, workload string, tail int) error {
-	versions, err := d.versions(workload)
+	id, err := d.identify(workload)
+	if err != nil {
+		if errors.Is(err, ErrUnknownWorkload) {
+			// A workload this driver does not run. The caller does not know which
+			// runtime holds it, so writing nothing is the answer.
+			return nil
+		}
+
+		return err
+	}
+
+	// Output lives in the workload's own tree, which is the one it writes to.
+	versions, err := d.versions(d.workloads, id)
 	if err != nil {
 		return err
 	}
@@ -498,36 +599,47 @@ func (d *Driver) Supervises(workload string) bool {
 	return ok
 }
 
-// path returns the directory holding one version of a workload.
-func (d *Driver) path(workload string, version int) string {
-	return filepath.Join(d.root, workload, strconv.Itoa(version))
-}
-
-// dir returns the directory holding a workload, refusing a name that could describe
-// anything but a single directory beneath the driver's root.
+// dir returns the directory holding a workload beneath the given tree.
 //
-// The manifest holds a workload's name to this rule already, so an ordinary workload
-// never fails here. Not every name reaches the driver through a manifest though: an
-// orphan is named by the label on the work found running, which is a value the driver
-// reads rather than one orca wrote. A name containing a traversal would otherwise
-// resolve outside the root, and this driver removes directories.
-func (d *Driver) dir(workload string) (string, error) {
-	if !namePattern.MatchString(workload) {
-		return "", fmt.Errorf("%w: %q", ErrInvalidWorkloadName, workload)
+// Directories are named for the workload's identifier rather than its name. An
+// identifier is orca's own, where a name is the operator's handle and reaches a driver
+// from places a manifest never validated — an orphan is named by a label on the work
+// found running. Keying on the identifier means no name is ever a path component, so
+// none has to be safe as one.
+//
+// The identifier is still checked, because a driver that removes directories should
+// not build a path from a value it has not looked at.
+func (d *Driver) dir(tree, id string) (string, error) {
+	if !idPattern.MatchString(id) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidWorkloadID, id)
 	}
 
-	return filepath.Join(d.root, workload), nil
+	return filepath.Join(tree, id), nil
+}
+
+// version returns the directory holding one version of a workload beneath the given
+// tree.
+func (d *Driver) version(tree, id string, version int) (string, error) {
+	dir, err := d.dir(tree, id)
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(dir, strconv.Itoa(version)), nil
 }
 
 // workloads lists the workloads the driver has directories for.
-func (d *Driver) workloads() ([]string, error) {
-	return d.subdirectories(d.root)
+func (d *Driver) known() ([]string, error) {
+	return d.subdirectories(d.state)
 }
 
-// versions returns the paths of every version the driver has a directory for, oldest
-// first, so that reading them yields a workload's history in order.
-func (d *Driver) versions(workload string) ([]string, error) {
-	root, err := d.dir(workload)
+// versions returns the paths of every version of a workload the driver has a record
+// for, oldest first, so that reading them yields a workload's history in order.
+//
+// The tree says which paths these are: records for observing what is running, workload
+// directories for reading output.
+func (d *Driver) versions(tree, id string) ([]string, error) {
+	root, err := d.dir(tree, id)
 	if err != nil {
 		return nil, err
 	}

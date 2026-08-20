@@ -203,7 +203,7 @@ func TestDriver_Stop(t *testing.T) {
 
 		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
 
-		require.NoError(t, d.Stop(t.Context(), "example"))
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
 	})
 
 	t.Run("forces removal so it doesn't race the container shutting down", func(t *testing.T) {
@@ -225,7 +225,7 @@ func TestDriver_Stop(t *testing.T) {
 
 		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
 
-		require.NoError(t, d.Stop(t.Context(), "example"))
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
 	})
 
 	t.Run("succeeds when it owns nothing for the workload", func(t *testing.T) {
@@ -234,7 +234,7 @@ func TestDriver_Stop(t *testing.T) {
 
 		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
 
-		require.NoError(t, d.Stop(t.Context(), "example"))
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
 	})
 }
 

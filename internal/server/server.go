@@ -59,11 +59,11 @@ func Run(ctx context.Context, config Config) error {
 	ports := database.NewPortRepository(db)
 	checker := health.New()
 
-	// The exec driver keeps each workload's files under the data directory, beside the
+	// The exec driver keeps its own trees under the data directory, beside the
 	// database, so that everything orca owns on disk is in one place.
 	execDriver := exec.New(exec.Config{
 		Logger: logger,
-		Root:   filepath.Join(config.Data.Directory, "workload"),
+		Root:   filepath.Join(config.Data.Directory, "exec"),
 	})
 
 	dockerDriver := docker.New(docker.Config{Logger: logger, Client: dockerClient})

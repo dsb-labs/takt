@@ -16,6 +16,11 @@ its version. An exec workload has a record in its own directory.
 Either way the runtime is the source of truth about what is running. orca stores no
 identifier that could point at something gone.
 
+That cuts both ways. What a runtime reports is not something orca validated, so a name
+read back from a label or a record is treated as a value rather than as a path. The
+directories the exec runtime keeps are named for the identifier orca assigned, and a
+name is read from inside a record rather than from the directory holding it.
+
 ## Reconciliation
 
 A pass reads the full desired state, asks every driver what it is running, and acts on

@@ -67,8 +67,14 @@ type (
 	// spread across fields only one driver reads. A driver takes what it recognises and
 	// ignores the rest, so a new runtime adds a block rather than widening this type.
 	Workload struct {
-		// The name of the workload, which identifies it to the operator and to the
-		// driver's own bookkeeping.
+		// The identifier the server assigned to the workload, which is stable across
+		// a rename and safe to use as a path component.
+		//
+		// A driver needing somewhere on disk keys it on this rather than on the name:
+		// a name is the operator's handle and reaches a driver from places a manifest
+		// never validated, where an identifier is orca's own.
+		ID string
+		// The name of the workload, which identifies it to the operator.
 		Name string
 		// The version of the specification this work is created from.
 		Version int
@@ -152,6 +158,7 @@ func NewWorkload(row database.Workload) (Workload, error) {
 	}
 
 	w := Workload{
+		ID:       row.ID,
 		Name:     row.Name,
 		Version:  row.Version,
 		SpecHash: row.SpecHash,

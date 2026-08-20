@@ -21,7 +21,8 @@ default:
 state.db          the workloads that have been applied
 state.db-wal      SQLite's write-ahead log
 state.db-shm      SQLite's shared-memory index
-workload/         one directory per exec workload
+exec/state/       what orca started, one directory per exec workload
+exec/workloads/   where exec workloads run, one directory each
 ```
 
 The database holds each workload's stored specification, environment included, so orca
@@ -33,17 +34,26 @@ server needs no recovery of orca's own bookkeeping.
 
 ## Exec workload directories
 
-Each version of an `exec` workload gets a directory of its own:
+Each version of an `exec` workload gets a directory of its own, under two separate
+trees:
 
 ```
-workload/<name>/<version>/
+exec/workloads/<id>/<version>/
   cwd/            the process's working directory
   output.log      the process's output, both streams combined
+
+exec/state/<id>/<version>/
   state.json      the process orca started, and how it ended
 ```
 
-The process runs in `cwd`, which is separate from orca's own files so that a workload
-writing to its working directory cannot overwrite them.
+The process runs in `cwd`. What orca records about it lives in the other tree, which
+holds no working directory at all, so a workload writing above its own has nothing of
+orca's to reach. A workload that could rewrite its own record could name any process on
+the host as its own.
+
+`<id>` is the identifier orca assigned the workload rather than its name. A name is
+what an operator types and reaches orca from places no manifest validated, so it is
+never a path component. It is read from inside a record when orca needs it.
 
 `output.log` grows for as long as the workload runs. orca does not rotate or truncate
 it, so a workload that writes continuously needs watching.
@@ -53,8 +63,8 @@ process. Both have to match for orca to claim the workload is still running. A p
 identifier alone is reused, so a record naming one that is alive may be describing
 something else.
 
-A workload's directories are removed when the workload is deleted, so its output
-survives for as long as the workload does.
+A workload's directories in both trees are removed when the workload is deleted, so its
+output survives for as long as the workload does.
 
 ## Restarting the server
 
@@ -63,8 +73,8 @@ rediscovers both on its next start rather than duplicating them, so restarting t
 server is a different thing from restarting the workloads it runs.
 
 Containers are found by the labels orca sets on them. Exec processes are found from the
-records in their workload directories, which is why those directories have to outlive
-the server that wrote them.
+records under `exec/state`, which is why those have to outlive the server that wrote
+them.
 
 One thing does not survive. Only a process's parent can collect its exit code, so an
 exec workload that ends while the server is down leaves none.
