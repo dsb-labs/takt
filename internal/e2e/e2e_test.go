@@ -274,13 +274,26 @@ func (s *Suite) TestWorkloadAdoptedAfterServerRestart() {
 func (s *Suite) TestOrphanedContainerIsStopped() {
 	name := s.workloadName()
 
-	s.Require().NoError(exec.Command("docker", "run", "--detach",
-		"--name", "orca-"+name+"-orphan",
+	// Removed here as well as by orca. The test asserts orca reaps it, so a failure
+	// leaves it behind — and the name is derived from the test, so the container would
+	// then collide with the next run of it. Docker reports that as an exit status
+	// rather than as a message, which is a poor thing to debug from.
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	container := "orca-" + name + "-orphan"
+
+	// Any output docker produces is captured, because the exit status alone says
+	// nothing about why: a name conflict and a missing image look the same.
+	create := exec.Command("docker", "run", "--detach",
+		"--name", container,
 		"--label", "orca.workload="+name,
 		"--label", "orca.spec-hash=deadbeef",
 		"--label", "orca.version=1",
 		testImage,
-	).Run())
+	)
+
+	out, err := create.CombinedOutput()
+	s.Require().NoErrorf(err, "failed to create the orphaned container: %s", out)
 
 	s.Require().Eventuallyf(func() bool {
 		return len(s.containers(name)) == 0
