@@ -57,7 +57,12 @@ func Run(ctx context.Context, config Config) error {
 	workloads := database.NewWorkloadRepository(db)
 	ports := database.NewPortRepository(db)
 	checker := health.New()
-	driver := docker.New(docker.Config{Logger: logger, Client: dockerClient})
+
+	// Keyed by the name each driver declares, which is what a workload's runtime is
+	// matched against. A runtime with no driver here is stored and left alone.
+	runtimes := map[string]*docker.Driver{
+		docker.Name: docker.New(docker.Config{Logger: logger, Client: dockerClient}),
+	}
 
 	// The service and the reconciler each need something from the other: the service
 	// wakes the reconciler when desired state changes, and the reconciler asks the
@@ -67,7 +72,7 @@ func Run(ctx context.Context, config Config) error {
 
 	reconcile := reconciler.New(reconciler.Config{
 		Logger:    logger,
-		Driver:    driver,
+		Drivers:   reconcilerDrivers(runtimes),
 		Workloads: workloads,
 		Ports:     ports,
 		Checker:   checker,
@@ -79,7 +84,7 @@ func Run(ctx context.Context, config Config) error {
 
 	svc = service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger:    logger,
-		Driver:    driver,
+		Drivers:   serviceDrivers(runtimes),
 		Workloads: workloads,
 		Ports:     ports,
 		Allocator: port.New(port.Config{Min: config.Ports.Min, Max: config.Ports.Max}),
@@ -155,4 +160,29 @@ func newLogger(config LoggingConfig) *slog.Logger {
 	}
 
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+}
+
+// reconcilerDrivers adapts the drivers onto the interface the reconciler consumes.
+//
+// The reconciler and the service take deliberately different views of a driver — one
+// starts and stops work, the other only reads — so each is handed a map of its own
+// interface rather than sharing one wider than either needs. Assigning each driver
+// explicitly keeps that a compile-time check.
+func reconcilerDrivers(runtimes map[string]*docker.Driver) map[string]reconciler.Driver {
+	out := make(map[string]reconciler.Driver, len(runtimes))
+	for name, runtime := range runtimes {
+		out[name] = runtime
+	}
+
+	return out
+}
+
+// serviceDrivers adapts the drivers onto the interface the service consumes.
+func serviceDrivers(runtimes map[string]*docker.Driver) map[string]service.Driver {
+	out := make(map[string]service.Driver, len(runtimes))
+	for name, runtime := range runtimes {
+		out[name] = runtime
+	}
+
+	return out
 }

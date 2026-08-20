@@ -17,6 +17,7 @@ import (
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/driver/docker"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/service"
@@ -164,7 +165,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 			tc.SetupMocks(d, repo, ports)
 
 			svc := newTestService(t, d, repo, ports, nil)
@@ -184,7 +185,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 func TestWorkloadService_Apply_NotifiesReconciler(t *testing.T) {
 	t.Parallel()
 
-	d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 	repo.EXPECT().Get(mock.Anything, "example").
 		Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -210,7 +211,7 @@ func TestWorkloadService_Get(t *testing.T) {
 	t.Parallel()
 
 	t.Run("merges observed instances into desired state", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 		d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
@@ -227,7 +228,7 @@ func TestWorkloadService_Get(t *testing.T) {
 	})
 
 	t.Run("still reports desired state when the driver is unreachable", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 		d.EXPECT().Observe(mock.Anything).Return(nil, errors.New("docker is down")).Once()
@@ -244,7 +245,7 @@ func TestWorkloadService_Get(t *testing.T) {
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "nope").Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 
@@ -295,7 +296,7 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 			checker := NewMockChecker(t)
 
 			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
@@ -308,7 +309,7 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 
 			svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 				Logger:    newTestLogger(t),
-				Driver:    d,
+				Drivers:   map[string]service.Driver{docker.Name: d},
 				Workloads: repo,
 				Ports:     ports,
 				Allocator: allocatorStub{},
@@ -382,7 +383,7 @@ func TestWorkloadService_Get_State(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 			d.EXPECT().Observe(mock.Anything).Return(tc.Instances, nil).Once()
@@ -465,7 +466,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 			row := storedWorkload("example")
 			spec := containerSpec("example", "example/example:latest")
@@ -491,7 +492,7 @@ func TestWorkloadService_List(t *testing.T) {
 	t.Parallel()
 
 	t.Run("observes the driver once for every workload", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().List(mock.Anything).Return([]database.Workload{
 			storedWorkload("alpha"),
@@ -518,7 +519,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 	t.Parallel()
 
 	t.Run("allocates again when another workload claims the port first", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
@@ -549,7 +550,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 	})
 
 	t.Run("reports a pinned port that collides", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
@@ -574,7 +575,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 	t.Parallel()
 
-	d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 	repo.EXPECT().Get(mock.Anything, "example").
 		Return(database.Workload{}, database.ErrWorkloadNotFound)
@@ -582,7 +583,7 @@ func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 
 	svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
 		Allocator: allocatorStub{err: port.ErrRangeExhausted},
@@ -605,7 +606,7 @@ func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 func TestWorkloadService_Get_DriverHangs(t *testing.T) {
 	t.Parallel()
 
-	d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 	repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
@@ -621,7 +622,7 @@ func TestWorkloadService_Get_DriverHangs(t *testing.T) {
 
 	svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
 		Allocator: allocatorStub{},
@@ -646,7 +647,7 @@ func TestWorkloadService_List_Queries(t *testing.T) {
 	t.Parallel()
 
 	t.Run("passes parsed queries to the repository", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.labels.app", Value: "web"}}).
 			Return([]database.Workload{storedWorkload("example")}, nil).Once()
@@ -660,7 +661,7 @@ func TestWorkloadService_List_Queries(t *testing.T) {
 	})
 
 	t.Run("keeps an equals sign in the value", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		// Only the first equals separates path from value, since a value may well
 		// contain one of its own.
@@ -675,7 +676,7 @@ func TestWorkloadService_List_Queries(t *testing.T) {
 	})
 
 	t.Run("rejects a query that is not path=value", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		svc := newTestService(t, d, repo, ports, nil)
 
@@ -684,7 +685,7 @@ func TestWorkloadService_List_Queries(t *testing.T) {
 	})
 
 	t.Run("reports a path the repository cannot parse", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().List(mock.Anything, mock.Anything).
 			Return(nil, database.ErrInvalidQueryPath).Once()
@@ -702,7 +703,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 	t.Parallel()
 
 	t.Run("marks the workload for deletion without touching the runtime", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		marked := storedWorkload("example")
 		marked.DeletedAt = time.Now().UTC()
@@ -725,7 +726,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 	})
 
 	t.Run("notifies the reconciler", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().MarkDeleting(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
@@ -741,7 +742,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().MarkDeleting(mock.Anything, "nope").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -756,7 +757,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 func TestWorkloadService_Apply_RejectsATerminatingWorkload(t *testing.T) {
 	t.Parallel()
 
-	d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 	deleting := storedWorkload("example")
 	deleting.DeletedAt = time.Now().UTC()
@@ -775,7 +776,7 @@ func TestWorkloadService_Logs(t *testing.T) {
 	t.Parallel()
 
 	t.Run("returns the driver's output", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 		d.EXPECT().Logs(mock.Anything, mock.Anything, "example", 20).
@@ -792,7 +793,7 @@ func TestWorkloadService_Logs(t *testing.T) {
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
-		d, repo, ports := NewMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "nope").Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 
@@ -816,7 +817,7 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 
 	return service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
 		Allocator: allocatorStub{},
@@ -875,4 +876,15 @@ func newTestLogger(t *testing.T) *slog.Logger {
 		AddSource: testing.Verbose(),
 		Level:     level,
 	}))
+}
+
+// newMockDriver returns a driver mock that already answers Name, which every consumer
+// calls to report which runtime it is talking about.
+func newMockDriver(t *testing.T) *MockDriver {
+	t.Helper()
+
+	d := NewMockDriver(t)
+	d.EXPECT().Name().Return(docker.Name).Maybe()
+
+	return d
 }

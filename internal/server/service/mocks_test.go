@@ -197,6 +197,50 @@ func (_c *MockDriver_Logs_Call) RunAndReturn(run func(ctx context.Context, out i
 	return _c
 }
 
+// Name provides a mock function for the type MockDriver
+func (_mock *MockDriver) Name() string {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Name")
+	}
+
+	var r0 string
+	if returnFunc, ok := ret.Get(0).(func() string); ok {
+		r0 = returnFunc()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+	return r0
+}
+
+// MockDriver_Name_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Name'
+type MockDriver_Name_Call struct {
+	*mock.Call
+}
+
+// Name is a helper method to define mock.On call
+func (_e *MockDriver_Expecter) Name() *MockDriver_Name_Call {
+	return &MockDriver_Name_Call{Call: _e.mock.On("Name")}
+}
+
+func (_c *MockDriver_Name_Call) Run(run func()) *MockDriver_Name_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockDriver_Name_Call) Return(s string) *MockDriver_Name_Call {
+	_c.Call.Return(s)
+	return _c
+}
+
+func (_c *MockDriver_Name_Call) RunAndReturn(run func() string) *MockDriver_Name_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Observe provides a mock function for the type MockDriver
 func (_mock *MockDriver) Observe(ctx context.Context) ([]driver.Instance, error) {
 	ret := _mock.Called(ctx)

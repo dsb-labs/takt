@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
@@ -21,6 +22,9 @@ type (
 	// The Driver interface describes the runtime operations the reconciler uses to
 	// converge a workload onto its desired state.
 	Driver interface {
+		// Name should return the name the driver is known by, which is what a
+		// workload's runtime is matched against to decide what runs it.
+		Name() string
 		// Start should run the given workload, returning the driver's handle for it.
 		Start(ctx context.Context, w driver.Workload) (string, error)
 		// Stop should stop and discard everything the driver runs for the named workload.
@@ -72,7 +76,7 @@ type (
 	// leaving the node permanently wrong.
 	Reconciler struct {
 		logger     *slog.Logger
-		driver     Driver
+		drivers    map[string]Driver
 		workloads  WorkloadRepository
 		ports      PortRepository
 		checker    Checker
@@ -86,8 +90,9 @@ type (
 	Config struct {
 		// The logger used for reconciliation events.
 		Logger *slog.Logger
-		// The driver that runs workloads.
-		Driver Driver
+		// The drivers that run workloads, keyed by the name each one declares. A
+		// workload whose runtime names no driver here is left alone.
+		Drivers map[string]Driver
 		// The repository holding desired state.
 		Workloads WorkloadRepository
 		// The repository holding port allocations, used to resolve the address a
@@ -148,7 +153,7 @@ const (
 func New(config Config) *Reconciler {
 	return &Reconciler{
 		logger:     config.Logger.With("component", "reconciler"),
-		driver:     config.Driver,
+		drivers:    config.Drivers,
 		workloads:  config.Workloads,
 		ports:      config.Ports,
 		checker:    config.Checker,
@@ -179,9 +184,9 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 
-	events, err := r.driver.Watch(ctx)
+	events, err := r.watch(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to watch driver: %w", err)
+		return err
 	}
 
 	// Converge once at startup so that a workload applied before the server was
@@ -225,7 +230,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	observeCtx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
 
-	instances, err := r.driver.Observe(observeCtx)
+	instances, err := r.observe(observeCtx)
 	if err != nil {
 		r.logger.With("error", err).Error("failed to observe driver instances")
 		return
@@ -272,10 +277,11 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		return r.teardown(ctx, row, instances)
 	}
 
-	// Only container workloads can run today. A workload naming any other runtime
-	// is stored but left alone, so it starts working when its driver arrives
-	// rather than being reported as broken.
-	if api.Runtime(row.Runtime) != api.Container {
+	// A workload whose runtime nothing runs is stored and left alone, so it starts
+	// working when its driver arrives rather than being reported as broken.
+	if _, ok := r.driverFor(row); !ok {
+		r.logger.With("workload", row.Name, "runtime", row.Runtime).Debug("no driver for runtime")
+
 		return nil
 	}
 
@@ -617,7 +623,13 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 	startCtx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 
-	id, err := r.driver.Start(startCtx, w)
+	runtime, ok := r.driverFor(row)
+	if !ok {
+		// Nothing runs this workload's runtime, which converge has already reported.
+		return nil
+	}
+
+	id, err := runtime.Start(startCtx, w)
 	if err != nil {
 		// A workload that cannot start may be sitting on a host port something
 		// outside orca has taken, which nothing orca does will free. Rather than
@@ -634,6 +646,74 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 	r.logger.With("workload", row.Name, "instance", id, "version", row.Version).Info("workload started")
 
 	return nil
+}
+
+// driverFor returns the driver that runs a workload's runtime, reporting false when
+// nothing does.
+func (r *Reconciler) driverFor(row database.Workload) (Driver, bool) {
+	runtime, ok := r.drivers[row.Runtime]
+
+	return runtime, ok
+}
+
+// observe collects the instances every driver is running.
+//
+// A pass has to see everything, because a workload it cannot see reads as absent and
+// would be started again. One driver failing therefore fails the whole observation
+// rather than yielding a partial picture that would be acted on as though complete.
+func (r *Reconciler) observe(ctx context.Context) ([]driver.Instance, error) {
+	var instances []driver.Instance
+
+	for _, runtime := range r.drivers {
+		observed, err := runtime.Observe(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to observe the %s runtime: %w", runtime.Name(), err)
+		}
+
+		instances = append(instances, observed...)
+	}
+
+	return instances, nil
+}
+
+// watch merges every driver's events into one channel, so the loop selects on a single
+// source however many runtimes there are.
+//
+// The merged channel closes once every driver's has. The loop treats that as the end of
+// events and falls back to the ticker, which is the same thing it already did when a
+// single driver's stream ended.
+func (r *Reconciler) watch(ctx context.Context) (<-chan driver.Event, error) {
+	streams := make([]<-chan driver.Event, 0, len(r.drivers))
+	for _, runtime := range r.drivers {
+		events, err := runtime.Watch(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to watch the %s runtime: %w", runtime.Name(), err)
+		}
+
+		streams = append(streams, events)
+	}
+
+	merged := make(chan driver.Event)
+
+	var wg sync.WaitGroup
+	for _, stream := range streams {
+		wg.Go(func() {
+			for event := range stream {
+				select {
+				case merged <- event:
+				case <-ctx.Done():
+					return
+				}
+			}
+		})
+	}
+
+	go func() {
+		wg.Wait()
+		close(merged)
+	}()
+
+	return merged, nil
 }
 
 // abandonPorts gives up the host ports orca chose for a workload, so that the next
@@ -660,8 +740,13 @@ func (r *Reconciler) stop(ctx context.Context, workload string) error {
 	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
 
-	if err := r.driver.Stop(ctx, workload); err != nil {
-		return err
+	// Every driver is asked, rather than the one the workload's runtime names. A
+	// workload being stopped may have no row left to read a runtime from — an orphan
+	// has none by definition — and a driver with nothing for the name does nothing.
+	for _, runtime := range r.drivers {
+		if err := runtime.Stop(ctx, workload); err != nil {
+			return fmt.Errorf("failed to stop workload on the %s runtime: %w", runtime.Name(), err)
+		}
 	}
 
 	// The check history describes work that no longer exists. Keeping it would

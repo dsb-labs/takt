@@ -17,6 +17,7 @@ import (
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/driver/docker"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 )
@@ -234,7 +235,7 @@ func TestReconciler_Run(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+			d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 			tc.SetupMocks(d, repo)
 
 			events := make(chan driver.Event)
@@ -252,7 +253,7 @@ func TestReconciler_Run(t *testing.T) {
 
 			r := reconciler.New(reconciler.Config{
 				Logger:    newTestLogger(t),
-				Driver:    d,
+				Drivers:   map[string]reconciler.Driver{docker.Name: d},
 				Workloads: repo,
 				Interval:  time.Hour,
 			})
@@ -310,7 +311,7 @@ func TestReconciler_Run_Health(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+			d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 			ports, checker := NewMockPortRepository(t), NewMockChecker(t)
 
 			row := storedWorkload("example", "hash-one")
@@ -352,7 +353,7 @@ func TestReconciler_Run_Health(t *testing.T) {
 
 			r := reconciler.New(reconciler.Config{
 				Logger:    newTestLogger(t),
-				Driver:    d,
+				Drivers:   map[string]reconciler.Driver{docker.Name: d},
 				Workloads: repo,
 				Ports:     ports,
 				Checker:   checker,
@@ -375,7 +376,7 @@ func TestReconciler_Run_Health(t *testing.T) {
 func TestReconciler_Run_RegistersChecks(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
 
 	checked := storedWorkload("example", "hash-one")
@@ -419,7 +420,7 @@ func TestReconciler_Run_RegistersChecks(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
 		Checker:   checker,
@@ -444,7 +445,7 @@ func TestReconciler_Run_RegistersChecks(t *testing.T) {
 func TestReconciler_Run_ForgetsChecksOnReplacement(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
 
 	row := storedWorkload("example", "hash-one")
@@ -493,7 +494,7 @@ func TestReconciler_Run_ForgetsChecksOnReplacement(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
 		Checker:   checker,
@@ -515,7 +516,7 @@ func TestReconciler_Run_ForgetsChecksOnReplacement(t *testing.T) {
 func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
 
 	// A workload on its way out is not worth probing, and results for one nothing
@@ -552,7 +553,7 @@ func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
 		Checker:   checker,
@@ -566,6 +567,104 @@ func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 
 	passes.wait(t, 1)
 	<-forgotten
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
+func TestReconciler_Run_RoutesByRuntime(t *testing.T) {
+	t.Parallel()
+
+	container, other := newMockDriver(t), NewMockDriver(t)
+	other.EXPECT().Name().Return("other").Maybe()
+
+	repo := NewMockWorkloadRepository(t)
+
+	// One workload for each runtime, so a driver that acted on the wrong one would be
+	// caught by its own mock rather than by an assertion after the fact.
+	mine := storedWorkload("mine", "hash-one")
+	theirs := storedWorkload("theirs", "hash-one")
+	theirs.Runtime = "other"
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{mine, theirs}, nil)
+
+	container.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
+		return w.Name == "mine"
+	})).Return("container-one", nil)
+
+	other.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
+		return w.Name == "theirs"
+	})).Return("other-one", nil)
+
+	// Both drivers are observed and watched, because a pass has to see everything: a
+	// workload it cannot see reads as absent and would be started again.
+	events := make(chan driver.Event)
+	container.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+	other.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+	passes := newCounter()
+	container.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+			return nil, nil
+		})
+	other.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: container, "other": other},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
+func TestReconciler_Run_LeavesARuntimeWithNoDriverAlone(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	// A runtime nothing runs. The workload is stored and left as it is, so it starts
+	// working when its driver arrives rather than being reported as broken.
+	row := storedWorkload("example", "hash-one")
+	row.Runtime = "nothing-runs-this"
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+			return nil, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	// One pass is enough: the mocks expect no Start or Stop at all, so reaching the
+	// end of a pass without either is the assertion.
+	passes.wait(t, 1)
 
 	cancel()
 	require.NoError(t, <-done)
@@ -628,7 +727,7 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+			d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
 			row := storedWorkload("example", "hash-one")
 			row.Spec = specWithRestart("example", tc.Policy)
@@ -661,7 +760,7 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 
 			r := reconciler.New(reconciler.Config{
 				Logger:    newTestLogger(t),
-				Driver:    d,
+				Drivers:   map[string]reconciler.Driver{docker.Name: d},
 				Workloads: repo,
 				Interval:  time.Hour,
 			})
@@ -682,7 +781,7 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 func TestReconciler_Run_RerunsARetiredWorkloadWhenItsSpecChanges(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
 	// The instance that ran carries the old hash, and the stored specification has
 	// moved on. That is what runs a finished job again: the operator changed what they
@@ -715,7 +814,7 @@ func TestReconciler_Run_RerunsARetiredWorkloadWhenItsSpecChanges(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		Interval:  time.Hour,
 	})
@@ -734,7 +833,7 @@ func TestReconciler_Run_RerunsARetiredWorkloadWhenItsSpecChanges(t *testing.T) {
 func TestReconciler_Run_ForgetsChecksOfARetiredWorkload(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
 
 	row := storedWorkload("example", "hash-one")
@@ -785,7 +884,7 @@ func TestReconciler_Run_ForgetsChecksOfARetiredWorkload(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
 		Checker:   checker,
@@ -807,7 +906,7 @@ func TestReconciler_Run_ForgetsChecksOfARetiredWorkload(t *testing.T) {
 func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
 		storedWorkload("example", "hash-one"),
@@ -857,7 +956,7 @@ func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		// Short enough that many passes run inside the window below, so an unpaced
 		// workload has every opportunity to restart repeatedly.
@@ -885,7 +984,7 @@ func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
 func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
 		storedWorkload("example", "hash-one"),
@@ -909,7 +1008,7 @@ func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		Interval:  time.Hour,
 	})
@@ -939,7 +1038,7 @@ func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 func TestReconciler_Run_SurvivesAHangingDriver(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
 	repo.EXPECT().List(mock.Anything).Return(nil, nil)
 
@@ -959,7 +1058,7 @@ func TestReconciler_Run_SurvivesAHangingDriver(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		Interval:  time.Hour,
 	})
@@ -986,7 +1085,7 @@ func TestReconciler_Run_SurvivesAHangingDriver(t *testing.T) {
 func TestReconciler_Run_ReconcilesOnDriverEvent(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
 	repo.EXPECT().List(mock.Anything).Return(nil, nil)
 
@@ -998,7 +1097,7 @@ func TestReconciler_Run_ReconcilesOnDriverEvent(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		// Long enough that a pass can only be attributed to the event.
 		Interval: time.Hour,
@@ -1024,7 +1123,7 @@ func TestReconciler_Run_ReconcilesOnDriverEvent(t *testing.T) {
 func TestReconciler_Run_ReconcilesOnNotify(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
 	repo.EXPECT().List(mock.Anything).Return(nil, nil)
 
@@ -1036,7 +1135,7 @@ func TestReconciler_Run_ReconcilesOnNotify(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		Interval:  time.Hour,
 	})
@@ -1062,7 +1161,7 @@ func TestReconciler_Run_ReconcilesOnNotify(t *testing.T) {
 func TestReconciler_Run_SurvivesEventStreamClosing(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
 	repo.EXPECT().List(mock.Anything).Return(nil, nil)
 
@@ -1074,7 +1173,7 @@ func TestReconciler_Run_SurvivesEventStreamClosing(t *testing.T) {
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		Interval:  10 * time.Millisecond,
 	})
@@ -1097,13 +1196,13 @@ func TestReconciler_Run_SurvivesEventStreamClosing(t *testing.T) {
 func TestReconciler_Run_FailsWhenTheDriverCannotBeWatched(t *testing.T) {
 	t.Parallel()
 
-	d, repo := NewMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
 	d.EXPECT().Watch(mock.Anything).Return(nil, errors.New("docker is down")).Once()
 
 	r := reconciler.New(reconciler.Config{
 		Logger:    newTestLogger(t),
-		Driver:    d,
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
 		Interval:  time.Hour,
 	})
@@ -1209,4 +1308,15 @@ func newTestLogger(t *testing.T) *slog.Logger {
 		AddSource: testing.Verbose(),
 		Level:     level,
 	}))
+}
+
+// newMockDriver returns a driver mock that already answers Name, which every consumer
+// calls to report which runtime it is talking about.
+func newMockDriver(t *testing.T) *MockDriver {
+	t.Helper()
+
+	d := NewMockDriver(t)
+	d.EXPECT().Name().Return(docker.Name).Maybe()
+
+	return d
 }

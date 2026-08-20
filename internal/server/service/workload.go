@@ -61,10 +61,14 @@ type (
 	// that a workload should go away — and the reconciler makes it so, which keeps
 	// a single component responsible for touching the runtime.
 	Driver interface {
+		// Name should return the name the driver is known by.
+		Name() string
 		// Observe should report every instance the driver is currently running.
 		Observe(ctx context.Context) ([]driver.Instance, error)
 		// Logs should write the recent output of the named workload to out, limited
-		// to the last tail lines.
+		// to the last tail lines. A driver with nothing for the name should write
+		// nothing rather than fail, since the caller does not know which runtime
+		// holds the workload.
 		Logs(ctx context.Context, out io.Writer, workload string, tail int) error
 	}
 
@@ -114,7 +118,7 @@ type (
 	// that runs workloads.
 	WorkloadService struct {
 		logger    *slog.Logger
-		driver    Driver
+		drivers   map[string]Driver
 		workloads WorkloadRepository
 		ports     PortRepository
 		allocator Allocator
@@ -127,8 +131,9 @@ type (
 type WorkloadServiceConfig struct {
 	// The logger used for service events.
 	Logger *slog.Logger
-	// The driver used to observe and read from workloads.
-	Driver Driver
+	// The drivers used to observe and read from workloads, keyed by the name each
+	// one declares.
+	Drivers map[string]Driver
 	// The repository holding desired state.
 	Workloads WorkloadRepository
 	// The repository holding port allocations.
@@ -148,7 +153,7 @@ type WorkloadServiceConfig struct {
 func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 	return &WorkloadService{
 		logger:    config.Logger.With("component", "service"),
-		driver:    config.Driver,
+		drivers:   config.Drivers,
 		workloads: config.Workloads,
 		ports:     config.Ports,
 		allocator: config.Allocator,
@@ -382,8 +387,13 @@ func (s *WorkloadService) Logs(ctx context.Context, out io.Writer, name string, 
 		return fmt.Errorf("failed to load workload: %w", err)
 	}
 
-	if err := s.driver.Logs(ctx, out, name, tail); err != nil {
-		return fmt.Errorf("failed to read workload logs: %w", err)
+	// Every driver is asked. Which runtime holds the workload is knowable from its
+	// row, but a driver with nothing for the name writes nothing, so asking is
+	// cheaper than threading the runtime through and getting it wrong.
+	for _, runtime := range s.drivers {
+		if err := runtime.Logs(ctx, out, name, tail); err != nil {
+			return fmt.Errorf("failed to read workload logs: %w", err)
+		}
 	}
 
 	return nil
@@ -669,10 +679,18 @@ func (s *WorkloadService) observe(ctx context.Context) map[string][]driver.Insta
 	ctx, cancel := context.WithTimeout(ctx, observeTimeout)
 	defer cancel()
 
-	instances, err := s.driver.Observe(ctx)
-	if err != nil {
-		s.logger.With("error", err).Error("failed to observe driver instances")
-		return nil
+	var instances []driver.Instance
+	for _, runtime := range s.drivers {
+		observed, err := runtime.Observe(ctx)
+		if err != nil {
+			// Reported rather than returned: desired state is still worth reading, and
+			// a read should not fail because one runtime is briefly unavailable.
+			s.logger.With("error", err, "runtime", runtime.Name()).Error("failed to observe driver instances")
+
+			continue
+		}
+
+		instances = append(instances, observed...)
 	}
 
 	byWorkload := make(map[string][]driver.Instance, len(instances))

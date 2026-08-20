@@ -22,6 +22,10 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver"
 )
 
+// Name is how this driver identifies itself, and is what the server maps a
+// workload's runtime onto when deciding which driver runs it.
+const Name = "container"
+
 const (
 	// LabelWorkload names the container label holding the workload a container
 	// belongs to. It is how the driver recognises its own work.
@@ -55,6 +59,11 @@ type (
 		Client Client
 	}
 )
+
+// Name returns the name this driver is registered under.
+func (d *Driver) Name() string {
+	return Name
+}
 
 // New returns a Driver that runs containers through the client in config.
 func New(config Config) *Driver {
