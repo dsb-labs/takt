@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -81,6 +82,47 @@ func Parse(r io.Reader) (Spec, error) {
 	return spec, nil
 }
 
+// ParseVolume reads a volume manifest from r and returns the volume it describes.
+//
+// A volume manifest carries no kind field. Which resource a file describes is decided
+// by what it is given to, so a file naming a workload's fields is reported as having
+// unknown keys rather than being accepted as half a volume.
+func ParseVolume(r io.Reader) (Volume, error) {
+	decoder := yaml.NewDecoder(r)
+	decoder.KnownFields(true)
+
+	var volume Volume
+	if err := decoder.Decode(&volume); err != nil {
+		return Volume{}, fmt.Errorf("failed to parse manifest: %w", err)
+	}
+
+	if err := ValidateVolume(volume); err != nil {
+		return Volume{}, err
+	}
+
+	return volume, nil
+}
+
+// ValidateVolume reports whether volume is a usable volume specification.
+func ValidateVolume(volume Volume) error {
+	err := validation.ValidateStruct(&volume,
+		validation.Field(&volume.Version,
+			validation.Required,
+			validation.In(version).Error(fmt.Sprintf("must be %q", version)),
+		),
+		validation.Field(&volume.Name,
+			validation.Required,
+			validation.Length(1, 63),
+			validation.Match(namePattern).Error("must be lowercase alphanumeric, optionally separated by dashes"),
+		),
+	)
+	if err != nil {
+		return fmt.Errorf("invalid manifest: %w", err)
+	}
+
+	return nil
+}
+
 // Validate reports whether spec is a usable workload specification.
 func Validate(spec Spec) error {
 	err := validation.ValidateStruct(&spec,
@@ -112,6 +154,10 @@ func Validate(spec Spec) error {
 	}
 
 	if err = validatePorts(spec, runtime); err != nil {
+		return err
+	}
+
+	if err = validateVolumes(spec.Volumes); err != nil {
 		return err
 	}
 
@@ -216,6 +262,56 @@ func validatePorts(spec Spec, runtime Runtime) error {
 	default:
 		return fmt.Errorf("invalid ports: the %s runtime cannot publish ports", runtime)
 	}
+}
+
+// validateVolumes reports whether the workload's mounts are ones orca can honour.
+//
+// The rules are the same for either runtime, which is the point of the field: a
+// workload moved between them keeps its manifest, and nobody has to remember which
+// runtime wants which spelling. Where the path resolves to differs — a container has
+// a filesystem of its own, an exec workload has its working directory — but what a
+// manifest may say does not.
+func validateVolumes(mounts []VolumeMount) error {
+	if len(mounts) == 0 {
+		return nil
+	}
+
+	names := make(map[string]struct{}, len(mounts))
+	paths := make(map[string]struct{}, len(mounts))
+
+	for _, mount := range mounts {
+		if !namePattern.MatchString(mount.Name) || len(mount.Name) > 63 {
+			return fmt.Errorf("invalid volumes: %q is not a volume name: must be lowercase "+
+				"alphanumeric, optionally separated by dashes", mount.Name)
+		}
+
+		if _, ok := names[mount.Name]; ok {
+			return fmt.Errorf("invalid volumes: volume %q is mounted more than once", mount.Name)
+		}
+		names[mount.Name] = struct{}{}
+
+		if !path.IsAbs(mount.To) {
+			return fmt.Errorf("invalid volumes: volume %q must name an absolute path to mount at, got %q",
+				mount.Name, mount.To)
+		}
+
+		// Cleaned before comparing, so that "/data" and "/data/" are recognised as
+		// the same mount rather than as two.
+		to := path.Clean(mount.To)
+
+		// A working directory is not a volume, and for a container this would be the
+		// whole filesystem.
+		if to == "/" {
+			return fmt.Errorf("invalid volumes: volume %q cannot be mounted at %q", mount.Name, mount.To)
+		}
+
+		if _, ok := paths[to]; ok {
+			return fmt.Errorf("invalid volumes: %q is mounted more than once", to)
+		}
+		paths[to] = struct{}{}
+	}
+
+	return nil
 }
 
 // validateHealth reports whether the workload's health check is one its runtime can

@@ -1,0 +1,9 @@
+version: v1
+name: example
+
+volumes:
+  - name: example-data
+    to: /
+
+container:
+  image: example/example:latest

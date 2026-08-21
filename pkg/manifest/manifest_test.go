@@ -41,6 +41,7 @@ func TestParse(t *testing.T) {
 				assert.Equal(t, "example/example:latest", spec.Container.Image)
 				assert.Equal(t, map[string]string{"EXAMPLE": "EXAMPLE"}, spec.Env)
 				assert.Equal(t, []manifest.Port{{To: 8080, From: 4141}, {To: 9090}}, spec.Ports)
+				assert.Equal(t, []manifest.VolumeMount{{Name: "example-data", To: "/var/lib/example"}}, spec.Volumes)
 
 				assert.Nil(t, spec.Exec)
 			},
@@ -279,6 +280,44 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// The same field, written the same way, for the other runtime. What it
+			// resolves to differs; what a manifest may say does not.
+			Name: "mounts a volume in an exec workload",
+			File: "volumes_exec.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Exec)
+				assert.Equal(t, []manifest.VolumeMount{{Name: "example-data", To: "/var/lib/example"}}, spec.Volumes)
+			},
+		},
+		{
+			// A relative path has no meaning to a container runtime, so the field
+			// means one thing rather than two.
+			Name:         "rejects a relative mount path",
+			File:         "volumes_relative.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a volume mounted at the root",
+			File:         "volumes_root.yaml",
+			ExpectsError: true,
+		},
+		{
+			// Cleaned before comparing, so a trailing slash does not hide a clash.
+			Name:         "rejects two volumes mounted at the same path",
+			File:         "volumes_duplicate_path.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects the same volume mounted twice",
+			File:         "volumes_duplicate_name.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a volume name orca would not accept",
+			File:         "volumes_bad_name.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:         "rejects malformed yaml",
 			File:         "malformed.yaml",
 			ExpectsError: true,
@@ -305,6 +344,66 @@ func TestParse(t *testing.T) {
 
 			require.NoError(t, err)
 			tc.Assert(t, spec)
+		})
+	}
+}
+
+func TestParseVolume(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name         string
+		File         string
+		Expected     manifest.Volume
+		ExpectsError bool
+	}{
+		{
+			Name:     "a volume manifest",
+			File:     "volume.yaml",
+			Expected: manifest.Volume{Version: "v1", Name: "example-data"},
+		},
+		{
+			Name:         "rejects a name orca would not accept",
+			File:         "volume_bad_name.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a schema version it does not understand",
+			File:         "volume_bad_version.yaml",
+			ExpectsError: true,
+		},
+		{
+			// A volume holds data and has nothing to configure, so a key that looks
+			// like configuration is a misunderstanding worth reporting.
+			Name:         "rejects an unknown field",
+			File:         "volume_unknown_field.yaml",
+			ExpectsError: true,
+		},
+		{
+			// Which resource a file describes is decided by what it is given to, so
+			// a workload manifest handed to this reads as unknown keys.
+			Name:         "rejects a workload manifest",
+			File:         "container.yaml",
+			ExpectsError: true,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			f, err := os.Open(filepath.Join("testdata", tc.File))
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, f.Close()) })
+
+			volume, err := manifest.ParseVolume(f)
+			if tc.ExpectsError {
+				assert.Error(t, err)
+				assert.Zero(t, volume)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.Expected, volume)
 		})
 	}
 }
@@ -606,4 +705,5 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	assert.NotEmpty(t, spec.Container.Command)
 	assert.NotEmpty(t, spec.Env)
 	assert.NotEmpty(t, spec.Ports)
+	assert.NotEmpty(t, spec.Volumes)
 }

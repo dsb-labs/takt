@@ -17,6 +17,9 @@ ports:
   - to: 9090
 env:
   EXAMPLE: EXAMPLE
+volumes:
+  - name: example-data
+    to: /var/lib/example
 container:
   image: example/example:latest
   command: ["sh", "-c", "exit 0"]

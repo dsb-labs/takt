@@ -1,0 +1,11 @@
+version: v1
+name: example
+
+volumes:
+  - name: example-data
+    to: /var/lib/example
+  - name: other-data
+    to: /var/lib/example/
+
+container:
+  image: example/example:latest

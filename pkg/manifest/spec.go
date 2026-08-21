@@ -68,6 +68,9 @@ type (
 		// The environment variables set for the workload. A workload starts with only
 		// these, rather than inheriting the server's own environment.
 		Env map[string]string
+		// The volumes to mount, and where the workload finds each one. Each names a
+		// volume that must already exist.
+		Volumes []VolumeMount
 		// What to do when the workload's instance ends. Never nil once a Spec has
 		// been through Parse or NewSpec, both of which resolve the defaults.
 		Restart *Restart
@@ -134,6 +137,30 @@ type (
 		// The command to run, and its arguments. No shell is involved unless the
 		// command names one.
 		Command []string
+	}
+
+	// The VolumeMount type describes a volume a workload mounts, and where the
+	// workload finds it.
+	VolumeMount struct {
+		// The volume to mount, which must already exist.
+		Name string
+		// Where the workload finds the volume, written the same way whichever
+		// runtime runs it.
+		//
+		// For a container it is the path inside the container. For an exec workload
+		// it is resolved against that workload's own working directory, which acts
+		// as its root, so a process starting there reaches the volume at the path
+		// named here either way.
+		To string
+	}
+
+	// The Volume type describes a volume, which is no more than its name. A volume
+	// holds data and has nothing to configure.
+	Volume struct {
+		// The manifest schema version. Must be "v1".
+		Version string
+		// The name that identifies the volume.
+		Name string
 	}
 )
 
@@ -228,6 +255,13 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 			}
 
 			out.Ports = append(out.Ports, port)
+		}
+	}
+
+	if spec.Volumes != nil {
+		out.Volumes = make([]VolumeMount, 0, len(*spec.Volumes))
+		for _, mount := range *spec.Volumes {
+			out.Volumes = append(out.Volumes, VolumeMount{Name: mount.Name, To: mount.To})
 		}
 	}
 

@@ -44,6 +44,15 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 		spec.Ports = &mappings
 	}
 
+	if len(s.Volumes) > 0 {
+		mounts := make([]api.VolumeMount, 0, len(s.Volumes))
+		for _, mount := range s.Volumes {
+			mounts = append(mounts, api.VolumeMount{Name: mount.Name, To: mount.To})
+		}
+
+		spec.Volumes = &mounts
+	}
+
 	if s.Container != nil {
 		spec.Container = &api.ContainerSpec{Image: s.Container.Image}
 
