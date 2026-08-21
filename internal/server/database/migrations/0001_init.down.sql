@@ -1,3 +1,5 @@
+DROP TABLE IF EXISTS volume;
+
 DROP INDEX IF EXISTS idx_workload_port_workload_id;
 
 DROP TABLE IF EXISTS workload_port;

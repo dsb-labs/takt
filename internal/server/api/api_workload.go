@@ -79,17 +79,6 @@ func (a *WorkloadAPI) internalError(operation string, err error) string {
 	return "failed to " + operation
 }
 
-// Register the HTTP endpoints onto the given http.ServeMux.
-//
-// The routes themselves come from the generated handler, which is mounted onto the
-// caller's mux rather than one of its own so that the server keeps ownership of
-// routing and can wrap the whole surface in its own middleware.
-func (a *WorkloadAPI) Register(mux *http.ServeMux) {
-	api.HandlerWithOptions(api.NewStrictHandler(a, nil), api.StdHTTPServerOptions{
-		BaseRouter: mux,
-	})
-}
-
 // ApplyWorkload stores the given specification as the desired state for the named
 // workload.
 func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorkloadRequestObject) (api.ApplyWorkloadResponseObject, error) {

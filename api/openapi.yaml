@@ -8,8 +8,11 @@ info:
     matches what was asked for.
 
     A workload names exactly one runtime block, which selects the driver used to run
-    it. Only the container runtime is implemented today; additional blocks are
-    reserved for future runtimes.
+    it.
+
+    A volume is a separate resource with a lifecycle of its own. It is created before
+    the workload that mounts it and outlives that workload, so removing stored data is
+    always something asked for rather than a consequence of deleting a workload.
   version: 1.0.0
   license:
     name: MIT
@@ -21,6 +24,8 @@ servers:
 tags:
   - name: workloads
     description: Submission and inspection of workloads.
+  - name: volumes
+    description: Storage that outlives the workloads mounting it.
 
 paths:
   /api/v1/workloads:
@@ -205,6 +210,129 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v1/volumes:
+    get:
+      operationId: listVolumes
+      tags: [volumes]
+      summary: List volumes
+      description: |
+        Returns the volumes the server holds, each with the workloads currently
+        mounting it.
+      responses:
+        "200":
+          description: The volumes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListVolumesResult"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      operationId: createVolume
+      tags: [volumes]
+      summary: Create a volume
+      description: |
+        Creates a volume and the directory backing it.
+
+        A volume has to exist before a workload can mount it, so that a mistyped
+        name is reported rather than silently becoming a second empty volume.
+        Creating one that already exists is rejected, because a volume holds data and
+        an accidental second create should not read as success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VolumeSpec"
+      responses:
+        "201":
+          description: The volume was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateVolumeResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: A volume with that name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/volumes/{name}:
+    parameters:
+      - $ref: "#/components/parameters/VolumeName"
+
+    get:
+      operationId: getVolume
+      tags: [volumes]
+      summary: Get a single volume
+      description: |
+        Returns the volume with the given name, including the workloads mounting it.
+      responses:
+        "200":
+          description: The requested volume.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetVolumeResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteVolume
+      tags: [volumes]
+      summary: Delete a volume and the data it holds
+      description: |
+        Removes the volume and everything stored in it.
+
+        A volume a workload mounts is refused rather than removed, and the response
+        names the workloads holding it. That is what makes deletion deliberate: a
+        volume outlives the workloads using it, so nothing else in orca will ever
+        remove one.
+
+        Deletion is synchronous, unlike a workload's. There is nothing running to
+        wind down, only a directory to remove.
+      parameters:
+        - name: force
+          in: query
+          required: false
+          description: |
+            Remove the volume even though a workload mounts it. The workload keeps
+            running and its mount stops resolving, so this is for a volume whose
+            workloads are known not to need it.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: |
+            The volume and its contents were removed.
+
+            The body is an object with nothing in it yet, rather than no body at all.
+            Every other response this API gives is JSON, and one that is not would
+            make a caller decoding the body special-case this single status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteVolumeResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A workload mounts the volume, and force was not set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
 components:
   parameters:
     WorkloadName:
@@ -212,6 +340,16 @@ components:
       in: path
       required: true
       description: The name that identifies the workload.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 63
+
+    VolumeName:
+      name: name
+      in: path
+      required: true
+      description: The name that identifies the volume.
       schema:
         type: string
         minLength: 1
@@ -226,7 +364,7 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
     NotFound:
-      description: No workload exists with the given name.
+      description: Nothing exists with the given name.
       content:
         application/json:
           schema:
@@ -289,6 +427,20 @@ components:
             names, rather than inheriting the server's own environment.
           additionalProperties:
             type: string
+        volumes:
+          type: array
+          description: |
+            The volumes to mount, and where the workload finds each one.
+
+            Each names a volume that must already exist. A specification naming one
+            that does not is rejected, so a mistyped name is reported rather than
+            quietly becoming a second empty volume.
+
+            Like ports, these sit alongside the runtime blocks: where a workload
+            keeps its data is a question about the workload rather than about the
+            runtime it happens to use.
+          items:
+            $ref: "#/components/schemas/VolumeMount"
         restart:
           $ref: "#/components/schemas/RestartSpec"
         health:
@@ -501,51 +653,6 @@ components:
           maximum: 65535
           examples: [4141]
 
-    ListWorkloadsResult:
-      type: object
-      description: |
-        The body returned when workloads are listed.
-
-        An object rather than a bare array, so that something later reported about a
-        listing as a whole is a new field rather than a change of type.
-      required: [workloads]
-      properties:
-        workloads:
-          type: array
-          description: The workloads matching the request.
-          items:
-            $ref: "#/components/schemas/Workload"
-
-    GetWorkloadResult:
-      type: object
-      description: The body returned when a single workload is read.
-      required: [workload]
-      properties:
-        workload:
-          $ref: "#/components/schemas/Workload"
-
-    ApplyWorkloadResult:
-      type: object
-      description: |
-        The body returned when a workload is applied.
-
-        Whether the workload was created or updated is the status code rather than a
-        field here, since that is what the code already distinguishes.
-      required: [workload]
-      properties:
-        workload:
-          $ref: "#/components/schemas/Workload"
-
-    DeleteWorkloadResult:
-      type: object
-      description: |
-        The body returned when a workload is marked for deletion, holding the
-        workload as it now stands.
-      required: [workload]
-      properties:
-        workload:
-          $ref: "#/components/schemas/Workload"
-
     ResolvedPort:
       type: object
       description: |
@@ -569,6 +676,87 @@ components:
             Whether the host port was allocated by the server rather than pinned by
             the specification. A dynamic port is stable for the life of the workload
             but may be reallocated if it turns out to be unusable.
+
+    VolumeMount:
+      type: object
+      description: |
+        A volume to mount, and the path at which the workload finds it.
+
+        `to` is written the same way for either runtime, so a workload moved between
+        them keeps its manifest. For a container it is the path inside the container.
+        For an exec workload it is resolved against that workload's own working
+        directory, which acts as its root, so `/var/lib/example` is reached at that
+        path by a process which starts there.
+
+        Either way the workload uses the path named here. Nothing tells it where the
+        volume sits on the host, which for an exec workload would be orca's own
+        layout.
+      required: [name, to]
+      properties:
+        name:
+          type: string
+          description: |
+            The volume to mount, which must already exist.
+          minLength: 1
+          maxLength: 63
+          examples: ["example-data"]
+        to:
+          type: string
+          description: |
+            Where the workload finds the volume. Must be an absolute path, and not
+            `/` itself.
+          minLength: 1
+          examples: ["/var/lib/example"]
+
+    VolumeSpec:
+      type: object
+      description: |
+        The desired state of a volume, which is no more than its name. A volume holds
+        data and has nothing to configure.
+      required: [version, name]
+      properties:
+        version:
+          type: string
+          description: The manifest schema version. Only "v1" is understood.
+          examples: ["v1"]
+        name:
+          type: string
+          description: The name that identifies the volume.
+          minLength: 1
+          maxLength: 63
+          examples: ["example-data"]
+
+    Volume:
+      type: object
+      description: |
+        A volume, together with the workloads currently mounting it.
+      required: [name, createdAt]
+      properties:
+        name:
+          type: string
+          description: The name that identifies the volume.
+        path:
+          type: string
+          description: |
+            Where the volume's data is on the host, which is what something taking a
+            backup needs.
+
+            Reported to a caller of this API and not to the workloads mounting the
+            volume. An operator asking orca where data lives has a reason to know; a
+            workload told where it sits inside orca's data directory could walk out of
+            it.
+        createdAt:
+          type: string
+          format: date-time
+          description: When the volume was created.
+        usedBy:
+          type: array
+          description: |
+            The names of the workloads whose specifications mount this volume. Empty
+            for a volume nothing is using, which is a volume that can be deleted
+            without forcing.
+          items:
+            type: string
 
     ExecSpec:
       type: object
@@ -769,3 +957,90 @@ components:
         error:
           type: string
           description: A human-readable description of what went wrong.
+
+    ListWorkloadsResult:
+      type: object
+      description: |
+        The body returned when workloads are listed.
+
+        An object rather than a bare array, so that something later reported about a
+        listing as a whole is a new field rather than a change of type.
+      required: [workloads]
+      properties:
+        workloads:
+          type: array
+          description: The workloads matching the request.
+          items:
+            $ref: "#/components/schemas/Workload"
+
+    GetWorkloadResult:
+      type: object
+      description: The body returned when a single workload is read.
+      required: [workload]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
+
+    ApplyWorkloadResult:
+      type: object
+      description: |
+        The body returned when a workload is applied.
+
+        Whether the workload was created or updated is the status code rather than a
+        field here, since that is what the code already distinguishes.
+      required: [workload]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
+
+    DeleteWorkloadResult:
+      type: object
+      description: |
+        The body returned when a workload is marked for deletion, holding the
+        workload as it now stands.
+      required: [workload]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
+
+    ListVolumesResult:
+      type: object
+      description: |
+        The body returned when volumes are listed.
+
+        An object rather than a bare array, so that something later reported about a
+        listing as a whole is a new field rather than a change of type.
+      required: [volumes]
+      properties:
+        volumes:
+          type: array
+          description: The volumes the server holds.
+          items:
+            $ref: "#/components/schemas/Volume"
+
+    GetVolumeResult:
+      type: object
+      description: The body returned when a single volume is read.
+      required: [volume]
+      properties:
+        volume:
+          $ref: "#/components/schemas/Volume"
+
+    CreateVolumeResult:
+      type: object
+      description: The body returned when a volume is created.
+      required: [volume]
+      properties:
+        volume:
+          $ref: "#/components/schemas/Volume"
+
+    DeleteVolumeResult:
+      type: object
+      description: |
+        The body returned when a volume is deleted, which has nothing in it yet.
+
+        It exists for two reasons. Every response this API gives is a JSON object, so
+        a caller decoding bodies needs no branch for the one operation that would
+        otherwise return nothing. And an object with no fields can gain one, where a
+        response with no body cannot gain anything without becoming a different kind
+        of response.

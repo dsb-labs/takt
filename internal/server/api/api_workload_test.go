@@ -556,10 +556,15 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 func do(t *testing.T, svc *MockWorkloadService, method, target string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
 
+	logger := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError}))
+
+	// The whole surface is registered even for a test about one resource, since the
+	// generated router serves one API and a request for an unregistered route would
+	// come back as a routing failure rather than as the handler's answer.
 	mux := http.NewServeMux()
-	api.NewWorkloadAPI(api.WorkloadAPIConfig{
-		Logger:    slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError})),
-		Workloads: svc,
+	api.New(api.Config{
+		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
+		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: NewMockVolumeService(t)}),
 	}).Register(mux)
 
 	req := httptest.NewRequest(method, target, body)

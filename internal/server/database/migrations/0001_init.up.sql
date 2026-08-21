@@ -25,3 +25,9 @@ CREATE TABLE IF NOT EXISTS workload_port (
 );
 
 CREATE INDEX IF NOT EXISTS idx_workload_port_workload_id ON workload_port (workload_id);
+
+CREATE TABLE IF NOT EXISTS volume (
+    id         TEXT NOT NULL PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);

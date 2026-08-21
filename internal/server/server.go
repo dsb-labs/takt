@@ -57,6 +57,7 @@ func Run(ctx context.Context, config Config) error {
 
 	workloads := database.NewWorkloadRepository(db)
 	ports := database.NewPortRepository(db)
+	volumes := database.NewVolumeRepository(db)
 	checker := health.New()
 
 	// The exec driver keeps its own trees under the data directory, beside the
@@ -108,8 +109,17 @@ func Run(ctx context.Context, config Config) error {
 		Notify:    reconcile.Notify,
 	})
 
+	volumeSvc := service.NewVolumeService(service.VolumeServiceConfig{
+		Logger:    logger,
+		Volumes:   volumes,
+		Directory: config.Data.Directory,
+	})
+
 	mux := http.NewServeMux()
-	api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}).Register(mux)
+	api.New(api.Config{
+		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
+		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: volumeSvc}),
+	}).Register(mux)
 
 	var handler http.Handler = mux
 	for _, middleware := range []func(http.Handler) http.Handler{

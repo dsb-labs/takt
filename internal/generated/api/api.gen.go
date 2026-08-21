@@ -187,6 +187,21 @@ type ContainerSpec struct {
 	Image string `json:"image"`
 }
 
+// CreateVolumeResult The body returned when a volume is created.
+type CreateVolumeResult struct {
+	// Volume A volume, together with the workloads currently mounting it.
+	Volume Volume `json:"volume"`
+}
+
+// DeleteVolumeResult The body returned when a volume is deleted, which has nothing in it yet.
+//
+// It exists for two reasons. Every response this API gives is a JSON object, so
+// a caller decoding bodies needs no branch for the one operation that would
+// otherwise return nothing. And an object with no fields can gain one, where a
+// response with no body cannot gain anything without becoming a different kind
+// of response.
+type DeleteVolumeResult = map[string]interface{}
+
 // DeleteWorkloadResult The body returned when a workload is marked for deletion, holding the
 // workload as it now stands.
 type DeleteWorkloadResult struct {
@@ -215,6 +230,12 @@ type ExecSpec struct {
 	//
 	// Examples: ["/usr/local/bin/backup","--target","/data"]
 	Command []string `json:"command"`
+}
+
+// GetVolumeResult The body returned when a single volume is read.
+type GetVolumeResult struct {
+	// Volume A volume, together with the workloads currently mounting it.
+	Volume Volume `json:"volume"`
 }
 
 // GetWorkloadResult The body returned when a single workload is read.
@@ -340,6 +361,15 @@ type InstanceHealth struct {
 // says not to run it again. Exited says only that it ended, which is what the
 // driver observed. Completed adds what the policy makes of that.
 type InstanceState string
+
+// ListVolumesResult The body returned when volumes are listed.
+//
+// An object rather than a bare array, so that something later reported about a
+// listing as a whole is a new field rather than a change of type.
+type ListVolumesResult struct {
+	// Volumes The volumes the server holds.
+	Volumes []Volume `json:"volumes"`
+}
 
 // ListWorkloadsResult The body returned when workloads are listed.
 //
@@ -483,6 +513,69 @@ type ScheduleSpec struct {
 	Overlap *OverlapPolicy `json:"overlap,omitempty"`
 }
 
+// Volume A volume, together with the workloads currently mounting it.
+type Volume struct {
+	// CreatedAt When the volume was created.
+	CreatedAt time.Time `json:"createdAt"`
+
+	// Name The name that identifies the volume.
+	Name string `json:"name"`
+
+	// Path Where the volume's data is on the host, which is what something taking a
+	// backup needs.
+	//
+	// Reported to a caller of this API and not to the workloads mounting the
+	// volume. An operator asking orca where data lives has a reason to know; a
+	// workload told where it sits inside orca's data directory could walk out of
+	// it.
+	Path *string `json:"path,omitempty"`
+
+	// UsedBy The names of the workloads whose specifications mount this volume. Empty
+	// for a volume nothing is using, which is a volume that can be deleted
+	// without forcing.
+	UsedBy *[]string `json:"usedBy,omitempty"`
+}
+
+// VolumeMount A volume to mount, and the path at which the workload finds it.
+//
+// `to` is written the same way for either runtime, so a workload moved between
+// them keeps its manifest. For a container it is the path inside the container.
+// For an exec workload it is resolved against that workload's own working
+// directory, which acts as its root, so `/var/lib/example` is reached at that
+// path by a process which starts there.
+//
+// Either way the workload uses the path named here. Nothing tells it where the
+// volume sits on the host, which for an exec workload would be orca's own
+// layout.
+type VolumeMount struct {
+	// Name The volume to mount, which must already exist.
+	//
+	//
+	// Examples: example-data
+	Name string `json:"name"`
+
+	// To Where the workload finds the volume. Must be an absolute path, and not
+	// `/` itself.
+	//
+	//
+	// Examples: /var/lib/example
+	To string `json:"to"`
+}
+
+// VolumeSpec The desired state of a volume, which is no more than its name. A volume holds
+// data and has nothing to configure.
+type VolumeSpec struct {
+	// Name The name that identifies the volume.
+	//
+	// Examples: example-data
+	Name string `json:"name"`
+
+	// Version The manifest schema version. Only "v1" is understood.
+	//
+	// Examples: v1
+	Version string `json:"version"`
+}
+
 // Workload A workload's desired state, together with the state observed from the driver
 // that runs it.
 type Workload struct {
@@ -616,6 +709,17 @@ type WorkloadSpec struct {
 	//
 	// Examples: v1
 	Version string `json:"version"`
+
+	// Volumes The volumes to mount, and where the workload finds each one.
+	//
+	// Each names a volume that must already exist. A specification naming one
+	// that does not is rejected, so a mistyped name is reported rather than
+	// quietly becoming a second empty volume.
+	//
+	// Like ports, these sit alongside the runtime blocks: where a workload
+	// keeps its data is a question about the workload rather than about the
+	// runtime it happens to use.
+	Volumes *[]VolumeMount `json:"volumes,omitempty"`
 }
 
 // WorkloadState The workload's overall state, derived from its instances. A workload is
@@ -628,6 +732,9 @@ type WorkloadSpec struct {
 // the server intends to fix it.
 type WorkloadState string
 
+// VolumeName defines model for VolumeName.
+type VolumeName = string
+
 // WorkloadName defines model for WorkloadName.
 type WorkloadName = string
 
@@ -639,6 +746,14 @@ type InternalServerError = ErrorResponse
 
 // NotFound The body returned for any unsuccessful request.
 type NotFound = ErrorResponse
+
+// DeleteVolumeParams defines parameters for DeleteVolume.
+type DeleteVolumeParams struct {
+	// Force Remove the volume even though a workload mounts it. The workload keeps
+	// running and its mount stops resolving, so this is for a volume whose
+	// workloads are known not to need it.
+	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+}
 
 // ListWorkloadsParams defines parameters for ListWorkloads.
 type ListWorkloadsParams struct {
@@ -659,6 +774,9 @@ type GetWorkloadLogsParams struct {
 	// a caller decide how much work the server does.
 	Tail *int `form:"tail,omitempty" json:"tail,omitempty"`
 }
+
+// CreateVolumeJSONRequestBody defines body for CreateVolume for application/json ContentType.
+type CreateVolumeJSONRequestBody = VolumeSpec
 
 // ApplyWorkloadJSONRequestBody defines body for ApplyWorkload for application/json ContentType.
 type ApplyWorkloadJSONRequestBody = WorkloadSpec
@@ -737,6 +855,64 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// ListVolumes List volumes
+	//
+	// Returns the volumes the server holds, each with the workloads currently
+	// mounting it.
+	//
+	// Corresponds with GET /api/v1/volumes (the `ListVolumes` operationId).
+	ListVolumes(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateVolumeWithBody Create a volume
+	//
+	// Creates a volume and the directory backing it.
+	//
+	// A volume has to exist before a workload can mount it, so that a mistyped
+	// name is reported rather than silently becoming a second empty volume.
+	// Creating one that already exists is rejected, because a volume holds data and
+	// an accidental second create should not read as success.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
+	CreateVolumeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateVolume Create a volume
+	//
+	// Creates a volume and the directory backing it.
+	//
+	// A volume has to exist before a workload can mount it, so that a mistyped
+	// name is reported rather than silently becoming a second empty volume.
+	// Creating one that already exists is rejected, because a volume holds data and
+	// an accidental second create should not read as success.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
+	CreateVolume(ctx context.Context, body CreateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteVolume Delete a volume and the data it holds
+	//
+	// Removes the volume and everything stored in it.
+	//
+	// A volume a workload mounts is refused rather than removed, and the response
+	// names the workloads holding it. That is what makes deletion deliberate: a
+	// volume outlives the workloads using it, so nothing else in orca will ever
+	// remove one.
+	//
+	// Deletion is synchronous, unlike a workload's. There is nothing running to
+	// wind down, only a directory to remove.
+	//
+	// Corresponds with DELETE /api/v1/volumes/{name} (the `DeleteVolume` operationId).
+	DeleteVolume(ctx context.Context, name VolumeName, params *DeleteVolumeParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetVolume Get a single volume
+	//
+	// Returns the volume with the given name, including the workloads mounting it.
+	//
+	// Corresponds with GET /api/v1/volumes/{name} (the `GetVolume` operationId).
+	GetVolume(ctx context.Context, name VolumeName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListWorkloads List workloads
 	//
 	// Returns the workloads known to the server, with the observed state of each
@@ -803,6 +979,114 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/workloads/{name}/logs (the `GetWorkloadLogs` operationId).
 	GetWorkloadLogs(ctx context.Context, name WorkloadName, params *GetWorkloadLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// ListVolumes List volumes
+//
+// Returns the volumes the server holds, each with the workloads currently
+// mounting it.
+//
+// Corresponds with GET /api/v1/volumes (the `ListVolumes` operationId).
+func (c *Client) ListVolumes(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListVolumesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateVolumeWithBody Create a volume
+//
+// Creates a volume and the directory backing it.
+//
+// A volume has to exist before a workload can mount it, so that a mistyped
+// name is reported rather than silently becoming a second empty volume.
+// Creating one that already exists is rejected, because a volume holds data and
+// an accidental second create should not read as success.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
+func (c *Client) CreateVolumeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateVolumeRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateVolume Create a volume
+//
+// Creates a volume and the directory backing it.
+//
+// A volume has to exist before a workload can mount it, so that a mistyped
+// name is reported rather than silently becoming a second empty volume.
+// Creating one that already exists is rejected, because a volume holds data and
+// an accidental second create should not read as success.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
+func (c *Client) CreateVolume(ctx context.Context, body CreateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateVolumeRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteVolume Delete a volume and the data it holds
+//
+// Removes the volume and everything stored in it.
+//
+// A volume a workload mounts is refused rather than removed, and the response
+// names the workloads holding it. That is what makes deletion deliberate: a
+// volume outlives the workloads using it, so nothing else in orca will ever
+// remove one.
+//
+// Deletion is synchronous, unlike a workload's. There is nothing running to
+// wind down, only a directory to remove.
+//
+// Corresponds with DELETE /api/v1/volumes/{name} (the `DeleteVolume` operationId).
+func (c *Client) DeleteVolume(ctx context.Context, name VolumeName, params *DeleteVolumeParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteVolumeRequest(c.Server, name, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetVolume Get a single volume
+//
+// Returns the volume with the given name, including the workloads mounting it.
+//
+// Corresponds with GET /api/v1/volumes/{name} (the `GetVolume` operationId).
+func (c *Client) GetVolume(ctx context.Context, name VolumeName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetVolumeRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 // ListWorkloads List workloads
@@ -930,6 +1214,168 @@ func (c *Client) GetWorkloadLogs(ctx context.Context, name WorkloadName, params 
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewListVolumesRequest constructs an http.Request for the ListVolumes method
+func NewListVolumesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/volumes")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateVolumeRequest calls the generic CreateVolume builder with application/json body
+func NewCreateVolumeRequest(server string, body CreateVolumeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateVolumeRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateVolumeRequestWithBody constructs an http.Request for the CreateVolume method, with any body, and a specified content type
+func NewCreateVolumeRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/volumes")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteVolumeRequest constructs an http.Request for the DeleteVolume method
+func NewDeleteVolumeRequest(server string, name VolumeName, params *DeleteVolumeParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/volumes/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Force != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "force", *params.Force, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetVolumeRequest constructs an http.Request for the GetVolume method
+func NewGetVolumeRequest(server string, name VolumeName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/volumes/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 // NewListWorkloadsRequest constructs an http.Request for the ListWorkloads method
@@ -1206,6 +1652,70 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// ListVolumesWithResponse List volumes
+	//
+	// Returns the volumes the server holds, each with the workloads currently
+	// mounting it.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/volumes (the `ListVolumes` operationId).
+	ListVolumesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVolumesResponse, error)
+
+	// CreateVolumeWithBodyWithResponse Create a volume
+	//
+	// Creates a volume and the directory backing it.
+	//
+	// A volume has to exist before a workload can mount it, so that a mistyped
+	// name is reported rather than silently becoming a second empty volume.
+	// Creating one that already exists is rejected, because a volume holds data and
+	// an accidental second create should not read as success.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
+	CreateVolumeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateVolumeResponse, error)
+
+	// CreateVolumeWithResponse Create a volume
+	//
+	// Creates a volume and the directory backing it.
+	//
+	// A volume has to exist before a workload can mount it, so that a mistyped
+	// name is reported rather than silently becoming a second empty volume.
+	// Creating one that already exists is rejected, because a volume holds data and
+	// an accidental second create should not read as success.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
+	CreateVolumeWithResponse(ctx context.Context, body CreateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateVolumeResponse, error)
+
+	// DeleteVolumeWithResponse Delete a volume and the data it holds
+	//
+	// Removes the volume and everything stored in it.
+	//
+	// A volume a workload mounts is refused rather than removed, and the response
+	// names the workloads holding it. That is what makes deletion deliberate: a
+	// volume outlives the workloads using it, so nothing else in orca will ever
+	// remove one.
+	//
+	// Deletion is synchronous, unlike a workload's. There is nothing running to
+	// wind down, only a directory to remove.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/volumes/{name} (the `DeleteVolume` operationId).
+	DeleteVolumeWithResponse(ctx context.Context, name VolumeName, params *DeleteVolumeParams, reqEditors ...RequestEditorFn) (*DeleteVolumeResponse, error)
+
+	// GetVolumeWithResponse Get a single volume
+	//
+	// Returns the volume with the given name, including the workloads mounting it.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/volumes/{name} (the `GetVolume` operationId).
+	GetVolumeWithResponse(ctx context.Context, name VolumeName, reqEditors ...RequestEditorFn) (*GetVolumeResponse, error)
+
 	// ListWorkloadsWithResponse List workloads
 	//
 	// Returns the workloads known to the server, with the observed state of each
@@ -1280,6 +1790,233 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /api/v1/workloads/{name}/logs (the `GetWorkloadLogs` operationId).
 	GetWorkloadLogsWithResponse(ctx context.Context, name WorkloadName, params *GetWorkloadLogsParams, reqEditors ...RequestEditorFn) (*GetWorkloadLogsResponse, error)
+}
+
+type ListVolumesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ListVolumesResult
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListVolumesResponse) GetJSON200() *ListVolumesResult {
+	return r.JSON200
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListVolumesResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListVolumesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListVolumesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListVolumesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListVolumesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateVolumeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *CreateVolumeResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateVolumeResponse) GetJSON201() *CreateVolumeResult {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateVolumeResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CreateVolumeResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r CreateVolumeResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateVolumeResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateVolumeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateVolumeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateVolumeResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteVolumeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeleteVolumeResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DeleteVolumeResponse) GetJSON200() *DeleteVolumeResult {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeleteVolumeResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DeleteVolumeResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r DeleteVolumeResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteVolumeResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteVolumeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteVolumeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteVolumeResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetVolumeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetVolumeResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetVolumeResponse) GetJSON200() *GetVolumeResult {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetVolumeResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetVolumeResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetVolumeResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetVolumeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetVolumeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetVolumeResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type ListWorkloadsResponse struct {
@@ -1578,6 +2315,100 @@ func (r GetWorkloadLogsResponse) ContentType() string {
 	return ""
 }
 
+// ListVolumesWithResponse List volumes
+//
+// Returns the volumes the server holds, each with the workloads currently
+// mounting it.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/volumes (the `ListVolumes` operationId).
+func (c *ClientWithResponses) ListVolumesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVolumesResponse, error) {
+	rsp, err := c.ListVolumes(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListVolumesResponse(rsp)
+}
+
+// CreateVolumeWithBodyWithResponse Create a volume
+//
+// Creates a volume and the directory backing it.
+//
+// A volume has to exist before a workload can mount it, so that a mistyped
+// name is reported rather than silently becoming a second empty volume.
+// Creating one that already exists is rejected, because a volume holds data and
+// an accidental second create should not read as success.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
+func (c *ClientWithResponses) CreateVolumeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateVolumeResponse, error) {
+	rsp, err := c.CreateVolumeWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateVolumeResponse(rsp)
+}
+
+// CreateVolumeWithResponse Create a volume
+//
+// Creates a volume and the directory backing it.
+//
+// A volume has to exist before a workload can mount it, so that a mistyped
+// name is reported rather than silently becoming a second empty volume.
+// Creating one that already exists is rejected, because a volume holds data and
+// an accidental second create should not read as success.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
+func (c *ClientWithResponses) CreateVolumeWithResponse(ctx context.Context, body CreateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateVolumeResponse, error) {
+	rsp, err := c.CreateVolume(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateVolumeResponse(rsp)
+}
+
+// DeleteVolumeWithResponse Delete a volume and the data it holds
+//
+// Removes the volume and everything stored in it.
+//
+// A volume a workload mounts is refused rather than removed, and the response
+// names the workloads holding it. That is what makes deletion deliberate: a
+// volume outlives the workloads using it, so nothing else in orca will ever
+// remove one.
+//
+// Deletion is synchronous, unlike a workload's. There is nothing running to
+// wind down, only a directory to remove.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/volumes/{name} (the `DeleteVolume` operationId).
+func (c *ClientWithResponses) DeleteVolumeWithResponse(ctx context.Context, name VolumeName, params *DeleteVolumeParams, reqEditors ...RequestEditorFn) (*DeleteVolumeResponse, error) {
+	rsp, err := c.DeleteVolume(ctx, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteVolumeResponse(rsp)
+}
+
+// GetVolumeWithResponse Get a single volume
+//
+// Returns the volume with the given name, including the workloads mounting it.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/volumes/{name} (the `GetVolume` operationId).
+func (c *ClientWithResponses) GetVolumeWithResponse(ctx context.Context, name VolumeName, reqEditors ...RequestEditorFn) (*GetVolumeResponse, error) {
+	rsp, err := c.GetVolume(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetVolumeResponse(rsp)
+}
+
 // ListWorkloadsWithResponse List workloads
 //
 // Returns the workloads known to the server, with the observed state of each
@@ -1687,6 +2518,173 @@ func (c *ClientWithResponses) GetWorkloadLogsWithResponse(ctx context.Context, n
 		return nil, err
 	}
 	return ParseGetWorkloadLogsResponse(rsp)
+}
+
+// ParseListVolumesResponse parses an HTTP response from a ListVolumesWithResponse call
+func ParseListVolumesResponse(rsp *http.Response) (*ListVolumesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListVolumesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ListVolumesResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateVolumeResponse parses an HTTP response from a CreateVolumeWithResponse call
+func ParseCreateVolumeResponse(rsp *http.Response) (*CreateVolumeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateVolumeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest CreateVolumeResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteVolumeResponse parses an HTTP response from a DeleteVolumeWithResponse call
+func ParseDeleteVolumeResponse(rsp *http.Response) (*DeleteVolumeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteVolumeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeleteVolumeResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetVolumeResponse parses an HTTP response from a GetVolumeWithResponse call
+func ParseGetVolumeResponse(rsp *http.Response) (*GetVolumeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetVolumeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetVolumeResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParseListWorkloadsResponse parses an HTTP response from a ListWorkloadsWithResponse call
@@ -1912,6 +2910,18 @@ func ParseGetWorkloadLogsResponse(rsp *http.Response) (*GetWorkloadLogsResponse,
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListVolumes List volumes
+	// (GET /api/v1/volumes)
+	ListVolumes(w http.ResponseWriter, r *http.Request)
+	// CreateVolume Create a volume
+	// (POST /api/v1/volumes)
+	CreateVolume(w http.ResponseWriter, r *http.Request)
+	// DeleteVolume Delete a volume and the data it holds
+	// (DELETE /api/v1/volumes/{name})
+	DeleteVolume(w http.ResponseWriter, r *http.Request, name VolumeName, params DeleteVolumeParams)
+	// GetVolume Get a single volume
+	// (GET /api/v1/volumes/{name})
+	GetVolume(w http.ResponseWriter, r *http.Request, name VolumeName)
 	// ListWorkloads List workloads
 	// (GET /api/v1/workloads)
 	ListWorkloads(w http.ResponseWriter, r *http.Request, params ListWorkloadsParams)
@@ -1937,6 +2947,102 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListVolumes operation middleware
+func (siw *ServerInterfaceWrapper) ListVolumes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListVolumes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateVolume operation middleware
+func (siw *ServerInterfaceWrapper) CreateVolume(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateVolume(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteVolume operation middleware
+func (siw *ServerInterfaceWrapper) DeleteVolume(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name VolumeName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteVolumeParams
+
+	// ------------- Optional query parameter "force" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "force", r.URL.Query(), &params.Force, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "force"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "force", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteVolume(w, r, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetVolume operation middleware
+func (siw *ServerInterfaceWrapper) GetVolume(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name VolumeName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetVolume(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListWorkloads operation middleware
 func (siw *ServerInterfaceWrapper) ListWorkloads(w http.ResponseWriter, r *http.Request) {
@@ -2216,6 +3322,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}", wrapper.GetWorkload)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/workloads/{name}", wrapper.ApplyWorkload)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}/logs", wrapper.GetWorkloadLogs)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/volumes", wrapper.ListVolumes)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/volumes", wrapper.CreateVolume)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.DeleteVolume)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.GetVolume)
 
 	return m
 }
@@ -2225,6 +3335,228 @@ type BadRequestJSONResponse ErrorResponse
 type InternalServerErrorJSONResponse ErrorResponse
 
 type NotFoundJSONResponse ErrorResponse
+
+type ListVolumesRequestObject struct {
+}
+
+type ListVolumesResponseObject interface {
+	VisitListVolumesResponse(w http.ResponseWriter) error
+}
+
+type ListVolumes200JSONResponse ListVolumesResult
+
+func (response ListVolumes200JSONResponse) VisitListVolumesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVolumes500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response ListVolumes500JSONResponse) VisitListVolumesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVolumeRequestObject struct {
+	Body *CreateVolumeJSONRequestBody
+}
+
+type CreateVolumeResponseObject interface {
+	VisitCreateVolumeResponse(w http.ResponseWriter) error
+}
+
+type CreateVolume201JSONResponse CreateVolumeResult
+
+func (response CreateVolume201JSONResponse) VisitCreateVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVolume400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateVolume400JSONResponse) VisitCreateVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVolume409JSONResponse ErrorResponse
+
+func (response CreateVolume409JSONResponse) VisitCreateVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateVolume500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response CreateVolume500JSONResponse) VisitCreateVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVolumeRequestObject struct {
+	Name   VolumeName `json:"name"`
+	Params DeleteVolumeParams
+}
+
+type DeleteVolumeResponseObject interface {
+	VisitDeleteVolumeResponse(w http.ResponseWriter) error
+}
+
+type DeleteVolume200JSONResponse DeleteVolumeResult
+
+func (response DeleteVolume200JSONResponse) VisitDeleteVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVolume404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteVolume404JSONResponse) VisitDeleteVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVolume409JSONResponse ErrorResponse
+
+func (response DeleteVolume409JSONResponse) VisitDeleteVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVolume500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response DeleteVolume500JSONResponse) VisitDeleteVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVolumeRequestObject struct {
+	Name VolumeName `json:"name"`
+}
+
+type GetVolumeResponseObject interface {
+	VisitGetVolumeResponse(w http.ResponseWriter) error
+}
+
+type GetVolume200JSONResponse GetVolumeResult
+
+func (response GetVolume200JSONResponse) VisitGetVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVolume404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetVolume404JSONResponse) VisitGetVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVolume500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetVolume500JSONResponse) VisitGetVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type ListWorkloadsRequestObject struct {
 	Params ListWorkloadsParams
@@ -2543,6 +3875,18 @@ func (response GetWorkloadLogs500JSONResponse) VisitGetWorkloadLogsResponse(w ht
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ListVolumes List volumes
+	// (GET /api/v1/volumes)
+	ListVolumes(ctx context.Context, request ListVolumesRequestObject) (ListVolumesResponseObject, error)
+	// CreateVolume Create a volume
+	// (POST /api/v1/volumes)
+	CreateVolume(ctx context.Context, request CreateVolumeRequestObject) (CreateVolumeResponseObject, error)
+	// DeleteVolume Delete a volume and the data it holds
+	// (DELETE /api/v1/volumes/{name})
+	DeleteVolume(ctx context.Context, request DeleteVolumeRequestObject) (DeleteVolumeResponseObject, error)
+	// GetVolume Get a single volume
+	// (GET /api/v1/volumes/{name})
+	GetVolume(ctx context.Context, request GetVolumeRequestObject) (GetVolumeResponseObject, error)
 	// ListWorkloads List workloads
 	// (GET /api/v1/workloads)
 	ListWorkloads(ctx context.Context, request ListWorkloadsRequestObject) (ListWorkloadsResponseObject, error)
@@ -2597,6 +3941,114 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListVolumes operation middleware
+func (sh *strictHandler) ListVolumes(w http.ResponseWriter, r *http.Request) {
+	var request ListVolumesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListVolumes(ctx, request.(ListVolumesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListVolumes")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListVolumesResponseObject); ok {
+		if err := validResponse.VisitListVolumesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateVolume operation middleware
+func (sh *strictHandler) CreateVolume(w http.ResponseWriter, r *http.Request) {
+	var request CreateVolumeRequestObject
+
+	var body CreateVolumeJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateVolume(ctx, request.(CreateVolumeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateVolume")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateVolumeResponseObject); ok {
+		if err := validResponse.VisitCreateVolumeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteVolume operation middleware
+func (sh *strictHandler) DeleteVolume(w http.ResponseWriter, r *http.Request, name VolumeName, params DeleteVolumeParams) {
+	var request DeleteVolumeRequestObject
+
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteVolume(ctx, request.(DeleteVolumeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteVolume")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteVolumeResponseObject); ok {
+		if err := validResponse.VisitDeleteVolumeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetVolume operation middleware
+func (sh *strictHandler) GetVolume(w http.ResponseWriter, r *http.Request, name VolumeName) {
+	var request GetVolumeRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetVolume(ctx, request.(GetVolumeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetVolume")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetVolumeResponseObject); ok {
+		if err := validResponse.VisitGetVolumeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListWorkloads operation middleware

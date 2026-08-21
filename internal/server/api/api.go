@@ -9,20 +9,64 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/dsb-labs/orca/internal/generated/api"
 )
 
-// The ErrorResponse type is the JSON shape returned for error responses, and
-// implements the error interface so that clients can return it directly.
-type ErrorResponse struct {
-	// The HTTP status code. Set when writing the response; not sent on the wire.
-	Status int `json:"-"`
-	// The human-readable error message.
-	Message string `json:"error"`
-}
+type (
+	// The ErrorResponse type is the JSON shape returned for error responses, and
+	// implements the error interface so that clients can return it directly.
+	ErrorResponse struct {
+		// The HTTP status code. Set when writing the response; not sent on the wire.
+		Status int `json:"-"`
+		// The human-readable error message.
+		Message string `json:"error"`
+	}
+
+	// The API type is the whole HTTP surface, assembled from the types serving each
+	// resource.
+	//
+	// The wire format describes one API, so the generated code describes one
+	// interface covering every operation in it. Each resource still gets a type of
+	// its own, holding only the service it needs, and embedding them here is what
+	// makes the set of them satisfy that interface. None of them has to know the
+	// others exist.
+	API struct {
+		*WorkloadAPI
+		*VolumeAPI
+	}
+
+	// The Config type contains fields used to construct an API.
+	Config struct {
+		// The endpoints serving workloads.
+		Workloads *WorkloadAPI
+		// The endpoints serving volumes.
+		Volumes *VolumeAPI
+	}
+)
 
 // Error returns the error message.
 func (e ErrorResponse) Error() string {
 	return e.Message
+}
+
+// New returns an API serving each of the given resources.
+func New(config Config) *API {
+	return &API{
+		WorkloadAPI: config.Workloads,
+		VolumeAPI:   config.Volumes,
+	}
+}
+
+// Register the HTTP endpoints onto the given http.ServeMux.
+//
+// The routes themselves come from the generated handler, which is mounted onto the
+// caller's mux rather than one of its own so that the server keeps ownership of
+// routing and can wrap the whole surface in its own middleware.
+func (a *API) Register(mux *http.ServeMux) {
+	api.HandlerWithOptions(api.NewStrictHandler(a, nil), api.StdHTTPServerOptions{
+		BaseRouter: mux,
+	})
 }
 
 // The largest request body the server will read. A workload specification is a
