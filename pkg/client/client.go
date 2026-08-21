@@ -18,6 +18,16 @@ import (
 var (
 	// ErrWorkloadNotFound is returned when no workload exists with the given name.
 	ErrWorkloadNotFound = errors.New("workload not found")
+	// ErrVolumeNotFound is returned when no volume exists with the given name.
+	ErrVolumeNotFound = errors.New("volume not found")
+	// ErrVolumeExists is returned when a volume already holds the given name.
+	ErrVolumeExists = errors.New("volume already exists")
+	// ErrVolumeInUse is returned when a volume a workload mounts is deleted without
+	// being forced.
+	ErrVolumeInUse = errors.New("volume is in use")
+	// ErrInvalidVolumeName is returned when a name is not usable as a single segment
+	// of a request path.
+	ErrInvalidVolumeName = errors.New("invalid volume name")
 )
 
 type (

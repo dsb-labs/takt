@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -33,6 +34,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 		SetupMocks   func(*MockWorkloadService)
 		ExpectStatus int
 		Assert       func(*testing.T, generated.Workload)
+		AssertBody   func(*testing.T, string)
 	}{
 		{
 			Name: "creates a new workload",
@@ -108,6 +110,21 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			ExpectStatus: http.StatusBadRequest,
 		},
 		{
+			Name: "reports a volume the workload mounts but does not exist",
+			Path: "/api/v1/workloads/example",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Workload{}, false, fmt.Errorf("%w: example-data", service.ErrVolumeNotFound)).Once()
+			},
+			// The caller's to fix, and the message names the volume: an operator who
+			// mistyped one is otherwise told only that something went wrong.
+			ExpectStatus: http.StatusBadRequest,
+			AssertBody: func(t *testing.T, body string) {
+				assert.Contains(t, body, "example-data")
+			},
+		},
+		{
 			Name: "reports a workload that is being deleted",
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
@@ -163,6 +180,10 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 
 			resp := do(t, svc, http.MethodPut, tc.Path, bytes.NewReader(body))
 			require.Equal(t, tc.ExpectStatus, resp.Code)
+
+			if tc.AssertBody != nil {
+				tc.AssertBody(t, resp.Body.String())
+			}
 
 			if tc.Assert == nil {
 				return
