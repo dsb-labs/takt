@@ -16,6 +16,7 @@ import (
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 
@@ -113,6 +114,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		},
 		&container.HostConfig{
 			PortBindings: bindings,
+			Mounts:       mounts(w.Volumes),
 		},
 		nil, nil,
 		containerName(w.Name, w.Version),
@@ -443,6 +445,30 @@ func instancePorts(ports []container.Port) []driver.Port {
 	}
 
 	return published
+}
+
+// mounts converts resolved volumes into the bind mounts docker expects.
+//
+// A bind rather than a docker named volume, because the exec runtime needs a real path
+// on the host whatever this driver does, and one mechanism serving both runtimes means
+// a volume means the same thing wherever it is mounted. The cost is that the daemon
+// has to share this filesystem, so a volume cannot be mounted into a container on a
+// remote daemon.
+func mounts(volumes []driver.Volume) []mount.Mount {
+	if len(volumes) == 0 {
+		return nil
+	}
+
+	out := make([]mount.Mount, 0, len(volumes))
+	for _, volume := range volumes {
+		out = append(out, mount.Mount{
+			Type:   mount.TypeBind,
+			Source: volume.Host,
+			Target: volume.Target,
+		})
+	}
+
+	return out
 }
 
 // portBindings converts resolved ports into the exposed set and host bindings docker

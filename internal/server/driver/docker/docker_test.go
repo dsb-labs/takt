@@ -9,6 +9,7 @@ import (
 
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -49,6 +50,35 @@ func TestDriver_Start(t *testing.T) {
 						return len(bindings) == 1 && bindings[0].HostPort == "4141"
 					}),
 					mock.Anything, mock.Anything, "orca-example-2",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			Name: "mounts the workload's volumes",
+			Workload: withVolumes(
+				workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
+				driver.Volume{Name: "example-data", Host: "/var/lib/orca/volumes/abc", Target: "/var/lib/example"},
+			),
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						// A bind of the directory orca owns, rather than a docker
+						// named volume: the exec runtime needs a real path anyway, so
+						// one mechanism serves both.
+						return len(host.Mounts) == 1 &&
+							host.Mounts[0].Type == mount.TypeBind &&
+							host.Mounts[0].Source == "/var/lib/orca/volumes/abc" &&
+							host.Mounts[0].Target == "/var/lib/example"
+					}),
+					mock.Anything, mock.Anything, "orca-example-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -468,6 +498,12 @@ func workload(name string, version int, hash string, spec api.ContainerSpec, por
 // rather than inside it.
 func withEnv(w driver.Workload, env map[string]string) driver.Workload {
 	w.Env = env
+
+	return w
+}
+
+func withVolumes(w driver.Workload, volumes ...driver.Volume) driver.Workload {
+	w.Volumes = volumes
 
 	return w
 }

@@ -85,6 +85,8 @@ type (
 		Env map[string]string
 		// The ports the work publishes, each already resolved to a host port.
 		Ports []Port
+		// The volumes the work mounts, each already resolved to a path on the host.
+		Volumes []Volume
 		// Arbitrary key-value pairs the operator attached to the workload.
 		Labels map[string]string
 		// The specification the workload was stored with, which carries the runtime
@@ -130,6 +132,22 @@ type (
 		Container int
 		// The host port that reaches it.
 		Host int
+	}
+
+	// The Volume type describes a volume a workload mounts, with the path it lives
+	// at on the host already resolved.
+	//
+	// A driver is given the path rather than the name, so that nothing about how a
+	// volume is stored has to be understood by the runtimes that mount one.
+	Volume struct {
+		// The name that identifies the volume.
+		Name string
+		// Where the volume's data is on the host.
+		Host string
+		// Where the workload finds it. What that means is the driver's business: a
+		// path inside a container, or one resolved against an exec workload's own
+		// working directory.
+		Target string
 	}
 
 	// The Event type reports that a driver's view of an instance has changed, so
@@ -181,6 +199,20 @@ func NewWorkload(row database.Workload) (Workload, error) {
 			}
 
 			w.Ports = append(w.Ports, Port{Container: mapping.To, Host: *mapping.From})
+		}
+	}
+
+	if spec.Volumes != nil {
+		w.Volumes = make([]Volume, 0, len(*spec.Volumes))
+		for _, mount := range *spec.Volumes {
+			// Unresolved for the same reason a port can be: the server had not
+			// finished settling the workload. Mounting nothing would be worse than
+			// waiting, since the workload would start and write somewhere else.
+			if mount.From == nil {
+				continue
+			}
+
+			w.Volumes = append(w.Volumes, Volume{Name: mount.Name, Host: *mount.From, Target: mount.To})
 		}
 	}
 

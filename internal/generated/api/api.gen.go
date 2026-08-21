@@ -539,15 +539,34 @@ type Volume struct {
 // VolumeMount A volume to mount, and the path at which the workload finds it.
 //
 // `to` is written the same way for either runtime, so a workload moved between
-// them keeps its manifest. For a container it is the path inside the container.
-// For an exec workload it is resolved against that workload's own working
-// directory, which acts as its root, so `/var/lib/example` is reached at that
-// path by a process which starts there.
+// them keeps its manifest. Where it resolves to differs, because a container has
+// a filesystem of its own and a process on the host does not.
 //
-// Either way the workload uses the path named here. Nothing tells it where the
-// volume sits on the host, which for an exec workload would be orca's own
-// layout.
+// For a container it is the path inside the container, and the workload uses it
+// as written.
+//
+// For an exec workload it is placed inside that workload's working directory, so
+// `to: /var/lib/example` puts the volume at `var/lib/example` relative to where
+// the process starts. **Such a workload has to reach it by the relative path.**
+// Making the absolute one resolve there would need the process to be confined to
+// its directory, which needs privileges orca does not have, so an absolute path
+// in a command reaches the host's own root instead.
+//
+// Either way nothing tells the workload where the volume sits on the host, which
+// for an exec workload would be orca's own layout.
 type VolumeMount struct {
+	// From Where the volume's data is on the host, resolved by the server from the
+	// named volume. Ignored when a specification is submitted.
+	//
+	// It is stored with the workload, as an allocated host port is, so that the
+	// runtime is given a path rather than a name to look up. Because it is part
+	// of the stored specification it is covered by the hash, so a volume whose
+	// path changed replaces the instances bound to the old one.
+	//
+	//
+	// Examples: /home/user/.local/share/orca/volumes/cvhs0dq0kqj4c9r8m1a0
+	From *string `json:"from,omitempty"`
+
 	// Name The volume to mount, which must already exist.
 	//
 	//

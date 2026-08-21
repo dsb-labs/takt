@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -56,6 +57,9 @@ var (
 	// ErrInvalidWorkloadID is returned when a workload's identifier could not be used
 	// as a directory beneath the driver's root.
 	ErrInvalidWorkloadID = errors.New("workload identifier is not usable as a directory")
+	// ErrInvalidMount is returned when a volume could not be placed inside the
+	// workload's working directory.
+	ErrInvalidMount = errors.New("volume cannot be mounted there")
 	// ErrUnknownWorkload is returned when the driver has no record of a workload it
 	// was asked about by name.
 	ErrUnknownWorkload = errors.New("driver has no record of the workload")
@@ -160,6 +164,10 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 
 	if err = os.MkdirAll(recordPath, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create state directory: %w", err)
+	}
+
+	if err = mount(filepath.Join(workload, workingDir), w.Volumes); err != nil {
+		return "", err
 	}
 
 	output, err := os.OpenFile(filepath.Join(workload, outputFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
@@ -342,6 +350,62 @@ func (d *Driver) Stop(ctx context.Context, id, workload string) error {
 	}
 
 	d.logger.With("workload", workload).Debug("workload stopped")
+
+	return nil
+}
+
+// mount places each of the workload's volumes inside its working directory.
+//
+// The volume ends up at the mount path taken as relative to that directory, so a
+// workload reaches it by the relative path rather than by the absolute one its manifest
+// names. Resolving the absolute path there would mean confining the process to its own
+// directory, which needs privileges orca does not have.
+//
+// A symlink rather than a bind mount, because mounting requires privileges orca does
+// not have: it runs as an ordinary user, and a workload reads and writes through a link
+// perfectly well. The links are made fresh on every start, since stopping the workload
+// removed the directory holding the last set. The link is the disposable part — the
+// volume it points at is not.
+//
+// The target path comes from a specification submitted over the API, so it is placed
+// through an os.Root opened on the working directory. Every name is then resolved by
+// the kernel relative to that directory and one reaching outside it fails, rather than
+// the containment depending on this function cleaning the path correctly.
+func mount(cwd string, volumes []driver.Volume) error {
+	if len(volumes) == 0 {
+		return nil
+	}
+
+	root, err := os.OpenRoot(cwd)
+	if err != nil {
+		return fmt.Errorf("failed to open workload directory: %w", err)
+	}
+
+	defer root.Close()
+
+	for _, volume := range volumes {
+		// The working directory is the workload's root, so a leading slash means that
+		// directory rather than the host's root. Cleaning first collapses a path
+		// trying to climb out into one that cannot, and os.Root refuses what is left
+		// if it still escapes.
+		target := strings.TrimPrefix(filepath.Clean("/"+volume.Target), "/")
+		if target == "" {
+			return fmt.Errorf("%w: volume %q names no path to mount at", ErrInvalidMount, volume.Name)
+		}
+
+		if parent := filepath.Dir(target); parent != "." {
+			if err = root.MkdirAll(parent, 0o700); err != nil {
+				return fmt.Errorf("%w: volume %q: %w", ErrInvalidMount, volume.Name, err)
+			}
+		}
+
+		// The link points outside the root, which is the whole point: a volume
+		// outlives the workload, so it cannot live in a directory that is removed
+		// with it.
+		if err = root.Symlink(volume.Host, target); err != nil {
+			return fmt.Errorf("%w: volume %q: %w", ErrInvalidMount, volume.Name, err)
+		}
+	}
 
 	return nil
 }

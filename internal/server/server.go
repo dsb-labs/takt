@@ -96,6 +96,12 @@ func Run(ctx context.Context, config Config) error {
 		Interval: config.Reconcile.Interval,
 	})
 
+	volumeSvc := service.NewVolumeService(service.VolumeServiceConfig{
+		Logger:    logger,
+		Volumes:   volumes,
+		Directory: config.Data.Directory,
+	})
+
 	svc = service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger: logger,
 		Drivers: map[string]service.Driver{
@@ -104,15 +110,10 @@ func Run(ctx context.Context, config Config) error {
 		},
 		Workloads: workloads,
 		Ports:     ports,
+		Volumes:   volumeSvc,
 		Allocator: port.New(port.Config{Min: config.Ports.Min, Max: config.Ports.Max}),
 		Checker:   checker,
 		Notify:    reconcile.Notify,
-	})
-
-	volumeSvc := service.NewVolumeService(service.VolumeServiceConfig{
-		Logger:    logger,
-		Volumes:   volumes,
-		Directory: config.Data.Directory,
 	})
 
 	mux := http.NewServeMux()

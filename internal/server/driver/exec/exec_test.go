@@ -594,3 +594,127 @@ func freePID(t *testing.T) int {
 
 	return cmd.Process.Pid
 }
+
+func TestDriver_Start_MountsVolumes(t *testing.T) {
+	t.Parallel()
+
+	t.Run("places a volume at the path the workload names", func(t *testing.T) {
+		t.Parallel()
+
+		// The workload reaches its volume at the path from its own manifest, resolved
+		// against the working directory it starts in. Nothing tells it where the
+		// volume really is.
+		d, root := newDriver(t)
+		volume := newVolume(t, "example-data")
+
+		// The command writes through a relative path. The working directory is where
+		// the volume was placed, and an absolute path in a command reaches the host's
+		// root rather than the workload's.
+		w := workload("example", 1, "hash-one", "echo written > var/lib/example/file")
+		w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: "/var/lib/example"}}
+
+		_, err := d.Start(t.Context(), w)
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		// The file landed in the volume rather than in the working directory.
+		contents, err := os.ReadFile(filepath.Join(volume, "file"))
+		require.NoError(t, err)
+		assert.Equal(t, "written\n", string(contents))
+
+		link := filepath.Join(root, "workloads", testID, "1", "cwd", "var", "lib", "example")
+		target, err := os.Readlink(link)
+		require.NoError(t, err, "the volume was not linked into the working directory")
+		assert.Equal(t, volume, target)
+	})
+
+	t.Run("creates the directories leading to a nested path", func(t *testing.T) {
+		t.Parallel()
+
+		d, root := newDriver(t)
+		volume := newVolume(t, "example-data")
+
+		w := workload("example", 1, "hash-one", "exit 0")
+		w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: "/a/b/c/deep"}}
+
+		_, err := d.Start(t.Context(), w)
+		require.NoError(t, err)
+
+		_, err = os.Lstat(filepath.Join(root, "workloads", testID, "1", "cwd", "a", "b", "c", "deep"))
+		assert.NoError(t, err)
+	})
+
+	t.Run("keeps a volume inside the working directory", func(t *testing.T) {
+		t.Parallel()
+
+		// The target comes from a specification submitted over the API. A path
+		// climbing out of the working directory is resolved against it rather than
+		// escaping, so a manifest cannot direct orca to write elsewhere on the host.
+		d, root := newDriver(t)
+		volume := newVolume(t, "example-data")
+
+		cwd := filepath.Join(root, "workloads", testID, "1", "cwd")
+
+		for _, target := range []string{"/../../escape", "../../escape", "/./x", "/a/../b"} {
+			w := workload("example", 1, "hash-one", "exit 0")
+			w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: target}}
+
+			_, err := d.Start(t.Context(), w)
+			require.NoError(t, err, "refused the target %q", target)
+
+			// Everything the target produced is inside the working directory, so
+			// nothing was written above it.
+			entries, err := os.ReadDir(cwd)
+			require.NoError(t, err)
+			assert.NotEmpty(t, entries, "the target %q placed nothing", target)
+
+			// Waited for before stopping. The driver records an exit from a goroutine
+			// of its own, and removing the directory it writes into while it is still
+			// running leaves it logging into a finished subtest.
+			awaitState(t, d, "example", driver.StateExited)
+
+			require.NoError(t, d.Stop(t.Context(), testID, "example"))
+
+			// The volume itself survived, wherever the target pointed.
+			_, err = os.Stat(volume)
+			assert.NoError(t, err, "the target %q destroyed the volume", target)
+		}
+	})
+}
+
+func TestDriver_Stop_LeavesVolumeContentsAlone(t *testing.T) {
+	t.Parallel()
+
+	// The whole point of a volume. Stopping a workload removes the tree its working
+	// directory sits in, and the reconciler stops a workload before every replacement
+	// and every retry, so a volume that did not survive this would be no better than
+	// the working directory it replaced.
+	d, _ := newDriver(t)
+	volume := newVolume(t, "example-data")
+
+	w := workload("example", 1, "hash-one", "echo precious > var/lib/example/file")
+	w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: "/var/lib/example"}}
+
+	_, err := d.Start(t.Context(), w)
+	require.NoError(t, err)
+
+	awaitState(t, d, "example", driver.StateExited)
+
+	require.NoError(t, d.Stop(t.Context(), testID, "example"))
+
+	contents, err := os.ReadFile(filepath.Join(volume, "file"))
+	require.NoError(t, err, "stopping the workload destroyed the volume's contents")
+	assert.Equal(t, "precious\n", string(contents))
+}
+
+// newVolume returns a directory standing in for a volume, which lives outside the
+// driver's root exactly as a real one does.
+func newVolume(t *testing.T, name string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "volumes", name)
+	require.NoError(t, os.MkdirAll(path, 0o700))
+
+	return path
+}

@@ -107,6 +107,17 @@ type (
 		Allocated(ctx context.Context) ([]int, error)
 	}
 
+	// The VolumeLocator interface describes how the service finds out where a
+	// mounted volume's data lives.
+	//
+	// Narrower than the volume service it is satisfied by: applying a workload needs
+	// to resolve a name to a path and nothing else, so that is all this asks for.
+	VolumeLocator interface {
+		// Path should return where the named volume's data is, reporting
+		// ErrVolumeNotFound when no such volume exists.
+		Path(ctx context.Context, name string) (string, error)
+	}
+
 	// The Allocator interface describes how the service obtains a host port for a
 	// workload that didn't ask for a particular one.
 	Allocator interface {
@@ -121,6 +132,7 @@ type (
 		drivers   map[string]Driver
 		workloads WorkloadRepository
 		ports     PortRepository
+		volumes   VolumeLocator
 		allocator Allocator
 		checker   Checker
 		notify    func()
@@ -138,6 +150,9 @@ type WorkloadServiceConfig struct {
 	Workloads WorkloadRepository
 	// The repository holding port allocations.
 	Ports PortRepository
+	// Where mounted volumes are resolved to paths. May be nil, in which case a
+	// workload mounting a volume is rejected.
+	Volumes VolumeLocator
 	// The allocator used to choose host ports.
 	Allocator Allocator
 	// The checker that establishes whether workloads are working. May be nil, in
@@ -156,6 +171,7 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		drivers:   config.Drivers,
 		workloads: config.Workloads,
 		ports:     config.Ports,
+		volumes:   config.Volumes,
 		allocator: config.Allocator,
 		checker:   config.Checker,
 		notify:    config.Notify,
@@ -207,6 +223,18 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 		if held, err = s.ports.List(ctx, existing.ID); err != nil {
 			return Workload{}, false, fmt.Errorf("failed to read workload ports: %w", err)
 		}
+	}
+
+	// Volumes are resolved to the paths they live at before the specification is
+	// hashed, for the same reason ports are: the runtime is then handed a path rather
+	// than a name to look up, and a volume whose path changed reads as an ordinary
+	// change and replaces the instances bound to the old one.
+	//
+	// Resolved here rather than inside store, since unlike a port allocation there is
+	// no race to lose: a volume either exists or it does not.
+	spec, err = s.resolveVolumes(ctx, spec)
+	if err != nil {
+		return Workload{}, false, err
 	}
 
 	stored, created, err := s.store(ctx, spec, runtime, held)
@@ -599,6 +627,41 @@ func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map
 // The resolved ports are part of the specification that gets hashed, which is what
 // makes a reallocated port replace the container running on the old one: to the
 // reconciler it is simply a specification that has changed.
+// resolveVolumes fills in where each mounted volume lives on the host, rejecting a
+// specification naming one that does not exist.
+//
+// A volume has to exist before it can be mounted. Creating one here would make a
+// mistyped name a second empty volume, which reads as success while the data the
+// workload wanted sits under the name that was meant.
+func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadSpec) (api.WorkloadSpec, error) {
+	if spec.Volumes == nil || len(*spec.Volumes) == 0 {
+		return spec, nil
+	}
+
+	if s.volumes == nil {
+		return spec, fmt.Errorf("%w: this server holds no volumes", ErrVolumeNotFound)
+	}
+
+	mounts := make([]api.VolumeMount, 0, len(*spec.Volumes))
+	for _, mount := range *spec.Volumes {
+		// Whatever went wrong is returned as it stands, including a volume that does
+		// not exist: the locator already names what it could not find, so wrapping it
+		// again would only repeat the name.
+		path, err := s.volumes.Path(ctx, mount.Name)
+		if err != nil {
+			return spec, err
+		}
+
+		mounts = append(mounts, api.VolumeMount{Name: mount.Name, To: mount.To, From: new(path)})
+	}
+
+	// The specification is taken by value, so this replaces only this copy's slice
+	// header and leaves the caller's alone.
+	spec.Volumes = &mounts
+
+	return spec, nil
+}
+
 func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.WorkloadSpec {
 	if spec.Ports == nil || len(ports) == 0 {
 		return spec

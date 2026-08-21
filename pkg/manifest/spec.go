@@ -145,12 +145,14 @@ type (
 		// The volume to mount, which must already exist.
 		Name string
 		// Where the workload finds the volume, written the same way whichever
-		// runtime runs it.
+		// runtime runs it. Where it resolves to differs, because a container has a
+		// filesystem of its own and a process on the host does not.
 		//
 		// For a container it is the path inside the container. For an exec workload
-		// it is resolved against that workload's own working directory, which acts
-		// as its root, so a process starting there reaches the volume at the path
-		// named here either way.
+		// the volume is placed at this path relative to the workload's working
+		// directory, and such a workload reaches it by that relative path: confining
+		// the process so the absolute one resolved there would need privileges orca
+		// does not have.
 		To string
 	}
 

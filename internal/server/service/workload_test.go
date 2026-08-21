@@ -200,6 +200,111 @@ func TestWorkloadService_Apply(t *testing.T) {
 	}
 }
 
+func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
+	t.Parallel()
+
+	spec := containerSpec("example", "example/example:latest")
+	spec.Volumes = &[]api.VolumeMount{{Name: "example-data", To: "/var/lib/example"}}
+
+	t.Run("stores where each mounted volume lives", func(t *testing.T) {
+		t.Parallel()
+
+		// The driver is handed a path rather than a name to look up, and the path is
+		// part of what gets hashed, so a volume that moved replaces the instances
+		// bound to where it was.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		volumes := NewMockVolumeLocator(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		volumes.EXPECT().Path(mock.Anything, "example-data").
+			Return("/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0", nil).Once()
+
+		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		repo.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(w database.Workload) bool {
+			var stored api.WorkloadSpec
+			if err := json.Unmarshal(w.Spec, &stored); err != nil || stored.Volumes == nil {
+				return false
+			}
+
+			mounts := *stored.Volumes
+
+			return len(mounts) == 1 &&
+				mounts[0].From != nil &&
+				*mounts[0].From == "/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0"
+		})).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+			w.Version = 1
+
+			return w, true, nil
+		}).Once()
+
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]service.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Volumes:   volumes,
+			Allocator: allocatorStub{},
+		})
+
+		_, _, err := svc.Apply(t.Context(), spec)
+		require.NoError(t, err)
+	})
+
+	t.Run("refuses a workload naming a volume that does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		// Creating it instead would make a mistyped name a second empty volume, which
+		// reads as success while the data the workload wanted sits under the name that
+		// was meant. Nothing is stored, so the reconciler never sees it.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		volumes := NewMockVolumeLocator(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		volumes.EXPECT().Path(mock.Anything, "example-data").
+			Return("", service.ErrVolumeNotFound).Once()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]service.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Volumes:   volumes,
+			Allocator: allocatorStub{},
+		})
+
+		_, _, err := svc.Apply(t.Context(), spec)
+		assert.ErrorIs(t, err, service.ErrVolumeNotFound)
+	})
+
+	t.Run("refuses a mount when the server holds no volumes at all", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]service.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Allocator: allocatorStub{},
+		})
+
+		_, _, err := svc.Apply(t.Context(), spec)
+		assert.ErrorIs(t, err, service.ErrVolumeNotFound)
+	})
+}
+
 func TestWorkloadService_Apply_NotifiesReconciler(t *testing.T) {
 	t.Parallel()
 
