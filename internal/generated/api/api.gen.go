@@ -158,6 +158,16 @@ func (e WorkloadState) Valid() bool {
 	}
 }
 
+// ApplyWorkloadResult The body returned when a workload is applied.
+//
+// Whether the workload was created or updated is the status code rather than a
+// field here, since that is what the code already distinguishes.
+type ApplyWorkloadResult struct {
+	// Workload A workload's desired state, together with the state observed from the driver
+	// that runs it.
+	Workload Workload `json:"workload"`
+}
+
 // ContainerSpec The container runtime block, run by the docker driver.
 type ContainerSpec struct {
 	// Command The command to run, replacing the one the image declares. Given as the
@@ -175,6 +185,14 @@ type ContainerSpec struct {
 	//
 	// Examples: example/example:latest
 	Image string `json:"image"`
+}
+
+// DeleteWorkloadResult The body returned when a workload is marked for deletion, holding the
+// workload as it now stands.
+type DeleteWorkloadResult struct {
+	// Workload A workload's desired state, together with the state observed from the driver
+	// that runs it.
+	Workload Workload `json:"workload"`
 }
 
 // ErrorResponse The body returned for any unsuccessful request.
@@ -197,6 +215,13 @@ type ExecSpec struct {
 	//
 	// Examples: ["/usr/local/bin/backup","--target","/data"]
 	Command []string `json:"command"`
+}
+
+// GetWorkloadResult The body returned when a single workload is read.
+type GetWorkloadResult struct {
+	// Workload A workload's desired state, together with the state observed from the driver
+	// that runs it.
+	Workload Workload `json:"workload"`
 }
 
 // HealthSpec How the server decides whether a workload is working, rather than merely
@@ -315,6 +340,15 @@ type InstanceHealth struct {
 // says not to run it again. Exited says only that it ended, which is what the
 // driver observed. Completed adds what the policy makes of that.
 type InstanceState string
+
+// ListWorkloadsResult The body returned when workloads are listed.
+//
+// An object rather than a bare array, so that something later reported about a
+// listing as a whole is a new field rather than a change of type.
+type ListWorkloadsResult struct {
+	// Workloads The workloads matching the request.
+	Workloads []Workload `json:"workloads"`
+}
 
 // OverlapPolicy What the server does when an occurrence comes due and the previous run has not
 // finished.
@@ -1252,7 +1286,7 @@ type ListWorkloadsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *[]Workload
+	JSON200 *ListWorkloadsResult
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *BadRequest
 	// JSON500 the response for an HTTP 500 `application/json` response
@@ -1260,7 +1294,7 @@ type ListWorkloadsResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r ListWorkloadsResponse) GetJSON200() *[]Workload {
+func (r ListWorkloadsResponse) GetJSON200() *ListWorkloadsResult {
 	return r.JSON200
 }
 
@@ -1307,7 +1341,7 @@ type DeleteWorkloadResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON202 the response for an HTTP 202 `application/json` response
-	JSON202 *Workload
+	JSON202 *DeleteWorkloadResult
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *NotFound
 	// JSON500 the response for an HTTP 500 `application/json` response
@@ -1315,7 +1349,7 @@ type DeleteWorkloadResponse struct {
 }
 
 // GetJSON202 returns the response for an HTTP 202 `application/json` response
-func (r DeleteWorkloadResponse) GetJSON202() *Workload {
+func (r DeleteWorkloadResponse) GetJSON202() *DeleteWorkloadResult {
 	return r.JSON202
 }
 
@@ -1362,7 +1396,7 @@ type GetWorkloadResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Workload
+	JSON200 *GetWorkloadResult
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *NotFound
 	// JSON500 the response for an HTTP 500 `application/json` response
@@ -1370,7 +1404,7 @@ type GetWorkloadResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetWorkloadResponse) GetJSON200() *Workload {
+func (r GetWorkloadResponse) GetJSON200() *GetWorkloadResult {
 	return r.JSON200
 }
 
@@ -1417,9 +1451,9 @@ type ApplyWorkloadResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *Workload
+	JSON200 *ApplyWorkloadResult
 	// JSON201 the response for an HTTP 201 `application/json` response
-	JSON201 *Workload
+	JSON201 *ApplyWorkloadResult
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *BadRequest
 	// JSON409 the response for an HTTP 409 `application/json` response
@@ -1433,12 +1467,12 @@ type ApplyWorkloadResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r ApplyWorkloadResponse) GetJSON200() *Workload {
+func (r ApplyWorkloadResponse) GetJSON200() *ApplyWorkloadResult {
 	return r.JSON200
 }
 
 // GetJSON201 returns the response for an HTTP 201 `application/json` response
-func (r ApplyWorkloadResponse) GetJSON201() *Workload {
+func (r ApplyWorkloadResponse) GetJSON201() *ApplyWorkloadResult {
 	return r.JSON201
 }
 
@@ -1670,7 +1704,7 @@ func ParseListWorkloadsResponse(rsp *http.Response) (*ListWorkloadsResponse, err
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest []Workload
+		var dest ListWorkloadsResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -1710,7 +1744,7 @@ func ParseDeleteWorkloadResponse(rsp *http.Response) (*DeleteWorkloadResponse, e
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
-		var dest Workload
+		var dest DeleteWorkloadResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -1750,7 +1784,7 @@ func ParseGetWorkloadResponse(rsp *http.Response) (*GetWorkloadResponse, error) 
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Workload
+		var dest GetWorkloadResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -1790,14 +1824,14 @@ func ParseApplyWorkloadResponse(rsp *http.Response) (*ApplyWorkloadResponse, err
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest Workload
+		var dest ApplyWorkloadResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest Workload
+		var dest ApplyWorkloadResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -2200,7 +2234,7 @@ type ListWorkloadsResponseObject interface {
 	VisitListWorkloadsResponse(w http.ResponseWriter) error
 }
 
-type ListWorkloads200JSONResponse []Workload
+type ListWorkloads200JSONResponse ListWorkloadsResult
 
 func (response ListWorkloads200JSONResponse) VisitListWorkloadsResponse(w http.ResponseWriter) error {
 
@@ -2252,7 +2286,7 @@ type DeleteWorkloadResponseObject interface {
 	VisitDeleteWorkloadResponse(w http.ResponseWriter) error
 }
 
-type DeleteWorkload202JSONResponse Workload
+type DeleteWorkload202JSONResponse DeleteWorkloadResult
 
 func (response DeleteWorkload202JSONResponse) VisitDeleteWorkloadResponse(w http.ResponseWriter) error {
 
@@ -2304,7 +2338,7 @@ type GetWorkloadResponseObject interface {
 	VisitGetWorkloadResponse(w http.ResponseWriter) error
 }
 
-type GetWorkload200JSONResponse Workload
+type GetWorkload200JSONResponse GetWorkloadResult
 
 func (response GetWorkload200JSONResponse) VisitGetWorkloadResponse(w http.ResponseWriter) error {
 
@@ -2357,7 +2391,7 @@ type ApplyWorkloadResponseObject interface {
 	VisitApplyWorkloadResponse(w http.ResponseWriter) error
 }
 
-type ApplyWorkload200JSONResponse Workload
+type ApplyWorkload200JSONResponse ApplyWorkloadResult
 
 func (response ApplyWorkload200JSONResponse) VisitApplyWorkloadResponse(w http.ResponseWriter) error {
 
@@ -2371,7 +2405,7 @@ func (response ApplyWorkload200JSONResponse) VisitApplyWorkloadResponse(w http.R
 	return err
 }
 
-type ApplyWorkload201JSONResponse Workload
+type ApplyWorkload201JSONResponse ApplyWorkloadResult
 
 func (response ApplyWorkload201JSONResponse) VisitApplyWorkloadResponse(w http.ResponseWriter) error {
 

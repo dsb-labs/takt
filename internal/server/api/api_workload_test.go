@@ -168,9 +168,9 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 				return
 			}
 
-			var got generated.Workload
-			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
-			tc.Assert(t, got)
+			var result generated.ApplyWorkloadResult
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+			tc.Assert(t, result.Workload)
 		})
 	}
 }
@@ -276,8 +276,10 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
 
-		var got generated.Workload
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+		var result generated.GetWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		got := result.Workload
 
 		assert.Equal(t, "example", got.Name)
 		assert.Equal(t, generated.WorkloadStateRunning, got.State)
@@ -301,8 +303,10 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
 
-		var got generated.Workload
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+		var result generated.GetWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		got := result.Workload
 
 		require.NotNil(t, got.Instances)
 		require.Len(t, *got.Instances, 1)
@@ -329,8 +333,10 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
 
-		var got generated.Workload
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+		var result generated.GetWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		got := result.Workload
 
 		require.NotNil(t, got.Instances)
 		require.Len(t, *got.Instances, 1)
@@ -360,8 +366,10 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
 
-		var got generated.Workload
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+		var result generated.GetWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		got := result.Workload
 
 		require.NotNil(t, got.Instances)
 		require.Len(t, *got.Instances, 1)
@@ -382,8 +390,10 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
 
-		var got generated.Workload
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+		var result generated.GetWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		got := result.Workload
 
 		require.NotNil(t, got.Instances)
 		require.Len(t, *got.Instances, 1)
@@ -413,8 +423,10 @@ func TestWorkloadAPI_ListWorkloads(t *testing.T) {
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
 
-		var got []generated.Workload
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+		var result generated.ListWorkloadsResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		got := result.Workloads
 		require.Len(t, got, 2)
 
 		assert.Equal(t, "alpha", got[0].Name)
@@ -447,8 +459,9 @@ func TestWorkloadAPI_ListWorkloads(t *testing.T) {
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
 
-		// An empty array rather than null, so clients can iterate unconditionally.
-		assert.JSONEq(t, `[]`, resp.Body.String())
+		// An object holding an empty array rather than null, so a client can reach
+		// for the field and iterate it unconditionally.
+		assert.JSONEq(t, `{"workloads":[]}`, resp.Body.String())
 	})
 }
 
@@ -469,8 +482,10 @@ func TestWorkloadAPI_DeleteWorkload(t *testing.T) {
 		// so the caller gets the workload back and can watch it disappear.
 		require.Equal(t, http.StatusAccepted, resp.Code)
 
-		var got generated.Workload
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &got))
+		var result generated.DeleteWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		got := result.Workload
 
 		assert.Equal(t, generated.WorkloadStateTerminating, got.State)
 		require.NotNil(t, got.Deleting)

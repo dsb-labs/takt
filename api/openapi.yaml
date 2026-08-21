@@ -57,9 +57,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Workload"
+                $ref: "#/components/schemas/ListWorkloadsResult"
         "400":
           $ref: "#/components/responses/BadRequest"
         "500":
@@ -82,7 +80,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Workload"
+                $ref: "#/components/schemas/GetWorkloadResult"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -111,13 +109,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Workload"
+                $ref: "#/components/schemas/ApplyWorkloadResult"
         "201":
           description: The workload was created.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Workload"
+                $ref: "#/components/schemas/ApplyWorkloadResult"
         "400":
           $ref: "#/components/responses/BadRequest"
         "409":
@@ -165,7 +163,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Workload"
+                $ref: "#/components/schemas/DeleteWorkloadResult"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":
@@ -502,6 +500,51 @@ components:
           minimum: 1
           maximum: 65535
           examples: [4141]
+
+    ListWorkloadsResult:
+      type: object
+      description: |
+        The body returned when workloads are listed.
+
+        An object rather than a bare array, so that something later reported about a
+        listing as a whole is a new field rather than a change of type.
+      required: [workloads]
+      properties:
+        workloads:
+          type: array
+          description: The workloads matching the request.
+          items:
+            $ref: "#/components/schemas/Workload"
+
+    GetWorkloadResult:
+      type: object
+      description: The body returned when a single workload is read.
+      required: [workload]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
+
+    ApplyWorkloadResult:
+      type: object
+      description: |
+        The body returned when a workload is applied.
+
+        Whether the workload was created or updated is the status code rather than a
+        field here, since that is what the code already distinguishes.
+      required: [workload]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
+
+    DeleteWorkloadResult:
+      type: object
+      description: |
+        The body returned when a workload is marked for deletion, holding the
+        workload as it now stands.
+      required: [workload]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
 
     ResolvedPort:
       type: object

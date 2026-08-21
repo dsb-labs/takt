@@ -167,7 +167,7 @@ func TestClient_Apply(t *testing.T) {
 				// server hashes the same specification the client held.
 				assert.Nil(t, got.Schedule)
 
-				writeJSON(t, w, http.StatusCreated, workload("example", api.WorkloadStatePending))
+				writeJSON(t, w, http.StatusCreated, api.ApplyWorkloadResult{Workload: workload("example", api.WorkloadStatePending)})
 			},
 			Assert: func(t *testing.T, got client.Workload, created bool) {
 				assert.True(t, created)
@@ -178,7 +178,7 @@ func TestClient_Apply(t *testing.T) {
 		{
 			Name: "updates a workload",
 			Handler: func(w http.ResponseWriter, r *http.Request) {
-				writeJSON(t, w, http.StatusOK, workload("example", api.WorkloadStateRunning))
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
 			},
 			Assert: func(t *testing.T, got client.Workload, created bool) {
 				assert.False(t, created)
@@ -255,7 +255,7 @@ func TestClient_Get(t *testing.T) {
 			assert.Equal(t, http.MethodGet, r.Method)
 			assert.Equal(t, "/api/v1/workloads/example", r.URL.Path)
 
-			writeJSON(t, w, http.StatusOK, workload("example", api.WorkloadStateRunning))
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
 		})
 
 		got, err := c.Get(t.Context(), "example")
@@ -281,7 +281,7 @@ func TestClient_Get(t *testing.T) {
 		}
 
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(t, w, http.StatusOK, checked)
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: checked})
 		})
 
 		got, err := c.Get(t.Context(), "example")
@@ -299,7 +299,7 @@ func TestClient_Get(t *testing.T) {
 
 	t.Run("reports no health for an unchecked instance", func(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(t, w, http.StatusOK, workload("example", api.WorkloadStateRunning))
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
 		})
 
 		got, err := c.Get(t.Context(), "example")
@@ -325,10 +325,10 @@ func TestClient_List(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, "/api/v1/workloads", r.URL.Path)
 
-			writeJSON(t, w, http.StatusOK, []api.Workload{
+			writeJSON(t, w, http.StatusOK, api.ListWorkloadsResult{Workloads: []api.Workload{
 				workload("alpha", api.WorkloadStateRunning),
 				workload("bravo", api.WorkloadStatePending),
-			})
+			}})
 		})
 
 		got, err := c.List(t.Context())
@@ -343,7 +343,7 @@ func TestClient_List(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, []string{"$.labels.app=web", "$.labels.env=prod"}, r.URL.Query()["query"])
 
-			writeJSON(t, w, http.StatusOK, []api.Workload{})
+			writeJSON(t, w, http.StatusOK, api.ListWorkloadsResult{Workloads: []api.Workload{}})
 		})
 
 		_, err := c.List(t.Context(), "$.labels.app=web", "$.labels.env=prod")
@@ -361,7 +361,7 @@ func TestClient_List(t *testing.T) {
 
 	t.Run("returns nothing when there are none", func(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(t, w, http.StatusOK, []api.Workload{})
+			writeJSON(t, w, http.StatusOK, api.ListWorkloadsResult{Workloads: []api.Workload{}})
 		})
 
 		got, err := c.List(t.Context())
@@ -381,7 +381,7 @@ func TestClient_Delete(t *testing.T) {
 			terminating := workload("example", api.WorkloadStateTerminating)
 			terminating.Deleting = new(true)
 
-			writeJSON(t, w, http.StatusAccepted, terminating)
+			writeJSON(t, w, http.StatusAccepted, api.DeleteWorkloadResult{Workload: terminating})
 		})
 
 		got, err := c.Delete(t.Context(), "example")
@@ -396,7 +396,7 @@ func TestClient_Delete(t *testing.T) {
 
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodDelete {
-				writeJSON(t, w, http.StatusAccepted, workload("example", api.WorkloadStateTerminating))
+				writeJSON(t, w, http.StatusAccepted, api.DeleteWorkloadResult{Workload: workload("example", api.WorkloadStateTerminating)})
 				return
 			}
 
@@ -405,7 +405,7 @@ func TestClient_Delete(t *testing.T) {
 			// through the former and stop at the latter.
 			gets++
 			if gets < 3 {
-				writeJSON(t, w, http.StatusOK, workload("example", api.WorkloadStateTerminating))
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateTerminating)})
 				return
 			}
 
@@ -421,12 +421,12 @@ func TestClient_Delete(t *testing.T) {
 	t.Run("gives up waiting when the context is cancelled", func(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodDelete {
-				writeJSON(t, w, http.StatusAccepted, workload("example", api.WorkloadStateTerminating))
+				writeJSON(t, w, http.StatusAccepted, api.DeleteWorkloadResult{Workload: workload("example", api.WorkloadStateTerminating)})
 				return
 			}
 
 			// Never disappears, so the wait can only end by cancellation.
-			writeJSON(t, w, http.StatusOK, workload("example", api.WorkloadStateTerminating))
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateTerminating)})
 		})
 
 		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)

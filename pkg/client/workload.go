@@ -163,9 +163,9 @@ func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool,
 
 	switch {
 	case resp.JSON201 != nil:
-		return newWorkload(*resp.JSON201), true, nil
+		return newWorkload(resp.JSON201.Workload), true, nil
 	case resp.JSON200 != nil:
-		return newWorkload(*resp.JSON200), false, nil
+		return newWorkload(resp.JSON200.Workload), false, nil
 	case resp.JSON400 != nil:
 		return Workload{}, false, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON409 != nil:
@@ -191,7 +191,7 @@ func (c *Client) Get(ctx context.Context, name string) (Workload, error) {
 
 	switch {
 	case resp.JSON200 != nil:
-		return newWorkload(*resp.JSON200), nil
+		return newWorkload(resp.JSON200.Workload), nil
 	case resp.JSON404 != nil:
 		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
 	case resp.JSON500 != nil:
@@ -220,8 +220,8 @@ func (c *Client) List(ctx context.Context, queries ...string) ([]Workload, error
 
 	switch {
 	case resp.JSON200 != nil:
-		workloads := make([]Workload, 0, len(*resp.JSON200))
-		for _, workload := range *resp.JSON200 {
+		workloads := make([]Workload, 0, len(resp.JSON200.Workloads))
+		for _, workload := range resp.JSON200.Workloads {
 			workloads = append(workloads, newWorkload(workload))
 		}
 
@@ -290,7 +290,7 @@ func (c *Client) Delete(ctx context.Context, name string, options ...DeleteOptio
 	var workload Workload
 	switch {
 	case resp.JSON202 != nil:
-		workload = newWorkload(*resp.JSON202)
+		workload = newWorkload(resp.JSON202.Workload)
 	case resp.JSON404 != nil:
 		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
 	case resp.JSON500 != nil:

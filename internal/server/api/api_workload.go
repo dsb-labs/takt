@@ -144,10 +144,10 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 	}
 
 	if created {
-		return api.ApplyWorkload201JSONResponse(newWorkload(workload)), nil
+		return api.ApplyWorkload201JSONResponse{Workload: newWorkload(workload)}, nil
 	}
 
-	return api.ApplyWorkload200JSONResponse(newWorkload(workload)), nil
+	return api.ApplyWorkload200JSONResponse{Workload: newWorkload(workload)}, nil
 }
 
 // GetWorkload returns the workload with the given name.
@@ -168,7 +168,7 @@ func (a *WorkloadAPI) GetWorkload(ctx context.Context, request api.GetWorkloadRe
 		}, nil
 	}
 
-	return api.GetWorkload200JSONResponse(newWorkload(workload)), nil
+	return api.GetWorkload200JSONResponse{Workload: newWorkload(workload)}, nil
 }
 
 // ListWorkloads returns the workloads matching the request's queries, or every
@@ -193,9 +193,9 @@ func (a *WorkloadAPI) ListWorkloads(ctx context.Context, request api.ListWorkloa
 		}, nil
 	}
 
-	response := make(api.ListWorkloads200JSONResponse, 0, len(workloads))
+	response := api.ListWorkloads200JSONResponse{Workloads: make([]api.Workload, 0, len(workloads))}
 	for _, workload := range workloads {
-		response = append(response, newWorkload(workload))
+		response.Workloads = append(response.Workloads, newWorkload(workload))
 	}
 
 	return response, nil
@@ -223,7 +223,7 @@ func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWork
 		}, nil
 	}
 
-	return api.DeleteWorkload202JSONResponse(newWorkload(workload)), nil
+	return api.DeleteWorkload202JSONResponse{Workload: newWorkload(workload)}, nil
 }
 
 // GetWorkloadLogs returns the recent output of the named workload.
