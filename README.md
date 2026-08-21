@@ -31,8 +31,8 @@ container:
   image: nginx:1.27-alpine
 EOF
 
-orca apply example.yaml
-orca get example
+orca workload apply example.yaml
+orca workload get example
 ```
 
 `get` reports the host port orca allocated, which is how the workload is reached.

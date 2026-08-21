@@ -86,7 +86,7 @@ nothing, and under `on-failure` it means such a job runs again.
 ## Reading logs
 
 ```sh
-orca logs example --tail 20
+orca workload logs example --tail 20
 ```
 
 For a container, orca reads the logs from the Docker daemon. For an exec workload it

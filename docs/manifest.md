@@ -109,7 +109,7 @@ For a container, leaving `from` out is the usual case. orca allocates a host por
 reports it back, so you never have to invent unique numbers by hand.
 
 ```sh
-orca get example | jq '.Ports'
+orca workload get example | jq '.Ports'
 [ { "To": 80, "From": 20000, "Dynamic": true } ]
 ```
 
@@ -253,4 +253,4 @@ the first after the last run, so a workload down for several does not run once f
 A scheduled workload cannot declare a health check. A check restarts a workload that
 stops answering, and a scheduled workload is expected to end.
 
-`orca get` reports when a scheduled workload next runs, once it has run at least once.
+`orca workload get` reports when a scheduled workload next runs, once it has run at least once.

@@ -13,12 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/cmd/apply"
-	delcmd "github.com/dsb-labs/orca/cmd/delete"
-	"github.com/dsb-labs/orca/cmd/get"
-	"github.com/dsb-labs/orca/cmd/list"
-	"github.com/dsb-labs/orca/cmd/logs"
 	"github.com/dsb-labs/orca/cmd/serve"
+	"github.com/dsb-labs/orca/cmd/workload"
 )
 
 func main() {
@@ -40,11 +36,7 @@ func main() {
 
 	cmd.AddCommand(
 		serve.Command(),
-		apply.Command(),
-		list.Command(),
-		get.Command(),
-		delcmd.Command(),
-		logs.Command(),
+		workload.Command(),
 	)
 
 	if err := cmd.ExecuteContext(ctx); err != nil {

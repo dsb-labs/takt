@@ -1,4 +1,4 @@
-// Package delete provides the CLI endpoint to the "delete" command.
+// Package delete provides the CLI endpoint to the "workload delete" command.
 package delete
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/dsb-labs/orca/pkg/client"
 )
 
-// Command returns the "delete" command used to remove a workload and stop
+// Command returns the "workload delete" command used to remove a workload and stop
 // everything running for it.
 func Command() *cobra.Command {
 	var address string

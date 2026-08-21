@@ -1,13 +1,17 @@
 # Command line
 
 ```
-orca serve [config-file]        Run the orca server
-orca apply <manifest>           Create or update a workload from a manifest file
-orca list                       List workloads                        (alias: ls)
-orca get <name>                 Show a single workload
-orca logs <name>                Read a workload's recent output
-orca delete <name>              Delete a workload and stop its work    (alias: rm)
+orca serve [config-file]                Run the orca server
+
+orca workload apply <manifest>          Create or update a workload from a manifest file
+orca workload list                      List workloads                       (alias: ls)
+orca workload get <name>                Show a single workload
+orca workload logs <name>               Read a workload's recent output
+orca workload delete <name>             Delete a workload and stop its work  (alias: rm)
 ```
+
+Commands are grouped by what they act on, so a verb reads the same whichever noun
+precedes it.
 
 Every command except `serve` takes `--address` (`-a`), the URL of the server, which
 defaults to `http://localhost:7373`.
@@ -24,10 +28,10 @@ orca serve config.toml      # from a file
 Runs the server in the foreground. The configuration file is optional and only has to
 describe what it changes. See [Configuration](configuration.md).
 
-## apply
+## workload apply
 
 ```sh
-orca apply example.yaml
+orca workload apply example.yaml
 ```
 
 Parses the manifest, submits it, and prints the resulting workload.
@@ -38,14 +42,14 @@ specification does, so a repeated apply never restarts healthy work.
 Applying a workload that is still terminating is rejected rather than resurrecting it
 half torn down.
 
-## list
+## workload list
 
 ```sh
-orca list
-orca list -q '$.labels.app=web'
-orca list -q '$.labels.app=web' -q '$.labels.env=prod'
-orca list -q '$.container.image=nginx:1.27-alpine'
-orca list -q '$.ports[0].to=80'
+orca workload list
+orca workload list -q '$.labels.app=web'
+orca workload list -q '$.labels.app=web' -q '$.labels.env=prod'
+orca workload list -q '$.container.image=nginx:1.27-alpine'
+orca workload list -q '$.ports[0].to=80'
 ```
 
 | Flag | Description |
@@ -62,10 +66,10 @@ as `1` or `0` and has to be written that way.
 Filtering happens in the database rather than in the client, so a query that matches
 little does not cost a read of everything it discards.
 
-## get
+## workload get
 
 ```sh
-orca get example
+orca workload get example
 ```
 
 Prints one workload: the specification that was submitted, the ports orca settled on,
@@ -73,11 +77,11 @@ and what the runtime reports about each instance.
 
 A workload that names a schedule also reports when it next runs.
 
-## logs
+## workload logs
 
 ```sh
-orca logs example
-orca logs example --tail 20
+orca workload logs example
+orca workload logs example --tail 20
 ```
 
 | Flag | Default | Description |
@@ -87,11 +91,11 @@ orca logs example --tail 20
 Prints a workload's recent output. Both output streams are combined in the order they
 were written.
 
-## delete
+## workload delete
 
 ```sh
-orca delete example
-orca delete example --wait
+orca workload delete example
+orca workload delete example --wait
 ```
 
 | Flag | Description |
@@ -100,11 +104,11 @@ orca delete example --wait
 
 Deleting is asynchronous. The workload reads as `terminating` while its work is
 stopped, and disappears once nothing is left running for it. A teardown can therefore
-be watched by polling `get` until the workload is gone.
+be watched by polling `workload get` until the workload is gone.
 
 ## Workload states
 
-`get` and `list` report a state derived from the workload's instances.
+`workload get` and `workload list` report a state derived from the workload's instances.
 
 | State | Meaning |
 |---|---|

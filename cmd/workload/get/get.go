@@ -1,4 +1,4 @@
-// Package get provides the CLI endpoint to the "get" command.
+// Package get provides the CLI endpoint to the "workload get" command.
 package get
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/dsb-labs/orca/pkg/client"
 )
 
-// Command returns the "get" command used to show a single workload.
+// Command returns the "workload get" command used to show a single workload.
 func Command() *cobra.Command {
 	var address string
 

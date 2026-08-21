@@ -1,4 +1,4 @@
-// Package apply provides the CLI endpoint to the "apply" command.
+// Package apply provides the CLI endpoint to the "workload apply" command.
 package apply
 
 import (
@@ -12,7 +12,7 @@ import (
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
-// Command returns the "apply" command used to submit a workload manifest to the
+// Command returns the "workload apply" command used to submit a workload manifest to the
 // orca server.
 func Command() *cobra.Command {
 	var address string

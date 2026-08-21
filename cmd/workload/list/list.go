@@ -1,4 +1,4 @@
-// Package list provides the CLI endpoint to the "list" command.
+// Package list provides the CLI endpoint to the "workload list" command.
 package list
 
 import (
@@ -10,7 +10,7 @@ import (
 	"github.com/dsb-labs/orca/pkg/client"
 )
 
-// Command returns the "list" command used to list the workloads known to the orca
+// Command returns the "workload list" command used to list the workloads known to the orca
 // server.
 func Command() *cobra.Command {
 	var address string
@@ -24,9 +24,9 @@ func Command() *cobra.Command {
 			"Repeat --query to narrow the result; a workload has to match all of them.\n" +
 			"A query is a JSON path into the workload's specification and the value it\n" +
 			"must hold:\n\n" +
-			"  orca list --query '$.labels.app=web'\n" +
-			"  orca list -q '$.labels.app=web' -q '$.labels.env=prod'\n" +
-			"  orca list -q '$.container.image=nginx:1.27-alpine'\n\n" +
+			"  orca workload list --query '$.labels.app=web'\n" +
+			"  orca workload list -q '$.labels.app=web' -q '$.labels.env=prod'\n" +
+			"  orca workload list -q '$.container.image=nginx:1.27-alpine'\n\n" +
 			"Values are compared as text, so a number is matched by its digits\n" +
 			"($.ports[0].to=80). A boolean is stored as 1 or 0 and has to be\n" +
 			"written that way.",

@@ -1,4 +1,4 @@
-// Package logs provides the CLI endpoint to the "logs" command.
+// Package logs provides the CLI endpoint to the "workload logs" command.
 package logs
 
 import (
@@ -9,7 +9,7 @@ import (
 	"github.com/dsb-labs/orca/pkg/client"
 )
 
-// Command returns the "logs" command used to read a workload's recent output.
+// Command returns the "workload logs" command used to read a workload's recent output.
 func Command() *cobra.Command {
 	var address string
 	var tail int
