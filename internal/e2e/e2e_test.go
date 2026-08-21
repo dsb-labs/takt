@@ -788,3 +788,152 @@ func (s *Suite) TestMissingWorkload() {
 
 	s.ErrorIs(s.client.Logs(s.ctx(), io.Discard, "does-not-exist", 10), client.ErrWorkloadNotFound)
 }
+
+// TestVolumeSurvivesAnExecWorkloadBeingReplaced covers the thing volumes exist for.
+//
+// Stopping an exec workload removes the tree its working directory sits in, and the
+// reconciler stops a workload before every replacement and every retry. So a volume
+// that did not survive that would be no better than the working directory it replaces,
+// which is what made this worth writing before volumes existed.
+func (s *Suite) TestVolumeSurvivesAnExecWorkloadBeingReplaced() {
+	name := s.workloadName()
+	volume := s.volumeName()
+
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupVolume(volume) })
+
+	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
+	s.Require().NoError(err)
+	s.Require().NotEmpty(created.Path)
+
+	// The command writes through the relative path, since the volume is placed inside
+	// the directory the process runs in. It appends, so a second run leaves both lines.
+	spec := s.execSpec(name, "sh", "-c", "echo ran >> var/lib/example/runs; exit 0")
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartNever}
+	spec.Volumes = []manifest.VolumeMount{{Name: volume, To: "/var/lib/example"}}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+	s.Require().Equal("ran\n", s.volumeFile(created.Path, "runs"))
+
+	// A changed specification replaces the instance, which stops the workload and
+	// removes its working directory before starting the new one.
+	spec.Env = map[string]string{"CHANGED": "yes"}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	// Two lines rather than one: the volume kept what the first run wrote, and the
+	// replacement appended to it rather than starting from nothing.
+	s.Require().Eventually(func() bool {
+		return s.volumeFile(created.Path, "runs") == "ran\nran\n"
+	}, convergeTimeout, 250*time.Millisecond, "the volume did not survive the workload being replaced")
+}
+
+// TestVolumeOutlivesTheWorkloadThatMountsIt covers the lifecycle that makes a volume a
+// resource of its own: deleting a workload leaves what it stored.
+func (s *Suite) TestVolumeOutlivesTheWorkloadThatMountsIt() {
+	name := s.workloadName()
+	volume := s.volumeName()
+
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupVolume(volume) })
+
+	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
+	s.Require().NoError(err)
+
+	spec := s.execSpec(name, "sh", "-c", "echo precious > var/lib/example/file; exit 0")
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartNever}
+	spec.Volumes = []manifest.VolumeMount{{Name: volume, To: "/var/lib/example"}}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+
+	// While the workload exists, the volume reports it as a holder and refuses to be
+	// deleted.
+	held, err := s.client.GetVolume(s.ctx(), volume)
+	s.Require().NoError(err)
+	s.Equal([]string{name}, held.UsedBy)
+
+	s.ErrorIs(s.client.DeleteVolume(s.ctx(), volume), client.ErrVolumeInUse)
+
+	_, err = s.client.Delete(s.ctx(), name, client.WithWait())
+	s.Require().NoError(err)
+
+	// The workload is gone and its data is not.
+	s.Equal("precious\n", s.volumeFile(created.Path, "file"))
+
+	free, err := s.client.GetVolume(s.ctx(), volume)
+	s.Require().NoError(err)
+	s.Empty(free.UsedBy, "the deleted workload is still reported as mounting the volume")
+
+	// Only deleting the volume removes the data, which is the whole point of it being
+	// a separate thing to delete.
+	s.Require().NoError(s.client.DeleteVolume(s.ctx(), volume))
+
+	_, err = s.client.GetVolume(s.ctx(), volume)
+	s.ErrorIs(err, client.ErrVolumeNotFound)
+	s.Empty(s.volumeFile(created.Path, "file"))
+}
+
+// TestVolumeMountedIntoAContainer covers the other runtime, where the volume is a bind
+// mount and the workload uses the path as written.
+func (s *Suite) TestVolumeMountedIntoAContainer() {
+	name := s.workloadName()
+	volume := s.volumeName()
+
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupVolume(volume) })
+
+	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
+	s.Require().NoError(err)
+
+	// An absolute path, used as written: a container has a filesystem of its own, so
+	// the daemon can put the volume where the manifest says.
+	spec := s.jobSpec(name, manifest.RestartNever, 0)
+	spec.Container.Command = []string{"sh", "-c", "echo from-a-container > /var/lib/example/file"}
+	spec.Volumes = []manifest.VolumeMount{{Name: volume, To: "/var/lib/example"}}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+	s.Equal("from-a-container\n", s.volumeFile(created.Path, "file"))
+}
+
+// TestWorkloadMountingAnUnknownVolumeIsRejected covers the apply being refused rather
+// than the volume being created, so a mistyped name is reported.
+func (s *Suite) TestWorkloadMountingAnUnknownVolumeIsRejected() {
+	name := s.workloadName()
+
+	spec := s.execSpec(name, "sh", "-c", "exit 0")
+	spec.Volumes = []manifest.VolumeMount{{Name: s.volumeName(), To: "/var/lib/example"}}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().Error(err)
+
+	// The volume is named, since an operator who mistyped one can act on that and not
+	// on "something went wrong".
+	s.Contains(err.Error(), s.volumeName())
+
+	// Nothing was stored, so the reconciler never sees it.
+	_, err = s.client.Get(s.ctx(), name)
+	s.ErrorIs(err, client.ErrWorkloadNotFound)
+
+	// And no volume was conjured up to satisfy the mount.
+	_, err = s.client.GetVolume(s.ctx(), s.volumeName())
+	s.ErrorIs(err, client.ErrVolumeNotFound)
+}
+
+// TestMissingVolume covers the not-found path on every volume endpoint that takes a
+// name.
+func (s *Suite) TestMissingVolume() {
+	_, err := s.client.GetVolume(s.ctx(), "does-not-exist")
+	s.ErrorIs(err, client.ErrVolumeNotFound)
+
+	s.ErrorIs(s.client.DeleteVolume(s.ctx(), "does-not-exist"), client.ErrVolumeNotFound)
+}

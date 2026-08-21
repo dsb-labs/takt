@@ -2,9 +2,14 @@ package e2e_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -313,4 +318,36 @@ func (s *Suite) freePort() string {
 	s.Require().NoError(err)
 
 	return port
+}
+
+// volumeName derives a volume name from the running test, short enough to stay inside
+// the 63 characters a name may have: a test's own name is already most of that.
+func (s *Suite) volumeName() string {
+	sum := sha256.Sum256([]byte(s.T().Name()))
+
+	return "e2e-vol-" + hex.EncodeToString(sum[:6])
+}
+
+// volumeFile reads a file from inside a volume's directory on the host, which is how a
+// test checks what a workload actually wrote. Returns empty when it is not there.
+func (s *Suite) volumeFile(path, name string) string {
+	contents, err := os.ReadFile(filepath.Join(path, name))
+	if err != nil {
+		return ""
+	}
+
+	return string(contents)
+}
+
+// cleanupVolume removes a volume a test created, forcing it so that a test which failed
+// partway through does not leave one behind held by a workload.
+func (s *Suite) cleanupVolume(name string) {
+	if s.client == nil {
+		return
+	}
+
+	err := s.client.DeleteVolume(context.Background(), name, client.WithForce())
+	if err != nil && !errors.Is(err, client.ErrVolumeNotFound) {
+		s.T().Logf("failed to delete volume %q: %v", name, err)
+	}
 }
