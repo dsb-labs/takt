@@ -22,6 +22,10 @@ ports:
 env:
   EXAMPLE: EXAMPLE
 
+volumes:
+  - name: example-data
+    to: /var/lib/example
+
 restart:
   policy: always
 
@@ -45,6 +49,7 @@ container:
 | `labels` | no | Arbitrary key-value pairs. |
 | `ports` | no | The ports the workload publishes. |
 | `env` | no | Environment variables set for the workload. |
+| `volumes` | no | The volumes the workload mounts, and where it finds each one. |
 | `restart` | no | What happens when the workload ends. |
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
 | `health` | no | How orca decides the workload is working. |
@@ -135,6 +140,69 @@ env:
 
 A workload starts with only what `env` names. It does not inherit the server's
 environment, which may hold credentials the workload has no business reading.
+
+## Volumes
+
+```yaml
+volumes:
+  - name: example-data
+    to: /var/lib/example
+```
+
+`name` is the volume to mount. `to` is where the workload finds it.
+
+A volume has to exist before a workload can mount it. Applying a manifest naming one
+that does not is rejected, so a mistyped name is reported rather than quietly becoming
+a second empty volume:
+
+```sh
+orca volume create volume.yaml
+orca workload apply example.yaml
+```
+
+The volume manifest is a name and nothing else, since a volume holds data and has
+nothing to configure:
+
+```yaml
+version: v1
+name: example-data
+```
+
+A volume outlives the workloads that mount it. Deleting a workload leaves its volumes
+alone, and `orca volume delete` is the only thing in orca that removes stored data. See
+[Command line](cli.md) for those commands.
+
+`to` is written the same way whichever runtime runs the workload, so a workload moved
+between them keeps its manifest. It must be an absolute path, and not `/`.
+
+Where it resolves to differs, because a container has a filesystem of its own and a
+process on the host does not.
+
+For a container, the volume is mounted at `to` and the workload uses that path as
+written.
+
+For an exec workload, the volume is placed at `to` inside the directory the process
+runs in. **Such a workload reaches it by the relative path**, so `to: /var/lib/example`
+is read and written as `var/lib/example`:
+
+```yaml
+volumes:
+  - name: example-data
+    to: /var/lib/example
+
+exec:
+  command: ["/usr/local/bin/backup", "--target", "var/lib/example"]
+```
+
+Resolving the absolute path there would mean confining the process to its own
+directory, which needs privileges orca does not have. An absolute path in a command
+therefore reaches the host's own root, wherever the volume was mounted.
+
+Two mounts cannot name the same volume, or the same path. A trailing slash makes no
+difference, so `/data` and `/data/` are the same mount.
+
+Volumes sit beside the runtime blocks rather than inside one, for the same reason ports
+do: where a workload keeps its data is a question about the workload.
 
 ## Restart
 

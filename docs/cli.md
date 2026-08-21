@@ -8,6 +8,11 @@ orca workload list                      List workloads                       (al
 orca workload get <name>                Show a single workload
 orca workload logs <name>               Read a workload's recent output
 orca workload delete <name>             Delete a workload and stop its work  (alias: rm)
+
+orca volume create <manifest>           Create a volume from a manifest file
+orca volume list                        List volumes                         (alias: ls)
+orca volume get <name>                  Show a single volume
+orca volume delete <name>               Delete a volume and the data it holds (alias: rm)
 ```
 
 Commands are grouped by what they act on, so a verb reads the same whichever noun
@@ -105,6 +110,69 @@ orca workload delete example --wait
 Deleting is asynchronous. The workload reads as `terminating` while its work is
 stopped, and disappears once nothing is left running for it. A teardown can therefore
 be watched by polling `workload get` until the workload is gone.
+
+## volume create
+
+```sh
+orca volume create volume.yaml
+```
+
+Creates a volume and the directory backing it. The manifest is a name and nothing else:
+
+```yaml
+version: v1
+name: example-data
+```
+
+A volume has to exist before a workload can mount it, so that a mistyped name is
+reported rather than becoming a second empty volume. Creating one that already exists
+is refused, because a volume holds data and the caller may well have meant a name they
+have not used yet.
+
+## volume list
+
+```sh
+orca volume list
+```
+
+Prints every volume: where its data is on the host, and which workloads mount it. A
+volume nothing mounts is one that can be deleted without forcing.
+
+## volume get
+
+```sh
+orca volume get example-data
+```
+
+Prints one volume. `Path` is where its data is on the host running the server, which is
+what something taking a backup needs.
+
+## volume delete
+
+```sh
+orca volume delete example-data
+orca volume delete example-data --force
+```
+
+| Flag | Description |
+|---|---|
+| `--force`, `-f` | Remove the volume even though a workload mounts it. |
+
+This is the only thing in orca that removes stored data. Deleting a workload leaves its
+volumes alone.
+
+A volume a workload mounts is refused, and the workloads holding it are named:
+
+```
+$ orca volume delete example-data
+Error: failed to delete volume: volume is in use: mounted by writer
+```
+
+`--force` removes it anyway. The workloads keep running with a mount that no longer
+resolves, so this is for a volume whose workloads are known not to need it.
+
+A workload being torn down still counts as holding a volume. Its work is still running
+until the reconciler has stopped it, so the data it mounts is still in use.
 
 ## Workload states
 

@@ -54,6 +54,10 @@ ports:
 env:
   EXAMPLE: EXAMPLE
 
+volumes:
+  - name: example-data
+    to: /var/lib/example
+
 restart:
   policy: always
 
@@ -67,12 +71,26 @@ container:
 A workload names exactly one runtime block. `container:` runs an image and `exec:`
 runs a command on the host. Everything else applies to either.
 
+A volume is created before the workload that mounts it and outlives that workload, so
+deleting a workload never destroys what it stored. Its manifest is a name and nothing
+else:
+
+```yaml
+version: v1
+name: example-data
+```
+
+```sh
+orca volume create volume.yaml
+orca workload apply example.yaml
+```
+
 ## Documentation
 
 - [Manifest reference](docs/manifest.md) — every field a workload can name.
 - [Command line](docs/cli.md) — every command and flag.
 - [Configuration](docs/configuration.md) — the server's TOML file.
-- [Operating orca](docs/operating.md) — exposure, state on disk, and reading logs.
+- [Operating orca](docs/operating.md) — exposure, state on disk, volumes, and reading logs.
 - [Design](docs/design.md) — how reconciliation works and why it is built this way.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers building and testing orca.

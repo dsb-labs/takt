@@ -133,6 +133,57 @@ rather than by loading every workload and discarding most of them. Storing JSONB
 means a malformed specification is rejected as it is written rather than when something
 later tries to read it.
 
+## Volumes have a lifetime of their own
+
+A volume is a resource rather than a field on a workload. It is created before the
+workload that mounts it, and deleting that workload leaves it alone.
+
+The alternative is storage scoped to a workload, which reads as simpler until deleting
+a workload destroys data. Then every delete is a decision about data, and correcting a
+typo in a manifest is one too. Removing stored data is instead something asked for
+directly, and `orca volume delete` is the only thing that does it.
+
+That is also why mounting a volume which does not exist is rejected rather than
+creating one. A mistyped name would otherwise become a second empty volume, which reads
+as success while the data the workload wanted sits under the name that was meant.
+
+Deleting a volume a workload mounts is refused unless forced, and a workload being torn
+down still counts as mounting it. Its work runs until the reconciler has stopped it, so
+the data is still in use.
+
+## A volume is a directory orca owns
+
+A volume is a directory under the data directory, bind-mounted into a container and
+symlinked into an exec workload's working directory.
+
+Docker has named volumes, and using them for containers would work. But an exec process
+runs on the host and needs a real path, so orca has to own a directory whatever it does
+for containers. One mechanism means a volume means the same thing wherever it is
+mounted, and orca can say where a volume's data actually is.
+
+The cost is that the Docker daemon has to share the filesystem, so a volume cannot be
+mounted into a container on a daemon reached over the network.
+
+An exec workload gets a symlink rather than a mount because mounting needs privileges
+orca does not have. It runs as an ordinary user, and a workload reads and writes through
+a link perfectly well. The links are made fresh on every start, since stopping a
+workload removes the directory holding the last set — the link is disposable, and the
+volume it points at is not.
+
+The mount path is written the same way for either runtime, so a workload moved between
+them keeps its manifest. Where it resolves to cannot be: an exec workload reaches its
+volume by the path taken as relative to the directory it runs in, because making the
+absolute path resolve there would mean confining the process, which again needs
+privileges orca has not got.
+
+The path a volume resolves to is part of the stored specification, so it is covered by
+the specification hash. A volume whose path changed therefore replaces the instances
+bound to where it was, the same way a reallocated port does.
+
+Nothing tells a workload where its volume is on the host. It does not need telling —
+the path in its manifest is the path that works — and an exec workload that knew would
+know it sits inside orca's data directory.
+
 ## Host ports are orca's to allocate
 
 A container port that names no host port gets one from orca rather than from the

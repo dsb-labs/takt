@@ -23,6 +23,7 @@ state.db-wal      SQLite's write-ahead log
 state.db-shm      SQLite's shared-memory index
 exec/state/       what orca started, one directory per exec workload
 exec/workloads/   where exec workloads run, one directory each
+volumes/          one directory per volume
 ```
 
 The database holds each workload's stored specification, environment included, so orca
@@ -65,6 +66,32 @@ something else.
 
 A workload's directories in both trees are removed when the workload is deleted, so its
 output survives for as long as the workload does.
+
+## Volumes
+
+Each volume gets a directory named for the identifier orca assigned it:
+
+```
+volumes/<id>/
+```
+
+Everything a workload writes to a mounted volume is in there. The directory is created
+when the volume is created and removed only when the volume is deleted, so it survives
+the workloads that mount it — including a workload being replaced, restarted or
+deleted.
+
+`orca volume list` reports where each volume's data is, which is what something taking
+a backup needs:
+
+```sh
+orca volume list | jq -r '.[] | "\(.Name)\t\(.Path)"'
+```
+
+Nothing tells a workload where its volume is on the host. An exec workload told that
+would know it sits inside orca's data directory, and could walk out of it.
+
+A volume is bind-mounted into a container, so the Docker daemon has to share this
+filesystem. Volumes do not work against a daemon reached over the network.
 
 ## Restarting the server
 
