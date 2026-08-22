@@ -19,8 +19,8 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver/exec"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
-	"github.com/dsb-labs/orca/internal/server/secret"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
+	"github.com/dsb-labs/orca/internal/server/secret"
 	"github.com/dsb-labs/orca/internal/server/service"
 )
 
@@ -72,6 +72,7 @@ func Run(ctx context.Context, config Config) error {
 	ports := database.NewPortRepository(db)
 	volumes := database.NewVolumeRepository(db)
 	secrets := database.NewSecretRepository(db)
+	variables := database.NewVariableRepository(db)
 	checker := health.New()
 
 	// The exec driver keeps its own trees under the data directory, beside the
@@ -92,19 +93,29 @@ func Run(ctx context.Context, config Config) error {
 	// service to reallocate ports that turned out to be unusable. Both are passed as
 	// functions so neither has to be half-constructed to build the other.
 	//
-	// The secret service needs the same treatment for the same reason: rotating a
-	// secret has to rehash the workloads reading it.
+	// The secret and variable services need the same treatment for the same reason:
+	// changing either has to rehash the workloads reading it.
 	var svc *service.WorkloadService
+
+	// One closure serves both, because Rehash recomputes against whatever a workload
+	// references rather than against what it was told changed.
+	rehash := func(ctx context.Context, workload string) error {
+		_, err := svc.Rehash(ctx, workload)
+
+		return err
+	}
 
 	secretSvc := service.NewSecretService(service.SecretServiceConfig{
 		Logger:  logger,
 		Secrets: secrets,
 		Cipher:  cipher,
-		Rehash: func(ctx context.Context, workload string) error {
-			_, err := svc.Rehash(ctx, workload)
+		Rehash:  rehash,
+	})
 
-			return err
-		},
+	variableSvc := service.NewVariableService(service.VariableServiceConfig{
+		Logger:    logger,
+		Variables: variables,
+		Rehash:    rehash,
 	})
 
 	// The drivers are keyed by the name each one declares, which is what a workload's
@@ -121,9 +132,12 @@ func Run(ctx context.Context, config Config) error {
 		},
 		Workloads: workloads,
 		Ports:     ports,
+		// One resolver for both kinds, because one value in an environment may hold
+		// both and expansion refuses what it cannot resolve.
 		Env: service.NewEnvResolver(service.EnvResolverConfig{
-			Logger:  logger,
-			Secrets: secretSvc,
+			Logger:    logger,
+			Secrets:   secretSvc,
+			Variables: variableSvc,
 		}),
 		Checker: checker,
 		// A check goes to where the workload's ports are published, which is not
@@ -150,7 +164,10 @@ func Run(ctx context.Context, config Config) error {
 		Workloads: workloads,
 		Ports:     ports,
 		Volumes:   volumeSvc,
+		// The repositories rather than the services: hashing a workload needs what
+		// each thing currently holds and nothing else.
 		Secrets:   secrets,
+		Variables: variables,
 		Allocator: port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort}),
 		Checker:   checker,
 		Notify:    reconcile.Notify,
@@ -161,6 +178,7 @@ func Run(ctx context.Context, config Config) error {
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: volumeSvc}),
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: secretSvc}),
+		Variables: api.NewVariableAPI(api.VariableAPIConfig{Logger: logger, Variables: variableSvc}),
 	}).Register(mux)
 
 	var handler http.Handler = mux
