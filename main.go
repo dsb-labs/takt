@@ -15,6 +15,7 @@ import (
 
 	"github.com/dsb-labs/orca/cmd/secret"
 	"github.com/dsb-labs/orca/cmd/serve"
+	"github.com/dsb-labs/orca/cmd/variable"
 	"github.com/dsb-labs/orca/cmd/volume"
 	"github.com/dsb-labs/orca/cmd/workload"
 )
@@ -41,6 +42,7 @@ func main() {
 		workload.Command(),
 		volume.Command(),
 		secret.Command(),
+		variable.Command(),
 	)
 
 	if err := cmd.ExecuteContext(ctx); err != nil {
