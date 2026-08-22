@@ -15,6 +15,11 @@ binding it to a network:
 Set `hosts` to the name the proxy serves when you put one in front of orca. See
 [Configuration](configuration.md#http).
 
+Encrypting secrets does not change this. An attacker who can reach the API can apply
+a workload that reads any secret, because that is what a workload is for. What
+encryption protects is the database file and a backup of it. See
+[Secrets](secrets.md#what-it-does-not).
+
 ### Loopback is not a boundary against a browser
 
 A loopback bind stops another machine reaching orca. It does not stop a web page.
@@ -73,6 +78,7 @@ default:
 state.db          the workloads that have been applied
 state.db-wal      SQLite's write-ahead log
 state.db-shm      SQLite's shared-memory index
+secret.key        the key secrets are encrypted with
 exec/state/       what orca started, one directory per exec workload
 exec/workloads/   where exec workloads run, one directory each
 volumes/          one directory per volume
@@ -80,6 +86,12 @@ volumes/          one directory per volume
 
 The database holds each workload's stored specification, environment included, so orca
 creates the directory and its files readable only by the user running the server.
+
+A secret's value is encrypted in the database rather than held in a specification, so
+a backup of `state.db` alone does not disclose one. `secret.key` is what decrypts
+them, and it needs a backup of its own: a value sealed under a key that is gone cannot
+be recovered. Keeping the two apart is what makes the database safe to copy. See
+[Secrets](secrets.md#the-encryption-key).
 
 The database holds desired state only. What is actually running is observed from the
 runtime when asked, so nothing persisted can go stale against reality. A restarted

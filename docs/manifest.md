@@ -48,7 +48,7 @@ container:
 | `name` | yes | Identifies the workload. Lowercase alphanumeric and dashes, up to 63 characters. |
 | `labels` | no | Arbitrary key-value pairs. |
 | `ports` | no | The ports the workload publishes. |
-| `env` | no | Environment variables set for the workload. |
+| `env` | no | Environment variables set for the workload. A value may reference a secret. |
 | `volumes` | no | The volumes the workload mounts, and where it finds each one. |
 | `restart` | no | What happens when the workload ends. |
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
@@ -144,6 +144,53 @@ env:
 
 A workload starts with only what `env` names. It does not inherit the server's
 environment, which may hold credentials the workload has no business reading.
+
+### Reading a secret
+
+An `env` value can reference a secret rather than holding it:
+
+```yaml
+env:
+  EXAMPLE: ${secret:secret-name}
+  DSN: postgres://app:${secret:db-password}@localhost:5432/app
+  LITERAL: $$notasecret
+```
+
+`${secret:name}` is replaced by the value of that secret as the workload starts.
+`$$` is a literal dollar sign, which is how a value that has to contain one says so.
+That is the whole syntax. It is not a template language, so there is nothing to
+evaluate and no conditionals to write.
+
+A reference may sit inside a longer string, as `DSN` shows, and the same secret may
+be referenced from several variables.
+
+Anything else after an unescaped `$` is an error rather than literal text:
+
+| Value | Result |
+| --- | --- |
+| `${secret:db-password}` | The value of `db-password` |
+| `$$notasecret` | The literal `$notasecret` |
+| `$${secret:name}` | The literal `${secret:name}` |
+| `${secret:db-password` | Rejected: not closed by `}` |
+| `${env:HOME}` | Rejected: `env` is not a reference type |
+| `${secret:DB_PASSWORD}` | Rejected: not a name a secret may have |
+| `$HOME` | Rejected: a bare `$` |
+
+References work in `env` values only. A reference in an `env` *key* is not a
+reference, and nowhere else in a manifest is scanned for one. Keeping the surface
+this narrow means a secret cannot reach a workload's name, its labels, or its image.
+
+The secret has to exist before a workload can read it. Applying a manifest naming one
+that does not is rejected, and the message names the secret:
+
+```sh
+printf %s hunter2 | orca secret set db-password
+orca workload apply example.yaml
+```
+
+What is stored is the reference, never the value. A workload's specification is
+readable through the API, so a resolved value there would be readable too. See
+[Secrets](secrets.md).
 
 ## Volumes
 

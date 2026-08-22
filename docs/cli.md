@@ -13,6 +13,11 @@ orca volume create <manifest>           Create a volume from a manifest file
 orca volume list                        List volumes                         (alias: ls)
 orca volume get <name>                  Show a single volume
 orca volume delete <name>               Delete a volume and the data it holds (alias: rm)
+
+orca secret set <name>                  Set a secret's value
+orca secret list                        List secrets                         (alias: ls)
+orca secret get <name>                  Show a single secret
+orca secret delete <name>               Delete a secret                      (alias: rm)
 ```
 
 Commands are grouped by what they act on, so a verb reads the same whichever noun
@@ -173,6 +178,64 @@ resolves, so this is for a volume whose workloads are known not to need it.
 
 A workload being torn down still counts as holding a volume. Its work is still running
 until the reconciler has stopped it, so the data it mounts is still in use.
+
+## secret set
+
+```sh
+orca secret set db-password --from-file ./password
+printf %s hunter2 | orca secret set db-password
+```
+
+| Flag | Description |
+|---|---|
+| `--from-file`, `-f` | Read the value from this file rather than standard input. |
+
+Stores a value, encrypted. There is deliberately no flag that takes the value:
+arguments are visible to anything that can list processes on the host, and they land
+in shell history.
+
+The value is taken exactly as given, including a trailing newline. `printf %s` rather
+than `echo` is what keeps one out of it.
+
+Setting a secret to the value it already holds does nothing, so a script that sets
+every secret on every run does not restart the workloads reading them. A value that
+did change replaces those workloads, and reaches them as they start.
+
+## secret list
+
+```sh
+orca secret list
+```
+
+Prints every secret: its revision, and which workloads read it. No value, here or
+anywhere else. This is how you find out what exists in order to reference it from a
+manifest.
+
+## secret get
+
+```sh
+orca secret get db-password
+```
+
+Prints one secret. `Revision` changes whenever the value changes, which is how a
+rotation is confirmed without the value being shown.
+
+## secret delete
+
+```sh
+orca secret delete db-password
+orca secret delete db-password --force
+```
+
+| Flag | Description |
+|---|---|
+| `--force`, `-f` | Remove the secret even though a workload reads it. |
+
+A secret a workload reads is refused, and the workloads reading it are named.
+
+`--force` removes it anyway. Those workloads keep running, and fail to start once
+something replaces them. Creating the secret again recovers them. See
+[Secrets](secrets.md).
 
 ## Workload states
 

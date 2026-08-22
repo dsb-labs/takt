@@ -85,10 +85,26 @@ orca volume create volume.yaml
 orca workload apply example.yaml
 ```
 
+An `env` value can read a secret rather than holding one. The value is stored
+encrypted, and only a workload starting ever sees it:
+
+```sh
+printf %s hunter2 | orca secret set db-password
+```
+
+```yaml
+env:
+  DSN: postgres://app:${secret:db-password}@localhost:5432/app
+```
+
+Changing a secret's value replaces the workloads reading it, so a rotation does not
+have to be followed by an apply.
+
 ## Documentation
 
 - [Manifest reference](docs/manifest.md) — every field a workload can name.
 - [Command line](docs/cli.md) — every command and flag.
+- [Secrets](docs/secrets.md) — storing a value a workload reads and you cannot.
 - [Configuration](docs/configuration.md) — the server's TOML file.
 - [Operating orca](docs/operating.md) — exposure, state on disk, volumes, and reading logs.
 - [Design](docs/design.md) — how reconciliation works and why it is built this way.

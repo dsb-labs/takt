@@ -193,3 +193,43 @@ the behaviour.
 
 An exec workload names its own host port, because the process binds one directly and
 there is no mapping to make. orca records it so that no other workload is given it.
+
+## A secret's revision is hashed, not its value
+
+A workload is replaced when its specification hash changes. A secret a workload reads
+is therefore part of what that hash covers, or rotating one would leave the old value
+running until something else happened to change the workload.
+
+The value cannot be what the hash covers. A hash is reported by the API, so a hash
+computed over a value would let a guess at that value be tested offline. Instead each
+secret carries a revision, which moves whenever its value moves and says nothing about
+it. The revisions of the secrets a workload reads are mixed into that workload's hash.
+
+The revisions are hashed without being stored. What goes into the database is the
+specification alone, exactly as submitted, with the reference text still in it. A
+resolved value there would be readable through the API, which echoes a specification
+back.
+
+A workload that reads no secret hashes exactly as it would if none of this existed.
+That is deliberate rather than incidental: any other choice would replace every
+running instance the first time an operator upgraded orca.
+
+The revision is random rather than a counter. A counter would restart at one for a
+secret deleted and created again, so a workload would hash the same as it did against
+the value that is gone, and would keep running against a secret orca no longer holds.
+
+## A secret is decrypted as late as possible
+
+The value is decrypted when a workload starts, and nowhere else. Nothing else asks:
+the API is given an interface that cannot read one, and the type it reports has no
+field to put one in.
+
+Resolution therefore sits in the reconciler, immediately before the driver is handed
+the environment. Starting a workload is also the only path to a driver, so one call
+covers every way a workload comes to run.
+
+It happens ahead of the start rather than in its error path. A workload that fails to
+start gives up the host ports orca chose for it, because something outside orca may
+have taken one. A secret that cannot be resolved has nothing to do with ports, and
+moving a workload's address for that reason would be a change an operator could not
+account for.

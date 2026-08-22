@@ -23,6 +23,9 @@ bind = "127.0.0.1"
 min-port = 20000
 max-port = 32000
 
+[secrets]
+key-file = ""
+
 [logging]
 level = "info"
 ```
@@ -107,6 +110,26 @@ published on it.
 This applies to a port orca publishes for a workload, which means a container. An
 `exec` workload binds its own port, so what it listens on is the process's business and
 this setting does not reach it.
+
+## secrets
+
+| Key | Default | Description |
+|---|---|---|
+| `key-file` | empty | The file holding the key secrets are encrypted with. |
+
+Empty puts the key at `secret.key` inside the data directory. It is generated on first
+start, 32 random bytes, readable only by the user running the server.
+
+Set this to keep the key off the same disk as the database:
+
+```toml
+[secrets]
+key-file = "/etc/orca/secret.key"
+```
+
+The file needs a backup, and the backup should not sit beside the database. A value
+sealed under a key that is gone cannot be recovered, and anything that can read the
+key can read every secret orca holds. See [Secrets](secrets.md#the-encryption-key).
 
 ## logging
 
