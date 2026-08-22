@@ -39,6 +39,13 @@ type (
 		SpecHash string
 		// Arbitrary key-value pairs attached to the workload.
 		Labels map[string]string
+		// The names of the secrets the workload's specification references.
+		//
+		// Written with the workload and not read back: what needs the recorded links
+		// is the other direction, finding the workloads to redeploy when a secret
+		// moves. Reading them here would cost a join on every pass of the reconciler
+		// to answer a question the specification already answers.
+		Secrets []string
 		// The time the workload was first applied.
 		CreatedAt time.Time
 		// The time the workload's specification last changed.
@@ -94,10 +101,11 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Po
 	var stored Workload
 	var created bool
 
-	// The row and its port allocations are written together. A workload whose ports
-	// could not be claimed must not exist at all: the reconciler would otherwise
-	// start it against a specification naming host ports nothing holds, so the
-	// caller would be told the apply failed while orca ran it anyway.
+	// The row, its port allocations and the secrets it references are written
+	// together. A workload whose ports could not be claimed must not exist at all:
+	// the reconciler would otherwise start it against a specification naming host
+	// ports nothing holds, so the caller would be told the apply failed while orca
+	// ran it anyway.
 	err = transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
 		existing, err := get(ctx, tx, w.Name)
 		switch {
@@ -124,7 +132,11 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Po
 			ports[i].WorkloadID = stored.ID
 		}
 
-		return claim(ctx, tx, stored.ID, ports)
+		if err = claim(ctx, tx, stored.ID, ports); err != nil {
+			return err
+		}
+
+		return link(ctx, tx, stored.ID, w.Secrets)
 	})
 	if err != nil {
 		return Workload{}, false, err
