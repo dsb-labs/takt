@@ -94,9 +94,6 @@ type (
 		// List should return the ports allocated to the workload with the given
 		// identifier.
 		List(ctx context.Context, workloadID string) ([]database.Port, error)
-		// Claim should record the given ports as allocated to the workload with the
-		// given identifier, replacing whatever it held before.
-		Claim(ctx context.Context, workloadID string, ports []database.Port) error
 		// HolderOf should name the workload the given host port is allocated to,
 		// reporting false when no workload holds it.
 		HolderOf(ctx context.Context, host int) (string, bool, error)
@@ -509,10 +506,6 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 		ports[i].WorkloadID = row.ID
 	}
 
-	if err = s.ports.Claim(ctx, row.ID, ports); err != nil {
-		return false, fmt.Errorf("failed to claim workload ports: %w", err)
-	}
-
 	encoded, hash, err := canonicalise(withResolvedPorts(spec, ports))
 	if err != nil {
 		return false, err
@@ -520,7 +513,12 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 
 	row.Spec, row.SpecHash = encoded, hash
 
-	if _, _, err = s.workloads.Upsert(ctx, row); err != nil {
+	// The ports travel with the write, as they do for an apply. Claiming them
+	// separately beforehand would not survive it: the write replaces a workload's
+	// allocation with whatever it was handed, so an Upsert given none clears the
+	// rows that were just claimed and leaves the specification naming host ports
+	// nothing holds.
+	if _, _, err = s.workloads.Upsert(ctx, row, ports...); err != nil {
 		return false, fmt.Errorf("failed to store workload: %w", err)
 	}
 

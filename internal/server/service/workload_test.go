@@ -961,6 +961,68 @@ func TestWorkloadService_Apply_RejectsATerminatingWorkload(t *testing.T) {
 	assert.ErrorIs(t, err, service.ErrWorkloadDeleting)
 }
 
+func TestWorkloadService_Reallocate(t *testing.T) {
+	t.Parallel()
+
+	t.Run("stores the ports it settled on alongside the workload", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = new([]api.PortMapping{{To: 80, From: new(20005)}})
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(api.Container), Spec: encoded, SpecHash: "hash-one"}
+		held := []database.Port{{WorkloadID: row.ID, Container: 80, Host: 20005, Dynamic: true}}
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+		ports.EXPECT().List(mock.Anything, row.ID).Return(held, nil).Once()
+		ports.EXPECT().Allocated(mock.Anything).Return([]int{20005}, nil).Once()
+
+		// The write has to carry the allocation. Upsert replaces a workload's ports
+		// with whatever it is handed, so one given none would clear the rows and
+		// leave the stored specification naming a host port nothing holds.
+		var claimed []database.Port
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+				claimed = p
+				return w, false, nil
+			}).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		changed, err := svc.Reallocate(t.Context(), "example")
+		require.NoError(t, err)
+		assert.True(t, changed)
+
+		require.Len(t, claimed, 1)
+		assert.Equal(t, row.ID, claimed[0].WorkloadID)
+		assert.Equal(t, 80, claimed[0].Container)
+		assert.True(t, claimed[0].Dynamic)
+		assert.NotEqual(t, 20005, claimed[0].Host)
+	})
+
+	t.Run("leaves a workload holding only pinned ports alone", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		row := storedWorkload("example")
+		row.ID = "workload-id"
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+		ports.EXPECT().List(mock.Anything, row.ID).
+			Return([]database.Port{{WorkloadID: row.ID, Container: 80, Host: 8080}}, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		// A pinned port was asked for explicitly, so moving it would override the
+		// operator rather than revise a guess.
+		changed, err := svc.Reallocate(t.Context(), "example")
+		require.NoError(t, err)
+		assert.False(t, changed)
+	})
+}
+
 func TestWorkloadService_Logs(t *testing.T) {
 	t.Parallel()
 
@@ -1001,7 +1063,6 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
-	ports.EXPECT().Claim(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	ports.EXPECT().HolderOf(mock.Anything, mock.Anything).Return("", false, nil).Maybe()
 
 	return service.NewWorkloadService(service.WorkloadServiceConfig{
