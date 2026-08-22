@@ -961,6 +961,262 @@ func TestWorkloadService_Apply_RejectsATerminatingWorkload(t *testing.T) {
 	assert.ErrorIs(t, err, service.ErrWorkloadDeleting)
 }
 
+func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("hashes a workload reading no secret exactly as before", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+
+		var hash string
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				hash = w.SpecHash
+
+				return w, true, nil
+			}).Once()
+
+		_, _, err := newTestService(t, d, repo, ports, nil).
+			Apply(t.Context(), containerSpec("example", "example/example:latest"))
+		require.NoError(t, err)
+
+		// Pinned to the literal, because this is the hash orca computed before secrets
+		// existed. A change here replaces every running instance on upgrade, so it has
+		// to be a decision rather than a side effect.
+		assert.Equal(t, "485029cc492e6cb9a301bdde6d7632286d9613ebae081824118e64611dcdf60f", hash)
+	})
+
+	t.Run("moves the hash when a secret's revision moves", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"DSN": "postgres://app:${secret:db-password}@localhost/app"})
+
+		first := applyForHash(t, spec, map[string]string{"db-password": "rev-one"})
+		second := applyForHash(t, spec, map[string]string{"db-password": "rev-two"})
+
+		// The same specification against a different revision is a different hash, so
+		// the reconciler replaces the instances holding the old value.
+		assert.NotEqual(t, first, second)
+	})
+
+	t.Run("keeps the hash when the revision is unchanged", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+
+		first := applyForHash(t, spec, map[string]string{"db-password": "rev-one"})
+		second := applyForHash(t, spec, map[string]string{"db-password": "rev-one"})
+
+		// Re-applying an unchanged manifest against an unchanged secret must not
+		// restart anything.
+		assert.Equal(t, first, second)
+	})
+
+	t.Run("hashes a workload reading a secret differently from one that does not", func(t *testing.T) {
+		plain := containerSpec("example", "example/example:latest")
+		plain.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+
+		withSecret := applyForHash(t, plain, map[string]string{"db-password": "rev-one"})
+
+		assert.NotEqual(t, "485029cc492e6cb9a301bdde6d7632286d9613ebae081824118e64611dcdf60f", withSecret)
+	})
+
+	t.Run("stores the reference rather than the value", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets := NewMockSecretRevisions(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		secrets.EXPECT().Revisions(mock.Anything, []string{"db-password"}).
+			Return(map[string]string{"db-password": "rev-one"}, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+
+		var stored database.Workload
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				stored = w
+
+				return w, true, nil
+			}).Once()
+
+		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+		require.NoError(t, err)
+
+		// The API echoes the stored specification back, so a resolved value here would
+		// be readable by anything that can reach the server.
+		assert.Contains(t, string(stored.Spec), "${secret:db-password}")
+		assert.NotContains(t, string(stored.Spec), "rev-one")
+
+		// The names are recorded so that rotating the secret can find this workload.
+		assert.Equal(t, []string{"db-password"}, stored.Secrets)
+	})
+
+	t.Run("refuses a reference to a secret that does not exist", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets := NewMockSecretRevisions(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"DSN": "${secret:nope}"})
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		secrets.EXPECT().Revisions(mock.Anything, []string{"nope"}).Return(nil, nil).Once()
+
+		// The workload could never start, and the operator applying it is the one who
+		// can correct the name.
+		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+		require.ErrorIs(t, err, service.ErrSecretNotFound)
+		assert.Contains(t, err.Error(), "nope")
+	})
+
+	t.Run("refuses a malformed reference", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"DSN": "${secret:unterminated"})
+
+		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec)
+		assert.ErrorIs(t, err, service.ErrInvalidSpec)
+	})
+}
+
+func TestWorkloadService_Rehash(t *testing.T) {
+	t.Parallel()
+
+	t.Run("moves the hash without touching the specification", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets := NewMockSecretRevisions(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(api.Container), Spec: encoded, SpecHash: "stale"}
+		held := []database.Port{{WorkloadID: row.ID, Container: 80, Host: 20001, Dynamic: true}}
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+		secrets.EXPECT().Revisions(mock.Anything, []string{"db-password"}).
+			Return(map[string]string{"db-password": "rev-two"}, nil).Once()
+		ports.EXPECT().List(mock.Anything, row.ID).Return(held, nil).Once()
+
+		var stored database.Workload
+		var claimed []database.Port
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+				stored, claimed = w, p
+
+				return w, false, nil
+			}).Once()
+
+		changed, err := newTestSecretAwareService(t, d, repo, ports, secrets).Rehash(t.Context(), "example")
+		require.NoError(t, err)
+		assert.True(t, changed)
+
+		// Only the hash moves. Rewriting the specification would re-resolve ports and
+		// volumes for a change that has nothing to do with either.
+		assert.Equal(t, encoded, stored.Spec)
+		assert.NotEqual(t, "stale", stored.SpecHash)
+
+		// The ports have to travel with the write or it would clear them.
+		assert.Equal(t, held, claimed)
+		assert.Equal(t, []string{"db-password"}, stored.Secrets)
+	})
+
+	t.Run("writes nothing when the hash is unchanged", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets := NewMockSecretRevisions(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+
+		revisions := map[string]string{"db-password": "rev-one"}
+		hash := applyForHash(t, spec, revisions)
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{ID: "workload-id", Name: "example", Spec: encoded, SpecHash: hash}, nil).Once()
+		secrets.EXPECT().Revisions(mock.Anything, []string{"db-password"}).Return(revisions, nil).Once()
+
+		// Nothing changed, so nothing is written and nothing is redeployed. The mock
+		// asserts no Upsert, since it was never told to expect one.
+		changed, err := newTestSecretAwareService(t, d, repo, ports, secrets).Rehash(t.Context(), "example")
+		require.NoError(t, err)
+		assert.False(t, changed)
+	})
+
+	t.Run("moves the hash when the secret has gone", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets := NewMockSecretRevisions(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{ID: "workload-id", Name: "example", Spec: encoded, SpecHash: "stale"}, nil).Once()
+		secrets.EXPECT().Revisions(mock.Anything, []string{"db-password"}).Return(nil, nil).Once()
+		ports.EXPECT().List(mock.Anything, "workload-id").Return(nil, nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				return w, false, nil
+			}).Once()
+
+		// A force-deleted secret still moves the hash, so the workload stops claiming
+		// it is running against something orca holds.
+		changed, err := newTestSecretAwareService(t, d, repo, ports, secrets).Rehash(t.Context(), "example")
+		require.NoError(t, err)
+		assert.True(t, changed)
+	})
+
+	t.Run("reports a workload that does not exist", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "nope").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		_, err := newTestService(t, d, repo, ports, nil).Rehash(t.Context(), "nope")
+		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
+	})
+}
+
+// applyForHash applies spec against the given secret revisions and returns the hash
+// the service stored, so that a test can compare two hashes without repeating the
+// mock wiring.
+func applyForHash(t *testing.T, spec api.WorkloadSpec, revisions map[string]string) string {
+	t.Helper()
+
+	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+	secrets := NewMockSecretRevisions(t)
+
+	repo.EXPECT().Get(mock.Anything, spec.Name).
+		Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+	secrets.EXPECT().Revisions(mock.Anything, mock.Anything).Return(revisions, nil).Once()
+	d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+
+	var hash string
+	repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+			hash = w.SpecHash
+
+			return w, true, nil
+		}).Once()
+
+	_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+	require.NoError(t, err)
+
+	return hash
+}
+
 func TestWorkloadService_Reallocate(t *testing.T) {
 	t.Parallel()
 
@@ -1072,6 +1328,32 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 		Ports:     ports,
 		Allocator: allocatorStub{},
 		Notify:    notify,
+	})
+}
+
+// newTestSecretAwareService builds a service that can read secret revisions, for the
+// tests about what a referenced secret does to a workload's hash.
+func newTestSecretAwareService(
+	t *testing.T,
+	d *MockDriver,
+	repo *MockWorkloadRepository,
+	ports *MockPortRepository,
+	secrets *MockSecretRevisions,
+) *service.WorkloadService {
+	t.Helper()
+
+	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().HolderOf(mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+
+	return service.NewWorkloadService(service.WorkloadServiceConfig{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]service.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Secrets:   secrets,
+		Allocator: allocatorStub{},
 	})
 }
 
