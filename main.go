@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/dsb-labs/orca/cmd/secret"
 	"github.com/dsb-labs/orca/cmd/serve"
 	"github.com/dsb-labs/orca/cmd/volume"
 	"github.com/dsb-labs/orca/cmd/workload"
@@ -39,6 +40,7 @@ func main() {
 		serve.Command(),
 		workload.Command(),
 		volume.Command(),
+		secret.Command(),
 	)
 
 	if err := cmd.ExecuteContext(ctx); err != nil {
