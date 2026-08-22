@@ -218,6 +218,29 @@ The revision is random rather than a counter. A counter would restart at one for
 secret deleted and created again, so a workload would hash the same as it did against
 the value that is gone, and would keep running against a secret orca no longer holds.
 
+## A variable's value is hashed, and a secret's is not
+
+A variable reaches a workload's hash the same way a secret does, and for the same
+reason: changing one has to replace the instances reading the old value. What reaches
+it differs. A secret contributes a revision, and a variable contributes its value.
+
+The reasoning that keeps a secret's value out of the hash does not apply to a
+variable. A hash over a secret's value would let a guess at it be tested offline
+against a hash the API reports. A variable's value is returned by that same API, so
+there is nothing left for the indirection to protect, and a revision column would only
+be a second thing to keep in step with the value.
+
+Hashing the value is also better behaved. A variable deleted and created again with the
+same value hashes as it did before, so the workloads reading it are left alone — which
+is correct, because nothing they read has changed. A random revision would have
+replaced them all. This is the one place where a secret's design is a compromise the
+variable does not have to make.
+
+Both contributions are omitted from the hash when there are none. A workload reading
+neither hashes exactly as it would if none of this existed, and a workload reading only
+secrets hashes exactly as it did before variables were added. Without that, adding this
+feature would have replaced every running instance that reads a secret.
+
 ## A secret is decrypted as late as possible
 
 The value is decrypted when a workload starts, and nowhere else. Nothing else asks:

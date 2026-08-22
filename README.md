@@ -100,11 +100,24 @@ env:
 Changing a secret's value replaces the workloads reading it, so a rotation does not
 have to be followed by an apply.
 
+A variable is the same thing for a value worth reading back — a hostname, a log level,
+a feature flag:
+
+```sh
+orca variable set db-host db.internal
+```
+
+```yaml
+env:
+  DSN: postgres://app@${var:db-host}:5432/app
+```
+
 ## Documentation
 
 - [Manifest reference](docs/manifest.md) — every field a workload can name.
 - [Command line](docs/cli.md) — every command and flag.
 - [Secrets](docs/secrets.md) — storing a value a workload reads and you cannot.
+- [Variables](docs/variables.md) — storing a value a workload reads and you can.
 - [Configuration](docs/configuration.md) — the server's TOML file.
 - [Operating orca](docs/operating.md) — exposure, state on disk, volumes, and reading logs.
 - [Design](docs/design.md) — how reconciliation works and why it is built this way.

@@ -48,7 +48,7 @@ container:
 | `name` | yes | Identifies the workload. Lowercase alphanumeric and dashes, up to 63 characters. |
 | `labels` | no | Arbitrary key-value pairs. |
 | `ports` | no | The ports the workload publishes. |
-| `env` | no | Environment variables set for the workload. A value may reference a secret. |
+| `env` | no | Environment variables set for the workload. A value may reference a secret or a variable. |
 | `volumes` | no | The volumes the workload mounts, and where it finds each one. |
 | `restart` | no | What happens when the workload ends. |
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
@@ -190,6 +190,35 @@ orca workload apply example.yaml
 
 What is stored is the reference, never the value. A workload's specification is
 readable through the API, so a resolved value there would be readable too. See
+[Secrets](secrets.md).
+
+### Reading a variable
+
+An `env` value can reference a variable the same way, with `${var:name}`:
+
+```yaml
+env:
+  EXAMPLE: ${var:variable-name}
+  DSN: postgres://app@${var:db-host}:5432/app
+  LITERAL: $$notavariable
+```
+
+Everything above applies unchanged: the same escaping, the same rejections, the same
+`env`-values-only scope, and the same requirement that the variable exists before a
+workload can read it.
+
+One value may hold both kinds:
+
+```yaml
+env:
+  DSN: postgres://app:${secret:db-password}@${var:db-host}:5432/app
+```
+
+The kind is part of what is being asked for, so `${var:token}` and `${secret:token}`
+name two different things and one is never substituted for the other.
+
+The difference between the two is whether the value is readable back. A variable's is
+returned by the API. A secret's is not. See [Variables](variables.md) and
 [Secrets](secrets.md).
 
 ## Volumes

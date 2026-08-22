@@ -18,6 +18,11 @@ orca secret set <name>                  Set a secret's value
 orca secret list                        List secrets                         (alias: ls)
 orca secret get <name>                  Show a single secret
 orca secret delete <name>               Delete a secret                      (alias: rm)
+
+orca variable set <name> [value]        Set a variable's value
+orca variable list                      List variables                       (alias: ls)
+orca variable get <name>                Show a single variable
+orca variable delete <name>             Delete a variable                    (alias: rm)
 ```
 
 Commands are grouped by what they act on, so a verb reads the same whichever noun
@@ -236,6 +241,64 @@ A secret a workload reads is refused, and the workloads reading it are named.
 `--force` removes it anyway. Those workloads keep running, and fail to start once
 something replaces them. Creating the secret again recovers them. See
 [Secrets](secrets.md).
+
+## variable set
+
+```sh
+orca variable set log-level debug
+orca variable set motd --from-file ./motd.txt
+printf %s debug | orca variable set log-level
+```
+
+| Flag | Description |
+|---|---|
+| `--from-file`, `-f` | Read the value from this file rather than the argument or standard input. |
+
+Stores a value as given. The value may be an argument here, where a secret's may not:
+arguments are visible to anything that can list processes and they land in shell
+history, which a variable has no reason to avoid.
+
+A value read from a file or from standard input is taken exactly as given, including
+a trailing newline. Giving both an argument and `--from-file` is refused.
+
+Setting a variable to the value it already holds does nothing, so a script that sets
+every variable on every run does not restart the workloads reading them. A value that
+did change replaces those workloads, and reaches them as they start.
+
+## variable list
+
+```sh
+orca variable list
+```
+
+Prints every variable: its value, and which workloads read it. The values are shown,
+unlike `secret list`, since reviewing what a fleet is configured with is the reason to
+choose a variable.
+
+## variable get
+
+```sh
+orca variable get log-level
+```
+
+Prints one variable, including its value.
+
+## variable delete
+
+```sh
+orca variable delete log-level
+orca variable delete log-level --force
+```
+
+| Flag | Description |
+|---|---|
+| `--force`, `-f` | Remove the variable even though a workload reads it. |
+
+A variable a workload reads is refused, and the workloads reading it are named.
+
+`--force` removes it anyway. Those workloads keep running, and fail to start once
+something replaces them. Creating the variable again recovers them. See
+[Variables](variables.md).
 
 ## Workload states
 

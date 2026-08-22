@@ -15,6 +15,10 @@ env:
 
 The reference syntax is documented in the [manifest reference](manifest.md#reading-a-secret).
 
+For a value that is not worth hiding — a hostname, a log level — use a
+[variable](variables.md) instead. It works the same way, and its value is readable
+back.
+
 ## What orca guarantees
 
 - **The value is not readable back.** No endpoint returns one, so no command prints
@@ -95,7 +99,7 @@ running process to take something away from it. They fail to start once somethin
 replaces them, and the failure names the secret:
 
 ```
-failed to resolve secrets for workload: secret not found: DSN reads db-password
+failed to resolve environment for workload: DSN reads secret not found: db-password
 ```
 
 Creating the secret again recovers them without any further action.

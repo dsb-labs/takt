@@ -20,6 +20,10 @@ a workload that reads any secret, because that is what a workload is for. What
 encryption protects is the database file and a backup of it. See
 [Secrets](secrets.md#what-it-does-not).
 
+Variables are not protected at all. Anything that can reach the API can read every
+variable and its value, which is what they are for. Put anything that would be
+damaging to report in a secret instead. See [Variables](variables.md).
+
 ### Loopback is not a boundary against a browser
 
 A loopback bind stops another machine reaching orca. It does not stop a web page.
