@@ -28,6 +28,8 @@ tags:
     description: Storage that outlives the workloads mounting it.
   - name: secrets
     description: Values a workload reads and an operator cannot.
+  - name: variables
+    description: Values a workload reads and an operator can.
 
 paths:
   /api/v1/workloads:
@@ -468,6 +470,137 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v1/variables:
+    get:
+      operationId: listVariables
+      tags: [variables]
+      summary: List variables
+      description: |
+        Returns the variables the server holds, each with its value and the workloads
+        currently reading it.
+
+        The values are part of the response, unlike a secret's. Being able to review
+        what a fleet is configured with is the reason to choose a variable over a
+        secret, so a listing that withheld them would defeat the point.
+      responses:
+        "200":
+          description: The variables.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListVariablesResult"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/variables/{name}:
+    parameters:
+      - $ref: "#/components/parameters/VariableName"
+
+    get:
+      operationId: getVariable
+      tags: [variables]
+      summary: Get a single variable
+      description: |
+        Returns the variable with the given name, including its value and the
+        workloads reading it.
+      responses:
+        "200":
+          description: The requested variable.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetVariableResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      operationId: setVariable
+      tags: [variables]
+      summary: Set a variable's value
+      description: |
+        Stores the given value as the named variable.
+
+        Setting a variable to the value it already holds does nothing, so no workload
+        reading it is redeployed. That mirrors applying an unchanged manifest, and
+        means a tool that sets every variable on every run does not restart the fleet
+        each time.
+
+        A value that did change moves the specification hash of every workload
+        reading the variable. Those workloads are then replaced by the reconciler,
+        and the new value reaches them as they start.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VariableSpec"
+      responses:
+        "200":
+          description: The variable was updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetVariableResult"
+        "201":
+          description: The variable was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetVariableResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteVariable
+      tags: [variables]
+      summary: Delete a variable
+      description: |
+        Removes the variable with the given name.
+
+        A variable a workload reads is refused rather than removed, and the response
+        names the workloads reading it. Forcing it through leaves those workloads
+        running: they find out at their next start, which is when the value is
+        actually needed.
+
+        Deletion is synchronous, unlike a workload's. There is nothing running to
+        wind down, only a row to remove.
+      parameters:
+        - name: force
+          in: query
+          required: false
+          description: |
+            Remove the variable even though a workload reads it. Those workloads keep
+            running until something replaces them, and then fail to start until the
+            variable exists again.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: |
+            The variable was removed.
+
+            The body is an object with nothing in it yet, rather than no body at all,
+            for the same reason deleting a secret returns one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteVariableResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A workload reads the variable, and force was not set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
 components:
   parameters:
     WorkloadName:
@@ -495,6 +628,16 @@ components:
       in: path
       required: true
       description: The name that identifies the secret.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 63
+
+    VariableName:
+      name: name
+      in: path
+      required: true
+      description: The name that identifies the variable.
       schema:
         type: string
         minLength: 1
@@ -983,6 +1126,61 @@ components:
           items:
             type: string
 
+    VariableSpec:
+      type: object
+      description: |
+        The value to store as a variable.
+
+        The name is not part of this. It travels in the path, because unlike a
+        workload or a volume a variable is not described by a manifest: there is
+        nothing to write down but the value.
+      required: [value]
+      properties:
+        value:
+          type: string
+          description: |
+            The value to store. Returned by this API, unlike a secret's.
+
+            An empty string is a valid value. A workload reading it gets an empty
+            environment variable, which is different from one that is not set.
+
+    Variable:
+      type: object
+      description: |
+        A variable, together with its value and the workloads currently reading it.
+
+        The value is on this schema and there is no revision, which is where a
+        variable parts company with a secret. A secret reports a revision so that a
+        rotation can be confirmed without revealing anything; a variable has nothing
+        to hide, so its value serves that purpose directly. That also makes it the
+        wrong place for anything damaging to report — a secret is what that is for.
+      required: [name, value, createdAt, updatedAt]
+      properties:
+        name:
+          type: string
+          description: The name that identifies the variable, and which a manifest references.
+        value:
+          type: string
+          description: The value the variable holds.
+        createdAt:
+          type: string
+          format: date-time
+          description: When the variable was created.
+        updatedAt:
+          type: string
+          format: date-time
+          description: |
+            When the variable's value last changed. Equal to createdAt for a variable
+            that has never been changed.
+        usedBy:
+          type: array
+          description: |
+            The names of the workloads whose specifications reference this variable.
+            Empty for a variable nothing reads, which is a variable that can be
+            deleted without forcing.
+          items:
+            type: string
+
     ExecSpec:
       type: object
       description: |
@@ -1306,3 +1504,40 @@ components:
       description: |
         The body returned when a secret is deleted, which has nothing in it yet, for
         the same reason deleting a volume returns one.
+
+    ListVariablesResult:
+      type: object
+      description: |
+        The body returned when variables are listed.
+
+        An object rather than a bare array, for the same reason listing volumes
+        returns one.
+      required: [variables]
+      properties:
+        variables:
+          type: array
+          description: The variables the server holds.
+          items:
+            $ref: "#/components/schemas/Variable"
+
+    GetVariableResult:
+      type: object
+      description: The body returned when a single variable is read.
+      required: [variable]
+      properties:
+        variable:
+          $ref: "#/components/schemas/Variable"
+
+    SetVariableResult:
+      type: object
+      description: The body returned when a variable is set.
+      required: [variable]
+      properties:
+        variable:
+          $ref: "#/components/schemas/Variable"
+
+    DeleteVariableResult:
+      type: object
+      description: |
+        The body returned when a variable is deleted, which has nothing in it yet, for
+        the same reason deleting a secret returns one.

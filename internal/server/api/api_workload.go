@@ -126,12 +126,13 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		return api.ApplyWorkload422JSONResponse{Error: err.Error()}, nil
 	case errors.Is(err, service.ErrVolumeNotFound),
 		errors.Is(err, service.ErrSecretNotFound),
+		errors.Is(err, service.ErrVariableNotFound),
 		errors.Is(err, service.ErrInvalidSpec),
 		errors.Is(err, service.ErrNoRuntime),
 		errors.Is(err, service.ErrAmbiguousRuntime):
-		// A volume or a secret that does not exist is the caller's to fix, and naming
-		// it is the whole point: the alternative is an operator who mistyped one being
-		// told only that something went wrong.
+		// A volume, a secret or a variable that does not exist is the caller's to fix,
+		// and naming it is the whole point: the alternative is an operator who mistyped
+		// one being told only that something went wrong.
 		return api.ApplyWorkload400JSONResponse{
 			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
 		}, nil

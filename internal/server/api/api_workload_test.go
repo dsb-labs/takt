@@ -140,6 +140,19 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			},
 		},
 		{
+			Name: "reports a variable the workload reads but does not exist",
+			Path: "/api/v1/workloads/example",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Workload{}, false, fmt.Errorf("%w: log-level", service.ErrVariableNotFound)).Once()
+			},
+			ExpectStatus: http.StatusBadRequest,
+			AssertBody: func(t *testing.T, body string) {
+				assert.Contains(t, body, "log-level")
+			},
+		},
+		{
 			Name: "reports a workload that is being deleted",
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
@@ -616,6 +629,7 @@ func do(t *testing.T, svc *MockWorkloadService, method, target string, body io.R
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: NewMockVolumeService(t)}),
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: NewMockSecretService(t)}),
+		Variables: api.NewVariableAPI(api.VariableAPIConfig{Logger: logger, Variables: NewMockVariableService(t)}),
 	}).Register(mux)
 
 	req := httptest.NewRequest(method, target, body)

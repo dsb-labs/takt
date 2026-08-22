@@ -197,6 +197,10 @@ type CreateVolumeResult struct {
 // the same reason deleting a volume returns one.
 type DeleteSecretResult = map[string]interface{}
 
+// DeleteVariableResult The body returned when a variable is deleted, which has nothing in it yet, for
+// the same reason deleting a secret returns one.
+type DeleteVariableResult = map[string]interface{}
+
 // DeleteVolumeResult The body returned when a volume is deleted, which has nothing in it yet.
 //
 // It exists for two reasons. Every response this API gives is a JSON object, so
@@ -244,6 +248,18 @@ type GetSecretResult struct {
 	// of orca: once set, the only thing that sees the value is a workload being
 	// started.
 	Secret Secret `json:"secret"`
+}
+
+// GetVariableResult The body returned when a single variable is read.
+type GetVariableResult struct {
+	// Variable A variable, together with its value and the workloads currently reading it.
+	//
+	// The value is on this schema and there is no revision, which is where a
+	// variable parts company with a secret. A secret reports a revision so that a
+	// rotation can be confirmed without revealing anything; a variable has nothing
+	// to hide, so its value serves that purpose directly. That also makes it the
+	// wrong place for anything damaging to report — a secret is what that is for.
+	Variable Variable `json:"variable"`
 }
 
 // GetVolumeResult The body returned when a single volume is read.
@@ -383,6 +399,15 @@ type InstanceState string
 type ListSecretsResult struct {
 	// Secrets The secrets the server holds.
 	Secrets []Secret `json:"secrets"`
+}
+
+// ListVariablesResult The body returned when variables are listed.
+//
+// An object rather than a bare array, for the same reason listing volumes
+// returns one.
+type ListVariablesResult struct {
+	// Variables The variables the server holds.
+	Variables []Variable `json:"variables"`
 }
 
 // ListVolumesResult The body returned when volumes are listed.
@@ -591,6 +616,58 @@ type SetSecretResult struct {
 	// of orca: once set, the only thing that sees the value is a workload being
 	// started.
 	Secret Secret `json:"secret"`
+}
+
+// SetVariableResult The body returned when a variable is set.
+type SetVariableResult struct {
+	// Variable A variable, together with its value and the workloads currently reading it.
+	//
+	// The value is on this schema and there is no revision, which is where a
+	// variable parts company with a secret. A secret reports a revision so that a
+	// rotation can be confirmed without revealing anything; a variable has nothing
+	// to hide, so its value serves that purpose directly. That also makes it the
+	// wrong place for anything damaging to report — a secret is what that is for.
+	Variable Variable `json:"variable"`
+}
+
+// Variable A variable, together with its value and the workloads currently reading it.
+//
+// The value is on this schema and there is no revision, which is where a
+// variable parts company with a secret. A secret reports a revision so that a
+// rotation can be confirmed without revealing anything; a variable has nothing
+// to hide, so its value serves that purpose directly. That also makes it the
+// wrong place for anything damaging to report — a secret is what that is for.
+type Variable struct {
+	// CreatedAt When the variable was created.
+	CreatedAt time.Time `json:"createdAt"`
+
+	// Name The name that identifies the variable, and which a manifest references.
+	Name string `json:"name"`
+
+	// UpdatedAt When the variable's value last changed. Equal to createdAt for a variable
+	// that has never been changed.
+	UpdatedAt time.Time `json:"updatedAt"`
+
+	// UsedBy The names of the workloads whose specifications reference this variable.
+	// Empty for a variable nothing reads, which is a variable that can be
+	// deleted without forcing.
+	UsedBy *[]string `json:"usedBy,omitempty"`
+
+	// Value The value the variable holds.
+	Value string `json:"value"`
+}
+
+// VariableSpec The value to store as a variable.
+//
+// The name is not part of this. It travels in the path, because unlike a
+// workload or a volume a variable is not described by a manifest: there is
+// nothing to write down but the value.
+type VariableSpec struct {
+	// Value The value to store. Returned by this API, unlike a secret's.
+	//
+	// An empty string is a valid value. A workload reading it gets an empty
+	// environment variable, which is different from one that is not set.
+	Value string `json:"value"`
 }
 
 // Volume A volume, together with the workloads currently mounting it.
@@ -834,6 +911,9 @@ type WorkloadState string
 // SecretName defines model for SecretName.
 type SecretName = string
 
+// VariableName defines model for VariableName.
+type VariableName = string
+
 // VolumeName defines model for VolumeName.
 type VolumeName = string
 
@@ -854,6 +934,14 @@ type DeleteSecretParams struct {
 	// Force Remove the secret even though a workload reads it. Those workloads keep
 	// running until something replaces them, and then fail to start until the
 	// secret exists again.
+	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+}
+
+// DeleteVariableParams defines parameters for DeleteVariable.
+type DeleteVariableParams struct {
+	// Force Remove the variable even though a workload reads it. Those workloads keep
+	// running until something replaces them, and then fail to start until the
+	// variable exists again.
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
 }
 
@@ -887,6 +975,9 @@ type GetWorkloadLogsParams struct {
 
 // SetSecretJSONRequestBody defines body for SetSecret for application/json ContentType.
 type SetSecretJSONRequestBody = SecretSpec
+
+// SetVariableJSONRequestBody defines body for SetVariable for application/json ContentType.
+type SetVariableJSONRequestBody = VariableSpec
 
 // CreateVolumeJSONRequestBody defines body for CreateVolume for application/json ContentType.
 type CreateVolumeJSONRequestBody = VolumeSpec
@@ -1040,6 +1131,77 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
 	SetSecret(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListVariables List variables
+	//
+	// Returns the variables the server holds, each with its value and the workloads
+	// currently reading it.
+	//
+	// The values are part of the response, unlike a secret's. Being able to review
+	// what a fleet is configured with is the reason to choose a variable over a
+	// secret, so a listing that withheld them would defeat the point.
+	//
+	// Corresponds with GET /api/v1/variables (the `ListVariables` operationId).
+	ListVariables(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteVariable Delete a variable
+	//
+	// Removes the variable with the given name.
+	//
+	// A variable a workload reads is refused rather than removed, and the response
+	// names the workloads reading it. Forcing it through leaves those workloads
+	// running: they find out at their next start, which is when the value is
+	// actually needed.
+	//
+	// Deletion is synchronous, unlike a workload's. There is nothing running to
+	// wind down, only a row to remove.
+	//
+	// Corresponds with DELETE /api/v1/variables/{name} (the `DeleteVariable` operationId).
+	DeleteVariable(ctx context.Context, name VariableName, params *DeleteVariableParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetVariable Get a single variable
+	//
+	// Returns the variable with the given name, including its value and the
+	// workloads reading it.
+	//
+	// Corresponds with GET /api/v1/variables/{name} (the `GetVariable` operationId).
+	GetVariable(ctx context.Context, name VariableName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetVariableWithBody Set a variable's value
+	//
+	// Stores the given value as the named variable.
+	//
+	// Setting a variable to the value it already holds does nothing, so no workload
+	// reading it is redeployed. That mirrors applying an unchanged manifest, and
+	// means a tool that sets every variable on every run does not restart the fleet
+	// each time.
+	//
+	// A value that did change moves the specification hash of every workload
+	// reading the variable. Those workloads are then replaced by the reconciler,
+	// and the new value reaches them as they start.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
+	SetVariableWithBody(ctx context.Context, name VariableName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetVariable Set a variable's value
+	//
+	// Stores the given value as the named variable.
+	//
+	// Setting a variable to the value it already holds does nothing, so no workload
+	// reading it is redeployed. That mirrors applying an unchanged manifest, and
+	// means a tool that sets every variable on every run does not restart the fleet
+	// each time.
+	//
+	// A value that did change moves the specification hash of every workload
+	// reading the variable. Those workloads are then replaced by the reconciler,
+	// and the new value reaches them as they start.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
+	SetVariable(ctx context.Context, name VariableName, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListVolumes List volumes
 	//
@@ -1280,6 +1442,127 @@ func (c *Client) SetSecretWithBody(ctx context.Context, name SecretName, content
 // Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
 func (c *Client) SetSecret(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSetSecretRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListVariables List variables
+//
+// Returns the variables the server holds, each with its value and the workloads
+// currently reading it.
+//
+// The values are part of the response, unlike a secret's. Being able to review
+// what a fleet is configured with is the reason to choose a variable over a
+// secret, so a listing that withheld them would defeat the point.
+//
+// Corresponds with GET /api/v1/variables (the `ListVariables` operationId).
+func (c *Client) ListVariables(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListVariablesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteVariable Delete a variable
+//
+// Removes the variable with the given name.
+//
+// A variable a workload reads is refused rather than removed, and the response
+// names the workloads reading it. Forcing it through leaves those workloads
+// running: they find out at their next start, which is when the value is
+// actually needed.
+//
+// Deletion is synchronous, unlike a workload's. There is nothing running to
+// wind down, only a row to remove.
+//
+// Corresponds with DELETE /api/v1/variables/{name} (the `DeleteVariable` operationId).
+func (c *Client) DeleteVariable(ctx context.Context, name VariableName, params *DeleteVariableParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteVariableRequest(c.Server, name, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetVariable Get a single variable
+//
+// Returns the variable with the given name, including its value and the
+// workloads reading it.
+//
+// Corresponds with GET /api/v1/variables/{name} (the `GetVariable` operationId).
+func (c *Client) GetVariable(ctx context.Context, name VariableName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetVariableRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetVariableWithBody Set a variable's value
+//
+// Stores the given value as the named variable.
+//
+// Setting a variable to the value it already holds does nothing, so no workload
+// reading it is redeployed. That mirrors applying an unchanged manifest, and
+// means a tool that sets every variable on every run does not restart the fleet
+// each time.
+//
+// A value that did change moves the specification hash of every workload
+// reading the variable. Those workloads are then replaced by the reconciler,
+// and the new value reaches them as they start.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
+func (c *Client) SetVariableWithBody(ctx context.Context, name VariableName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetVariableRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetVariable Set a variable's value
+//
+// Stores the given value as the named variable.
+//
+// Setting a variable to the value it already holds does nothing, so no workload
+// reading it is redeployed. That mirrors applying an unchanged manifest, and
+// means a tool that sets every variable on every run does not restart the fleet
+// each time.
+//
+// A value that did change moves the specification hash of every workload
+// reading the variable. Those workloads are then replaced by the reconciler,
+// and the new value reaches them as they start.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
+func (c *Client) SetVariable(ctx context.Context, name VariableName, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetVariableRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1675,6 +1958,175 @@ func NewSetSecretRequestWithBody(server string, name SecretName, contentType str
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/secrets/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListVariablesRequest constructs an http.Request for the ListVariables method
+func NewListVariablesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/variables")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDeleteVariableRequest constructs an http.Request for the DeleteVariable method
+func NewDeleteVariableRequest(server string, name VariableName, params *DeleteVariableParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/variables/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Force != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "force", *params.Force, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetVariableRequest constructs an http.Request for the GetVariable method
+func NewGetVariableRequest(server string, name VariableName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/variables/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetVariableRequest calls the generic SetVariable builder with application/json body
+func NewSetVariableRequest(server string, name VariableName, body SetVariableJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetVariableRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewSetVariableRequestWithBody constructs an http.Request for the SetVariable method, with any body, and a specified content type
+func NewSetVariableRequestWithBody(server string, name VariableName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/variables/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2209,6 +2661,83 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
 	SetSecretWithResponse(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSecretResponse, error)
 
+	// ListVariablesWithResponse List variables
+	//
+	// Returns the variables the server holds, each with its value and the workloads
+	// currently reading it.
+	//
+	// The values are part of the response, unlike a secret's. Being able to review
+	// what a fleet is configured with is the reason to choose a variable over a
+	// secret, so a listing that withheld them would defeat the point.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/variables (the `ListVariables` operationId).
+	ListVariablesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVariablesResponse, error)
+
+	// DeleteVariableWithResponse Delete a variable
+	//
+	// Removes the variable with the given name.
+	//
+	// A variable a workload reads is refused rather than removed, and the response
+	// names the workloads reading it. Forcing it through leaves those workloads
+	// running: they find out at their next start, which is when the value is
+	// actually needed.
+	//
+	// Deletion is synchronous, unlike a workload's. There is nothing running to
+	// wind down, only a row to remove.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/variables/{name} (the `DeleteVariable` operationId).
+	DeleteVariableWithResponse(ctx context.Context, name VariableName, params *DeleteVariableParams, reqEditors ...RequestEditorFn) (*DeleteVariableResponse, error)
+
+	// GetVariableWithResponse Get a single variable
+	//
+	// Returns the variable with the given name, including its value and the
+	// workloads reading it.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/variables/{name} (the `GetVariable` operationId).
+	GetVariableWithResponse(ctx context.Context, name VariableName, reqEditors ...RequestEditorFn) (*GetVariableResponse, error)
+
+	// SetVariableWithBodyWithResponse Set a variable's value
+	//
+	// Stores the given value as the named variable.
+	//
+	// Setting a variable to the value it already holds does nothing, so no workload
+	// reading it is redeployed. That mirrors applying an unchanged manifest, and
+	// means a tool that sets every variable on every run does not restart the fleet
+	// each time.
+	//
+	// A value that did change moves the specification hash of every workload
+	// reading the variable. Those workloads are then replaced by the reconciler,
+	// and the new value reaches them as they start.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
+	SetVariableWithBodyWithResponse(ctx context.Context, name VariableName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetVariableResponse, error)
+
+	// SetVariableWithResponse Set a variable's value
+	//
+	// Stores the given value as the named variable.
+	//
+	// Setting a variable to the value it already holds does nothing, so no workload
+	// reading it is redeployed. That mirrors applying an unchanged manifest, and
+	// means a tool that sets every variable on every run does not restart the fleet
+	// each time.
+	//
+	// A value that did change moves the specification hash of every workload
+	// reading the variable. Those workloads are then replaced by the reconciler,
+	// and the new value reaches them as they start.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
+	SetVariableWithResponse(ctx context.Context, name VariableName, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*SetVariableResponse, error)
+
 	// ListVolumesWithResponse List volumes
 	//
 	// Returns the volumes the server holds, each with the workloads currently
@@ -2570,6 +3099,233 @@ func (r SetSecretResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r SetSecretResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListVariablesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ListVariablesResult
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListVariablesResponse) GetJSON200() *ListVariablesResult {
+	return r.JSON200
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListVariablesResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListVariablesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListVariablesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListVariablesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListVariablesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteVariableResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeleteVariableResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DeleteVariableResponse) GetJSON200() *DeleteVariableResult {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeleteVariableResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DeleteVariableResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r DeleteVariableResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteVariableResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteVariableResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteVariableResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteVariableResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetVariableResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetVariableResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetVariableResponse) GetJSON200() *GetVariableResult {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetVariableResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetVariableResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetVariableResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetVariableResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetVariableResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetVariableResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetVariableResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SetVariableResult
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *SetVariableResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetVariableResponse) GetJSON200() *SetVariableResult {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r SetVariableResponse) GetJSON201() *SetVariableResult {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r SetVariableResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r SetVariableResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r SetVariableResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetVariableResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetVariableResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetVariableResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3208,6 +3964,113 @@ func (c *ClientWithResponses) SetSecretWithResponse(ctx context.Context, name Se
 	return ParseSetSecretResponse(rsp)
 }
 
+// ListVariablesWithResponse List variables
+//
+// Returns the variables the server holds, each with its value and the workloads
+// currently reading it.
+//
+// The values are part of the response, unlike a secret's. Being able to review
+// what a fleet is configured with is the reason to choose a variable over a
+// secret, so a listing that withheld them would defeat the point.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/variables (the `ListVariables` operationId).
+func (c *ClientWithResponses) ListVariablesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVariablesResponse, error) {
+	rsp, err := c.ListVariables(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListVariablesResponse(rsp)
+}
+
+// DeleteVariableWithResponse Delete a variable
+//
+// Removes the variable with the given name.
+//
+// A variable a workload reads is refused rather than removed, and the response
+// names the workloads reading it. Forcing it through leaves those workloads
+// running: they find out at their next start, which is when the value is
+// actually needed.
+//
+// Deletion is synchronous, unlike a workload's. There is nothing running to
+// wind down, only a row to remove.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/variables/{name} (the `DeleteVariable` operationId).
+func (c *ClientWithResponses) DeleteVariableWithResponse(ctx context.Context, name VariableName, params *DeleteVariableParams, reqEditors ...RequestEditorFn) (*DeleteVariableResponse, error) {
+	rsp, err := c.DeleteVariable(ctx, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteVariableResponse(rsp)
+}
+
+// GetVariableWithResponse Get a single variable
+//
+// Returns the variable with the given name, including its value and the
+// workloads reading it.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/variables/{name} (the `GetVariable` operationId).
+func (c *ClientWithResponses) GetVariableWithResponse(ctx context.Context, name VariableName, reqEditors ...RequestEditorFn) (*GetVariableResponse, error) {
+	rsp, err := c.GetVariable(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetVariableResponse(rsp)
+}
+
+// SetVariableWithBodyWithResponse Set a variable's value
+//
+// Stores the given value as the named variable.
+//
+// Setting a variable to the value it already holds does nothing, so no workload
+// reading it is redeployed. That mirrors applying an unchanged manifest, and
+// means a tool that sets every variable on every run does not restart the fleet
+// each time.
+//
+// A value that did change moves the specification hash of every workload
+// reading the variable. Those workloads are then replaced by the reconciler,
+// and the new value reaches them as they start.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
+func (c *ClientWithResponses) SetVariableWithBodyWithResponse(ctx context.Context, name VariableName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetVariableResponse, error) {
+	rsp, err := c.SetVariableWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetVariableResponse(rsp)
+}
+
+// SetVariableWithResponse Set a variable's value
+//
+// Stores the given value as the named variable.
+//
+// Setting a variable to the value it already holds does nothing, so no workload
+// reading it is redeployed. That mirrors applying an unchanged manifest, and
+// means a tool that sets every variable on every run does not restart the fleet
+// each time.
+//
+// A value that did change moves the specification hash of every workload
+// reading the variable. Those workloads are then replaced by the reconciler,
+// and the new value reaches them as they start.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
+func (c *ClientWithResponses) SetVariableWithResponse(ctx context.Context, name VariableName, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*SetVariableResponse, error) {
+	rsp, err := c.SetVariable(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetVariableResponse(rsp)
+}
+
 // ListVolumesWithResponse List volumes
 //
 // Returns the volumes the server holds, each with the workloads currently
@@ -3556,6 +4419,173 @@ func ParseSetSecretResponse(rsp *http.Response) (*SetSecretResponse, error) {
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
 		var dest SetSecretResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListVariablesResponse parses an HTTP response from a ListVariablesWithResponse call
+func ParseListVariablesResponse(rsp *http.Response) (*ListVariablesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListVariablesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ListVariablesResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteVariableResponse parses an HTTP response from a DeleteVariableWithResponse call
+func ParseDeleteVariableResponse(rsp *http.Response) (*DeleteVariableResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteVariableResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeleteVariableResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetVariableResponse parses an HTTP response from a GetVariableWithResponse call
+func ParseGetVariableResponse(rsp *http.Response) (*GetVariableResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetVariableResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetVariableResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetVariableResponse parses an HTTP response from a SetVariableWithResponse call
+func ParseSetVariableResponse(rsp *http.Response) (*SetVariableResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetVariableResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SetVariableResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest SetVariableResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -3982,6 +5012,18 @@ type ServerInterface interface {
 	// SetSecret Set a secret's value
 	// (PUT /api/v1/secrets/{name})
 	SetSecret(w http.ResponseWriter, r *http.Request, name SecretName)
+	// ListVariables List variables
+	// (GET /api/v1/variables)
+	ListVariables(w http.ResponseWriter, r *http.Request)
+	// DeleteVariable Delete a variable
+	// (DELETE /api/v1/variables/{name})
+	DeleteVariable(w http.ResponseWriter, r *http.Request, name VariableName, params DeleteVariableParams)
+	// GetVariable Get a single variable
+	// (GET /api/v1/variables/{name})
+	GetVariable(w http.ResponseWriter, r *http.Request, name VariableName)
+	// SetVariable Set a variable's value
+	// (PUT /api/v1/variables/{name})
+	SetVariable(w http.ResponseWriter, r *http.Request, name VariableName)
 	// ListVolumes List volumes
 	// (GET /api/v1/volumes)
 	ListVolumes(w http.ResponseWriter, r *http.Request)
@@ -4119,6 +5161,114 @@ func (siw *ServerInterfaceWrapper) SetSecret(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetSecret(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListVariables operation middleware
+func (siw *ServerInterfaceWrapper) ListVariables(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListVariables(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteVariable operation middleware
+func (siw *ServerInterfaceWrapper) DeleteVariable(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name VariableName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteVariableParams
+
+	// ------------- Optional query parameter "force" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "force", r.URL.Query(), &params.Force, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "force"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "force", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteVariable(w, r, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetVariable operation middleware
+func (siw *ServerInterfaceWrapper) GetVariable(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name VariableName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetVariable(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetVariable operation middleware
+func (siw *ServerInterfaceWrapper) SetVariable(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name VariableName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetVariable(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4510,6 +5660,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/secrets/{name}", wrapper.DeleteSecret)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/secrets/{name}", wrapper.GetSecret)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/secrets/{name}", wrapper.SetSecret)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/variables", wrapper.ListVariables)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/variables/{name}", wrapper.DeleteVariable)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/variables/{name}", wrapper.GetVariable)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/variables/{name}", wrapper.SetVariable)
 
 	return m
 }
@@ -4732,6 +5886,229 @@ type SetSecret500JSONResponse struct {
 }
 
 func (response SetSecret500JSONResponse) VisitSetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVariablesRequestObject struct {
+}
+
+type ListVariablesResponseObject interface {
+	VisitListVariablesResponse(w http.ResponseWriter) error
+}
+
+type ListVariables200JSONResponse ListVariablesResult
+
+func (response ListVariables200JSONResponse) VisitListVariablesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVariables500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response ListVariables500JSONResponse) VisitListVariablesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVariableRequestObject struct {
+	Name   VariableName `json:"name"`
+	Params DeleteVariableParams
+}
+
+type DeleteVariableResponseObject interface {
+	VisitDeleteVariableResponse(w http.ResponseWriter) error
+}
+
+type DeleteVariable200JSONResponse DeleteVariableResult
+
+func (response DeleteVariable200JSONResponse) VisitDeleteVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVariable404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteVariable404JSONResponse) VisitDeleteVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVariable409JSONResponse ErrorResponse
+
+func (response DeleteVariable409JSONResponse) VisitDeleteVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteVariable500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response DeleteVariable500JSONResponse) VisitDeleteVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVariableRequestObject struct {
+	Name VariableName `json:"name"`
+}
+
+type GetVariableResponseObject interface {
+	VisitGetVariableResponse(w http.ResponseWriter) error
+}
+
+type GetVariable200JSONResponse GetVariableResult
+
+func (response GetVariable200JSONResponse) VisitGetVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVariable404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetVariable404JSONResponse) VisitGetVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVariable500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetVariable500JSONResponse) VisitGetVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetVariableRequestObject struct {
+	Name VariableName `json:"name"`
+	Body *SetVariableJSONRequestBody
+}
+
+type SetVariableResponseObject interface {
+	VisitSetVariableResponse(w http.ResponseWriter) error
+}
+
+type SetVariable200JSONResponse SetVariableResult
+
+func (response SetVariable200JSONResponse) VisitSetVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetVariable201JSONResponse SetVariableResult
+
+func (response SetVariable201JSONResponse) VisitSetVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetVariable400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetVariable400JSONResponse) VisitSetVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetVariable500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response SetVariable500JSONResponse) VisitSetVariableResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -5294,6 +6671,18 @@ type StrictServerInterface interface {
 	// SetSecret Set a secret's value
 	// (PUT /api/v1/secrets/{name})
 	SetSecret(ctx context.Context, request SetSecretRequestObject) (SetSecretResponseObject, error)
+	// ListVariables List variables
+	// (GET /api/v1/variables)
+	ListVariables(ctx context.Context, request ListVariablesRequestObject) (ListVariablesResponseObject, error)
+	// DeleteVariable Delete a variable
+	// (DELETE /api/v1/variables/{name})
+	DeleteVariable(ctx context.Context, request DeleteVariableRequestObject) (DeleteVariableResponseObject, error)
+	// GetVariable Get a single variable
+	// (GET /api/v1/variables/{name})
+	GetVariable(ctx context.Context, request GetVariableRequestObject) (GetVariableResponseObject, error)
+	// SetVariable Set a variable's value
+	// (PUT /api/v1/variables/{name})
+	SetVariable(ctx context.Context, request SetVariableRequestObject) (SetVariableResponseObject, error)
 	// ListVolumes List volumes
 	// (GET /api/v1/volumes)
 	ListVolumes(ctx context.Context, request ListVolumesRequestObject) (ListVolumesResponseObject, error)
@@ -5465,6 +6854,116 @@ func (sh *strictHandler) SetSecret(w http.ResponseWriter, r *http.Request, name 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetSecretResponseObject); ok {
 		if err := validResponse.VisitSetSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListVariables operation middleware
+func (sh *strictHandler) ListVariables(w http.ResponseWriter, r *http.Request) {
+	var request ListVariablesRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListVariables(ctx, request.(ListVariablesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListVariables")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListVariablesResponseObject); ok {
+		if err := validResponse.VisitListVariablesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteVariable operation middleware
+func (sh *strictHandler) DeleteVariable(w http.ResponseWriter, r *http.Request, name VariableName, params DeleteVariableParams) {
+	var request DeleteVariableRequestObject
+
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteVariable(ctx, request.(DeleteVariableRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteVariable")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteVariableResponseObject); ok {
+		if err := validResponse.VisitDeleteVariableResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetVariable operation middleware
+func (sh *strictHandler) GetVariable(w http.ResponseWriter, r *http.Request, name VariableName) {
+	var request GetVariableRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetVariable(ctx, request.(GetVariableRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetVariable")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetVariableResponseObject); ok {
+		if err := validResponse.VisitGetVariableResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetVariable operation middleware
+func (sh *strictHandler) SetVariable(w http.ResponseWriter, r *http.Request, name VariableName) {
+	var request SetVariableRequestObject
+
+	request.Name = name
+
+	var body SetVariableJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetVariable(ctx, request.(SetVariableRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetVariable")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetVariableResponseObject); ok {
+		if err := validResponse.VisitSetVariableResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
