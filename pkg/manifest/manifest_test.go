@@ -318,6 +318,22 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			Name: "keeps a secret reference as written",
+			File: "env_secrets.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				// Parsing leaves the reference alone. Only the server holds the key, so
+				// the text is what travels and what is stored.
+				assert.Equal(t, "${secret:secret-name}", spec.Env["EXAMPLE"])
+				assert.Equal(t, "postgres://app:${secret:db-password}@localhost:5432/app", spec.Env["DSN"])
+				assert.Equal(t, "$$notasecret", spec.Env["LITERAL"])
+			},
+		},
+		{
+			Name:         "rejects an unterminated secret reference",
+			File:         "env_bad_secret.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:         "rejects malformed yaml",
 			File:         "malformed.yaml",
 			ExpectsError: true,

@@ -161,6 +161,10 @@ func Validate(spec Spec) error {
 		return err
 	}
 
+	if err = validateEnv(spec); err != nil {
+		return err
+	}
+
 	if err = validateHealth(spec, runtime); err != nil {
 		return err
 	}
