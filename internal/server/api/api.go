@@ -39,6 +39,7 @@ type (
 	API struct {
 		*WorkloadAPI
 		*VolumeAPI
+		*SecretAPI
 	}
 
 	// The Config type contains fields used to construct an API.
@@ -47,6 +48,8 @@ type (
 		Workloads *WorkloadAPI
 		// The endpoints serving volumes.
 		Volumes *VolumeAPI
+		// The endpoints serving secrets.
+		Secrets *SecretAPI
 	}
 )
 
@@ -60,6 +63,7 @@ func New(config Config) *API {
 	return &API{
 		WorkloadAPI: config.Workloads,
 		VolumeAPI:   config.Volumes,
+		SecretAPI:   config.Secrets,
 	}
 }
 

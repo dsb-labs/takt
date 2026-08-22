@@ -600,6 +600,7 @@ func do(t *testing.T, svc *MockWorkloadService, method, target string, body io.R
 	api.New(api.Config{
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: NewMockVolumeService(t)}),
+		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: NewMockSecretService(t)}),
 	}).Register(mux)
 
 	req := httptest.NewRequest(method, target, body)
