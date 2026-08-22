@@ -1,5 +1,6 @@
 [http]
 address = "localhost:9999"
+hosts = ["orca.example.com"]
 
 [data]
 directory = "/var/lib/orca"

@@ -35,6 +35,15 @@ type (
 	HTTPConfig struct {
 		// The address the HTTP server binds to, in host:port form.
 		Address string `toml:"address"`
+		// The host names a request may name, beyond an address literal and
+		// "localhost", which are always accepted.
+		//
+		// A request naming anything else is refused. Reaching this API is enough to
+		// run code on the host, and a browser will send a request to a loopback
+		// address on behalf of any page the operator visited — so the name a request
+		// asks for is checked rather than assumed to be orca's own. Set this to the
+		// name a reverse proxy in front of orca serves.
+		Hosts []string `toml:"hosts"`
 	}
 
 	// The DataConfig type contains configuration for the server's on-disk state.

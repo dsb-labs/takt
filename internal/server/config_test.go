@@ -30,6 +30,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "/var/lib/orca", config.Data.Directory)
 				assert.Equal(t, "tcp://localhost:2375", config.Docker.Host)
 				assert.Equal(t, 30*time.Second, config.Reconcile.Interval)
+				assert.Equal(t, []string{"orca.example.com"}, config.HTTP.Hosts)
 				assert.Equal(t, 25000, config.Ports.Min)
 				assert.Equal(t, 26000, config.Ports.Max)
 				assert.Equal(t, "debug", config.Logging.Level)

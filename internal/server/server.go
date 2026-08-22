@@ -126,6 +126,12 @@ func Run(ctx context.Context, config Config) error {
 	for _, middleware := range []func(http.Handler) http.Handler{
 		api.Recovery(logger),
 		api.Logging(logger),
+		// Ahead of everything that acts on a request. Reaching this API is enough to
+		// run code on the host, and listening on loopback does not establish that the
+		// operator is who asked — a browser sends a request there on behalf of
+		// whatever page it was told to.
+		api.Guard(logger, config.HTTP.Hosts),
+		api.RequireJSON,
 		api.Limit,
 	} {
 		handler = middleware(handler)
