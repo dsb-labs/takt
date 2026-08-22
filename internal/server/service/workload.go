@@ -799,10 +799,13 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadS
 // it, which is how they come to report that something they need has gone. Refusing
 // the reference is the business of the caller that can act on it.
 func (s *WorkloadService) resolveSecrets(ctx context.Context, spec api.WorkloadSpec) ([]string, map[string]string, error) {
-	names, err := manifest.References(manifest.NewSpec(spec))
-	switch {
-	case err != nil:
+	references, err := manifest.References(manifest.NewSpec(spec))
+	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+	}
+
+	names := manifest.Names(references, manifest.KindSecret)
+	switch {
 	case len(names) == 0:
 		return nil, nil, nil
 	case s.secrets == nil:

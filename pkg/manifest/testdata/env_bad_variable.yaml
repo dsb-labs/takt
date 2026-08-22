@@ -1,0 +1,6 @@
+version: v1
+name: example
+env:
+  EXAMPLE: ${var:log-level
+container:
+  image: example/example:latest

@@ -269,7 +269,12 @@ func (s *SecretService) Resolve(ctx context.Context, env map[string]string) (map
 
 	resolved := make(map[string]string, len(env))
 	for key, value := range env {
-		expanded, err := manifest.Expand(value, func(name string) (string, bool) {
+		expanded, err := manifest.Expand(value, func(reference manifest.Reference) (string, bool) {
+			if reference.Kind != manifest.KindSecret {
+				return "", false
+			}
+
+			name := reference.Name
 			if value, ok := values[name]; ok {
 				return value, true
 			}

@@ -12,31 +12,69 @@ import (
 func TestParseReferences(t *testing.T) {
 	t.Parallel()
 
+	secret := func(name string) manifest.Reference {
+		return manifest.Reference{Kind: manifest.KindSecret, Name: name}
+	}
+
+	variable := func(name string) manifest.Reference {
+		return manifest.Reference{Kind: manifest.KindVariable, Name: name}
+	}
+
 	tt := []struct {
 		Name      string
 		Value     string
-		Expected  []string
+		Expected  []manifest.Reference
 		ExpectErr error
 	}{
 		{
 			Name:     "a whole value",
 			Value:    "${secret:db-password}",
-			Expected: []string{"db-password"},
+			Expected: []manifest.Reference{secret("db-password")},
+		},
+		{
+			Name:     "a whole value referencing a variable",
+			Value:    "${var:log-level}",
+			Expected: []manifest.Reference{variable("log-level")},
 		},
 		{
 			Name:     "inside a larger string",
 			Value:    "postgres://app:${secret:db-password}@localhost:5432/app",
-			Expected: []string{"db-password"},
+			Expected: []manifest.Reference{secret("db-password")},
+		},
+		{
+			Name:     "a variable inside a larger string",
+			Value:    "postgres://app@${var:db-host}:5432/app",
+			Expected: []manifest.Reference{variable("db-host")},
 		},
 		{
 			Name:     "several in one value",
 			Value:    "${secret:user}:${secret:password}",
-			Expected: []string{"user", "password"},
+			Expected: []manifest.Reference{secret("user"), secret("password")},
+		},
+		{
+			Name:  "both kinds in one value",
+			Value: "postgres://app:${secret:db-password}@${var:db-host}/app",
+			Expected: []manifest.Reference{
+				secret("db-password"),
+				variable("db-host"),
+			},
 		},
 		{
 			Name:     "the same one twice",
 			Value:    "${secret:token} ${secret:token}",
-			Expected: []string{"token"},
+			Expected: []manifest.Reference{secret("token")},
+		},
+		{
+			Name:     "the same variable twice",
+			Value:    "${var:region} ${var:region}",
+			Expected: []manifest.Reference{variable("region")},
+		},
+		{
+			Name:  "a secret and a variable sharing a name",
+			Value: "${secret:token} ${var:token}",
+			// Two references rather than one. The kinds resolve from different places,
+			// so a name held by both names two different things.
+			Expected: []manifest.Reference{secret("token"), variable("token")},
 		},
 		{
 			Name:  "a value referencing nothing",
@@ -53,11 +91,20 @@ func TestParseReferences(t *testing.T) {
 		{
 			Name:     "an escaped sigil beside a reference",
 			Value:    "$$${secret:token}",
-			Expected: []string{"token"},
+			Expected: []manifest.Reference{secret("token")},
+		},
+		{
+			Name:     "an escaped sigil beside a variable reference",
+			Value:    "$$${var:token}",
+			Expected: []manifest.Reference{variable("token")},
 		},
 		{
 			Name:  "an escaped reference",
 			Value: "$${secret:token}",
+		},
+		{
+			Name:  "an escaped variable reference",
+			Value: "$${var:token}",
 		},
 		{
 			Name:  "a trailing escaped sigil",
@@ -66,6 +113,11 @@ func TestParseReferences(t *testing.T) {
 		{
 			Name:      "an unterminated reference",
 			Value:     "${secret:db-password",
+			ExpectErr: manifest.ErrInvalidReference,
+		},
+		{
+			Name:      "an unterminated variable reference",
+			Value:     "${var:log-level",
 			ExpectErr: manifest.ErrInvalidReference,
 		},
 		{
@@ -89,13 +141,28 @@ func TestParseReferences(t *testing.T) {
 			ExpectErr: manifest.ErrInvalidReference,
 		},
 		{
+			Name:      "a name that is not one a variable may have",
+			Value:     "${var:LOG_LEVEL}",
+			ExpectErr: manifest.ErrInvalidReference,
+		},
+		{
 			Name:      "an empty name",
 			Value:     "${secret:}",
 			ExpectErr: manifest.ErrInvalidReference,
 		},
 		{
+			Name:      "an empty variable name",
+			Value:     "${var:}",
+			ExpectErr: manifest.ErrInvalidReference,
+		},
+		{
 			Name:      "a name closed before it opens",
 			Value:     "${secret}",
+			ExpectErr: manifest.ErrInvalidReference,
+		},
+		{
+			Name:      "a variable closed before it opens",
+			Value:     "${var}",
 			ExpectErr: manifest.ErrInvalidReference,
 		},
 		{
@@ -108,29 +175,52 @@ func TestParseReferences(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			names, err := manifest.ParseReferences(tc.Value)
+			references, err := manifest.ParseReferences(tc.Value)
 			if tc.ExpectErr != nil {
 				assert.ErrorIs(t, err, tc.ExpectErr)
 				return
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.Expected, names)
+			assert.Equal(t, tc.Expected, references)
 		})
 	}
+}
+
+func TestParseReferences_NamesBothFormsInAnError(t *testing.T) {
+	t.Parallel()
+
+	// An operator who wrote something that is not a reference has to be told what one
+	// looks like, and both kinds are equally likely to have been meant.
+	_, err := manifest.ParseReferences("${env:HOME}")
+	require.ErrorIs(t, err, manifest.ErrInvalidReference)
+	assert.Contains(t, err.Error(), "${secret:name}")
+	assert.Contains(t, err.Error(), "${var:name}")
 }
 
 func TestExpand(t *testing.T) {
 	t.Parallel()
 
-	values := map[string]string{
+	secrets := map[string]string{
 		"db-password": "hunter2",
 		"user":        "app",
 		"empty":       "",
 	}
 
-	resolve := func(name string) (string, bool) {
-		value, ok := values[name]
+	variables := map[string]string{
+		"db-host":   "localhost",
+		"log-level": "debug",
+		"blank":     "",
+	}
+
+	resolve := func(reference manifest.Reference) (string, bool) {
+		if reference.Kind == manifest.KindVariable {
+			value, ok := variables[reference.Name]
+
+			return value, ok
+		}
+
+		value, ok := secrets[reference.Name]
 
 		return value, ok
 	}
@@ -147,6 +237,11 @@ func TestExpand(t *testing.T) {
 			Expected: "hunter2",
 		},
 		{
+			Name:     "a whole value referencing a variable",
+			Value:    "${var:log-level}",
+			Expected: "debug",
+		},
+		{
 			Name:     "inside a larger string",
 			Value:    "postgres://app:${secret:db-password}@localhost:5432/app",
 			Expected: "postgres://app:hunter2@localhost:5432/app",
@@ -155,6 +250,18 @@ func TestExpand(t *testing.T) {
 			Name:     "several in one value",
 			Value:    "${secret:user}:${secret:db-password}",
 			Expected: "app:hunter2",
+		},
+		{
+			Name:     "both kinds in one value",
+			Value:    "postgres://${secret:user}:${secret:db-password}@${var:db-host}/app",
+			Expected: "postgres://app:hunter2@localhost/app",
+		},
+		{
+			Name:  "a secret and a variable sharing a name",
+			Value: "${secret:empty}${var:blank}",
+			// Both hold nothing, so this proves only that neither resolved against the
+			// other's map. The kinds are told apart in TestExpand_TellsTheKindsApart.
+			Expected: "",
 		},
 		{
 			Name:     "a value referencing nothing",
@@ -179,13 +286,40 @@ func TestExpand(t *testing.T) {
 			Expected: "${secret:user}",
 		},
 		{
+			Name:     "an escaped variable reference",
+			Value:    "$${var:log-level}",
+			Expected: "${var:log-level}",
+		},
+		{
 			Name:     "a secret holding nothing",
 			Value:    "prefix-${secret:empty}-suffix",
 			Expected: "prefix--suffix",
 		},
 		{
+			Name:     "a variable holding nothing",
+			Value:    "prefix-${var:blank}-suffix",
+			Expected: "prefix--suffix",
+		},
+		{
 			Name:      "a secret that does not exist",
 			Value:     "${secret:nope}",
+			ExpectErr: manifest.ErrUnknownSecret,
+		},
+		{
+			Name:      "a variable that does not exist",
+			Value:     "${var:nope}",
+			ExpectErr: manifest.ErrUnknownVariable,
+		},
+		{
+			Name:  "a variable named after a secret that exists",
+			Value: "${var:db-password}",
+			// The kind is part of what is being asked for, so a variable is not
+			// satisfied by a secret of the same name.
+			ExpectErr: manifest.ErrUnknownVariable,
+		},
+		{
+			Name:      "a secret named after a variable that exists",
+			Value:     "${secret:log-level}",
 			ExpectErr: manifest.ErrUnknownSecret,
 		},
 		{
@@ -209,11 +343,36 @@ func TestExpand(t *testing.T) {
 	}
 }
 
+func TestExpand_TellsTheKindsApart(t *testing.T) {
+	t.Parallel()
+
+	// A name held by both a secret and a variable resolves to a different value for
+	// each, so the callback is told which one is being asked for rather than having to
+	// guess from the name.
+	expanded, err := manifest.Expand("${secret:token}/${var:token}", func(reference manifest.Reference) (string, bool) {
+		if reference.Kind == manifest.KindVariable {
+			return "public", true
+		}
+
+		return "private", true
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "private/public", expanded)
+}
+
 func TestReferences(t *testing.T) {
 	t.Parallel()
 
+	secret := func(name string) manifest.Reference {
+		return manifest.Reference{Kind: manifest.KindSecret, Name: name}
+	}
+
+	variable := func(name string) manifest.Reference {
+		return manifest.Reference{Kind: manifest.KindVariable, Name: name}
+	}
+
 	t.Run("names every secret the environment references", func(t *testing.T) {
-		names, err := manifest.References(manifest.Spec{
+		references, err := manifest.References(manifest.Spec{
 			Env: map[string]string{
 				"DSN":     "postgres://app:${secret:db-password}@localhost/app",
 				"TOKEN":   "${secret:api-token}",
@@ -221,20 +380,50 @@ func TestReferences(t *testing.T) {
 			},
 		})
 		require.NoError(t, err)
-		assert.Equal(t, []string{"api-token", "db-password"}, names)
+		assert.Equal(t, []manifest.Reference{secret("api-token"), secret("db-password")}, references)
+	})
+
+	t.Run("names every variable the environment references", func(t *testing.T) {
+		references, err := manifest.References(manifest.Spec{
+			Env: map[string]string{
+				"HOST":  "${var:db-host}",
+				"LEVEL": "${var:log-level}",
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{variable("db-host"), variable("log-level")}, references)
+	})
+
+	t.Run("groups the kinds together", func(t *testing.T) {
+		references, err := manifest.References(manifest.Spec{
+			Env: map[string]string{
+				"A": "${var:zeta}",
+				"B": "${secret:alpha}",
+				"C": "${var:mu}",
+				"D": "${secret:omega}",
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{
+			secret("alpha"),
+			secret("omega"),
+			variable("mu"),
+			variable("zeta"),
+		}, references)
 	})
 
 	t.Run("returns them in a stable order", func(t *testing.T) {
 		spec := manifest.Spec{
 			Env: map[string]string{
 				"A": "${secret:zeta}",
-				"B": "${secret:alpha}",
+				"B": "${var:alpha}",
 				"C": "${secret:mu}",
+				"D": "${var:omega}",
 			},
 		}
 
-		// These names reach the hash of a specification, so an order that followed map
-		// iteration would make an unchanged workload hash differently each apply.
+		// These references reach the hash of a specification, so an order that followed
+		// map iteration would make an unchanged workload hash differently each apply.
 		first, err := manifest.References(spec)
 		require.NoError(t, err)
 
@@ -248,11 +437,11 @@ func TestReferences(t *testing.T) {
 	t.Run("ignores a reference in a key", func(t *testing.T) {
 		// A key names an environment variable rather than something a workload reads,
 		// so there is nothing to substitute into.
-		names, err := manifest.References(manifest.Spec{
+		references, err := manifest.References(manifest.Spec{
 			Env: map[string]string{"${secret:db-password}": "literal"},
 		})
 		require.NoError(t, err)
-		assert.Empty(t, names)
+		assert.Empty(t, references)
 	})
 
 	t.Run("names the variable holding a bad reference", func(t *testing.T) {
@@ -264,8 +453,36 @@ func TestReferences(t *testing.T) {
 	})
 
 	t.Run("returns nothing for a workload with no environment", func(t *testing.T) {
-		names, err := manifest.References(manifest.Spec{})
+		references, err := manifest.References(manifest.Spec{})
 		require.NoError(t, err)
-		assert.Empty(t, names)
+		assert.Empty(t, references)
+	})
+}
+
+func TestNames(t *testing.T) {
+	t.Parallel()
+
+	references := []manifest.Reference{
+		{Kind: manifest.KindSecret, Name: "db-password"},
+		{Kind: manifest.KindSecret, Name: "api-token"},
+		{Kind: manifest.KindVariable, Name: "log-level"},
+		{Kind: manifest.KindVariable, Name: "db-host"},
+	}
+
+	t.Run("returns the secrets", func(t *testing.T) {
+		assert.Equal(t, []string{"db-password", "api-token"}, manifest.Names(references, manifest.KindSecret))
+	})
+
+	t.Run("returns the variables", func(t *testing.T) {
+		assert.Equal(t, []string{"log-level", "db-host"}, manifest.Names(references, manifest.KindVariable))
+	})
+
+	t.Run("returns nothing for a kind that is absent", func(t *testing.T) {
+		secrets := []manifest.Reference{{Kind: manifest.KindSecret, Name: "only"}}
+		assert.Empty(t, manifest.Names(secrets, manifest.KindVariable))
+	})
+
+	t.Run("returns nothing for no references", func(t *testing.T) {
+		assert.Empty(t, manifest.Names(nil, manifest.KindSecret))
 	})
 }

@@ -334,6 +334,31 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			Name: "keeps a variable reference as written",
+			File: "env_variables.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				// Parsing leaves the reference alone, as it does for a secret. A
+				// variable is held by the server, so the text is what travels.
+				assert.Equal(t, "${var:variable-name}", spec.Env["EXAMPLE"])
+				assert.Equal(t, "postgres://app@${var:db-host}:5432/app", spec.Env["DSN"])
+				assert.Equal(t, "$$notavariable", spec.Env["LITERAL"])
+			},
+		},
+		{
+			Name: "keeps both kinds of reference as written",
+			File: "env_mixed.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, "${secret:secret-name}", spec.Env["EXAMPLE"])
+				assert.Equal(t, "${var:variable-name}", spec.Env["EXAMPLE2"])
+				assert.Equal(t, "postgres://app:${secret:db-password}@${var:db-host}:5432/app", spec.Env["DSN"])
+			},
+		},
+		{
+			Name:         "rejects an unterminated variable reference",
+			File:         "env_bad_variable.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:         "rejects malformed yaml",
 			File:         "malformed.yaml",
 			ExpectsError: true,

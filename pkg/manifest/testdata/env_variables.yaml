@@ -1,0 +1,8 @@
+version: v1
+name: example
+env:
+  EXAMPLE: ${var:variable-name}
+  DSN: postgres://app@${var:db-host}:5432/app
+  LITERAL: $$notavariable
+container:
+  image: example/example:latest

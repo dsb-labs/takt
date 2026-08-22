@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -10,32 +11,74 @@ import (
 
 var (
 	// ErrInvalidReference is returned when a value holds something that begins like a
-	// secret reference but is not one.
-	ErrInvalidReference = errors.New("invalid secret reference")
+	// reference but is not one.
+	ErrInvalidReference = errors.New("invalid reference")
 	// ErrUnknownSecret is returned when expanding a value that references a secret
 	// the caller could not resolve.
 	ErrUnknownSecret = errors.New("unknown secret")
+	// ErrUnknownVariable is returned when expanding a value that references a
+	// variable the caller could not resolve.
+	ErrUnknownVariable = errors.New("unknown variable")
 )
 
 const (
-	// What opens a reference, after the escape has been ruled out.
-	referencePrefix = "${secret:"
 	// What a reference is closed by.
 	referenceSuffix = '}'
 	// What introduces a reference, and what doubles to mean itself.
 	referenceSigil = '$'
 )
 
-// ParseReferences returns the names of the secrets value references, in the order
-// they appear and without repeats.
+type (
+	// The ReferenceKind type names what a reference resolves against.
+	ReferenceKind string
+
+	// The Reference type identifies one thing a value in a manifest reads rather
+	// than holds.
+	//
+	// The kind is part of the identity rather than a detail of the syntax. A secret
+	// and a variable may share a name, and the two are resolved from different
+	// places, so one is never a substitute for the other.
+	Reference struct {
+		// What the reference resolves against.
+		Kind ReferenceKind
+		// The name of the secret or variable being referenced.
+		Name string
+	}
+)
+
+const (
+	// KindSecret is a reference to a value orca holds encrypted, which nothing reads
+	// back out.
+	KindSecret ReferenceKind = "secret"
+	// KindVariable is a reference to a value orca holds in the clear, which the API
+	// reports.
+	KindVariable ReferenceKind = "var"
+)
+
+// Every kind a reference may name.
 //
-// The grammar is whole. A reference is "${secret:name}", and "$$" is a literal
-// dollar sign. Anything else following an unescaped dollar sign is reported rather
-// than passed through, so a manifest that meant to reference a secret is never
-// quietly handed the text it wrote. This is deliberately not a template language:
-// there is nothing to evaluate, so there is no way to ask it to.
-func ParseReferences(value string) ([]string, error) {
-	var names []string
+// A slice rather than a set so that the error naming the accepted forms lists them
+// the same way each time. No kind's opening is a prefix of another's, so the order
+// does not affect what matches.
+var referenceKinds = []ReferenceKind{KindSecret, KindVariable}
+
+// opening returns the text that opens a reference of this kind.
+//
+// Derived from the kind rather than held beside it, so the two cannot disagree.
+func (k ReferenceKind) opening() string {
+	return "${" + string(k) + ":"
+}
+
+// ParseReferences returns the references value holds, in the order they appear and
+// without repeats.
+//
+// The grammar is whole. A reference is "${secret:name}" or "${var:name}", and "$$"
+// is a literal dollar sign. Anything else following an unescaped dollar sign is
+// reported rather than passed through, so a manifest that meant to reference
+// something is never quietly handed the text it wrote. This is deliberately not a
+// template language: there is nothing to evaluate, so there is no way to ask it to.
+func ParseReferences(value string) ([]Reference, error) {
+	var references []Reference
 
 	for i := 0; i < len(value); i++ {
 		if value[i] != referenceSigil {
@@ -49,9 +92,11 @@ func ParseReferences(value string) ([]string, error) {
 		}
 
 		rest := value[i:]
-		if !strings.HasPrefix(rest, referencePrefix) {
-			return nil, fmt.Errorf("%w: %q must be %q, or %q for a literal dollar sign",
-				ErrInvalidReference, truncate(rest), referencePrefix+"name}", "$$")
+
+		prefix, kind, ok := openingOf(rest)
+		if !ok {
+			return nil, fmt.Errorf("%w: %q must be %s, or %q for a literal dollar sign",
+				ErrInvalidReference, truncate(rest), acceptedForms(), "$$")
 		}
 
 		end := strings.IndexByte(rest, referenceSuffix)
@@ -60,29 +105,30 @@ func ParseReferences(value string) ([]string, error) {
 				ErrInvalidReference, truncate(rest), string(referenceSuffix))
 		}
 
-		name := rest[len(referencePrefix):end]
+		name := rest[len(prefix):end]
 		if !namePattern.MatchString(name) || len(name) > 63 {
-			return nil, fmt.Errorf("%w: secret name %q must be lowercase alphanumeric, optionally separated by dashes",
-				ErrInvalidReference, name)
+			return nil, fmt.Errorf("%w: %s name %q must be lowercase alphanumeric, optionally separated by dashes",
+				ErrInvalidReference, kind, name)
 		}
 
-		if !slices.Contains(names, name) {
-			names = append(names, name)
+		reference := Reference{Kind: kind, Name: name}
+		if !slices.Contains(references, reference) {
+			references = append(references, reference)
 		}
 
 		i += end
 	}
 
-	return names, nil
+	return references, nil
 }
 
-// Expand replaces every secret reference in value with what resolve returns for it,
-// and unescapes each "$$" to a single dollar sign.
+// Expand replaces every reference in value with what resolve returns for it, and
+// unescapes each "$$" to a single dollar sign.
 //
-// Returns ErrUnknownSecret naming the secret when resolve reports it does not hold
-// one. Leaving the reference text in place would hand a workload the reference as
-// though it were the value, which it would then use.
-func Expand(value string, resolve func(name string) (string, bool)) (string, error) {
+// Returns ErrUnknownSecret or ErrUnknownVariable naming the reference when resolve
+// reports it holds nothing for one. Leaving the reference text in place would hand a
+// workload the reference as though it were the value, which it would then use.
+func Expand(value string, resolve func(reference Reference) (string, bool)) (string, error) {
 	// Checked up front so that a malformed reference is reported the same way
 	// wherever expansion happens, rather than only where a scan happened to look.
 	if _, err := ParseReferences(value); err != nil {
@@ -106,12 +152,14 @@ func Expand(value string, resolve func(name string) (string, bool)) (string, err
 		}
 
 		rest := value[i:]
+		prefix, kind, _ := openingOf(rest)
 		end := strings.IndexByte(rest, referenceSuffix)
-		name := rest[len(referencePrefix):end]
 
-		resolved, ok := resolve(name)
+		reference := Reference{Kind: kind, Name: rest[len(prefix):end]}
+
+		resolved, ok := resolve(reference)
 		if !ok {
-			return "", fmt.Errorf("%w: %s", ErrUnknownSecret, name)
+			return "", fmt.Errorf("%w: %s", unknown(kind), reference.Name)
 		}
 
 		out.WriteString(resolved)
@@ -122,14 +170,14 @@ func Expand(value string, resolve func(name string) (string, bool)) (string, err
 	return out.String(), nil
 }
 
-// References returns the names of every secret the workload's environment
-// references, sorted so that the result is stable.
+// References returns every reference the workload's environment holds, sorted so
+// that the result is stable.
 //
-// Stable because these names reach the hash of a workload's specification. An order
-// that depended on map iteration would make an unchanged workload hash differently
-// each time it was applied.
-func References(spec Spec) ([]string, error) {
-	var names []string
+// Stable because these references reach the hash of a workload's specification. An
+// order that depended on map iteration would make an unchanged workload hash
+// differently each time it was applied.
+func References(spec Spec) ([]Reference, error) {
+	var references []Reference
 
 	// Sorted so that a manifest with two bad references always reports the same one.
 	for _, key := range slices.Sorted(maps.Keys(spec.Env)) {
@@ -138,20 +186,37 @@ func References(spec Spec) ([]string, error) {
 			return nil, fmt.Errorf("invalid env %s: %w", key, err)
 		}
 
-		for _, name := range found {
-			if !slices.Contains(names, name) {
-				names = append(names, name)
+		for _, reference := range found {
+			if !slices.Contains(references, reference) {
+				references = append(references, reference)
 			}
 		}
 	}
 
-	slices.Sort(names)
+	slices.SortFunc(references, func(a, b Reference) int {
+		return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Name, b.Name))
+	})
 
-	return names, nil
+	return references, nil
 }
 
-// validateEnv reports whether the workload's environment holds usable secret
-// references.
+// Names returns the names of the references of the given kind, keeping the order
+// they were given in.
+//
+// Filtered here rather than by each caller so that a set of names is collected the
+// same way wherever one kind has to be told from the other.
+func Names(references []Reference, kind ReferenceKind) []string {
+	var names []string
+	for _, reference := range references {
+		if reference.Kind == kind {
+			names = append(names, reference.Name)
+		}
+	}
+
+	return names
+}
+
+// validateEnv reports whether the workload's environment holds usable references.
 //
 // Only the values are scanned. A key is the name of an environment variable rather
 // than something a workload reads, so a reference in one has nothing to substitute
@@ -160,6 +225,39 @@ func validateEnv(spec Spec) error {
 	_, err := References(spec)
 
 	return err
+}
+
+// openingOf reports which kind of reference rest opens, along with the text that
+// opened it.
+func openingOf(rest string) (string, ReferenceKind, bool) {
+	for _, kind := range referenceKinds {
+		if opening := kind.opening(); strings.HasPrefix(rest, opening) {
+			return opening, kind, true
+		}
+	}
+
+	return "", "", false
+}
+
+// acceptedForms names every reference an operator may write, for an error reporting
+// something that is not one.
+func acceptedForms() string {
+	forms := make([]string, 0, len(referenceKinds))
+	for _, kind := range referenceKinds {
+		forms = append(forms, `"`+kind.opening()+`name}"`)
+	}
+
+	return strings.Join(forms, " or ")
+}
+
+// unknown returns the error reporting that a reference of the given kind resolved
+// against nothing.
+func unknown(kind ReferenceKind) error {
+	if kind == KindVariable {
+		return ErrUnknownVariable
+	}
+
+	return ErrUnknownSecret
 }
 
 // truncate shortens a value for an error message, so that a reference opened in a
