@@ -64,15 +64,15 @@ type (
 		ListAll(ctx context.Context) (map[string][]database.Port, error)
 	}
 
-	// The Resolver interface describes how the reconciler turns the secret
-	// references in a workload's environment into the values it is started with.
+	// The Resolver interface describes how the reconciler turns the references in a
+	// workload's environment into the values it is started with.
 	//
-	// Resolution happens here, as late as it can, so that a plaintext exists only
-	// for as long as it takes to start the work that needs it. Nothing the
-	// reconciler persists holds one.
+	// Resolution happens here, as late as it can, so that a secret's plaintext
+	// exists only for as long as it takes to start the work that needs it. Nothing
+	// the reconciler persists holds one.
 	Resolver interface {
-		// Resolve should return env with every secret reference replaced by the value
-		// it names, reporting an error when one cannot be resolved.
+		// Resolve should return env with every reference replaced by the value it
+		// names, reporting an error when one cannot be resolved.
 		Resolve(ctx context.Context, env map[string]string) (map[string]string, error)
 	}
 
@@ -101,7 +101,7 @@ type (
 		drivers    map[string]Driver
 		workloads  WorkloadRepository
 		ports      PortRepository
-		secrets    Resolver
+		env        Resolver
 		checker    Checker
 		bind       string
 		reallocate func(ctx context.Context, workload string) (bool, error)
@@ -131,10 +131,11 @@ type (
 		// The repository holding port allocations, used to resolve the address a
 		// health check probes. May be nil, in which case no checks are registered.
 		Ports PortRepository
-		// Resolves the secrets a workload reads, as it starts. May be nil, in which
-		// case a workload's environment is passed to its driver as stored — so a
-		// reference reaches the workload as the text it is written as.
-		Secrets Resolver
+		// Resolves the secrets and variables a workload reads, as it starts. May be
+		// nil, in which case a workload's environment is passed to its driver as
+		// stored — so a reference of either kind reaches the workload as the text it
+		// is written as.
+		Env Resolver
 		// Reports what orca's own health checks established. May be nil, in which
 		// case only the state the driver reports is acted on.
 		Checker Checker
@@ -212,7 +213,7 @@ func New(config Config) *Reconciler {
 		drivers:    config.Drivers,
 		workloads:  config.Workloads,
 		ports:      config.Ports,
-		secrets:    config.Secrets,
+		env:        config.Env,
 		checker:    config.Checker,
 		bind:       config.Bind,
 		reallocate: config.Reallocate,
@@ -938,18 +939,19 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 		return nil
 	}
 
-	// The secrets the workload reads are resolved here, immediately before the driver
-	// is handed the environment, so that a plaintext lives no longer than it has to.
+	// The secrets and variables the workload reads are resolved here, immediately
+	// before the driver is handed the environment, so that a secret's plaintext lives
+	// no longer than it has to.
 	//
-	// Ahead of the start rather than inside its error path: a secret that cannot be
+	// Ahead of the start rather than inside its error path: a reference that cannot be
 	// resolved would otherwise be treated as a workload that failed to start, which
 	// gives up the host ports orca chose for it. Ports have nothing to do with why
 	// this failed, and churning them would move the workload's address for a reason
 	// the operator cannot see. Returning here instead leaves the backoff to pace the
 	// retries, so a workload waiting on a secret does not fill the log.
-	if r.secrets != nil {
-		if w.Env, err = r.secrets.Resolve(startCtx, w.Env); err != nil {
-			return fmt.Errorf("failed to resolve secrets for workload: %w", err)
+	if r.env != nil {
+		if w.Env, err = r.env.Resolve(startCtx, w.Env); err != nil {
+			return fmt.Errorf("failed to resolve environment for workload: %w", err)
 		}
 	}
 

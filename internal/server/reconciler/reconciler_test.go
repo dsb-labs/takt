@@ -1811,7 +1811,7 @@ func TestReconciler_Run_ResolvesSecrets(t *testing.T) {
 			Logger:    newTestLogger(t),
 			Drivers:   map[string]reconciler.Driver{docker.Name: d},
 			Workloads: repo,
-			Secrets:   secrets,
+			Env:       secrets,
 			Interval:  time.Hour,
 		})
 
@@ -1860,7 +1860,7 @@ func TestReconciler_Run_ResolvesSecrets(t *testing.T) {
 			Logger:    newTestLogger(t),
 			Drivers:   map[string]reconciler.Driver{docker.Name: d},
 			Workloads: repo,
-			Secrets:   secrets,
+			Env:       secrets,
 			Reallocate: func(context.Context, string) (bool, error) {
 				reallocated.inc()
 

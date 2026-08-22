@@ -121,8 +121,11 @@ func Run(ctx context.Context, config Config) error {
 		},
 		Workloads: workloads,
 		Ports:     ports,
-		Secrets:   secretSvc,
-		Checker:   checker,
+		Env: service.NewEnvResolver(service.EnvResolverConfig{
+			Logger:  logger,
+			Secrets: secretSvc,
+		}),
+		Checker: checker,
 		// A check goes to where the workload's ports are published, which is not
 		// loopback for a server told to publish somewhere specific.
 		Bind: config.Workload.Bind,

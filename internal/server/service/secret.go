@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 var (
@@ -267,77 +266,6 @@ func (s *SecretService) Value(ctx context.Context, name string) (string, error) 
 	}
 
 	return string(opened), nil
-}
-
-// Resolve returns env with every secret reference replaced by the value it names.
-//
-// This is the only thing that produces a secret's plaintext, and it exists for the
-// reconciler to call as a workload starts. Returns ErrSecretNotFound naming the
-// secret when a reference cannot be resolved: handing the workload the reference
-// text would have it use that as the value.
-func (s *SecretService) Resolve(ctx context.Context, env map[string]string) (map[string]string, error) {
-	if len(env) == 0 {
-		return env, nil
-	}
-
-	// Read once each, however many variables reference the same secret.
-	values := make(map[string]string)
-
-	// Why a lookup came back empty, which the callback cannot report itself. A secret
-	// nobody created and a key that cannot decrypt what it sealed both leave a
-	// reference unresolved, and an operator told the wrong one goes looking in the
-	// wrong place.
-	var failed error
-	var missing string
-
-	resolved := make(map[string]string, len(env))
-	for key, value := range env {
-		expanded, err := manifest.Expand(value, func(reference manifest.Reference) (string, bool) {
-			if reference.Kind != manifest.KindSecret {
-				return "", false
-			}
-
-			name := reference.Name
-			if value, ok := values[name]; ok {
-				return value, true
-			}
-
-			stored, err := s.secrets.Get(ctx, name)
-			switch {
-			case errors.Is(err, database.ErrSecretNotFound):
-				missing = name
-
-				return "", false
-			case err != nil:
-				failed = fmt.Errorf("failed to load secret %s: %w", name, err)
-
-				return "", false
-			}
-
-			opened, err := s.cipher.Open(name, stored.Value)
-			if err != nil {
-				failed = fmt.Errorf("failed to decrypt secret %s: %w", name, err)
-
-				return "", false
-			}
-
-			values[name] = string(opened)
-
-			return values[name], true
-		})
-		switch {
-		case failed != nil:
-			return nil, failed
-		case missing != "":
-			return nil, fmt.Errorf("%w: %s reads %s", ErrSecretNotFound, key, missing)
-		case err != nil:
-			return nil, fmt.Errorf("failed to resolve env %s: %w", key, err)
-		}
-
-		resolved[key] = expanded
-	}
-
-	return resolved, nil
 }
 
 // unchanged reports whether stored already holds value.

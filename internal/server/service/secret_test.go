@@ -2,7 +2,6 @@ package service_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -236,96 +235,6 @@ func TestSecretService_Value(t *testing.T) {
 		// created, and an operator told the latter would go looking for the wrong thing.
 		_, err := newTestSecretService(t, secrets, nil).Value(t.Context(), "db-password")
 		require.ErrorIs(t, err, secret.ErrInvalidCiphertext)
-		assert.NotErrorIs(t, err, service.ErrSecretNotFound)
-	})
-}
-
-func TestSecretService_Resolve(t *testing.T) {
-	t.Parallel()
-
-	t.Run("substitutes the values a workload reads", func(t *testing.T) {
-		secrets := NewMockSecretRepository(t)
-		cipher := newTestCipher(t)
-
-		sealed, err := cipher.Seal("db-password", []byte("hunter2"))
-		require.NoError(t, err)
-
-		secrets.EXPECT().Get(mock.Anything, "db-password").
-			Return(database.Secret{Name: "db-password", Value: sealed}, nil).Once()
-
-		resolved, err := newTestSecretService(t, secrets, cipher).Resolve(t.Context(), map[string]string{
-			"DSN":     "postgres://app:${secret:db-password}@localhost/app",
-			"LITERAL": "$$notasecret",
-		})
-		require.NoError(t, err)
-		assert.Equal(t, "postgres://app:hunter2@localhost/app", resolved["DSN"])
-		assert.Equal(t, "$notasecret", resolved["LITERAL"])
-	})
-
-	t.Run("reads a secret once however many variables reference it", func(t *testing.T) {
-		secrets := NewMockSecretRepository(t)
-		cipher := newTestCipher(t)
-
-		sealed, err := cipher.Seal("token", []byte("abc"))
-		require.NoError(t, err)
-
-		secrets.EXPECT().Get(mock.Anything, "token").
-			Return(database.Secret{Name: "token", Value: sealed}, nil).Once()
-
-		resolved, err := newTestSecretService(t, secrets, cipher).Resolve(t.Context(), map[string]string{
-			"ONE": "${secret:token}",
-			"TWO": "${secret:token}",
-		})
-		require.NoError(t, err)
-		assert.Equal(t, "abc", resolved["ONE"])
-		assert.Equal(t, "abc", resolved["TWO"])
-	})
-
-	t.Run("leaves an environment referencing nothing alone", func(t *testing.T) {
-		env := map[string]string{"PLAIN": "value"}
-
-		resolved, err := newTestSecretService(t, NewMockSecretRepository(t), nil).Resolve(t.Context(), env)
-		require.NoError(t, err)
-		assert.Equal(t, env, resolved)
-	})
-
-	t.Run("reports a secret that does not exist", func(t *testing.T) {
-		secrets := NewMockSecretRepository(t)
-
-		secrets.EXPECT().Get(mock.Anything, "nope").
-			Return(database.Secret{}, database.ErrSecretNotFound).Once()
-
-		// Handing the workload the reference text would have it use that as the value.
-		_, err := newTestSecretService(t, secrets, nil).
-			Resolve(t.Context(), map[string]string{"DSN": "${secret:nope}"})
-		require.ErrorIs(t, err, service.ErrSecretNotFound)
-		assert.Contains(t, err.Error(), "nope")
-	})
-
-	t.Run("distinguishes a value it cannot decrypt", func(t *testing.T) {
-		secrets := NewMockSecretRepository(t)
-
-		secrets.EXPECT().Get(mock.Anything, "db-password").
-			Return(database.Secret{Name: "db-password", Value: []byte("not openable")}, nil).Once()
-
-		// A key that cannot decrypt what it sealed is not the same as a secret nobody
-		// created, and an operator told the latter would go looking for the wrong thing.
-		_, err := newTestSecretService(t, secrets, nil).
-			Resolve(t.Context(), map[string]string{"DSN": "${secret:db-password}"})
-		require.Error(t, err)
-		assert.NotErrorIs(t, err, service.ErrSecretNotFound)
-		assert.ErrorIs(t, err, secret.ErrInvalidCiphertext)
-	})
-
-	t.Run("reports a read that failed", func(t *testing.T) {
-		secrets := NewMockSecretRepository(t)
-
-		failure := errors.New("database is gone")
-		secrets.EXPECT().Get(mock.Anything, "db-password").Return(database.Secret{}, failure).Once()
-
-		_, err := newTestSecretService(t, secrets, nil).
-			Resolve(t.Context(), map[string]string{"DSN": "${secret:db-password}"})
-		require.ErrorIs(t, err, failure)
 		assert.NotErrorIs(t, err, service.ErrSecretNotFound)
 	})
 }
