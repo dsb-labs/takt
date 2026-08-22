@@ -364,6 +364,27 @@ func (s *Suite) cleanupSecret(name string) {
 	}
 }
 
+// variableName derives a variable name from the running test's name, so that tests
+// sharing a server cannot change each other's variables.
+func (s *Suite) variableName() string {
+	sum := sha256.Sum256([]byte(s.T().Name()))
+
+	return "e2e-var-" + hex.EncodeToString(sum[:6])
+}
+
+// cleanupVariable removes a variable a test created, forcing it so that one held by a
+// workload a failing test left behind does not survive into the next run.
+func (s *Suite) cleanupVariable(name string) {
+	if s.client == nil {
+		return
+	}
+
+	err := s.client.DeleteVariable(context.Background(), name, client.WithForceDeleteVariable())
+	if err != nil && !errors.Is(err, client.ErrVariableNotFound) {
+		s.T().Logf("failed to delete variable %q: %v", name, err)
+	}
+}
+
 // databaseHolds reports whether the raw bytes of the server's database contain the
 // given value.
 //
