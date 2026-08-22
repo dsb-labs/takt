@@ -28,6 +28,8 @@ type (
 		Reconcile ReconcileConfig `toml:"reconcile"`
 		// Settings for the workloads orca runs.
 		Workload WorkloadConfig `toml:"workload"`
+		// Secret storage settings.
+		Secrets SecretsConfig `toml:"secrets"`
 		// Logging settings.
 		Logging LoggingConfig `toml:"logging"`
 	}
@@ -51,6 +53,19 @@ type (
 	DataConfig struct {
 		// The directory the SQLite database is stored in.
 		Directory string `toml:"directory"`
+	}
+
+	// The SecretsConfig type contains configuration for the secrets orca holds.
+	SecretsConfig struct {
+		// The file holding the key a secret's value is encrypted under.
+		//
+		// Generated on first start if nothing is there. Anything that can read this
+		// file can read every secret orca holds, so it is written readable only by
+		// the user running the server — and it belongs on a backup, because a secret
+		// sealed under a key that is gone cannot be recovered.
+		//
+		// Empty puts it beside the database, in the data directory.
+		KeyFile string `toml:"key-file"`
 	}
 
 	// The DockerConfig type contains configuration for talking to the Docker daemon.
@@ -129,6 +144,19 @@ func DefaultConfig() Config {
 			Level: "info",
 		},
 	}
+}
+
+// KeyPath returns the file holding the secret encryption key.
+//
+// Resolved here rather than defaulted in DefaultConfig, because the default sits
+// inside the data directory and a configuration file may have moved that. A default
+// computed before the file was read would point at the directory orca is not using.
+func (c Config) KeyPath() string {
+	if c.Secrets.KeyFile != "" {
+		return c.Secrets.KeyFile
+	}
+
+	return filepath.Join(c.Data.Directory, "secret.key")
 }
 
 func defaultDataDir() string {

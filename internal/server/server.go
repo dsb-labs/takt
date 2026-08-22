@@ -19,6 +19,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver/exec"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
+	"github.com/dsb-labs/orca/internal/server/secret"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 	"github.com/dsb-labs/orca/internal/server/service"
 )
@@ -55,9 +56,22 @@ func Run(ctx context.Context, config Config) error {
 	}
 	defer dockerClient.Close()
 
+	// Loaded before anything that could seal a value, so a server that cannot reach
+	// its key fails to start rather than accepting a secret it could not store.
+	key, err := secret.LoadKey(config.KeyPath())
+	if err != nil {
+		return fmt.Errorf("failed to load secret encryption key: %w", err)
+	}
+
+	cipher, err := secret.New(key)
+	if err != nil {
+		return fmt.Errorf("failed to construct secret cipher: %w", err)
+	}
+
 	workloads := database.NewWorkloadRepository(db)
 	ports := database.NewPortRepository(db)
 	volumes := database.NewVolumeRepository(db)
+	secrets := database.NewSecretRepository(db)
 	checker := health.New()
 
 	// The exec driver keeps its own trees under the data directory, beside the
@@ -77,7 +91,21 @@ func Run(ctx context.Context, config Config) error {
 	// wakes the reconciler when desired state changes, and the reconciler asks the
 	// service to reallocate ports that turned out to be unusable. Both are passed as
 	// functions so neither has to be half-constructed to build the other.
+	//
+	// The secret service needs the same treatment for the same reason: rotating a
+	// secret has to rehash the workloads reading it.
 	var svc *service.WorkloadService
+
+	secretSvc := service.NewSecretService(service.SecretServiceConfig{
+		Logger:  logger,
+		Secrets: secrets,
+		Cipher:  cipher,
+		Rehash: func(ctx context.Context, workload string) error {
+			_, err := svc.Rehash(ctx, workload)
+
+			return err
+		},
+	})
 
 	// The drivers are keyed by the name each one declares, which is what a workload's
 	// runtime is matched against. A runtime with no driver is stored and left alone.
@@ -93,6 +121,7 @@ func Run(ctx context.Context, config Config) error {
 		},
 		Workloads: workloads,
 		Ports:     ports,
+		Secrets:   secretSvc,
 		Checker:   checker,
 		// A check goes to where the workload's ports are published, which is not
 		// loopback for a server told to publish somewhere specific.
@@ -118,6 +147,7 @@ func Run(ctx context.Context, config Config) error {
 		Workloads: workloads,
 		Ports:     ports,
 		Volumes:   volumeSvc,
+		Secrets:   secrets,
 		Allocator: port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort}),
 		Checker:   checker,
 		Notify:    reconcile.Notify,
@@ -127,6 +157,7 @@ func Run(ctx context.Context, config Config) error {
 	api.New(api.Config{
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: volumeSvc}),
+		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: secretSvc}),
 	}).Register(mux)
 
 	var handler http.Handler = mux

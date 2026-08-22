@@ -16,5 +16,8 @@ bind = "0.0.0.0"
 min-port = 25000
 max-port = 26000
 
+[secrets]
+key-file = "/etc/orca/secret.key"
+
 [logging]
 level = "debug"
