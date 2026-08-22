@@ -1042,14 +1042,24 @@ func (s *Suite) TestUnchangedSecretIsNotRedeployed() {
 	s.Equal(first.Revision, again.Revision)
 	s.Equal(first.UpdatedAt, again.UpdatedAt)
 
-	// Nothing moved, so nothing is replaced. Waited on rather than asserted at once,
-	// since a redeploy would take a moment to appear and an immediate check would
-	// pass whether or not one was coming.
-	s.Require().Never(func() bool {
-		workload, err := s.client.Get(s.ctx(), name)
+	// Nothing moved, so nothing is replaced. Watched over several reconciliation
+	// passes rather than asserted at once, since a redeploy would take a moment to
+	// appear and an immediate check would pass whether or not one was coming.
+	//
+	// A plain loop rather than Never, whose condition runs on a goroutine that
+	// outlives the assertion: it would still be reading the suite's client while the
+	// teardown replaced it.
+	for range 10 {
+		time.Sleep(time.Second)
 
-		return err == nil && (workload.Version != before.Version || s.instanceID(name) != instance)
-	}, 10*time.Second, time.Second, "an unchanged secret redeployed its workload")
+		workload, err := s.client.Get(s.ctx(), name)
+		s.Require().NoError(err)
+		s.Require().Len(workload.Instances, 1)
+		s.Require().Equal(before.Version, workload.Version,
+			"an unchanged secret bumped its workload's version")
+		s.Require().Equal(instance, workload.Instances[0].ID,
+			"an unchanged secret replaced its workload's instance")
+	}
 }
 
 // TestDeletingASecretInUseIsRefused covers the refusal naming the workloads, and what
