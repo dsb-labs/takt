@@ -26,6 +26,8 @@ tags:
     description: Submission and inspection of workloads.
   - name: volumes
     description: Storage that outlives the workloads mounting it.
+  - name: secrets
+    description: Values a workload reads and an operator cannot.
 
 paths:
   /api/v1/workloads:
@@ -333,6 +335,139 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v1/secrets:
+    get:
+      operationId: listSecrets
+      tags: [secrets]
+      summary: List secrets
+      description: |
+        Returns the secrets the server holds, each with the workloads currently
+        reading it.
+
+        No value is returned, here or anywhere else. This is how an operator finds
+        out what exists in order to reference it from a manifest.
+      responses:
+        "200":
+          description: The secrets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSecretsResult"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/secrets/{name}:
+    parameters:
+      - $ref: "#/components/parameters/SecretName"
+
+    get:
+      operationId: getSecret
+      tags: [secrets]
+      summary: Get a single secret
+      description: |
+        Returns the secret with the given name, including the workloads reading it.
+
+        The value is not part of the response. Nothing reads a secret back out of
+        orca: once set, the only thing that sees the value is a workload being
+        started.
+      responses:
+        "200":
+          description: The requested secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetSecretResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      operationId: setSecret
+      tags: [secrets]
+      summary: Set a secret's value
+      description: |
+        Stores the given value as the named secret, encrypted.
+
+        Setting a secret to the value it already holds does nothing: the revision
+        stays put, so no workload reading it is redeployed. That mirrors applying an
+        unchanged manifest, and means a tool that sets every secret on every run does
+        not restart the fleet each time.
+
+        A value that did change moves the revision, which moves the specification
+        hash of every workload reading the secret. Those workloads are then replaced
+        by the reconciler, and the new value reaches them as they start.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SecretSpec"
+      responses:
+        "200":
+          description: The secret was updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetSecretResult"
+        "201":
+          description: The secret was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetSecretResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteSecret
+      tags: [secrets]
+      summary: Delete a secret
+      description: |
+        Removes the secret with the given name.
+
+        A secret a workload reads is refused rather than removed, and the response
+        names the workloads reading it. Forcing it through leaves those workloads
+        running: they find out at their next start, which is when the value is
+        actually needed.
+
+        Deletion is synchronous, unlike a workload's. There is nothing running to
+        wind down, only a row to remove.
+      parameters:
+        - name: force
+          in: query
+          required: false
+          description: |
+            Remove the secret even though a workload reads it. Those workloads keep
+            running until something replaces them, and then fail to start until the
+            secret exists again.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: |
+            The secret was removed.
+
+            The body is an object with nothing in it yet, rather than no body at all,
+            for the same reason deleting a volume returns one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteSecretResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A workload reads the secret, and force was not set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
 components:
   parameters:
     WorkloadName:
@@ -350,6 +485,16 @@ components:
       in: path
       required: true
       description: The name that identifies the volume.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 63
+
+    SecretName:
+      name: name
+      in: path
+      required: true
+      description: The name that identifies the secret.
       schema:
         type: string
         minLength: 1
@@ -777,6 +922,67 @@ components:
           items:
             type: string
 
+    SecretSpec:
+      type: object
+      description: |
+        The value to store as a secret.
+
+        The name is not part of this. It travels in the path, because unlike a
+        workload or a volume a secret is not described by a manifest: there is nothing
+        to write down but the value, and writing that down is what a secret exists to
+        avoid.
+      required: [value]
+      properties:
+        value:
+          type: string
+          description: |
+            The value to store. Stored encrypted and never returned by this API.
+
+            An empty string is a valid value. A workload reading it gets an empty
+            environment variable, which is different from one that is not set.
+
+    Secret:
+      type: object
+      description: |
+        A secret, together with the workloads currently reading it.
+
+        There is no value on this schema, on purpose. Nothing reads a secret back out
+        of orca: once set, the only thing that sees the value is a workload being
+        started.
+      required: [name, revision, createdAt, updatedAt]
+      properties:
+        name:
+          type: string
+          description: The name that identifies the secret, and which a manifest references.
+        revision:
+          type: string
+          description: |
+            Changes whenever the secret's value changes, and never otherwise.
+
+            Reported so that an operator can confirm a rotation landed, and so that
+            two servers can be compared without either revealing anything. It says
+            nothing about the value: it is random rather than derived from it, which
+            is also why it cannot be used to test a guess.
+          examples: ["9f2c4a1e8b7d3f6002a5c8e1b4d7f0a3"]
+        createdAt:
+          type: string
+          format: date-time
+          description: When the secret was created.
+        updatedAt:
+          type: string
+          format: date-time
+          description: |
+            When the secret's value last changed. Equal to createdAt for a secret that
+            has never been rotated.
+        usedBy:
+          type: array
+          description: |
+            The names of the workloads whose specifications reference this secret.
+            Empty for a secret nothing reads, which is a secret that can be deleted
+            without forcing.
+          items:
+            type: string
+
     ExecSpec:
       type: object
       description: |
@@ -1063,3 +1269,40 @@ components:
         otherwise return nothing. And an object with no fields can gain one, where a
         response with no body cannot gain anything without becoming a different kind
         of response.
+
+    ListSecretsResult:
+      type: object
+      description: |
+        The body returned when secrets are listed.
+
+        An object rather than a bare array, for the same reason listing volumes
+        returns one.
+      required: [secrets]
+      properties:
+        secrets:
+          type: array
+          description: The secrets the server holds.
+          items:
+            $ref: "#/components/schemas/Secret"
+
+    GetSecretResult:
+      type: object
+      description: The body returned when a single secret is read.
+      required: [secret]
+      properties:
+        secret:
+          $ref: "#/components/schemas/Secret"
+
+    SetSecretResult:
+      type: object
+      description: The body returned when a secret is set.
+      required: [secret]
+      properties:
+        secret:
+          $ref: "#/components/schemas/Secret"
+
+    DeleteSecretResult:
+      type: object
+      description: |
+        The body returned when a secret is deleted, which has nothing in it yet, for
+        the same reason deleting a volume returns one.

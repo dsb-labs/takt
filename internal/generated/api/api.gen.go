@@ -193,6 +193,10 @@ type CreateVolumeResult struct {
 	Volume Volume `json:"volume"`
 }
 
+// DeleteSecretResult The body returned when a secret is deleted, which has nothing in it yet, for
+// the same reason deleting a volume returns one.
+type DeleteSecretResult = map[string]interface{}
+
 // DeleteVolumeResult The body returned when a volume is deleted, which has nothing in it yet.
 //
 // It exists for two reasons. Every response this API gives is a JSON object, so
@@ -230,6 +234,16 @@ type ExecSpec struct {
 	//
 	// Examples: ["/usr/local/bin/backup","--target","/data"]
 	Command []string `json:"command"`
+}
+
+// GetSecretResult The body returned when a single secret is read.
+type GetSecretResult struct {
+	// Secret A secret, together with the workloads currently reading it.
+	//
+	// There is no value on this schema, on purpose. Nothing reads a secret back out
+	// of orca: once set, the only thing that sees the value is a workload being
+	// started.
+	Secret Secret `json:"secret"`
 }
 
 // GetVolumeResult The body returned when a single volume is read.
@@ -361,6 +375,15 @@ type InstanceHealth struct {
 // says not to run it again. Exited says only that it ended, which is what the
 // driver observed. Completed adds what the policy makes of that.
 type InstanceState string
+
+// ListSecretsResult The body returned when secrets are listed.
+//
+// An object rather than a bare array, for the same reason listing volumes
+// returns one.
+type ListSecretsResult struct {
+	// Secrets The secrets the server holds.
+	Secrets []Secret `json:"secrets"`
+}
 
 // ListVolumesResult The body returned when volumes are listed.
 //
@@ -511,6 +534,63 @@ type ScheduleSpec struct {
 	//
 	// Either way the workload runs one instance at a time.
 	Overlap *OverlapPolicy `json:"overlap,omitempty"`
+}
+
+// Secret A secret, together with the workloads currently reading it.
+//
+// There is no value on this schema, on purpose. Nothing reads a secret back out
+// of orca: once set, the only thing that sees the value is a workload being
+// started.
+type Secret struct {
+	// CreatedAt When the secret was created.
+	CreatedAt time.Time `json:"createdAt"`
+
+	// Name The name that identifies the secret, and which a manifest references.
+	Name string `json:"name"`
+
+	// Revision Changes whenever the secret's value changes, and never otherwise.
+	//
+	// Reported so that an operator can confirm a rotation landed, and so that
+	// two servers can be compared without either revealing anything. It says
+	// nothing about the value: it is random rather than derived from it, which
+	// is also why it cannot be used to test a guess.
+	//
+	//
+	// Examples: 9f2c4a1e8b7d3f6002a5c8e1b4d7f0a3
+	Revision string `json:"revision"`
+
+	// UpdatedAt When the secret's value last changed. Equal to createdAt for a secret that
+	// has never been rotated.
+	UpdatedAt time.Time `json:"updatedAt"`
+
+	// UsedBy The names of the workloads whose specifications reference this secret.
+	// Empty for a secret nothing reads, which is a secret that can be deleted
+	// without forcing.
+	UsedBy *[]string `json:"usedBy,omitempty"`
+}
+
+// SecretSpec The value to store as a secret.
+//
+// The name is not part of this. It travels in the path, because unlike a
+// workload or a volume a secret is not described by a manifest: there is nothing
+// to write down but the value, and writing that down is what a secret exists to
+// avoid.
+type SecretSpec struct {
+	// Value The value to store. Stored encrypted and never returned by this API.
+	//
+	// An empty string is a valid value. A workload reading it gets an empty
+	// environment variable, which is different from one that is not set.
+	Value string `json:"value"`
+}
+
+// SetSecretResult The body returned when a secret is set.
+type SetSecretResult struct {
+	// Secret A secret, together with the workloads currently reading it.
+	//
+	// There is no value on this schema, on purpose. Nothing reads a secret back out
+	// of orca: once set, the only thing that sees the value is a workload being
+	// started.
+	Secret Secret `json:"secret"`
 }
 
 // Volume A volume, together with the workloads currently mounting it.
@@ -751,6 +831,9 @@ type WorkloadSpec struct {
 // the server intends to fix it.
 type WorkloadState string
 
+// SecretName defines model for SecretName.
+type SecretName = string
+
 // VolumeName defines model for VolumeName.
 type VolumeName = string
 
@@ -765,6 +848,14 @@ type InternalServerError = ErrorResponse
 
 // NotFound The body returned for any unsuccessful request.
 type NotFound = ErrorResponse
+
+// DeleteSecretParams defines parameters for DeleteSecret.
+type DeleteSecretParams struct {
+	// Force Remove the secret even though a workload reads it. Those workloads keep
+	// running until something replaces them, and then fail to start until the
+	// secret exists again.
+	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+}
 
 // DeleteVolumeParams defines parameters for DeleteVolume.
 type DeleteVolumeParams struct {
@@ -793,6 +884,9 @@ type GetWorkloadLogsParams struct {
 	// a caller decide how much work the server does.
 	Tail *int `form:"tail,omitempty" json:"tail,omitempty"`
 }
+
+// SetSecretJSONRequestBody defines body for SetSecret for application/json ContentType.
+type SetSecretJSONRequestBody = SecretSpec
 
 // CreateVolumeJSONRequestBody defines body for CreateVolume for application/json ContentType.
 type CreateVolumeJSONRequestBody = VolumeSpec
@@ -873,6 +967,79 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
+
+	// ListSecrets List secrets
+	//
+	// Returns the secrets the server holds, each with the workloads currently
+	// reading it.
+	//
+	// No value is returned, here or anywhere else. This is how an operator finds
+	// out what exists in order to reference it from a manifest.
+	//
+	// Corresponds with GET /api/v1/secrets (the `ListSecrets` operationId).
+	ListSecrets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteSecret Delete a secret
+	//
+	// Removes the secret with the given name.
+	//
+	// A secret a workload reads is refused rather than removed, and the response
+	// names the workloads reading it. Forcing it through leaves those workloads
+	// running: they find out at their next start, which is when the value is
+	// actually needed.
+	//
+	// Deletion is synchronous, unlike a workload's. There is nothing running to
+	// wind down, only a row to remove.
+	//
+	// Corresponds with DELETE /api/v1/secrets/{name} (the `DeleteSecret` operationId).
+	DeleteSecret(ctx context.Context, name SecretName, params *DeleteSecretParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetSecret Get a single secret
+	//
+	// Returns the secret with the given name, including the workloads reading it.
+	//
+	// The value is not part of the response. Nothing reads a secret back out of
+	// orca: once set, the only thing that sees the value is a workload being
+	// started.
+	//
+	// Corresponds with GET /api/v1/secrets/{name} (the `GetSecret` operationId).
+	GetSecret(ctx context.Context, name SecretName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetSecretWithBody Set a secret's value
+	//
+	// Stores the given value as the named secret, encrypted.
+	//
+	// Setting a secret to the value it already holds does nothing: the revision
+	// stays put, so no workload reading it is redeployed. That mirrors applying an
+	// unchanged manifest, and means a tool that sets every secret on every run does
+	// not restart the fleet each time.
+	//
+	// A value that did change moves the revision, which moves the specification
+	// hash of every workload reading the secret. Those workloads are then replaced
+	// by the reconciler, and the new value reaches them as they start.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
+	SetSecretWithBody(ctx context.Context, name SecretName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetSecret Set a secret's value
+	//
+	// Stores the given value as the named secret, encrypted.
+	//
+	// Setting a secret to the value it already holds does nothing: the revision
+	// stays put, so no workload reading it is redeployed. That mirrors applying an
+	// unchanged manifest, and means a tool that sets every secret on every run does
+	// not restart the fleet each time.
+	//
+	// A value that did change moves the revision, which moves the specification
+	// hash of every workload reading the secret. Those workloads are then replaced
+	// by the reconciler, and the new value reaches them as they start.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
+	SetSecret(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListVolumes List volumes
 	//
@@ -998,6 +1165,129 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/workloads/{name}/logs (the `GetWorkloadLogs` operationId).
 	GetWorkloadLogs(ctx context.Context, name WorkloadName, params *GetWorkloadLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// ListSecrets List secrets
+//
+// Returns the secrets the server holds, each with the workloads currently
+// reading it.
+//
+// No value is returned, here or anywhere else. This is how an operator finds
+// out what exists in order to reference it from a manifest.
+//
+// Corresponds with GET /api/v1/secrets (the `ListSecrets` operationId).
+func (c *Client) ListSecrets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSecretsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteSecret Delete a secret
+//
+// Removes the secret with the given name.
+//
+// A secret a workload reads is refused rather than removed, and the response
+// names the workloads reading it. Forcing it through leaves those workloads
+// running: they find out at their next start, which is when the value is
+// actually needed.
+//
+// Deletion is synchronous, unlike a workload's. There is nothing running to
+// wind down, only a row to remove.
+//
+// Corresponds with DELETE /api/v1/secrets/{name} (the `DeleteSecret` operationId).
+func (c *Client) DeleteSecret(ctx context.Context, name SecretName, params *DeleteSecretParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteSecretRequest(c.Server, name, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetSecret Get a single secret
+//
+// Returns the secret with the given name, including the workloads reading it.
+//
+// The value is not part of the response. Nothing reads a secret back out of
+// orca: once set, the only thing that sees the value is a workload being
+// started.
+//
+// Corresponds with GET /api/v1/secrets/{name} (the `GetSecret` operationId).
+func (c *Client) GetSecret(ctx context.Context, name SecretName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSecretRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetSecretWithBody Set a secret's value
+//
+// Stores the given value as the named secret, encrypted.
+//
+// Setting a secret to the value it already holds does nothing: the revision
+// stays put, so no workload reading it is redeployed. That mirrors applying an
+// unchanged manifest, and means a tool that sets every secret on every run does
+// not restart the fleet each time.
+//
+// A value that did change moves the revision, which moves the specification
+// hash of every workload reading the secret. Those workloads are then replaced
+// by the reconciler, and the new value reaches them as they start.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
+func (c *Client) SetSecretWithBody(ctx context.Context, name SecretName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetSecretRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetSecret Set a secret's value
+//
+// Stores the given value as the named secret, encrypted.
+//
+// Setting a secret to the value it already holds does nothing: the revision
+// stays put, so no workload reading it is redeployed. That mirrors applying an
+// unchanged manifest, and means a tool that sets every secret on every run does
+// not restart the fleet each time.
+//
+// A value that did change moves the revision, which moves the specification
+// hash of every workload reading the secret. Those workloads are then replaced
+// by the reconciler, and the new value reaches them as they start.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
+func (c *Client) SetSecret(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetSecretRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 // ListVolumes List volumes
@@ -1233,6 +1523,175 @@ func (c *Client) GetWorkloadLogs(ctx context.Context, name WorkloadName, params 
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewListSecretsRequest constructs an http.Request for the ListSecrets method
+func NewListSecretsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/secrets")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDeleteSecretRequest constructs an http.Request for the DeleteSecret method
+func NewDeleteSecretRequest(server string, name SecretName, params *DeleteSecretParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/secrets/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Force != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "force", *params.Force, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetSecretRequest constructs an http.Request for the GetSecret method
+func NewGetSecretRequest(server string, name SecretName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/secrets/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetSecretRequest calls the generic SetSecret builder with application/json body
+func NewSetSecretRequest(server string, name SecretName, body SetSecretJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetSecretRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewSetSecretRequestWithBody constructs an http.Request for the SetSecret method, with any body, and a specified content type
+func NewSetSecretRequestWithBody(server string, name SecretName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/secrets/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
 }
 
 // NewListVolumesRequest constructs an http.Request for the ListVolumes method
@@ -1671,6 +2130,85 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// ListSecretsWithResponse List secrets
+	//
+	// Returns the secrets the server holds, each with the workloads currently
+	// reading it.
+	//
+	// No value is returned, here or anywhere else. This is how an operator finds
+	// out what exists in order to reference it from a manifest.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/secrets (the `ListSecrets` operationId).
+	ListSecretsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListSecretsResponse, error)
+
+	// DeleteSecretWithResponse Delete a secret
+	//
+	// Removes the secret with the given name.
+	//
+	// A secret a workload reads is refused rather than removed, and the response
+	// names the workloads reading it. Forcing it through leaves those workloads
+	// running: they find out at their next start, which is when the value is
+	// actually needed.
+	//
+	// Deletion is synchronous, unlike a workload's. There is nothing running to
+	// wind down, only a row to remove.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/secrets/{name} (the `DeleteSecret` operationId).
+	DeleteSecretWithResponse(ctx context.Context, name SecretName, params *DeleteSecretParams, reqEditors ...RequestEditorFn) (*DeleteSecretResponse, error)
+
+	// GetSecretWithResponse Get a single secret
+	//
+	// Returns the secret with the given name, including the workloads reading it.
+	//
+	// The value is not part of the response. Nothing reads a secret back out of
+	// orca: once set, the only thing that sees the value is a workload being
+	// started.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/secrets/{name} (the `GetSecret` operationId).
+	GetSecretWithResponse(ctx context.Context, name SecretName, reqEditors ...RequestEditorFn) (*GetSecretResponse, error)
+
+	// SetSecretWithBodyWithResponse Set a secret's value
+	//
+	// Stores the given value as the named secret, encrypted.
+	//
+	// Setting a secret to the value it already holds does nothing: the revision
+	// stays put, so no workload reading it is redeployed. That mirrors applying an
+	// unchanged manifest, and means a tool that sets every secret on every run does
+	// not restart the fleet each time.
+	//
+	// A value that did change moves the revision, which moves the specification
+	// hash of every workload reading the secret. Those workloads are then replaced
+	// by the reconciler, and the new value reaches them as they start.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
+	SetSecretWithBodyWithResponse(ctx context.Context, name SecretName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetSecretResponse, error)
+
+	// SetSecretWithResponse Set a secret's value
+	//
+	// Stores the given value as the named secret, encrypted.
+	//
+	// Setting a secret to the value it already holds does nothing: the revision
+	// stays put, so no workload reading it is redeployed. That mirrors applying an
+	// unchanged manifest, and means a tool that sets every secret on every run does
+	// not restart the fleet each time.
+	//
+	// A value that did change moves the revision, which moves the specification
+	// hash of every workload reading the secret. Those workloads are then replaced
+	// by the reconciler, and the new value reaches them as they start.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
+	SetSecretWithResponse(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSecretResponse, error)
+
 	// ListVolumesWithResponse List volumes
 	//
 	// Returns the volumes the server holds, each with the workloads currently
@@ -1809,6 +2347,233 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /api/v1/workloads/{name}/logs (the `GetWorkloadLogs` operationId).
 	GetWorkloadLogsWithResponse(ctx context.Context, name WorkloadName, params *GetWorkloadLogsParams, reqEditors ...RequestEditorFn) (*GetWorkloadLogsResponse, error)
+}
+
+type ListSecretsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ListSecretsResult
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListSecretsResponse) GetJSON200() *ListSecretsResult {
+	return r.JSON200
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListSecretsResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListSecretsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListSecretsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListSecretsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListSecretsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteSecretResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeleteSecretResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DeleteSecretResponse) GetJSON200() *DeleteSecretResult {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeleteSecretResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DeleteSecretResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r DeleteSecretResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteSecretResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteSecretResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteSecretResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteSecretResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetSecretResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetSecretResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetSecretResponse) GetJSON200() *GetSecretResult {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetSecretResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetSecretResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetSecretResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetSecretResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetSecretResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetSecretResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetSecretResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *SetSecretResult
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *SetSecretResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetSecretResponse) GetJSON200() *SetSecretResult {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r SetSecretResponse) GetJSON201() *SetSecretResult {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r SetSecretResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r SetSecretResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r SetSecretResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetSecretResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetSecretResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetSecretResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type ListVolumesResponse struct {
@@ -2334,6 +3099,115 @@ func (r GetWorkloadLogsResponse) ContentType() string {
 	return ""
 }
 
+// ListSecretsWithResponse List secrets
+//
+// Returns the secrets the server holds, each with the workloads currently
+// reading it.
+//
+// No value is returned, here or anywhere else. This is how an operator finds
+// out what exists in order to reference it from a manifest.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/secrets (the `ListSecrets` operationId).
+func (c *ClientWithResponses) ListSecretsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListSecretsResponse, error) {
+	rsp, err := c.ListSecrets(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListSecretsResponse(rsp)
+}
+
+// DeleteSecretWithResponse Delete a secret
+//
+// Removes the secret with the given name.
+//
+// A secret a workload reads is refused rather than removed, and the response
+// names the workloads reading it. Forcing it through leaves those workloads
+// running: they find out at their next start, which is when the value is
+// actually needed.
+//
+// Deletion is synchronous, unlike a workload's. There is nothing running to
+// wind down, only a row to remove.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/secrets/{name} (the `DeleteSecret` operationId).
+func (c *ClientWithResponses) DeleteSecretWithResponse(ctx context.Context, name SecretName, params *DeleteSecretParams, reqEditors ...RequestEditorFn) (*DeleteSecretResponse, error) {
+	rsp, err := c.DeleteSecret(ctx, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteSecretResponse(rsp)
+}
+
+// GetSecretWithResponse Get a single secret
+//
+// Returns the secret with the given name, including the workloads reading it.
+//
+// The value is not part of the response. Nothing reads a secret back out of
+// orca: once set, the only thing that sees the value is a workload being
+// started.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/secrets/{name} (the `GetSecret` operationId).
+func (c *ClientWithResponses) GetSecretWithResponse(ctx context.Context, name SecretName, reqEditors ...RequestEditorFn) (*GetSecretResponse, error) {
+	rsp, err := c.GetSecret(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetSecretResponse(rsp)
+}
+
+// SetSecretWithBodyWithResponse Set a secret's value
+//
+// Stores the given value as the named secret, encrypted.
+//
+// Setting a secret to the value it already holds does nothing: the revision
+// stays put, so no workload reading it is redeployed. That mirrors applying an
+// unchanged manifest, and means a tool that sets every secret on every run does
+// not restart the fleet each time.
+//
+// A value that did change moves the revision, which moves the specification
+// hash of every workload reading the secret. Those workloads are then replaced
+// by the reconciler, and the new value reaches them as they start.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
+func (c *ClientWithResponses) SetSecretWithBodyWithResponse(ctx context.Context, name SecretName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetSecretResponse, error) {
+	rsp, err := c.SetSecretWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetSecretResponse(rsp)
+}
+
+// SetSecretWithResponse Set a secret's value
+//
+// Stores the given value as the named secret, encrypted.
+//
+// Setting a secret to the value it already holds does nothing: the revision
+// stays put, so no workload reading it is redeployed. That mirrors applying an
+// unchanged manifest, and means a tool that sets every secret on every run does
+// not restart the fleet each time.
+//
+// A value that did change moves the revision, which moves the specification
+// hash of every workload reading the secret. Those workloads are then replaced
+// by the reconciler, and the new value reaches them as they start.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
+func (c *ClientWithResponses) SetSecretWithResponse(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSecretResponse, error) {
+	rsp, err := c.SetSecret(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetSecretResponse(rsp)
+}
+
 // ListVolumesWithResponse List volumes
 //
 // Returns the volumes the server holds, each with the workloads currently
@@ -2537,6 +3411,173 @@ func (c *ClientWithResponses) GetWorkloadLogsWithResponse(ctx context.Context, n
 		return nil, err
 	}
 	return ParseGetWorkloadLogsResponse(rsp)
+}
+
+// ParseListSecretsResponse parses an HTTP response from a ListSecretsWithResponse call
+func ParseListSecretsResponse(rsp *http.Response) (*ListSecretsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListSecretsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ListSecretsResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteSecretResponse parses an HTTP response from a DeleteSecretWithResponse call
+func ParseDeleteSecretResponse(rsp *http.Response) (*DeleteSecretResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteSecretResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeleteSecretResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetSecretResponse parses an HTTP response from a GetSecretWithResponse call
+func ParseGetSecretResponse(rsp *http.Response) (*GetSecretResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetSecretResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetSecretResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetSecretResponse parses an HTTP response from a SetSecretWithResponse call
+func ParseSetSecretResponse(rsp *http.Response) (*SetSecretResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetSecretResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest SetSecretResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest SetSecretResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParseListVolumesResponse parses an HTTP response from a ListVolumesWithResponse call
@@ -2929,6 +3970,18 @@ func ParseGetWorkloadLogsResponse(rsp *http.Response) (*GetWorkloadLogsResponse,
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListSecrets List secrets
+	// (GET /api/v1/secrets)
+	ListSecrets(w http.ResponseWriter, r *http.Request)
+	// DeleteSecret Delete a secret
+	// (DELETE /api/v1/secrets/{name})
+	DeleteSecret(w http.ResponseWriter, r *http.Request, name SecretName, params DeleteSecretParams)
+	// GetSecret Get a single secret
+	// (GET /api/v1/secrets/{name})
+	GetSecret(w http.ResponseWriter, r *http.Request, name SecretName)
+	// SetSecret Set a secret's value
+	// (PUT /api/v1/secrets/{name})
+	SetSecret(w http.ResponseWriter, r *http.Request, name SecretName)
 	// ListVolumes List volumes
 	// (GET /api/v1/volumes)
 	ListVolumes(w http.ResponseWriter, r *http.Request)
@@ -2966,6 +4019,114 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListSecrets operation middleware
+func (siw *ServerInterfaceWrapper) ListSecrets(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSecrets(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSecret operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name SecretName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteSecretParams
+
+	// ------------- Optional query parameter "force" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "force", r.URL.Query(), &params.Force, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "force"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "force", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSecret(w, r, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSecret operation middleware
+func (siw *ServerInterfaceWrapper) GetSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name SecretName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSecret(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetSecret operation middleware
+func (siw *ServerInterfaceWrapper) SetSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name SecretName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetSecret(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListVolumes operation middleware
 func (siw *ServerInterfaceWrapper) ListVolumes(w http.ResponseWriter, r *http.Request) {
@@ -3345,6 +4506,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/volumes", wrapper.CreateVolume)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.DeleteVolume)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.GetVolume)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/secrets", wrapper.ListSecrets)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/secrets/{name}", wrapper.DeleteSecret)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/secrets/{name}", wrapper.GetSecret)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/secrets/{name}", wrapper.SetSecret)
 
 	return m
 }
@@ -3354,6 +4519,229 @@ type BadRequestJSONResponse ErrorResponse
 type InternalServerErrorJSONResponse ErrorResponse
 
 type NotFoundJSONResponse ErrorResponse
+
+type ListSecretsRequestObject struct {
+}
+
+type ListSecretsResponseObject interface {
+	VisitListSecretsResponse(w http.ResponseWriter) error
+}
+
+type ListSecrets200JSONResponse ListSecretsResult
+
+func (response ListSecrets200JSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecrets500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response ListSecrets500JSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSecretRequestObject struct {
+	Name   SecretName `json:"name"`
+	Params DeleteSecretParams
+}
+
+type DeleteSecretResponseObject interface {
+	VisitDeleteSecretResponse(w http.ResponseWriter) error
+}
+
+type DeleteSecret200JSONResponse DeleteSecretResult
+
+func (response DeleteSecret200JSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSecret404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteSecret404JSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSecret409JSONResponse ErrorResponse
+
+func (response DeleteSecret409JSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteSecret500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response DeleteSecret500JSONResponse) VisitDeleteSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecretRequestObject struct {
+	Name SecretName `json:"name"`
+}
+
+type GetSecretResponseObject interface {
+	VisitGetSecretResponse(w http.ResponseWriter) error
+}
+
+type GetSecret200JSONResponse GetSecretResult
+
+func (response GetSecret200JSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecret404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetSecret404JSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetSecret500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetSecret500JSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetSecretRequestObject struct {
+	Name SecretName `json:"name"`
+	Body *SetSecretJSONRequestBody
+}
+
+type SetSecretResponseObject interface {
+	VisitSetSecretResponse(w http.ResponseWriter) error
+}
+
+type SetSecret200JSONResponse SetSecretResult
+
+func (response SetSecret200JSONResponse) VisitSetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetSecret201JSONResponse SetSecretResult
+
+func (response SetSecret201JSONResponse) VisitSetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetSecret400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetSecret400JSONResponse) VisitSetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetSecret500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response SetSecret500JSONResponse) VisitSetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type ListVolumesRequestObject struct {
 }
@@ -3894,6 +5282,18 @@ func (response GetWorkloadLogs500JSONResponse) VisitGetWorkloadLogsResponse(w ht
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ListSecrets List secrets
+	// (GET /api/v1/secrets)
+	ListSecrets(ctx context.Context, request ListSecretsRequestObject) (ListSecretsResponseObject, error)
+	// DeleteSecret Delete a secret
+	// (DELETE /api/v1/secrets/{name})
+	DeleteSecret(ctx context.Context, request DeleteSecretRequestObject) (DeleteSecretResponseObject, error)
+	// GetSecret Get a single secret
+	// (GET /api/v1/secrets/{name})
+	GetSecret(ctx context.Context, request GetSecretRequestObject) (GetSecretResponseObject, error)
+	// SetSecret Set a secret's value
+	// (PUT /api/v1/secrets/{name})
+	SetSecret(ctx context.Context, request SetSecretRequestObject) (SetSecretResponseObject, error)
 	// ListVolumes List volumes
 	// (GET /api/v1/volumes)
 	ListVolumes(ctx context.Context, request ListVolumesRequestObject) (ListVolumesResponseObject, error)
@@ -3960,6 +5360,116 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListSecrets operation middleware
+func (sh *strictHandler) ListSecrets(w http.ResponseWriter, r *http.Request) {
+	var request ListSecretsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListSecrets(ctx, request.(ListSecretsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListSecrets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListSecretsResponseObject); ok {
+		if err := validResponse.VisitListSecretsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteSecret operation middleware
+func (sh *strictHandler) DeleteSecret(w http.ResponseWriter, r *http.Request, name SecretName, params DeleteSecretParams) {
+	var request DeleteSecretRequestObject
+
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteSecret(ctx, request.(DeleteSecretRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteSecret")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteSecretResponseObject); ok {
+		if err := validResponse.VisitDeleteSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetSecret operation middleware
+func (sh *strictHandler) GetSecret(w http.ResponseWriter, r *http.Request, name SecretName) {
+	var request GetSecretRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetSecret(ctx, request.(GetSecretRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetSecret")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetSecretResponseObject); ok {
+		if err := validResponse.VisitGetSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetSecret operation middleware
+func (sh *strictHandler) SetSecret(w http.ResponseWriter, r *http.Request, name SecretName) {
+	var request SetSecretRequestObject
+
+	request.Name = name
+
+	var body SetSecretJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetSecret(ctx, request.(SetSecretRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetSecret")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetSecretResponseObject); ok {
+		if err := validResponse.VisitSetSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListVolumes operation middleware
