@@ -51,6 +51,12 @@ const (
 	// The default number of log lines returned when a request doesn't ask for a
 	// specific number. Matches the default declared in the specification.
 	defaultLogTail = 100
+	// The fewest log lines a request may ask for. The specification declares this
+	// minimum, and it is enforced for a reason beyond tidiness: a driver may read a
+	// non-positive count as meaning something other than a small tail. Docker takes a
+	// negative one as "every line", which would return the whole of a workload's
+	// output and make the maximum below bypassable by a minus sign.
+	minLogTail = 1
 	// The most log lines a request may ask for. The specification declares this
 	// maximum, but the generated code does not enforce it, and the server reads what
 	// it is asked to read — so an uncapped request would let a caller decide how much
@@ -221,9 +227,12 @@ func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWork
 
 // GetWorkloadLogs returns the recent output of the named workload.
 func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorkloadLogsRequestObject) (api.GetWorkloadLogsResponseObject, error) {
+	// Clamped at both ends. The specification declares the range and the generated
+	// code enforces neither, so the bounds the server documents are the server's to
+	// apply.
 	tail := defaultLogTail
 	if request.Params.Tail != nil {
-		tail = min(*request.Params.Tail, maxLogTail)
+		tail = min(max(*request.Params.Tail, minLogTail), maxLogTail)
 	}
 
 	// A missing workload is established before anything is written, because once the

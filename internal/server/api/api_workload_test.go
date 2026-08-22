@@ -564,6 +564,20 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 		assert.Equal(t, http.StatusOK, resp.Code)
 	})
 
+	t.Run("raises a tail below the minimum", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").
+			Return(workload("example", generated.WorkloadStateRunning), nil).Once()
+
+		// Docker reads a negative count as every line, so passing one straight
+		// through would return the whole of a workload's output and make the cap
+		// above bypassable by a minus sign.
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", 1).Return(nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?tail=-1", nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
 	t.Run("reports a missing workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "nope").
