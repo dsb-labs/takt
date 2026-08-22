@@ -197,6 +197,49 @@ func TestSecretService_Delete(t *testing.T) {
 	})
 }
 
+func TestSecretService_Value(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the plaintext", func(t *testing.T) {
+		secrets := NewMockSecretRepository(t)
+		cipher := newTestCipher(t)
+
+		sealed, err := cipher.Seal("db-password", []byte("hunter2"))
+		require.NoError(t, err)
+
+		secrets.EXPECT().Get(mock.Anything, "db-password").
+			Return(database.Secret{Name: "db-password", Value: sealed}, nil).Once()
+
+		value, err := newTestSecretService(t, secrets, cipher).Value(t.Context(), "db-password")
+		require.NoError(t, err)
+		assert.Equal(t, "hunter2", value)
+	})
+
+	t.Run("reports one that does not exist", func(t *testing.T) {
+		secrets := NewMockSecretRepository(t)
+
+		secrets.EXPECT().Get(mock.Anything, "nope").
+			Return(database.Secret{}, database.ErrSecretNotFound).Once()
+
+		value, err := newTestSecretService(t, secrets, nil).Value(t.Context(), "nope")
+		require.ErrorIs(t, err, service.ErrSecretNotFound)
+		assert.Empty(t, value)
+	})
+
+	t.Run("distinguishes a value it cannot decrypt", func(t *testing.T) {
+		secrets := NewMockSecretRepository(t)
+
+		secrets.EXPECT().Get(mock.Anything, "db-password").
+			Return(database.Secret{Name: "db-password", Value: []byte("not openable")}, nil).Once()
+
+		// A key that cannot decrypt what it sealed is not the same as a secret nobody
+		// created, and an operator told the latter would go looking for the wrong thing.
+		_, err := newTestSecretService(t, secrets, nil).Value(t.Context(), "db-password")
+		require.ErrorIs(t, err, secret.ErrInvalidCiphertext)
+		assert.NotErrorIs(t, err, service.ErrSecretNotFound)
+	})
+}
+
 func TestSecretService_Resolve(t *testing.T) {
 	t.Parallel()
 

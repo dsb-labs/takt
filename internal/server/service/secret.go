@@ -32,10 +32,10 @@ var (
 // that is gone and would keep running against a secret it no longer has.
 const revisionLength = 16
 
-// The names a secret may have, which are the names a workload may have. A secret's
-// name is referenced from a manifest and reported back to an operator, so it is held
-// to the same shape.
-var secretNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+// The names a secret or a variable may have, which are the names a workload may
+// have. Either is referenced from a manifest and reported back to an operator, so
+// both are held to the same shape.
+var referenceNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 type (
 	// The SecretRepository interface describes the persistence operations the secret
@@ -132,7 +132,7 @@ func NewSecretService(config SecretServiceConfig) *SecretService {
 // A value that did change moves the revision, and every workload referencing the
 // secret is rehashed so the reconciler replaces its instances.
 func (s *SecretService) Set(ctx context.Context, name string, value []byte) (Secret, bool, error) {
-	if !secretNamePattern.MatchString(name) || len(name) > 63 {
+	if !referenceNamePattern.MatchString(name) || len(name) > 63 {
 		return Secret{}, false, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidSecret)
 	}
 
@@ -244,6 +244,29 @@ func (s *SecretService) Delete(ctx context.Context, name string, force bool) err
 	s.logger.With("secret", name, "forced", force).Info("secret deleted")
 
 	return nil
+}
+
+// Value returns the plaintext of the named secret, for the resolver to substitute
+// into a workload's environment as it starts.
+//
+// This and Resolve are the only things that produce a secret's plaintext. Reports
+// ErrSecretNotFound when nothing holds the name, which the resolver turns into a
+// refusal to start rather than handing the workload the reference text.
+func (s *SecretService) Value(ctx context.Context, name string) (string, error) {
+	stored, err := s.secrets.Get(ctx, name)
+	switch {
+	case errors.Is(err, database.ErrSecretNotFound):
+		return "", fmt.Errorf("%w: %s", ErrSecretNotFound, name)
+	case err != nil:
+		return "", fmt.Errorf("failed to load secret %s: %w", name, err)
+	}
+
+	opened, err := s.cipher.Open(name, stored.Value)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt secret %s: %w", name, err)
+	}
+
+	return string(opened), nil
 }
 
 // Resolve returns env with every secret reference replaced by the value it names.
