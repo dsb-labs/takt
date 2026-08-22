@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -35,6 +36,9 @@ type (
 		client *client.Client
 		cancel context.CancelFunc
 		done   *errgroup.Group
+		// Where the running server keeps its state, so that a test can read the
+		// database directly and check what did not reach it.
+		directory string
 	}
 
 	// The option type modifies how a test server is started.
@@ -89,7 +93,7 @@ func (s *Suite) start(options ...option) {
 	c, err := client.New("http://" + config.HTTP.Address)
 	s.Require().NoError(err)
 
-	s.client, s.cancel, s.done = c, cancel, group
+	s.client, s.cancel, s.done, s.directory = c, cancel, group, config.Data.Directory
 
 	// Run opens the database and connects to docker before it listens, so a test
 	// has to wait for the listener rather than assume it.
@@ -337,6 +341,48 @@ func (s *Suite) volumeFile(path, name string) string {
 	}
 
 	return string(contents)
+}
+
+// secretName derives a secret name from the running test's name, so that tests
+// sharing a server cannot rotate each other's secrets.
+func (s *Suite) secretName() string {
+	sum := sha256.Sum256([]byte(s.T().Name()))
+
+	return "e2e-sec-" + hex.EncodeToString(sum[:6])
+}
+
+// cleanupSecret removes a secret a test created, forcing it so that one held by a
+// workload a failing test left behind does not survive into the next run.
+func (s *Suite) cleanupSecret(name string) {
+	if s.client == nil {
+		return
+	}
+
+	err := s.client.DeleteSecret(context.Background(), name, client.WithForceDelete())
+	if err != nil && !errors.Is(err, client.ErrSecretNotFound) {
+		s.T().Logf("failed to delete secret %q: %v", name, err)
+	}
+}
+
+// databaseHolds reports whether the raw bytes of the server's database contain the
+// given value.
+//
+// The file is read rather than queried, so this covers anything a value could have
+// reached: a column nothing selects, an index, or a page the write-ahead log has not
+// checkpointed yet.
+func (s *Suite) databaseHolds(value string) bool {
+	for _, name := range []string{"state.db", "state.db-wal", "state.db-shm"} {
+		contents, err := os.ReadFile(filepath.Join(s.directory, name))
+		if err != nil {
+			continue
+		}
+
+		if bytes.Contains(contents, []byte(value)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // cleanupVolume removes a volume a test created, forcing it so that a test which failed
