@@ -18,7 +18,7 @@ func Command() *cobra.Command {
 		Use:   "secret",
 		Short: "Set, inspect and delete secrets",
 		Long: "Set, inspect and delete secrets.\n\n" +
-			"A secret is a value a workload reads and an operator cannot. It is stored\n" +
+			"A secret is a value a workload can read and an operator cannot. It is stored\n" +
 			"encrypted, referenced from a manifest as ${secret:name}, and decrypted only\n" +
 			"to be handed to a workload as it starts. Nothing reads one back out: there\n" +
 			"is no command here that prints a value, because there is no endpoint that\n" +

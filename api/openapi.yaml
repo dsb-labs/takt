@@ -27,9 +27,9 @@ tags:
   - name: volumes
     description: Storage that outlives the workloads mounting it.
   - name: secrets
-    description: Values a workload reads and an operator cannot.
+    description: Values a workload can read and an operator cannot.
   - name: variables
-    description: Values a workload reads and an operator can.
+    description: Values both a workload and an operator can read.
 
 paths:
   /api/v1/workloads:

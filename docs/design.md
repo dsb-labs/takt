@@ -1,4 +1,4 @@
-# Design
+ Design
 
 ## Desired state and observed state
 

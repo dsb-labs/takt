@@ -17,7 +17,7 @@ var (
 )
 
 type (
-	// The Secret type represents a value a workload reads but an operator cannot,
+	// The Secret type represents a value a workload can read but an operator cannot,
 	// stored encrypted.
 	//
 	// The value never leaves the database in the clear except to be handed to a

@@ -1,6 +1,6 @@
 # Secrets
 
-A secret is a value a workload reads and an operator cannot. It is stored encrypted,
+A secret is a value a workload can read and an operator cannot. It is stored encrypted,
 referenced from a manifest by name, and decrypted only to be handed to a workload as
 it starts.
 
@@ -99,7 +99,7 @@ running process to take something away from it. They fail to start once somethin
 replaces them, and the failure names the secret:
 
 ```
-failed to resolve environment for workload: DSN reads secret not found: db-password
+failed to resolve environment for workload: DSN reads unknown secret: db-password
 ```
 
 Creating the secret again recovers them without any further action.

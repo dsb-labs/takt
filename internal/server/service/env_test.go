@@ -10,13 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 func TestEnvResolver_Resolve(t *testing.T) {
 	t.Parallel()
 
 	t.Run("substitutes the secrets a workload reads", func(t *testing.T) {
-		secrets := NewMockSecretValue(t)
+		secrets := NewMockValueStore(t)
 
 		secrets.EXPECT().Value(mock.Anything, "db-password").Return("hunter2", nil).Once()
 
@@ -30,7 +31,7 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 
 	t.Run("substitutes the variables a workload reads", func(t *testing.T) {
-		variables := NewMockVariableValue(t)
+		variables := NewMockValueStore(t)
 
 		variables.EXPECT().Value(mock.Anything, "db-host").Return("localhost", nil).Once()
 
@@ -42,8 +43,7 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 
 	t.Run("substitutes both kinds in one value", func(t *testing.T) {
-		secrets := NewMockSecretValue(t)
-		variables := NewMockVariableValue(t)
+		secrets, variables := NewMockValueStore(t), NewMockValueStore(t)
 
 		secrets.EXPECT().Value(mock.Anything, "db-password").Return("hunter2", nil).Once()
 		variables.EXPECT().Value(mock.Anything, "db-host").Return("localhost", nil).Once()
@@ -58,7 +58,7 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 
 	t.Run("reads a secret once however many variables reference it", func(t *testing.T) {
-		secrets := NewMockSecretValue(t)
+		secrets := NewMockValueStore(t)
 
 		secrets.EXPECT().Value(mock.Anything, "token").Return("abc", nil).Once()
 
@@ -72,7 +72,7 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 
 	t.Run("reads a variable once however many reference it", func(t *testing.T) {
-		variables := NewMockVariableValue(t)
+		variables := NewMockValueStore(t)
 
 		variables.EXPECT().Value(mock.Anything, "region").Return("eu-west", nil).Once()
 
@@ -86,8 +86,7 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 
 	t.Run("tells a secret and a variable of the same name apart", func(t *testing.T) {
-		secrets := NewMockSecretValue(t)
-		variables := NewMockVariableValue(t)
+		secrets, variables := NewMockValueStore(t), NewMockValueStore(t)
 
 		secrets.EXPECT().Value(mock.Anything, "token").Return("private", nil).Once()
 		variables.EXPECT().Value(mock.Anything, "token").Return("public", nil).Once()
@@ -112,7 +111,7 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 
 	t.Run("reports a secret that does not exist", func(t *testing.T) {
-		secrets := NewMockSecretValue(t)
+		secrets := NewMockValueStore(t)
 
 		secrets.EXPECT().Value(mock.Anything, "nope").
 			Return("", fmt.Errorf("%w: nope", service.ErrSecretNotFound)).Once()
@@ -120,7 +119,7 @@ func TestEnvResolver_Resolve(t *testing.T) {
 		// Handing the workload the reference text would have it use that as the value.
 		_, err := newTestEnvResolver(t, secrets, nil).
 			Resolve(t.Context(), map[string]string{"DSN": "${secret:nope}"})
-		require.ErrorIs(t, err, service.ErrSecretNotFound)
+		require.ErrorIs(t, err, manifest.ErrUnknownSecret)
 
 		// Both ends of the reference, so an operator knows which variable to look at as
 		// well as what it could not read.
@@ -129,20 +128,20 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 
 	t.Run("reports a variable that does not exist", func(t *testing.T) {
-		variables := NewMockVariableValue(t)
+		variables := NewMockValueStore(t)
 
 		variables.EXPECT().Value(mock.Anything, "nope").
 			Return("", fmt.Errorf("%w: nope", service.ErrVariableNotFound)).Once()
 
 		_, err := newTestEnvResolver(t, nil, variables).
 			Resolve(t.Context(), map[string]string{"LEVEL": "${var:nope}"})
-		require.ErrorIs(t, err, service.ErrVariableNotFound)
+		require.ErrorIs(t, err, manifest.ErrUnknownVariable)
 		assert.Contains(t, err.Error(), "LEVEL")
 		assert.Contains(t, err.Error(), "nope")
 	})
 
 	t.Run("distinguishes a read that failed from one that found nothing", func(t *testing.T) {
-		secrets := NewMockSecretValue(t)
+		secrets := NewMockValueStore(t)
 
 		failure := errors.New("database is gone")
 		secrets.EXPECT().Value(mock.Anything, "db-password").Return("", failure).Once()
@@ -152,11 +151,11 @@ func TestEnvResolver_Resolve(t *testing.T) {
 		_, err := newTestEnvResolver(t, secrets, nil).
 			Resolve(t.Context(), map[string]string{"DSN": "${secret:db-password}"})
 		require.ErrorIs(t, err, failure)
-		assert.NotErrorIs(t, err, service.ErrSecretNotFound)
+		assert.NotErrorIs(t, err, manifest.ErrUnknownSecret)
 	})
 
 	t.Run("reports a malformed reference", func(t *testing.T) {
-		_, err := newTestEnvResolver(t, NewMockSecretValue(t), nil).
+		_, err := newTestEnvResolver(t, NewMockValueStore(t), nil).
 			Resolve(t.Context(), map[string]string{"DSN": "${secret:unterminated"})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "DSN")
@@ -165,19 +164,19 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	t.Run("refuses a secret on a server holding none", func(t *testing.T) {
 		// A resolver with no secret store cannot resolve one, and a workload handed
 		// the reference text would use it as the value.
-		_, err := newTestEnvResolver(t, nil, NewMockVariableValue(t)).
+		_, err := newTestEnvResolver(t, nil, NewMockValueStore(t)).
 			Resolve(t.Context(), map[string]string{"DSN": "${secret:db-password}"})
-		assert.ErrorIs(t, err, service.ErrSecretNotFound)
+		assert.ErrorIs(t, err, manifest.ErrUnknownSecret)
 	})
 
 	t.Run("refuses a variable on a server holding none", func(t *testing.T) {
-		_, err := newTestEnvResolver(t, NewMockSecretValue(t), nil).
+		_, err := newTestEnvResolver(t, NewMockValueStore(t), nil).
 			Resolve(t.Context(), map[string]string{"LEVEL": "${var:log-level}"})
-		assert.ErrorIs(t, err, service.ErrVariableNotFound)
+		assert.ErrorIs(t, err, manifest.ErrUnknownVariable)
 	})
 }
 
-func newTestEnvResolver(t *testing.T, secrets service.SecretValue, variables service.VariableValue) *service.EnvResolver {
+func newTestEnvResolver(t *testing.T, secrets, variables service.ValueStore) *service.EnvResolver {
 	t.Helper()
 
 	return service.NewEnvResolver(service.EnvResolverConfig{

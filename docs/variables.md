@@ -1,6 +1,6 @@
 # Variables
 
-A variable is a value a workload reads and an operator can. It is stored as given,
+A variable is a value both a workload and an operator can read. It is stored as given,
 referenced from a manifest by name, and substituted into a workload's environment as
 it starts.
 
@@ -106,7 +106,7 @@ running process to take something away from it. They fail to start once somethin
 replaces them, and the failure names the variable:
 
 ```
-failed to resolve environment for workload: LEVEL reads variable not found: log-level
+failed to resolve environment for workload: LEVEL reads unknown variable: log-level
 ```
 
 Creating the variable again recovers them without any further action.

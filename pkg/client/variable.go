@@ -11,8 +11,8 @@ import (
 )
 
 type (
-	// The Variable type is the client-side view of a variable: a value a workload
-	// reads and an operator can.
+	// The Variable type is the client-side view of a variable: a value both a
+	// workload and an operator can read.
 	//
 	// The value is on it, unlike a Secret. That is the whole difference between the
 	// two, and it is why anything worth hiding belongs in a secret instead.

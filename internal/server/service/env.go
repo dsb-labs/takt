@@ -10,22 +10,15 @@ import (
 )
 
 type (
-	// The SecretValue interface describes how the resolver reads the secret behind a
-	// reference.
+	// The ValueStore interface describes how the resolver reads what one reference
+	// names.
 	//
-	// Narrower than the secret service it is satisfied by: substituting a value needs
-	// to read one secret at a time and nothing else.
-	SecretValue interface {
-		// Value should return the plaintext of the named secret, reporting
-		// ErrSecretNotFound when no such secret exists.
-		Value(ctx context.Context, name string) (string, error)
-	}
-
-	// The VariableValue interface describes how the resolver reads the variable
-	// behind a reference.
-	VariableValue interface {
-		// Value should return what the named variable holds, reporting
-		// ErrVariableNotFound when no such variable exists.
+	// One interface for both kinds, because reading a secret and reading a variable
+	// differ only in which service answers. Narrower than either service it is
+	// satisfied by: substituting a value needs one name at a time and nothing else.
+	ValueStore interface {
+		// Value should return what the named secret or variable holds, reporting
+		// ErrSecretNotFound or ErrVariableNotFound when nothing holds the name.
 		Value(ctx context.Context, name string) (string, error)
 	}
 
@@ -39,8 +32,8 @@ type (
 	// reference text as though it were the value.
 	EnvResolver struct {
 		logger    *slog.Logger
-		secrets   SecretValue
-		variables VariableValue
+		secrets   ValueStore
+		variables ValueStore
 	}
 
 	// The EnvResolverConfig type contains fields used to construct an EnvResolver.
@@ -49,10 +42,10 @@ type (
 		Logger *slog.Logger
 		// Where the secrets a workload reads are read from. May be nil, in which case
 		// a workload referencing a secret fails to start.
-		Secrets SecretValue
+		Secrets ValueStore
 		// Where the variables a workload reads are read from. May be nil, in which
 		// case a workload referencing a variable fails to start.
-		Variables VariableValue
+		Variables ValueStore
 	}
 )
 
@@ -68,9 +61,11 @@ func NewEnvResolver(config EnvResolverConfig) *EnvResolver {
 // Resolve returns env with every reference replaced by the value it names.
 //
 // This is the only thing that produces a secret's plaintext outside the secret
-// service, and it exists for the reconciler to call as a workload starts. Returns
-// ErrSecretNotFound or ErrVariableNotFound naming what could not be resolved: handing
-// the workload the reference text would have it use that as the value.
+// service, and it exists for the reconciler to call as a workload starts.
+//
+// Returns manifest.ErrUnknownSecret or manifest.ErrUnknownVariable naming both the
+// environment variable and what it could not read. Handing the workload the reference
+// text would have it use that as the value.
 func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[string]string, error) {
 	if len(env) == 0 {
 		return env, nil
@@ -81,12 +76,12 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[s
 	// name and hold different values.
 	values := make(map[manifest.Reference]string)
 
-	// Why a lookup came back empty, which the callback cannot report itself. Something
-	// nobody created and a key that cannot decrypt what it sealed both leave a
-	// reference unresolved, and an operator told the wrong one goes looking in the
-	// wrong place.
+	// Why a lookup came back empty, which the callback cannot report itself. A key
+	// that cannot decrypt what it sealed leaves a reference unresolved just as a
+	// missing value does, and an operator told the wrong one goes looking in the
+	// wrong place. Nothing held under the name needs no such treatment: expansion
+	// reports that itself, naming the kind that was asked for.
 	var failed error
-	var missing error
 
 	resolved := make(map[string]string, len(env))
 	for key, value := range env {
@@ -95,15 +90,13 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[s
 				return value, true
 			}
 
-			value, err := r.value(ctx, reference)
+			value, found, err := r.value(ctx, reference)
 			switch {
-			case errors.Is(err, ErrSecretNotFound), errors.Is(err, ErrVariableNotFound):
-				missing = err
-
-				return "", false
 			case err != nil:
 				failed = err
 
+				return "", false
+			case !found:
 				return "", false
 			}
 
@@ -114,10 +107,10 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[s
 		switch {
 		case failed != nil:
 			return nil, failed
-		case missing != nil:
+		case errors.Is(err, manifest.ErrUnknownSecret), errors.Is(err, manifest.ErrUnknownVariable):
 			// Naming the environment variable as well as what it reads, so that an
 			// operator has both ends of the reference that could not be resolved.
-			return nil, fmt.Errorf("%s reads %w", key, missing)
+			return nil, fmt.Errorf("%s reads %w", key, err)
 		case err != nil:
 			return nil, fmt.Errorf("failed to resolve env %s: %w", key, err)
 		}
@@ -128,19 +121,34 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[s
 	return resolved, nil
 }
 
-// value reads what the reference names from whichever store holds that kind.
-func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference) (string, error) {
+// value reads what the reference names from whichever store holds that kind,
+// reporting whether anything holds it.
+//
+// Nothing held under the name is a false rather than an error, so that expansion is
+// what reports it. That keeps one description of an unresolved reference, whichever
+// kind it named and wherever expansion was called from.
+func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference) (string, bool, error) {
+	store := r.secrets
+	missing := ErrSecretNotFound
+
 	if reference.Kind == manifest.KindVariable {
-		if r.variables == nil {
-			return "", fmt.Errorf("%w: this server holds no variables", ErrVariableNotFound)
-		}
-
-		return r.variables.Value(ctx, reference.Name)
+		store = r.variables
+		missing = ErrVariableNotFound
 	}
 
-	if r.secrets == nil {
-		return "", fmt.Errorf("%w: this server holds no secrets", ErrSecretNotFound)
+	// A server holding no store of that kind holds nothing under the name, which is
+	// the same answer as a name nobody created.
+	if store == nil {
+		return "", false, nil
 	}
 
-	return r.secrets.Value(ctx, reference.Name)
+	value, err := store.Value(ctx, reference.Name)
+	switch {
+	case errors.Is(err, missing):
+		return "", false, nil
+	case err != nil:
+		return "", false, err
+	}
+
+	return value, true, nil
 }

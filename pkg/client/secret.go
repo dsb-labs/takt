@@ -11,8 +11,8 @@ import (
 )
 
 type (
-	// The Secret type is the client-side view of a secret: a value a workload reads
-	// and an operator cannot.
+	// The Secret type is the client-side view of a secret: a value a workload can
+	// read and an operator cannot.
 	//
 	// There is no value on it. Nothing reads a secret back out of orca, so there is
 	// nothing for this type to carry.

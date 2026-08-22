@@ -116,8 +116,8 @@ env:
 
 - [Manifest reference](docs/manifest.md) — every field a workload can name.
 - [Command line](docs/cli.md) — every command and flag.
-- [Secrets](docs/secrets.md) — storing a value a workload reads and you cannot.
-- [Variables](docs/variables.md) — storing a value a workload reads and you can.
+- [Secrets](docs/secrets.md) — storing a value a workload can read and you cannot.
+- [Variables](docs/variables.md) — storing a value both you and a workload can read.
 - [Configuration](docs/configuration.md) — the server's TOML file.
 - [Operating orca](docs/operating.md) — exposure, state on disk, volumes, and reading logs.
 - [Design](docs/design.md) — how reconciliation works and why it is built this way.
