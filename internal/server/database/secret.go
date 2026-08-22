@@ -282,13 +282,13 @@ func (r *SecretRepository) UsedBy(ctx context.Context, name string) ([]string, e
 	return workloads, rows.Err()
 }
 
-// link records which secrets a workload references inside an existing transaction,
-// so that it can be composed with the write of the workload itself.
+// linkSecrets records which secrets a workload references inside an existing
+// transaction, so that it can be composed with the write of the workload itself.
 //
 // Replaced wholesale for the same reason a port allocation is: the stored links have
 // to describe the specification that was just written, so a reference removed from a
 // manifest stops counting as a use.
-func link(ctx context.Context, tx *sql.Tx, workloadID string, names []string) error {
+func linkSecrets(ctx context.Context, tx *sql.Tx, workloadID string, names []string) error {
 	const (
 		clear  = `DELETE FROM workload_secret WHERE workload_id = ?`
 		insert = `INSERT INTO workload_secret (workload_id, secret_name) VALUES (?, ?)`
