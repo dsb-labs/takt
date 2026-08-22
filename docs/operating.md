@@ -12,6 +12,45 @@ binding it to a network:
 - A WireGuard or Tailscale interface, so the port is only reachable inside it.
 - An SSH tunnel, for occasional access from one machine.
 
+Set `hosts` to the name the proxy serves when you put one in front of orca. See
+[Configuration](configuration.md#http).
+
+### Loopback is not a boundary against a browser
+
+A loopback bind stops another machine reaching orca. It does not stop a web page.
+
+A browser sends a request to `127.0.0.1` on behalf of whatever page it has open. An
+attacker serves a page from a name they control, points that name at `127.0.0.1`, and
+the browser treats what follows as same-origin. The request arrives from loopback, so
+nothing about where it came from says the operator asked for it.
+
+orca checks the name each request asks for, which is what closes this. A request
+naming an address or `localhost` is accepted, since an attacker cannot point either at
+a victim's own machine. A request naming anything else has to name something in
+`hosts`, or it is refused. A request from a browser page on another origin is refused
+whatever it names.
+
+This costs nothing for an operator using the CLI or `curl`. It matters for whoever
+runs orca on a workstation they also browse from.
+
+### Workload ports are published separately
+
+Restricting reach to orca's own port does not restrict reach to its workloads. A
+container's host port is published on the address `workload.bind` names, which starts
+as loopback:
+
+```toml
+[workload]
+bind = "0.0.0.0"
+```
+
+Set that when something on the network has to reach a workload. Anything a workload
+serves is then reachable wherever the host is, so it is worth knowing which workloads
+that covers.
+
+An `exec` workload is not covered either way. The process binds its own port, so what
+it listens on is decided by the command rather than by orca.
+
 ## State on disk
 
 Everything orca keeps lives under the data directory, `~/.local/share/orca` by

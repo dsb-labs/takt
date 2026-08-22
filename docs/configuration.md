@@ -7,6 +7,7 @@ changes.
 ```toml
 [http]
 address = "127.0.0.1:7373"
+hosts = []
 
 [data]
 directory = "~/.local/share/orca"
@@ -17,9 +18,10 @@ host = ""
 [reconcile]
 interval = "10s"
 
-[ports]
-min = 20000
-max = 32000
+[workload]
+bind = "127.0.0.1"
+min-port = 20000
+max-port = 32000
 
 [logging]
 level = "info"
@@ -30,9 +32,24 @@ level = "info"
 | Key | Default | Description |
 |---|---|---|
 | `address` | `127.0.0.1:7373` | The address the API listens on. |
+| `hosts` | empty | The host names a request may name. |
 
 Loopback by default. Reaching the API is enough to run code on the host, so read
 [Operating orca](operating.md) before binding it to a network.
+
+`hosts` names the host names orca accepts a request for. An address literal and
+`localhost` are always accepted, so an operator reaching orca directly needs nothing
+here. Set it to the name a reverse proxy in front of orca serves:
+
+```toml
+[http]
+address = "127.0.0.1:7373"
+hosts = ["orca.example.com"]
+```
+
+A request naming anything else is refused with `421`. That check is what stops a page
+in the operator's browser from reaching a loopback-bound API — see
+[Operating orca](operating.md#exposure).
 
 ## data
 
@@ -62,15 +79,34 @@ The interval is a floor on convergence rather than the usual case. A driver repo
 a change triggers a pass at once, and so does an apply. Shortening this mostly affects
 how quickly orca notices something it was never told about.
 
-## ports
+## workload
 
 | Key | Default | Description |
 |---|---|---|
-| `min` | `20000` | The lowest host port orca will allocate. |
-| `max` | `32000` | The highest host port orca will allocate. |
+| `bind` | `127.0.0.1` | The address a workload's host ports are published on. |
+| `min-port` | `20000` | The lowest host port orca will allocate. |
+| `max-port` | `32000` | The highest host port orca will allocate. |
 
-The range orca allocates from for a container port that names no host port. A port a
-manifest pins is used as given, whether or not it falls in this range.
+`min-port` and `max-port` are the range orca allocates from for a container port that
+names no host port. A port a manifest pins is used as given, whether or not it falls in
+this range.
+
+`bind` is which interfaces a workload can be reached on. Loopback by default, for the
+same reason the API listens there: publishing a port exposes whatever the workload
+serves. Set it to `0.0.0.0` to publish on every interface:
+
+```toml
+[workload]
+bind = "0.0.0.0"
+```
+
+It must be an address rather than a name, and it cannot be left empty. A name would
+have to be resolved, and what it resolved to could change under a workload already
+published on it.
+
+This applies to a port orca publishes for a workload, which means a container. An
+`exec` workload binds its own port, so what it listens on is the process's business and
+this setting does not reach it.
 
 ## logging
 

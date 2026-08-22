@@ -123,6 +123,10 @@ anything pointing at it keeps working. Pin `from` when something outside orca ha
 know the address up front. Pinning a port another workload holds is rejected when you
 apply the manifest.
 
+A container's port is published on loopback unless the server is configured otherwise,
+so a workload another machine has to reach needs `workload.bind` set. See
+[Operating orca](operating.md#workload-ports-are-published-separately).
+
 An exec workload must name `from`. The process binds a port on the host directly, so
 there is no mapping to make. orca records the port to stop another workload taking it,
 and allocates nothing.
