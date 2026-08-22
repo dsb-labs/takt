@@ -1779,6 +1779,159 @@ func TestReconciler_Run_FailsWhenTheDriverCannotBeWatched(t *testing.T) {
 	assert.Error(t, r.Run(t.Context()))
 }
 
+func TestReconciler_Run_ResolvesSecrets(t *testing.T) {
+	t.Parallel()
+
+	t.Run("hands the driver the resolved environment", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		secrets := NewMockResolver(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.Spec = specWithEnv("example", map[string]string{"DSN": "${secret:db-password}"})
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+		secrets.EXPECT().Resolve(mock.Anything, map[string]string{"DSN": "${secret:db-password}"}).
+			Return(map[string]string{"DSN": "hunter2"}, nil)
+
+		started := make(chan map[string]string, 1)
+		d.EXPECT().Start(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w driver.Workload) (string, error) {
+				select {
+				case started <- w.Env:
+				default:
+				}
+
+				return "instance-one", nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Secrets:   secrets,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		// The value reaches the driver, which is the only proof resolution happens on
+		// the path that actually starts work.
+		env := <-started
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Equal(t, map[string]string{"DSN": "hunter2"}, env)
+	})
+
+	t.Run("does not abandon ports when a secret cannot be resolved", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		secrets := NewMockResolver(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.Spec = specWithEnv("example", map[string]string{"DSN": "${secret:nope}"})
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(nil, nil)
+
+		resolves := newCounter()
+		secrets.EXPECT().Resolve(mock.Anything, mock.Anything).
+			RunAndReturn(func(context.Context, map[string]string) (map[string]string, error) {
+				resolves.inc()
+
+				return nil, errors.New("secret not found: nope")
+			})
+
+		// Reallocating would move the workload's address because a secret is missing,
+		// which is a change an operator cannot account for. The mock has no
+		// expectation for Start either, so reaching the driver at all would fail.
+		reallocated := newCounter()
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Secrets:   secrets,
+			Reallocate: func(context.Context, string) (bool, error) {
+				reallocated.inc()
+
+				return false, nil
+			},
+			Interval: time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+
+		// Nudged twice more to show the backoff paces the retries, exactly as it does
+		// for a workload whose image does not exist.
+		for i := 2; i <= 3; i++ {
+			r.Notify()
+			passes.wait(t, i)
+		}
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Zero(t, reallocated.get(), "a missing secret gave up the workload's ports")
+		assert.Equal(t, 1, resolves.get(), "a workload waiting on a secret was retried inside its backoff window")
+	})
+
+	t.Run("passes the environment through when nothing resolves secrets", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.Spec = specWithEnv("example", map[string]string{"PLAIN": "value"})
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+		started := make(chan map[string]string, 1)
+		d.EXPECT().Start(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w driver.Workload) (string, error) {
+				select {
+				case started <- w.Env:
+				default:
+				}
+
+				return "instance-one", nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		env := <-started
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Equal(t, map[string]string{"PLAIN": "value"}, env)
+	})
+}
+
 // The counter type counts reconciliation passes as the loop drives them, so that
 // tests can wait on the pass itself rather than polling the mock's call log —
 // which the loop is concurrently writing to.
@@ -1889,6 +2042,21 @@ func specWithRestart(name string, policy api.RestartPolicy) []byte {
 		Version:   "v1",
 		Name:      name,
 		Restart:   &api.RestartSpec{Policy: new(policy)},
+		Container: &api.ContainerSpec{Image: "example/example:latest"},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return spec
+}
+
+// specWithEnv returns a stored specification setting the given environment.
+func specWithEnv(name string, env map[string]string) []byte {
+	spec, err := json.Marshal(api.WorkloadSpec{
+		Version:   "v1",
+		Name:      name,
+		Env:       new(env),
 		Container: &api.ContainerSpec{Image: "example/example:latest"},
 	})
 	if err != nil {
