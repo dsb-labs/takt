@@ -125,6 +125,21 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			},
 		},
 		{
+			Name: "reports a secret the workload reads but does not exist",
+			Path: "/api/v1/workloads/example",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Workload{}, false, fmt.Errorf("%w: db-password", service.ErrSecretNotFound)).Once()
+			},
+			// Named for the same reason a missing volume is. The workload could never
+			// start, and the operator who typed the name is the one who can correct it.
+			ExpectStatus: http.StatusBadRequest,
+			AssertBody: func(t *testing.T, body string) {
+				assert.Contains(t, body, "db-password")
+			},
+		},
+		{
 			Name: "reports a workload that is being deleted",
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
