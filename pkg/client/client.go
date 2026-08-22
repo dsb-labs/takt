@@ -36,6 +36,14 @@ var (
 	// ErrInvalidSecretName is returned when a name is not usable as a single segment
 	// of a request path.
 	ErrInvalidSecretName = errors.New("invalid secret name")
+	// ErrVariableNotFound is returned when no variable exists with the given name.
+	ErrVariableNotFound = errors.New("variable not found")
+	// ErrVariableInUse is returned when a variable a workload reads is deleted
+	// without being forced.
+	ErrVariableInUse = errors.New("variable is in use")
+	// ErrInvalidVariableName is returned when a name is not usable as a single
+	// segment of a request path.
+	ErrInvalidVariableName = errors.New("invalid variable name")
 )
 
 type (
