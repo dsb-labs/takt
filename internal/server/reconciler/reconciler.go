@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"runtime"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -88,6 +90,7 @@ type (
 		workloads  WorkloadRepository
 		ports      PortRepository
 		checker    Checker
+		bind       string
 		reallocate func(ctx context.Context, workload string) (bool, error)
 		now        func() time.Time
 		interval   time.Duration
@@ -118,6 +121,9 @@ type (
 		// Reports what orca's own health checks established. May be nil, in which
 		// case only the state the driver reports is acted on.
 		Checker Checker
+		// The address a workload's host ports are published on, which is where a
+		// health check is performed. Empty probes loopback.
+		Bind string
 		// Called to abandon the host ports orca chose for a workload when it fails
 		// to start, reporting whether anything changed. May be nil, in which case
 		// ports are never reallocated.
@@ -190,6 +196,7 @@ func New(config Config) *Reconciler {
 		workloads:  config.Workloads,
 		ports:      config.Ports,
 		checker:    config.Checker,
+		bind:       config.Bind,
 		reallocate: config.Reallocate,
 		now:        clock(config.Now),
 		interval:   config.Interval,
@@ -465,7 +472,7 @@ func (r *Reconciler) register(ctx context.Context, rows []database.Workload, obs
 	}
 
 	for _, row := range rows {
-		check, ok, err := healthCheck(row, allocations[row.ID])
+		check, ok, err := healthCheck(r.bind, row, allocations[row.ID])
 		switch {
 		case err != nil:
 			// The specification was validated before it was stored, so a check that
@@ -567,7 +574,7 @@ func retired(restart *manifest.Restart, instances []driver.Instance) bool {
 
 // healthCheck resolves a stored workload's health check into something probeable,
 // reporting false when the workload declares none.
-func healthCheck(row database.Workload, ports []database.Port) (health.Check, bool, error) {
+func healthCheck(bind string, row database.Workload, ports []database.Port) (health.Check, bool, error) {
 	var spec api.WorkloadSpec
 	if err := json.Unmarshal(row.Spec, &spec); err != nil {
 		return health.Check{}, false, fmt.Errorf("failed to decode workload spec: %w", err)
@@ -584,15 +591,28 @@ func healthCheck(row database.Workload, ports []database.Port) (health.Check, bo
 	}
 
 	return health.Check{
-		// Probing the loopback address rather than the published interface keeps the
-		// check to traffic that never leaves the host.
-		Address:     fmt.Sprintf("127.0.0.1:%d", host),
+		Address:     net.JoinHostPort(probeHost(bind), strconv.Itoa(host)),
 		HTTP:        resolved.Health.HTTP,
 		Interval:    resolved.Health.Interval,
 		Timeout:     resolved.Health.Timeout,
 		Retries:     resolved.Health.Retries,
 		StartPeriod: resolved.Health.StartPeriod,
 	}, true, nil
+}
+
+// probeHost returns the host a check is performed against, given the address a
+// workload's ports are published on.
+//
+// A port published on one interface is only reachable there, so the check has to go
+// where the workload actually is rather than to loopback by assumption. The exception
+// is the unspecified address, which means every interface: loopback is one of them,
+// and probing it keeps the check to traffic that never leaves the host.
+func probeHost(bind string) string {
+	if parsed := net.ParseIP(bind); parsed == nil || parsed.IsUnspecified() {
+		return "127.0.0.1"
+	}
+
+	return bind
 }
 
 // healthPort finds the host port that reaches the port the check names.

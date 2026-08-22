@@ -50,6 +50,7 @@ type (
 	Driver struct {
 		logger *slog.Logger
 		client Client
+		bind   string
 	}
 
 	// The Config type contains fields used to construct a Driver.
@@ -58,8 +59,19 @@ type (
 		Logger *slog.Logger
 		// The client used to talk to the Docker daemon.
 		Client Client
+		// The address a container's host ports are published on. Empty publishes on
+		// loopback, which is the narrower of the two things this can mean.
+		Bind string
 	}
 )
+
+// The address a container's ports are published on when the configuration names
+// none.
+//
+// Loopback rather than every interface, and deliberately not docker's own default:
+// docker reads an empty host address as every interface, so a driver that passed one
+// through would publish a workload to the network whenever a caller forgot to say.
+const defaultBind = "127.0.0.1"
 
 // Name returns the name this driver is registered under.
 func (d *Driver) Name() string {
@@ -68,9 +80,15 @@ func (d *Driver) Name() string {
 
 // New returns a Driver that runs containers through the client in config.
 func New(config Config) *Driver {
+	bind := config.Bind
+	if bind == "" {
+		bind = defaultBind
+	}
+
 	return &Driver{
 		logger: config.Logger.With("component", "driver", "driver", "docker"),
 		client: config.Client,
+		bind:   bind,
 	}
 }
 
@@ -92,7 +110,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", err
 	}
 
-	exposed, bindings := portBindings(w.Ports)
+	exposed, bindings := portBindings(d.bind, w.Ports)
 
 	labels := make(map[string]string, len(w.Labels)+3)
 	for k, v := range w.Labels {
@@ -472,8 +490,12 @@ func mounts(volumes []driver.Volume) []mount.Mount {
 }
 
 // portBindings converts resolved ports into the exposed set and host bindings docker
-// expects.
-func portBindings(ports []driver.Port) (nat.PortSet, nat.PortMap) {
+// expects, published on the given address.
+//
+// The address is what decides who can reach the workload, so it comes from the
+// server's configuration rather than being fixed here. Publishing on every interface
+// is a thing an operator can ask for and not a thing a driver assumes.
+func portBindings(bind string, ports []driver.Port) (nat.PortSet, nat.PortMap) {
 	if len(ports) == 0 {
 		return nil, nil
 	}
@@ -488,7 +510,7 @@ func portBindings(ports []driver.Port) (nat.PortSet, nat.PortMap) {
 
 		exposed[key] = struct{}{}
 		bindings[key] = []nat.PortBinding{{
-			HostIP:   "0.0.0.0",
+			HostIP:   bind,
 			HostPort: strconv.Itoa(port.Host),
 		}}
 	}

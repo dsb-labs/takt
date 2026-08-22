@@ -67,7 +67,11 @@ func Run(ctx context.Context, config Config) error {
 		Root:   filepath.Join(config.Data.Directory, "exec"),
 	})
 
-	dockerDriver := docker.New(docker.Config{Logger: logger, Client: dockerClient})
+	dockerDriver := docker.New(docker.Config{
+		Logger: logger,
+		Client: dockerClient,
+		Bind:   config.Workload.Bind,
+	})
 
 	// The service and the reconciler each need something from the other: the service
 	// wakes the reconciler when desired state changes, and the reconciler asks the
@@ -90,6 +94,9 @@ func Run(ctx context.Context, config Config) error {
 		Workloads: workloads,
 		Ports:     ports,
 		Checker:   checker,
+		// A check goes to where the workload's ports are published, which is not
+		// loopback for a server told to publish somewhere specific.
+		Bind: config.Workload.Bind,
 		Reallocate: func(ctx context.Context, workload string) (bool, error) {
 			return svc.Reallocate(ctx, workload)
 		},
@@ -111,7 +118,7 @@ func Run(ctx context.Context, config Config) error {
 		Workloads: workloads,
 		Ports:     ports,
 		Volumes:   volumeSvc,
-		Allocator: port.New(port.Config{Min: config.Ports.Min, Max: config.Ports.Max}),
+		Allocator: port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort}),
 		Checker:   checker,
 		Notify:    reconcile.Notify,
 	})

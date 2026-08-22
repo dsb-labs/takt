@@ -47,7 +47,11 @@ func TestDriver_Start(t *testing.T) {
 					}),
 					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
 						bindings := host.PortBindings["8080/tcp"]
-						return len(bindings) == 1 && bindings[0].HostPort == "4141"
+
+						// A driver told nothing about where to publish uses loopback,
+						// so forgetting to say never exposes a workload to the network.
+						return len(bindings) == 1 && bindings[0].HostPort == "4141" &&
+							bindings[0].HostIP == "127.0.0.1"
 					}),
 					mock.Anything, mock.Anything, "orca-example-2",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
@@ -211,6 +215,64 @@ func TestDriver_Start(t *testing.T) {
 
 			require.NoError(t, err)
 			tc.Assert(t, id)
+		})
+	}
+}
+
+func TestDriver_Start_PublishAddress(t *testing.T) {
+	t.Parallel()
+
+	// Which interfaces a workload is reachable on is the operator's decision, so the
+	// address reaches docker as given rather than being narrowed or widened here.
+	tt := []struct {
+		Name     string
+		Bind     string
+		ExpectIP string
+	}{
+		{
+			Name:     "publishes on the configured address",
+			Bind:     "10.0.0.5",
+			ExpectIP: "10.0.0.5",
+		},
+		{
+			Name:     "publishes on every interface when asked",
+			Bind:     "0.0.0.0",
+			ExpectIP: "0.0.0.0",
+		},
+		{
+			// Docker would read an empty address as every interface, so the driver
+			// names loopback rather than passing one through.
+			Name:     "falls back to loopback when told nothing",
+			Bind:     "",
+			ExpectIP: "127.0.0.1",
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			client := NewMockClient(t)
+
+			client.EXPECT().ImageList(mock.Anything, mock.Anything).
+				Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+			client.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+				mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+					bindings := host.PortBindings["8080/tcp"]
+					return len(bindings) == 1 && bindings[0].HostIP == tc.ExpectIP
+				}),
+				mock.Anything, mock.Anything, mock.Anything,
+			).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+			client.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+
+			d := docker.New(docker.Config{
+				Logger: newTestLogger(t),
+				Client: client,
+				Bind:   tc.Bind,
+			})
+
+			_, err := d.Start(t.Context(), workload("example", 1, "hash", containerSpec("example/example:latest", nil), ports(8080, 4141), nil))
+			require.NoError(t, err)
 		})
 	}
 }

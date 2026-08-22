@@ -31,8 +31,9 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "tcp://localhost:2375", config.Docker.Host)
 				assert.Equal(t, 30*time.Second, config.Reconcile.Interval)
 				assert.Equal(t, []string{"orca.example.com"}, config.HTTP.Hosts)
-				assert.Equal(t, 25000, config.Ports.Min)
-				assert.Equal(t, 26000, config.Ports.Max)
+				assert.Equal(t, "0.0.0.0", config.Workload.Bind)
+				assert.Equal(t, 25000, config.Workload.MinPort)
+				assert.Equal(t, 26000, config.Workload.MaxPort)
 				assert.Equal(t, "debug", config.Logging.Level)
 			},
 		},
@@ -88,8 +89,8 @@ func TestDefaultConfig(t *testing.T) {
 
 		assert.NotEmpty(t, config.Data.Directory)
 		assert.Positive(t, config.Reconcile.Interval)
-		assert.Positive(t, config.Ports.Min)
-		assert.Positive(t, config.Ports.Max)
+		assert.Positive(t, config.Workload.MinPort)
+		assert.Positive(t, config.Workload.MaxPort)
 	})
 
 	t.Run("binds to loopback", func(t *testing.T) {
@@ -103,6 +104,20 @@ func TestDefaultConfig(t *testing.T) {
 		require.NoError(t, err, "the default address must name an interface explicitly")
 
 		assert.True(t, address.IsLoopback(), "the default address is reachable off-host: %s", host)
+	})
+
+	t.Run("publishes workload ports on loopback", func(t *testing.T) {
+		// A published port exposes whatever the workload serves, so it is the same
+		// decision as binding the API and gets the same default. An operator who
+		// restricted reach to orca's own port would otherwise still be publishing
+		// every workload to the network.
+		//
+		// Parsed rather than compared, which also pins that the default is not empty:
+		// docker reads an empty host address as every interface.
+		bind, err := netip.ParseAddr(server.DefaultConfig().Workload.Bind)
+		require.NoError(t, err, "the default bind address must name an interface explicitly")
+
+		assert.True(t, bind.IsLoopback(), "workload ports are published off-host: %s", bind)
 	})
 }
 
@@ -135,12 +150,26 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			Name:         "a port range minimum above its maximum",
-			Mutate:       func(c *server.Config) { c.Ports.Min, c.Ports.Max = 30000, 20000 },
+			Mutate:       func(c *server.Config) { c.Workload.MinPort, c.Workload.MaxPort = 30000, 20000 },
 			ExpectsError: true,
 		},
 		{
 			Name:         "a port range outside the usable range",
-			Mutate:       func(c *server.Config) { c.Ports.Max = 70000 },
+			Mutate:       func(c *server.Config) { c.Workload.MaxPort = 70000 },
+			ExpectsError: true,
+		},
+		{
+			// Refused rather than taken as a default, because docker reads an empty
+			// host address as every interface — the opposite of what orca defaults to.
+			Name:         "an empty workload bind address",
+			Mutate:       func(c *server.Config) { c.Workload.Bind = "" },
+			ExpectsError: true,
+		},
+		{
+			// A name would have to be resolved, and what it resolved to could change
+			// under a workload already published on it.
+			Name:         "a workload bind address that is not an address",
+			Mutate:       func(c *server.Config) { c.Workload.Bind = "localhost" },
 			ExpectsError: true,
 		},
 		{

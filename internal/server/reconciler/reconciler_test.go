@@ -446,6 +446,106 @@ func TestReconciler_Run_RegistersChecks(t *testing.T) {
 	assert.Equal(t, "/healthz", got.HTTP)
 }
 
+func TestReconciler_Run_ProbesThePublishedAddress(t *testing.T) {
+	t.Parallel()
+
+	// A port published on one interface is only reachable there, so a server told to
+	// publish somewhere specific has to be checked there too. Probing loopback
+	// regardless would report every checked workload as unhealthy and have the
+	// reconciler restart work that was answering perfectly well.
+	tt := []struct {
+		Name           string
+		Bind           string
+		ExpectedProbed string
+	}{
+		{
+			Name:           "probes the interface a workload is published on",
+			Bind:           "10.0.0.5",
+			ExpectedProbed: "10.0.0.5:20080",
+		},
+		{
+			// Every interface includes loopback, so the check stays on the host.
+			Name:           "probes loopback when published on every interface",
+			Bind:           "0.0.0.0",
+			ExpectedProbed: "127.0.0.1:20080",
+		},
+		{
+			Name:           "probes loopback when told nothing",
+			Bind:           "",
+			ExpectedProbed: "127.0.0.1:20080",
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			repo := NewMockWorkloadRepository(t)
+			ports := NewMockPortRepository(t)
+			checker := NewMockChecker(t)
+			d := NewMockDriver(t)
+
+			checked := storedWorkload("example", "hash-one")
+			checked.ID = "workload-one"
+			checked.Spec = specWithHealth("example")
+
+			repo.EXPECT().List(mock.Anything).Return([]database.Workload{checked}, nil)
+
+			ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+				"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+			}, nil)
+
+			registered := make(chan health.Check, 1)
+			checker.EXPECT().Set("example", mock.Anything).
+				Run(func(_ string, check health.Check) {
+					select {
+					case registered <- check:
+					default:
+					}
+				}).Return()
+
+			checker.EXPECT().Result("example").Return(health.Result{Status: health.StatusHealthy}, true)
+
+			events := make(chan driver.Event)
+			d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+			passes := newCounter()
+			d.EXPECT().Observe(mock.Anything).
+				RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+					passes.inc()
+
+					return []driver.Instance{{
+						ID:       "container-one",
+						Workload: "example",
+						SpecHash: "hash-one",
+						State:    driver.StateRunning,
+					}}, nil
+				})
+
+			r := reconciler.New(reconciler.Config{
+				Logger:    newTestLogger(t),
+				Drivers:   map[string]reconciler.Driver{docker.Name: d},
+				Workloads: repo,
+				Ports:     ports,
+				Checker:   checker,
+				Bind:      tc.Bind,
+				Interval:  time.Hour,
+			})
+
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+
+			go func() { done <- r.Run(ctx) }()
+
+			passes.wait(t, 1)
+			awaitPasses(t, r, 1)
+
+			cancel()
+			require.NoError(t, <-done)
+
+			assert.Equal(t, tc.ExpectedProbed, (<-registered).Address)
+		})
+	}
+}
+
 func TestReconciler_Run_ForgetsChecksOnReplacement(t *testing.T) {
 	t.Parallel()
 

@@ -4,6 +4,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,8 +26,8 @@ type (
 		Docker DockerConfig `toml:"docker"`
 		// Reconciliation settings.
 		Reconcile ReconcileConfig `toml:"reconcile"`
-		// Host port allocation settings.
-		Ports PortsConfig `toml:"ports"`
+		// Settings for the workloads orca runs.
+		Workload WorkloadConfig `toml:"workload"`
 		// Logging settings.
 		Logging LoggingConfig `toml:"logging"`
 	}
@@ -67,13 +68,25 @@ type (
 		Interval time.Duration `toml:"interval"`
 	}
 
-	// The PortsConfig type contains configuration for the host ports orca allocates
-	// to workloads that don't ask for a particular one.
-	PortsConfig struct {
+	// The WorkloadConfig type contains configuration for the workloads orca runs:
+	// the address their host ports are published on, and the range it allocates
+	// those ports from.
+	WorkloadConfig struct {
+		// The address a workload's host ports are published on.
+		//
+		// Loopback by default, for the same reason the API listens there: publishing
+		// a port is exposing whatever the workload serves, and which interfaces that
+		// reaches should be a decision an operator made rather than one orca made for
+		// them. Set it to "0.0.0.0" to publish on every interface.
+		//
+		// This applies to a port orca publishes on a workload's behalf, which means a
+		// container. An exec workload binds its port itself, so what it listens on is
+		// the process's business and orca has nothing to say about it.
+		Bind string `toml:"bind"`
 		// The lowest host port that may be allocated.
-		Min int `toml:"min"`
+		MinPort int `toml:"min-port"`
 		// The highest host port that may be allocated.
-		Max int `toml:"max"`
+		MaxPort int `toml:"max-port"`
 	}
 
 	// The LoggingConfig type contains configuration for application logging.
@@ -100,9 +113,17 @@ func DefaultConfig() Config {
 		Reconcile: ReconcileConfig{
 			Interval: 10 * time.Second,
 		},
-		Ports: PortsConfig{
-			Min: port.DefaultMin,
-			Max: port.DefaultMax,
+		Workload: WorkloadConfig{
+			// Loopback, like the API. A workload's port is published for something to
+			// reach, but which interfaces that means is the same decision as binding
+			// the API — so it is one an operator makes rather than a default.
+			//
+			// Named explicitly rather than left empty, because empty is what docker
+			// reads as every interface. A reader should not have to know that to see
+			// which of the two this is.
+			Bind:    "127.0.0.1",
+			MinPort: port.DefaultMin,
+			MaxPort: port.DefaultMax,
 		},
 		Logging: LoggingConfig{
 			Level: "info",
@@ -139,7 +160,7 @@ func (c *Config) Validate() error {
 		c.HTTP.validate(),
 		c.Data.validate(),
 		c.Reconcile.validate(),
-		c.Ports.validate(),
+		c.Workload.validate(),
 		c.Logging.validate(),
 	)
 }
@@ -168,14 +189,21 @@ func (c ReconcileConfig) validate() error {
 	return nil
 }
 
-func (c PortsConfig) validate() error {
+func (c WorkloadConfig) validate() error {
 	switch {
-	case c.Min < 1 || c.Min > 65535:
-		return errors.New("port range minimum must be between 1 and 65535")
-	case c.Max < 1 || c.Max > 65535:
-		return errors.New("port range maximum must be between 1 and 65535")
-	case c.Min > c.Max:
-		return errors.New("port range minimum must not exceed its maximum")
+	case c.Bind == "":
+		return errors.New("workload bind address is required")
+	// An address rather than a name, because this is what a port is published on
+	// rather than somewhere orca connects to. A name would have to be resolved, and
+	// what it resolved to could change under a running workload.
+	case net.ParseIP(c.Bind) == nil:
+		return fmt.Errorf("workload bind address must be an IP address, got %q", c.Bind)
+	case c.MinPort < 1 || c.MinPort > 65535:
+		return errors.New("workload port range minimum must be between 1 and 65535")
+	case c.MaxPort < 1 || c.MaxPort > 65535:
+		return errors.New("workload port range maximum must be between 1 and 65535")
+	case c.MinPort > c.MaxPort:
+		return errors.New("workload port range minimum must not exceed its maximum")
 	}
 
 	return nil
