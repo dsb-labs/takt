@@ -30,8 +30,21 @@ a victim's own machine. A request naming anything else has to name something in
 `hosts`, or it is refused. A request from a browser page on another origin is refused
 whatever it names.
 
-This costs nothing for an operator using the CLI or `curl`. It matters for whoever
-runs orca on a workstation they also browse from.
+A request carrying a body must also declare `Content-Type: application/json`. That is
+already the only body the API reads, and requiring it turns away the form-encoded and
+plain-text requests a browser will send across origins without asking permission
+first.
+
+The CLI does all of this correctly. A hand-written `curl` that sends a body needs the
+header:
+
+```sh
+curl -X PUT -H 'Content-Type: application/json' \
+  --data-binary @workload.json \
+  http://127.0.0.1:7373/api/v1/workloads/example
+```
+
+This matters most for whoever runs orca on a workstation they also browse from.
 
 ### Workload ports are published separately
 
