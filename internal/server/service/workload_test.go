@@ -1084,6 +1084,167 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 	})
 }
 
+func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
+	t.Parallel()
+
+	t.Run("hashes a workload reading a secret exactly as it did before variables", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"DSN": "postgres://app:${secret:db-password}@localhost/app"})
+
+		// Pinned to the literal, because this is the hash orca computed for this
+		// workload before variables existed. Adding a field to what is hashed would
+		// otherwise replace every running instance that reads a secret, so both fields
+		// are omitted when empty and this is the test that holds them to it.
+		assert.Equal(t,
+			"75ec730e704fa8d23450ee2a8101b3ef5dbe273494684d4512a4c59da0710efb",
+			applyForHashOf(t, spec, map[string]string{"db-password": "rev-one"}, nil))
+	})
+
+	t.Run("moves the hash when a variable's value changes", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+
+		first := applyForHashOf(t, spec, nil, map[string]string{"log-level": "debug"})
+		second := applyForHashOf(t, spec, nil, map[string]string{"log-level": "info"})
+
+		// The value is what is hashed, so a change to it is a change to the hash and
+		// the reconciler replaces the instances reading the old one.
+		assert.NotEqual(t, first, second)
+	})
+
+	t.Run("keeps the hash when the value is unchanged", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+
+		first := applyForHashOf(t, spec, nil, map[string]string{"log-level": "debug"})
+		second := applyForHashOf(t, spec, nil, map[string]string{"log-level": "debug"})
+
+		// Re-applying an unchanged manifest against an unchanged variable must not
+		// restart anything. Hashing the value rather than a revision is what makes a
+		// variable deleted and re-created with the same value read as unchanged too.
+		assert.Equal(t, first, second)
+	})
+
+	t.Run("hashes a workload reading a variable differently from one that does not", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+
+		withVariable := applyForHashOf(t, spec, nil, map[string]string{"log-level": "debug"})
+
+		assert.NotEqual(t, "485029cc492e6cb9a301bdde6d7632286d9613ebae081824118e64611dcdf60f", withVariable)
+	})
+
+	t.Run("hashes the two kinds into different places", func(t *testing.T) {
+		asSecret := containerSpec("example", "example/example:latest")
+		asSecret.Env = new(map[string]string{"VALUE": "${secret:shared}"})
+
+		asVariable := containerSpec("example", "example/example:latest")
+		asVariable.Env = new(map[string]string{"VALUE": "${var:shared}"})
+
+		// A name held by both kinds contributes to a different field of what is hashed,
+		// so the two never collide even given the same name and the same text.
+		first := applyForHashOf(t, asSecret, map[string]string{"shared": "same"}, nil)
+		second := applyForHashOf(t, asVariable, nil, map[string]string{"shared": "same"})
+
+		assert.NotEqual(t, first, second)
+	})
+
+	t.Run("stores the reference rather than the value", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		variables.EXPECT().Values(mock.Anything, []string{"log-level"}).
+			Return(map[string]string{"log-level": "debug"}, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+
+		var stored database.Workload
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				stored = w
+
+				return w, true, nil
+			}).Once()
+
+		_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec)
+		require.NoError(t, err)
+
+		// A variable is stored as written, as a secret is. The value is not a secret,
+		// but resolving it into the stored specification would mean a change to the
+		// variable no longer reaching the workload that reads it.
+		assert.Contains(t, string(stored.Spec), "${var:log-level}")
+		assert.NotContains(t, string(stored.Spec), "debug")
+
+		// The names are recorded so that changing the variable can find this workload.
+		assert.Equal(t, []string{"log-level"}, stored.Variables)
+	})
+
+	t.Run("records both kinds a workload reads", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"DSN": "postgres://app:${secret:db-password}@${var:db-host}/app"})
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		secrets.EXPECT().Revisions(mock.Anything, []string{"db-password"}).
+			Return(map[string]string{"db-password": "rev-one"}, nil).Once()
+		variables.EXPECT().Values(mock.Anything, []string{"db-host"}).
+			Return(map[string]string{"db-host": "localhost"}, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+
+		var stored database.Workload
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				stored = w
+
+				return w, true, nil
+			}).Once()
+
+		_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec)
+		require.NoError(t, err)
+
+		assert.Equal(t, []string{"db-password"}, stored.Secrets)
+		assert.Equal(t, []string{"db-host"}, stored.Variables)
+	})
+
+	t.Run("refuses a reference to a variable that does not exist", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"LEVEL": "${var:nope}"})
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		variables.EXPECT().Values(mock.Anything, []string{"nope"}).Return(nil, nil).Once()
+
+		// The workload could never start, and the operator applying it is the one who
+		// can correct the name.
+		_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec)
+		require.ErrorIs(t, err, service.ErrVariableNotFound)
+		assert.Contains(t, err.Error(), "nope")
+	})
+
+	t.Run("refuses a variable on a server holding none", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec)
+		assert.ErrorIs(t, err, service.ErrVariableNotFound)
+	})
+}
+
 func TestWorkloadService_Rehash(t *testing.T) {
 	t.Parallel()
 
@@ -1178,6 +1339,67 @@ func TestWorkloadService_Rehash(t *testing.T) {
 		assert.True(t, changed)
 	})
 
+	t.Run("moves the hash when a variable's value changes", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{ID: "workload-id", Name: "example", Spec: encoded, SpecHash: "stale"}, nil).Once()
+		variables.EXPECT().Values(mock.Anything, []string{"log-level"}).
+			Return(map[string]string{"log-level": "info"}, nil).Once()
+		ports.EXPECT().List(mock.Anything, "workload-id").Return(nil, nil).Once()
+
+		var stored database.Workload
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				stored = w
+
+				return w, false, nil
+			}).Once()
+
+		// One Rehash serves both kinds, because it recomputes against whatever the
+		// workload references rather than against what it was told changed.
+		changed, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).
+			Rehash(t.Context(), "example")
+		require.NoError(t, err)
+		assert.True(t, changed)
+
+		// The specification is written back exactly as it was read. Only the hash moves.
+		assert.JSONEq(t, string(encoded), string(stored.Spec))
+		assert.Equal(t, []string{"log-level"}, stored.Variables)
+	})
+
+	t.Run("writes nothing when a variable's value is unchanged", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+
+		// The hash the workload already holds for this value, so the rehash finds
+		// nothing to do. The mock has no Upsert expectation, so a write would fail.
+		hash := applyForHashOf(t, spec, nil, map[string]string{"log-level": "debug"})
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{ID: "workload-id", Name: "example", Spec: encoded, SpecHash: hash}, nil).Once()
+		variables.EXPECT().Values(mock.Anything, []string{"log-level"}).
+			Return(map[string]string{"log-level": "debug"}, nil).Once()
+
+		changed, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).
+			Rehash(t.Context(), "example")
+		require.NoError(t, err)
+		assert.False(t, changed)
+	})
+
 	t.Run("reports a workload that does not exist", func(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
@@ -1195,12 +1417,22 @@ func TestWorkloadService_Rehash(t *testing.T) {
 func applyForHash(t *testing.T, spec api.WorkloadSpec, revisions map[string]string) string {
 	t.Helper()
 
+	return applyForHashOf(t, spec, revisions, nil)
+}
+
+// applyForHashOf applies spec against the given secret revisions and variable values
+// and returns the hash the service stored, so that a test can compare two hashes
+// without repeating the mock wiring.
+func applyForHashOf(t *testing.T, spec api.WorkloadSpec, revisions, values map[string]string) string {
+	t.Helper()
+
 	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
-	secrets := NewMockSecretRevisions(t)
+	secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
 
 	repo.EXPECT().Get(mock.Anything, spec.Name).
 		Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
-	secrets.EXPECT().Revisions(mock.Anything, mock.Anything).Return(revisions, nil).Once()
+	secrets.EXPECT().Revisions(mock.Anything, mock.Anything).Return(revisions, nil).Maybe()
+	variables.EXPECT().Values(mock.Anything, mock.Anything).Return(values, nil).Maybe()
 	d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
 
 	var hash string
@@ -1211,7 +1443,7 @@ func applyForHash(t *testing.T, spec api.WorkloadSpec, revisions map[string]stri
 			return w, true, nil
 		}).Once()
 
-	_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+	_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec)
 	require.NoError(t, err)
 
 	return hash
@@ -1342,19 +1574,40 @@ func newTestSecretAwareService(
 ) *service.WorkloadService {
 	t.Helper()
 
+	return newTestReferenceAwareService(t, d, repo, ports, secrets, nil)
+}
+
+func newTestReferenceAwareService(
+	t *testing.T,
+	d *MockDriver,
+	repo *MockWorkloadRepository,
+	ports *MockPortRepository,
+	secrets *MockSecretRevisions,
+	variables *MockVariableValues,
+) *service.WorkloadService {
+	t.Helper()
+
 	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().HolderOf(mock.Anything, mock.Anything).Return("", false, nil).Maybe()
 
-	return service.NewWorkloadService(service.WorkloadServiceConfig{
+	config := service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
 		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
 		Secrets:   secrets,
 		Allocator: allocatorStub{},
-	})
+	}
+
+	// Left nil rather than set to a typed nil, so that the service sees no variable
+	// store at all and a test can exercise a server that holds none.
+	if variables != nil {
+		config.Variables = variables
+	}
+
+	return service.NewWorkloadService(config)
 }
 
 // The allocatorStub type hands out ports from a fixed base, so a test can predict

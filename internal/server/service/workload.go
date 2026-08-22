@@ -123,20 +123,32 @@ type (
 	}
 
 	// The hashedSpec type is what a workload's specification hash is computed over
-	// when the workload reads a secret.
+	// when the workload reads a secret or a variable.
 	//
-	// It exists so that a secret's revision reaches the hash without being stored:
+	// It exists so that what a workload reads reaches the hash without being stored:
 	// the specification is written to the database on its own, and this wrapper is
 	// built only to be hashed and discarded. Its shape is therefore part of what a
-	// hash means — changing it re-hashes every workload that reads a secret and
+	// hash means — changing it re-hashes every workload that reads either and
 	// replaces their instances.
+	//
+	// Both maps are omitted when empty, which is what stopped adding variables from
+	// re-hashing every workload that already read a secret. Such a workload encodes
+	// exactly as it did before variables existed, because the field that would have
+	// been written as null is left out instead.
 	hashedSpec struct {
 		// The stored specification, encoded exactly as it is persisted.
 		Spec json.RawMessage `json:"spec"`
 		// The revision of each secret the workload reads, keyed by name. Go's encoder
 		// sorts map keys, so this contributes the same bytes for a given set of
 		// secrets however they were collected.
-		Secrets map[string]string `json:"secrets"`
+		Secrets map[string]string `json:"secrets,omitempty"`
+		// The value of each variable the workload reads, keyed by name.
+		//
+		// The value rather than a revision, unlike a secret. A secret is held at arm's
+		// length because the hash is reported and one computed over a value would
+		// confirm a guess at it; a variable's value is reported by the API anyway, so
+		// the indirection would protect nothing and cost a column.
+		Variables map[string]string `json:"variables,omitempty"`
 	}
 
 	// The SecretRevisions interface describes how the service learns what version of
@@ -151,6 +163,35 @@ type (
 		Revisions(ctx context.Context, names []string) (map[string]string, error)
 	}
 
+	// The VariableValues interface describes how the service learns what each
+	// variable a workload reads currently holds.
+	//
+	// Narrower than the variable service it is satisfied by, as SecretRevisions is.
+	VariableValues interface {
+		// Values should return the current value of each named variable, keyed by
+		// name, omitting any that do not exist.
+		Values(ctx context.Context, names []string) (map[string]string, error)
+	}
+
+	// The references type carries what a workload reads and what those things
+	// currently hold, from the one scan of a specification to the write that records
+	// it and the hash that covers it.
+	//
+	// The names travel alongside what was read because the two answer different
+	// questions. The names are stored, so that finding the workloads to redeploy when
+	// something moves does not depend on parsing every specification; what was read
+	// reaches the hash and is then discarded.
+	references struct {
+		// The names of the secrets the specification references.
+		secrets []string
+		// The names of the variables the specification references.
+		variables []string
+		// The revision of each secret that exists, keyed by name.
+		revisions map[string]string
+		// The value of each variable that exists, keyed by name.
+		values map[string]string
+	}
+
 	// The WorkloadService type orchestrates the persistence layer and the driver
 	// that runs workloads.
 	WorkloadService struct {
@@ -160,6 +201,7 @@ type (
 		ports     PortRepository
 		volumes   VolumeLocator
 		secrets   SecretRevisions
+		variables VariableValues
 		allocator Allocator
 		checker   Checker
 		notify    func()
@@ -183,6 +225,9 @@ type WorkloadServiceConfig struct {
 	// Where the revisions of the secrets a workload reads are read from. May be nil,
 	// in which case a workload referencing a secret is rejected.
 	Secrets SecretRevisions
+	// Where the values of the variables a workload reads are read from. May be nil,
+	// in which case a workload referencing a variable is rejected.
+	Variables VariableValues
 	// The allocator used to choose host ports.
 	Allocator Allocator
 	// The checker that establishes whether workloads are working. May be nil, in
@@ -203,6 +248,7 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		ports:     config.Ports,
 		volumes:   config.Volumes,
 		secrets:   config.Secrets,
+		variables: config.Variables,
 		allocator: config.Allocator,
 		checker:   config.Checker,
 		notify:    config.Notify,
@@ -268,24 +314,29 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 		return Workload{}, false, err
 	}
 
-	// The secrets the workload reads are resolved to their revisions, not to their
-	// values. A revision reaches the hash so that rotating a secret replaces the
-	// instances reading it; the value stays out of both the hash and the stored
-	// specification, and is read only as the workload starts.
+	// The secrets the workload reads are resolved to their revisions rather than their
+	// values, and the variables to their values. Either reaches the hash so that
+	// changing one replaces the instances reading it. A secret's value stays out of
+	// both the hash and the stored specification, and is read only as the workload
+	// starts.
 	//
-	// A reference to a secret that does not exist is refused here rather than at
+	// A reference to something that does not exist is refused here rather than at
 	// start. The workload could never run, and the operator asking for it is the one
 	// who can fix the name.
-	secrets, revisions, err := s.resolveSecrets(ctx, spec)
+	read, err := s.resolveReferences(ctx, spec)
 	if err != nil {
 		return Workload{}, false, err
 	}
 
-	if missing := missingSecrets(secrets, revisions); len(missing) > 0 {
-		return Workload{}, false, fmt.Errorf("%w: %s", ErrSecretNotFound, strings.Join(missing, ", "))
+	if absent := missing(read.secrets, read.revisions); len(absent) > 0 {
+		return Workload{}, false, fmt.Errorf("%w: %s", ErrSecretNotFound, strings.Join(absent, ", "))
 	}
 
-	stored, created, err := s.store(ctx, spec, runtime, held, secrets, revisions)
+	if absent := missing(read.variables, read.values); len(absent) > 0 {
+		return Workload{}, false, fmt.Errorf("%w: %s", ErrVariableNotFound, strings.Join(absent, ", "))
+	}
+
+	stored, created, err := s.store(ctx, spec, runtime, held, read)
 	if err != nil {
 		return Workload{}, false, err
 	}
@@ -315,8 +366,7 @@ func (s *WorkloadService) store(
 	spec api.WorkloadSpec,
 	runtime api.Runtime,
 	held []database.Port,
-	secrets []string,
-	revisions map[string]string,
+	read references,
 ) (database.Workload, bool, error) {
 	// Bounded because a caller waiting on a request would rather hear that orca
 	// couldn't settle its ports than wait indefinitely for a quiet moment.
@@ -328,17 +378,18 @@ func (s *WorkloadService) store(
 			return database.Workload{}, false, err
 		}
 
-		encoded, hash, err := canonicalise(withResolvedPorts(spec, ports), revisions)
+		encoded, hash, err := canonicalise(withResolvedPorts(spec, ports), read)
 		if err != nil {
 			return database.Workload{}, false, err
 		}
 
 		row := database.Workload{
-			Name:     spec.Name,
-			Runtime:  string(runtime),
-			Spec:     encoded,
-			SpecHash: hash,
-			Secrets:  secrets,
+			Name:      spec.Name,
+			Runtime:   string(runtime),
+			Spec:      encoded,
+			SpecHash:  hash,
+			Secrets:   read.secrets,
+			Variables: read.variables,
 		}
 
 		if spec.Labels != nil {
@@ -568,17 +619,18 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 	// Read again rather than carried over, for the same reason the ports are handed
 	// back to the write: the stored links are replaced by whatever the write is given,
 	// so a row that named none would have its references forgotten.
-	secrets, revisions, err := s.resolveSecrets(ctx, spec)
+	read, err := s.resolveReferences(ctx, spec)
 	if err != nil {
 		return false, err
 	}
 
-	encoded, hash, err := canonicalise(withResolvedPorts(spec, ports), revisions)
+	encoded, hash, err := canonicalise(withResolvedPorts(spec, ports), read)
 	if err != nil {
 		return false, err
 	}
 
-	row.Spec, row.SpecHash, row.Secrets = encoded, hash, secrets
+	row.Spec, row.SpecHash = encoded, hash
+	row.Secrets, row.Variables = read.secrets, read.variables
 
 	// The ports travel with the write, as they do for an apply. Claiming them
 	// separately beforehand would not survive it: the write replaces a workload's
@@ -594,16 +646,18 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 	return true, nil
 }
 
-// Rehash recomputes the named workload's specification hash against the secrets it
-// currently reads, reporting whether the hash moved.
+// Rehash recomputes the named workload's specification hash against the secrets and
+// variables it currently reads, reporting whether the hash moved.
 //
-// This exists for the secret service to call when a value changes. Nothing about the
-// specification changes: the stored bytes are written back exactly as they were read,
-// and only the hash moves. That is what makes a rotated secret read as an ordinary
-// specification change, so the reconciler replaces the instances holding the old
-// value and the new one is resolved as they start.
+// This exists for the secret and variable services to call when a value changes. One
+// method serves both, because it recomputes against whatever the workload references
+// rather than against what it was told changed. Nothing about the specification
+// changes: the stored bytes are written back exactly as they were read, and only the
+// hash moves. That is what makes a rotated secret or a changed variable read as an
+// ordinary specification change, so the reconciler replaces the instances holding the
+// old value and the new one is resolved as they start.
 //
-// A secret that has been deleted moves the hash too. The workload is then asking for
+// Something that has been deleted moves the hash too. The workload is then asking for
 // something orca no longer holds, which is reported when it next tries to start
 // rather than by silently leaving the old value running.
 func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error) {
@@ -620,12 +674,12 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 		return false, fmt.Errorf("failed to decode workload spec: %w", err)
 	}
 
-	secrets, revisions, err := s.resolveSecrets(ctx, spec)
+	read, err := s.resolveReferences(ctx, spec)
 	if err != nil {
 		return false, err
 	}
 
-	_, hash, err := canonicalise(spec, revisions)
+	_, hash, err := canonicalise(spec, read)
 	if err != nil {
 		return false, err
 	}
@@ -642,7 +696,8 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 		return false, fmt.Errorf("failed to read workload ports: %w", err)
 	}
 
-	row.SpecHash, row.Secrets = hash, secrets
+	row.SpecHash = hash
+	row.Secrets, row.Variables = read.secrets, read.variables
 
 	if _, _, err = s.workloads.Upsert(ctx, row, held...); err != nil {
 		return false, fmt.Errorf("failed to store workload: %w", err)
@@ -787,52 +842,65 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadS
 	return spec, nil
 }
 
-// resolveSecrets returns the secrets the specification's environment references,
-// along with the revision each one currently holds.
+// resolveReferences returns what the specification's environment references, along
+// with what each of those currently holds.
 //
 // The specification comes back untouched, unlike ports and volumes: a reference is
-// stored as written, because resolving it would put the value in the database. The
-// revisions travel separately, reaching the hash without being stored.
+// stored as written, because resolving a secret would put its value in the database
+// and a variable is stored the same way for consistency. What was read travels
+// separately, reaching the hash without being stored.
 //
-// A secret that does not exist is simply absent from the revisions rather than an
-// error. That is what makes deleting a secret move the hash of the workloads reading
-// it, which is how they come to report that something they need has gone. Refusing
-// the reference is the business of the caller that can act on it.
-func (s *WorkloadService) resolveSecrets(ctx context.Context, spec api.WorkloadSpec) ([]string, map[string]string, error) {
-	references, err := manifest.References(manifest.NewSpec(spec))
+// Something that does not exist is simply absent rather than an error. That is what
+// makes deleting a secret or a variable move the hash of the workloads reading it,
+// which is how they come to report that something they need has gone. Refusing the
+// reference is the business of the caller that can act on it.
+func (s *WorkloadService) resolveReferences(ctx context.Context, spec api.WorkloadSpec) (references, error) {
+	found, err := manifest.References(manifest.NewSpec(spec))
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+		return references{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
 
-	names := manifest.Names(references, manifest.KindSecret)
+	resolved := references{
+		secrets:   manifest.Names(found, manifest.KindSecret),
+		variables: manifest.Names(found, manifest.KindVariable),
+	}
+
 	switch {
-	case len(names) == 0:
-		return nil, nil, nil
+	case len(resolved.secrets) == 0:
 	case s.secrets == nil:
-		return nil, nil, fmt.Errorf("%w: this server holds no secrets", ErrSecretNotFound)
-	}
-
-	revisions, err := s.secrets.Revisions(ctx, names)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to read secret revisions: %w", err)
-	}
-
-	return names, revisions, nil
-}
-
-// missingSecrets names the referenced secrets that do not exist.
-//
-// Every name is checked rather than the counts compared, so that an operator is told
-// which secret to create rather than that one of them is absent.
-func missingSecrets(names []string, revisions map[string]string) []string {
-	var missing []string
-	for _, name := range names {
-		if _, ok := revisions[name]; !ok {
-			missing = append(missing, name)
+		return references{}, fmt.Errorf("%w: this server holds no secrets", ErrSecretNotFound)
+	default:
+		if resolved.revisions, err = s.secrets.Revisions(ctx, resolved.secrets); err != nil {
+			return references{}, fmt.Errorf("failed to read secret revisions: %w", err)
 		}
 	}
 
-	return missing
+	switch {
+	case len(resolved.variables) == 0:
+	case s.variables == nil:
+		return references{}, fmt.Errorf("%w: this server holds no variables", ErrVariableNotFound)
+	default:
+		if resolved.values, err = s.variables.Values(ctx, resolved.variables); err != nil {
+			return references{}, fmt.Errorf("failed to read variable values: %w", err)
+		}
+	}
+
+	return resolved, nil
+}
+
+// missing names the referenced things of one kind that do not exist.
+//
+// Every name is checked rather than the counts compared, so that an operator is told
+// which one to create rather than that one of them is absent.
+func missing(names []string, held map[string]string) []string {
+	var absent []string
+	for _, name := range names {
+		if _, ok := held[name]; !ok {
+			absent = append(absent, name)
+		}
+	}
+
+	return absent
 }
 
 func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.WorkloadSpec {
@@ -957,32 +1025,39 @@ func runtimeOf(spec api.WorkloadSpec) (api.Runtime, error) {
 }
 
 // canonicalise encodes spec as JSON and hashes it, mixing in the revision of each
-// secret the workload reads. Go's encoder writes struct fields in declaration order
-// and map keys in sorted order, so the encoding is stable for a given specification
-// and the hash can be compared to detect drift.
+// secret and the value of each variable the workload reads. Go's encoder writes
+// struct fields in declaration order and map keys in sorted order, so the encoding is
+// stable for a given specification and the hash can be compared to detect drift.
 //
-// The returned bytes are always the specification alone: the revisions reach the
+// The returned bytes are always the specification alone: what was read reaches the
 // hash without being stored, so nothing about a secret is written to the database or
-// echoed back by the API. Mixing them in is what makes a rotated secret read as an
-// ordinary specification change, so the reconciler replaces the instances holding
-// the old value. The values themselves are never hashed — the hash is reported, and
-// one computed over a value would confirm a guess at it.
+// echoed back by the API. Mixing it in is what makes a rotated secret or a changed
+// variable read as an ordinary specification change, so the reconciler replaces the
+// instances holding the old value.
 //
-// A workload reading no secret hashes exactly as it would without this, which is
-// what stops an upgrade replacing every running instance.
-func canonicalise(spec api.WorkloadSpec, revisions map[string]string) ([]byte, string, error) {
+// A secret contributes its revision and never its value, because the hash is
+// reported and one computed over a value would confirm a guess at it. A variable
+// contributes its value, which the API reports anyway.
+//
+// A workload reading neither hashes exactly as it would without this, which is what
+// stops an upgrade replacing every running instance.
+func canonicalise(spec api.WorkloadSpec, read references) ([]byte, string, error) {
 	encoded, err := json.Marshal(spec)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to encode workload spec: %w", err)
 	}
 
-	if len(revisions) == 0 {
+	if len(read.revisions) == 0 && len(read.values) == 0 {
 		sum := sha256.Sum256(encoded)
 
 		return encoded, hex.EncodeToString(sum[:]), nil
 	}
 
-	hashed, err := json.Marshal(hashedSpec{Spec: encoded, Secrets: revisions})
+	hashed, err := json.Marshal(hashedSpec{
+		Spec:      encoded,
+		Secrets:   read.revisions,
+		Variables: read.values,
+	})
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to encode workload spec: %w", err)
 	}
