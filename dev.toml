@@ -10,6 +10,7 @@ interval = "5s"
 [logging]
 level = "debug"
 
-[ports]
-min = 20000
-max = 32000
+[workload]
+bind = "127.0.0.1"
+min-port = 20000
+max-port = 32000
