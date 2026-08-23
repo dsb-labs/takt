@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -341,6 +342,63 @@ func (s *Suite) volumeFile(path, name string) string {
 	}
 
 	return string(contents)
+}
+
+// mountedFile reads a file from inside the container the named workload is running,
+// which is how a test checks what a mounted value actually looks like to the workload.
+// Returns empty when there is no container or no such file.
+//
+// Read from inside rather than from the host, because that is the thing under test: a
+// file rewritten in place is visible to the container, where one replaced by a rename
+// would leave it reading the old inode.
+func (s *Suite) mountedFile(workload, path string) string {
+	containers := s.containers(workload)
+	if len(containers) == 0 {
+		return ""
+	}
+
+	out, err := exec.Command("docker", "exec", containers[0], "cat", path).Output()
+	if err != nil {
+		return ""
+	}
+
+	return string(out)
+}
+
+// mountsHold reports whether any file the server wrote for a mounted value contains
+// the given value.
+//
+// This is the counterpart to databaseHolds for the one place a mounted secret's
+// plaintext legitimately lives, and is how a test proves it is removed again.
+func (s *Suite) mountsHold(value string) bool {
+	var found bool
+
+	root := filepath.Join(s.directory, "mounts", "files")
+
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case entry.IsDir():
+			return nil
+		}
+
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		if bytes.Contains(contents, []byte(value)) {
+			found = true
+		}
+
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		s.T().Logf("failed to walk the mounted values: %v", err)
+	}
+
+	return found
 }
 
 // secretName derives a secret name from the running test's name, so that tests
