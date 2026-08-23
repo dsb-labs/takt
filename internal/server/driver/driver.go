@@ -205,14 +205,15 @@ func NewWorkload(row database.Workload) (Workload, error) {
 	if spec.Volumes != nil {
 		w.Volumes = make([]Volume, 0, len(*spec.Volumes))
 		for _, mount := range *spec.Volumes {
-			// Unresolved for the same reason a port can be: the server had not
-			// finished settling the workload. Mounting nothing would be worse than
-			// waiting, since the workload would start and write somewhere else.
-			if mount.From == nil {
+			// A mount naming no volume is not one this resolves, and one whose path is
+			// unresolved is a workload the server has not finished settling. Mounting
+			// nothing would be worse than waiting, since the workload would start and
+			// write somewhere else.
+			if mount.Name == nil || mount.From == nil {
 				continue
 			}
 
-			w.Volumes = append(w.Volumes, Volume{Name: mount.Name, Host: *mount.From, Target: mount.To})
+			w.Volumes = append(w.Volumes, Volume{Name: *mount.Name, Host: *mount.From, Target: mount.To})
 		}
 	}
 

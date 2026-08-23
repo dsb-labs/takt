@@ -827,12 +827,13 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadS
 		// Whatever went wrong is returned as it stands, including a volume that does
 		// not exist: the locator already names what it could not find, so wrapping it
 		// again would only repeat the name.
-		path, err := s.volumes.Path(ctx, mount.Name)
+		path, err := s.volumes.Path(ctx, *mount.Name)
 		if err != nil {
 			return spec, err
 		}
 
-		mounts = append(mounts, api.VolumeMount{Name: mount.Name, To: mount.To, From: new(path)})
+		mount.From = new(path)
+		mounts = append(mounts, mount)
 	}
 
 	// The specification is taken by value, so this replaces only this copy's slice

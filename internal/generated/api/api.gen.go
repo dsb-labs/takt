@@ -71,6 +71,27 @@ func (e InstanceState) Valid() bool {
 	}
 }
 
+// Defines values for MountSignal.
+const (
+	SIGHUP  MountSignal = "SIGHUP"
+	SIGUSR1 MountSignal = "SIGUSR1"
+	SIGUSR2 MountSignal = "SIGUSR2"
+)
+
+// Valid indicates whether the value is a known member of the MountSignal enum.
+func (e MountSignal) Valid() bool {
+	switch e {
+	case SIGHUP:
+		return true
+	case SIGUSR1:
+		return true
+	case SIGUSR2:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for OverlapPolicy.
 const (
 	Replace OverlapPolicy = "replace"
@@ -428,6 +449,23 @@ type ListWorkloadsResult struct {
 	Workloads []Workload `json:"workloads"`
 }
 
+// MountSignal The signal to send the workload when a mounted secret or variable changes,
+// rather than replacing its instance.
+//
+// Without one, a change is delivered the way a change to a referenced secret is:
+// the specification's hash moves and the instance is replaced, which is what a
+// workload that reads a file once at startup needs. With one, the server rewrites
+// the file in place and signals the workload, so a process that rereads its
+// configuration keeps its connections and its uptime through a rotation.
+//
+// Only a signal a program reloads on can be named. One that would stop the
+// workload is refused, because whether a workload runs is the server's decision
+// to make through the restart policy.
+//
+// Only a mounted secret or variable may name one. A volume holds whatever the
+// workload puts there, so there is no change the server could report.
+type MountSignal string
+
 // OverlapPolicy What the server does when an occurrence comes due and the previous run has not
 // finished.
 //
@@ -693,7 +731,16 @@ type Volume struct {
 	UsedBy *[]string `json:"usedBy,omitempty"`
 }
 
-// VolumeMount A volume to mount, and the path at which the workload finds it.
+// VolumeMount Something to mount, and the path at which the workload finds it.
+//
+// Exactly one of `name`, `secret` or `var` must be present, and which one it is
+// decides what appears at the path. `name` mounts a volume, which is a directory
+// that outlives the workload. `secret` and `var` mount a file holding what the
+// server holds under that name, so a value an operator keeps in orca can be read
+// by a workload that wants a file rather than an environment variable.
+//
+// The source is derived from the field that is present rather than from a
+// discriminator, as a specification's runtime is.
 //
 // `to` is written the same way for either runtime, so a workload moved between
 // them keeps its manifest. Where it resolves to differs, because a container has
@@ -709,16 +756,21 @@ type Volume struct {
 // its directory, which needs privileges orca does not have, so an absolute path
 // in a command reaches the host's own root instead.
 //
-// Either way nothing tells the workload where the volume sits on the host, which
+// Either way nothing tells the workload where the mount sits on the host, which
 // for an exec workload would be orca's own layout.
 type VolumeMount struct {
 	// From Where the volume's data is on the host, resolved by the server from the
-	// named volume. Ignored when a specification is submitted.
+	// named volume. Ignored when a specification is submitted, and absent for a
+	// mounted secret or variable.
 	//
 	// It is stored with the workload, as an allocated host port is, so that the
 	// runtime is given a path rather than a name to look up. Because it is part
 	// of the stored specification it is covered by the hash, so a volume whose
 	// path changed replaces the instances bound to the old one.
+	//
+	// A mounted value carries none. Where the server writes the file is its own
+	// layout and changes with every version of the workload, so storing it would
+	// move the hash for a reason the operator did not ask for.
 	//
 	//
 	// Examples: /home/user/.local/share/orca/volumes/cvhs0dq0kqj4c9r8m1a0
@@ -728,14 +780,51 @@ type VolumeMount struct {
 	//
 	//
 	// Examples: example-data
-	Name string `json:"name"`
+	Name *string `json:"name,omitempty"`
 
-	// To Where the workload finds the volume. Must be an absolute path, and not
-	// `/` itself.
+	// Secret The secret to mount as a file, which must already exist. The file holds
+	// the secret's value and nothing else.
+	//
+	// This is the option for a secret that is a file — a certificate, a key, a
+	// credentials document — rather than a value that fits in an environment
+	// variable. It necessarily writes the plaintext to the host filesystem,
+	// where an `env` reference does not, so it is a choice worth making
+	// knowingly.
+	//
+	//
+	// Examples: tls-cert
+	Secret *string `json:"secret,omitempty"`
+
+	// Signal The signal to send the workload when a mounted secret or variable changes,
+	// rather than replacing its instance.
+	//
+	// Without one, a change is delivered the way a change to a referenced secret is:
+	// the specification's hash moves and the instance is replaced, which is what a
+	// workload that reads a file once at startup needs. With one, the server rewrites
+	// the file in place and signals the workload, so a process that rereads its
+	// configuration keeps its connections and its uptime through a rotation.
+	//
+	// Only a signal a program reloads on can be named. One that would stop the
+	// workload is refused, because whether a workload runs is the server's decision
+	// to make through the restart policy.
+	//
+	// Only a mounted secret or variable may name one. A volume holds whatever the
+	// workload puts there, so there is no change the server could report.
+	Signal *MountSignal `json:"signal,omitempty"`
+
+	// To Where the workload finds what is mounted. Must be an absolute path, and
+	// not `/` itself.
 	//
 	//
 	// Examples: /var/lib/example
 	To string `json:"to"`
+
+	// Var The variable to mount as a file, which must already exist. The file holds
+	// the variable's value and nothing else.
+	//
+	//
+	// Examples: app-config
+	Var *string `json:"var,omitempty"`
 }
 
 // VolumeSpec The desired state of a volume, which is no more than its name. A volume holds
@@ -886,11 +975,16 @@ type WorkloadSpec struct {
 	// Examples: v1
 	Version string `json:"version"`
 
-	// Volumes The volumes to mount, and where the workload finds each one.
+	// Volumes What the workload mounts, and where it finds each one.
 	//
-	// Each names a volume that must already exist. A specification naming one
-	// that does not is rejected, so a mistyped name is reported rather than
-	// quietly becoming a second empty volume.
+	// An entry names a volume, a secret or a variable. A volume is storage that
+	// outlives the workload; a mounted secret or variable is a file holding that
+	// value. One list rather than two, because a workload saying what appears in
+	// its filesystem is one question however the contents are produced.
+	//
+	// Each names something that must already exist. A specification naming what
+	// does not is rejected, so a mistyped name is reported rather than quietly
+	// becoming a second empty volume or an empty file.
 	//
 	// Like ports, these sit alongside the runtime blocks: where a workload
 	// keeps its data is a question about the workload rather than about the

@@ -204,7 +204,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 	t.Parallel()
 
 	spec := containerSpec("example", "example/example:latest")
-	spec.Volumes = &[]api.VolumeMount{{Name: "example-data", To: "/var/lib/example"}}
+	spec.Volumes = &[]api.VolumeMount{{Name: new("example-data"), To: "/var/lib/example"}}
 
 	t.Run("stores where each mounted volume lives", func(t *testing.T) {
 		t.Parallel()

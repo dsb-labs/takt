@@ -47,7 +47,7 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 	if len(s.Volumes) > 0 {
 		mounts := make([]api.VolumeMount, 0, len(s.Volumes))
 		for _, mount := range s.Volumes {
-			mounts = append(mounts, api.VolumeMount{Name: mount.Name, To: mount.To})
+			mounts = append(mounts, api.VolumeMount{Name: new(mount.Name), To: mount.To})
 		}
 
 		spec.Volumes = &mounts

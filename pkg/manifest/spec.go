@@ -263,7 +263,7 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 	if spec.Volumes != nil {
 		out.Volumes = make([]VolumeMount, 0, len(*spec.Volumes))
 		for _, mount := range *spec.Volumes {
-			out.Volumes = append(out.Volumes, VolumeMount{Name: mount.Name, To: mount.To})
+			out.Volumes = append(out.Volumes, NewVolumeMount(mount))
 		}
 	}
 
@@ -279,6 +279,22 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 
 	if spec.Exec != nil {
 		out.Exec = &Exec{Command: spec.Exec.Command}
+	}
+
+	return out
+}
+
+// NewVolumeMount maps a wire mount onto the canonical shape.
+//
+// The source fields are carried across as they were given rather than being resolved
+// to a kind here. Which source a mount names is derived wherever it matters, so a
+// mount naming none or naming two survives to be reported by validation instead of
+// becoming a mount of something arbitrary.
+func NewVolumeMount(mount api.VolumeMount) VolumeMount {
+	out := VolumeMount{To: mount.To}
+
+	if mount.Name != nil {
+		out.Name = *mount.Name
 	}
 
 	return out
