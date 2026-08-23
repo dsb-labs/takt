@@ -47,7 +47,7 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 	if len(s.Volumes) > 0 {
 		mounts := make([]api.VolumeMount, 0, len(s.Volumes))
 		for _, mount := range s.Volumes {
-			mounts = append(mounts, api.VolumeMount{Name: new(mount.Name), To: mount.To})
+			mounts = append(mounts, wireMount(mount))
 		}
 
 		spec.Volumes = &mounts
@@ -66,4 +66,29 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 	}
 
 	return spec
+}
+
+// wireMount maps a canonical mount onto the type the API accepts.
+//
+// Only the source the mount names is sent. The others are absent rather than empty,
+// for the same reason an unset host port is: a specification submitted twice has to
+// hash identically on the server, and a mount that named a volume must encode exactly
+// as it did before secrets could be mounted at all.
+func wireMount(mount manifest.VolumeMount) api.VolumeMount {
+	out := api.VolumeMount{To: mount.To}
+
+	if mount.Name != "" {
+		out.Name = new(mount.Name)
+	}
+	if mount.Secret != "" {
+		out.Secret = new(mount.Secret)
+	}
+	if mount.Var != "" {
+		out.Var = new(mount.Var)
+	}
+	if mount.Signal != "" {
+		out.Signal = new(api.MountSignal(mount.Signal))
+	}
+
+	return out
 }
