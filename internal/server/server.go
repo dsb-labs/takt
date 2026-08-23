@@ -194,24 +194,9 @@ func Run(ctx context.Context, config Config) error {
 		Variables: api.NewVariableAPI(api.VariableAPIConfig{Logger: logger, Variables: variableSvc}),
 	}).Register(mux)
 
-	var handler http.Handler = mux
-	for _, middleware := range []func(http.Handler) http.Handler{
-		api.Recovery(logger),
-		api.Logging(logger),
-		// Ahead of everything that acts on a request. Reaching this API is enough to
-		// run code on the host, and listening on loopback does not establish that the
-		// operator is who asked — a browser sends a request there on behalf of
-		// whatever page it was told to.
-		api.Guard(logger, config.HTTP.Hosts),
-		api.RequireJSON,
-		api.Limit,
-	} {
-		handler = middleware(handler)
-	}
-
 	server := &http.Server{
 		Addr:    config.HTTP.Address,
-		Handler: handler,
+		Handler: api.Wrap(mux, logger, config.HTTP.Hosts),
 		// A client that opens a connection and then stalls — mid-header, mid-body, or
 		// while reading a response — otherwise holds it indefinitely. These bound how
 		// long any one request may occupy the server.

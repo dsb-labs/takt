@@ -82,6 +82,34 @@ func (a *API) Register(mux *http.ServeMux) {
 	})
 }
 
+// Wrap returns handler with the middleware the server puts in front of it.
+//
+// The order is what this exists to hold still. Each entry wraps what came before, so
+// the list runs innermost first and a request meets it bottom to top: a body is bounded
+// before anything reads it, the host is checked before a handler runs, and Recovery sits
+// directly around the handler where a panic is actually likely to come from.
+//
+// Recovery being innermost is deliberate rather than incidental. A panic that unwound
+// past Logging would leave no record of the request that caused it, and the answer to
+// "which request killed this" is the reason the log line is worth having at all.
+func Wrap(handler http.Handler, logger *slog.Logger, hosts []string) http.Handler {
+	for _, middleware := range []func(http.Handler) http.Handler{
+		Recovery(logger),
+		Logging(logger),
+		// Ahead of anything that reaches a handler. Reaching this API is enough to run
+		// code on the host, and listening on loopback does not establish that the
+		// operator is who asked — a browser sends a request there on behalf of whatever
+		// page it was told to.
+		Guard(logger, hosts),
+		RequireJSON,
+		Limit,
+	} {
+		handler = middleware(handler)
+	}
+
+	return handler
+}
+
 // The largest request body the server will read. A workload specification is a
 // small document — a manifest an operator wrote by hand — so this is generous for
 // anything legitimate while refusing to read an endless upload into memory.
