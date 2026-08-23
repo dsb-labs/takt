@@ -3,10 +3,12 @@
 package reconciler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net"
 	"runtime"
 	"slices"
@@ -21,6 +23,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
+	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -39,6 +42,14 @@ type (
 		// workload to take one from. A driver that keys its own storage on the
 		// identifier has to find such a workload by its name instead.
 		Stop(ctx context.Context, id, workload string) error
+		// Signal should send the named signal to everything the driver runs for a
+		// workload, so that a workload mounting a value can be told the value
+		// changed rather than being replaced.
+		//
+		// A driver with nothing running for the workload should do nothing rather
+		// than fail. There is nothing to reload, and the reconciler asks only the
+		// driver that runs the workload anyway.
+		Signal(ctx context.Context, id, workload, signal string) error
 		// Observe should report every instance the driver is currently running.
 		Observe(ctx context.Context) ([]driver.Instance, error)
 		// Watch should report changes to the driver's instances so that the
@@ -76,6 +87,25 @@ type (
 		Resolve(ctx context.Context, env map[string]string) (map[string]string, error)
 	}
 
+	// The Mounts interface describes how the reconciler turns the secrets and
+	// variables a workload mounts into files on the host.
+	//
+	// Delivery happens here, as late as it can, for the same reason resolution does: a
+	// value's plaintext exists on disk only for as long as the workload reading it.
+	Mounts interface {
+		// Deliver should write a file for every value the specification mounts and
+		// return them as mounts the driver can honour.
+		Deliver(ctx context.Context, id string, version int, spec api.WorkloadSpec) ([]driver.Volume, error)
+		// Refresh should rewrite the mounted values that have changed since they were
+		// delivered, reporting the signal each affected workload asked for.
+		Refresh(ctx context.Context, name, id string, version int, spec api.WorkloadSpec) ([]service.Refresh, error)
+		// Forget should remove the files written for a workload, once nothing is
+		// running for it.
+		Forget(id string) error
+		// Prune should remove the files written for workloads other than those named.
+		Prune(keep []string) error
+	}
+
 	// The Checker interface describes how the reconciler registers and reads what
 	// orca established about a workload's health.
 	Checker interface {
@@ -102,6 +132,7 @@ type (
 		workloads  WorkloadRepository
 		ports      PortRepository
 		env        Resolver
+		mounts     Mounts
 		checker    Checker
 		bind       string
 		reallocate func(ctx context.Context, workload string) (bool, error)
@@ -136,6 +167,11 @@ type (
 		// stored — so a reference of either kind reaches the workload as the text it
 		// is written as.
 		Env Resolver
+		// Materialises the secrets and variables a workload mounts. May be nil, in
+		// which case a workload mounting either is started without the files it asked
+		// for — so one is only ever nil where no workload can mount anything, as in
+		// tests.
+		Mounts Mounts
 		// Reports what orca's own health checks established. May be nil, in which
 		// case only the state the driver reports is acted on.
 		Checker Checker
@@ -214,6 +250,7 @@ func New(config Config) *Reconciler {
 		workloads:  config.Workloads,
 		ports:      config.Ports,
 		env:        config.Env,
+		mounts:     config.Mounts,
 		checker:    config.Checker,
 		bind:       config.Bind,
 		reallocate: config.Reallocate,
@@ -335,6 +372,40 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 			r.logger.With("workload", workload, "error", err).Error("failed to stop orphaned workload")
 		}
 	}
+
+	r.prune(rows)
+}
+
+// prune removes the mounted values of workloads that no longer exist.
+//
+// A teardown removes them itself, so this is for the case that teardown cannot cover: a
+// server that stopped between stopping the work and removing the row leaves files whose
+// workload is gone, and a secret's plaintext should not sit on the disk waiting for
+// something to notice.
+//
+// That is a condition a server recovers from rather than one that arises while it runs,
+// so this reads the disk on the first pass and then only occasionally. Doing it every
+// pass cost two directory reads per pass forever — on a host where nothing has ever been
+// mounted, two failing syscalls — to answer a question whose answer only changes when a
+// server stops at exactly the wrong moment.
+//
+// Failures are logged rather than returned. Nothing is worse off for the files
+// remaining, and a later pass tries again.
+func (r *Reconciler) prune(rows []database.Workload) {
+	const every = 64
+
+	if r.mounts == nil || r.passes.Load()%every != 0 {
+		return
+	}
+
+	keep := make([]string, 0, len(rows))
+	for _, row := range rows {
+		keep = append(keep, row.ID)
+	}
+
+	if err := r.mounts.Prune(keep); err != nil {
+		r.logger.With("error", err).Error("failed to remove the mounted values of workloads that no longer exist")
+	}
 }
 
 // convergeAll converges every workload, several at a time.
@@ -449,7 +520,12 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 			r.settle(row.Name)
 		}
 
-		return nil
+		// A workload mounting a value it asked to be signalled about is told here,
+		// because its specification is current by construction: such a value stays out
+		// of the hash, so a change to one leaves the workload looking exactly as it
+		// does now. Comparing what was delivered against what orca holds is the only
+		// thing that would notice.
+		return r.refresh(ctx, row)
 	}
 
 	// A workload whose instances have all ended under a policy that asks for nothing
@@ -471,6 +547,85 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	}
 
 	return r.restart(ctx, row, instances)
+}
+
+// refresh rewrites the values a running workload mounts and signals it for each one
+// that changed.
+//
+// This is the other half of what a mount naming a signal asks for. Such a value is
+// deliberately absent from the specification's hash, so nothing about the workload
+// moves when it changes and the stale check will never fire: the file on disk is
+// compared against what orca holds, and the workload is told.
+//
+// The signal follows the write, so a workload told to reload always finds the new
+// contents. A failure to signal is returned rather than swallowed: the file has moved
+// and the workload has not been told, so the pass has to report that it did not finish
+// what it started. The digest is only recorded once the file is written, so the next
+// pass tries again.
+func (r *Reconciler) refresh(ctx context.Context, row database.Workload) error {
+	if r.mounts == nil {
+		return nil
+	}
+
+	// This runs for every workload that is up, on every pass, so the common case of a
+	// workload that mounts nothing must not cost a decode of its whole specification.
+	// No workload can want a refresh without naming a signal, and the stored bytes are
+	// canonical JSON, so the key is present verbatim when one does.
+	if !bytes.Contains(row.Spec, []byte(`"signal"`)) {
+		return nil
+	}
+
+	var spec api.WorkloadSpec
+	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+		// Validated before it was stored, so this means the specification and the rules
+		// have diverged. Nothing about the mounts can be read, and the workload is left
+		// running rather than being disturbed on the strength of a spec nothing could
+		// read.
+		return fmt.Errorf("failed to decode workload spec: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
+	defer cancel()
+
+	refreshed, err := r.mounts.Refresh(ctx, row.Name, row.ID, row.Version, spec)
+	if err != nil {
+		return fmt.Errorf("failed to refresh mounted values: %w", err)
+	}
+
+	if len(refreshed) == 0 {
+		return nil
+	}
+
+	d, ok := r.driverFor(row)
+	if !ok {
+		// Nothing runs this runtime, which converge has already reported. The files are
+		// written either way, so whatever eventually runs the workload reads the
+		// current value.
+		return nil
+	}
+
+	// One signal per distinct signal named, however many mounts changed. A workload
+	// that mounts three secrets and rotates all of them wants to be told to reload, not
+	// told three times.
+	for _, signal := range slices.Sorted(maps.Keys(signalsOf(refreshed))) {
+		if err = d.Signal(ctx, row.ID, row.Name, signal); err != nil {
+			return fmt.Errorf("failed to signal workload on the %s runtime: %w", d.Name(), err)
+		}
+
+		r.logger.With("workload", row.Name, "signal", signal).Info("signalled a workload whose mounted values changed")
+	}
+
+	return nil
+}
+
+// signalsOf returns the set of signals a batch of refreshed mounts asks for.
+func signalsOf(refreshed []service.Refresh) map[string]struct{} {
+	signals := make(map[string]struct{}, len(refreshed))
+	for _, refresh := range refreshed {
+		signals[string(refresh.Signal)] = struct{}{}
+	}
+
+	return signals
 }
 
 // register keeps the checker in step with the desired state, so that every workload
@@ -802,6 +957,16 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 		return nil
 	}
 
+	// Nothing is running, so the values the workload mounted have no reader left. This
+	// is what takes a mounted secret's plaintext off the disk, and it happens before
+	// the row goes: once that is gone there is no identifier to find the files by, and
+	// only the periodic prune would ever remove them.
+	if r.mounts != nil {
+		if err := r.mounts.Forget(row.ID); err != nil {
+			return fmt.Errorf("failed to remove mounted values: %w", err)
+		}
+	}
+
 	if err := r.workloads.Delete(ctx, row.Name); err != nil {
 		return fmt.Errorf("failed to delete workload: %w", err)
 	}
@@ -953,6 +1118,22 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 		if w.Env, err = r.env.Resolve(startCtx, w.Env); err != nil {
 			return fmt.Errorf("failed to resolve environment for workload: %w", err)
 		}
+	}
+
+	// The values the workload mounts are written here, for the same reasons and on the
+	// same terms as the environment above: as late as they can be, and ahead of the
+	// start rather than inside its error path, so a value that cannot be read leaves
+	// the workload's ports alone and lets the backoff pace the retries.
+	//
+	// The files join the volumes the specification already resolved, so a driver
+	// mounts one exactly as it mounts the other.
+	if r.mounts != nil {
+		mounted, err := r.mounts.Deliver(startCtx, row.ID, row.Version, w.Spec)
+		if err != nil {
+			return fmt.Errorf("failed to deliver mounted values for workload: %w", err)
+		}
+
+		w.Volumes = append(w.Volumes, mounted...)
 	}
 
 	id, err := d.Start(startCtx, w)

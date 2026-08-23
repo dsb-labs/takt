@@ -21,6 +21,8 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
+	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 func TestReconciler_Run(t *testing.T) {
@@ -1932,6 +1934,440 @@ func TestReconciler_Run_ResolvesSecrets(t *testing.T) {
 	})
 }
 
+func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
+	t.Parallel()
+
+	t.Run("hands the driver the files it wrote", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		mounts := NewMockMounts(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+
+		delivered := driver.Volume{
+			Name:   "tls-cert",
+			Host:   "/data/mounts/files/workload-id/1/secret-tls-cert",
+			Target: "/etc/tls/cert.pem",
+		}
+
+		mounts.EXPECT().Deliver(mock.Anything, "workload-id", 1, mock.Anything).
+			Return([]driver.Volume{delivered}, nil)
+
+		started := make(chan []driver.Volume, 1)
+		d.EXPECT().Start(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w driver.Workload) (string, error) {
+				select {
+				case started <- w.Volumes:
+				default:
+				}
+
+				return "instance-one", nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Mounts:    mounts,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		// A materialised value reaches the driver as an ordinary mount, which is what
+		// lets either runtime mount one without knowing where it came from.
+		volumes := <-started
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Equal(t, []driver.Volume{delivered}, volumes)
+	})
+
+	t.Run("does not abandon ports when a value cannot be delivered", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		mounts := NewMockMounts(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(nil, nil)
+
+		delivers := newCounter()
+		mounts.EXPECT().Deliver(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(context.Context, string, int, api.WorkloadSpec) ([]driver.Volume, error) {
+				delivers.inc()
+
+				return nil, errors.New("secret not found: nope")
+			})
+
+		// Ports have nothing to do with why this failed, exactly as for a secret an
+		// environment reads. The mock has no expectation for Start either, so reaching
+		// the driver at all would fail.
+		reallocated := newCounter()
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Mounts:    mounts,
+			Reallocate: func(context.Context, string) (bool, error) {
+				reallocated.inc()
+
+				return false, nil
+			},
+			Interval: time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+
+		for i := 2; i <= 3; i++ {
+			r.Notify()
+			passes.wait(t, i)
+		}
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Zero(t, reallocated.get(), "a missing mounted value gave up the workload's ports")
+		assert.Equal(t, 1, delivers.get(), "a workload waiting on a mounted value was retried inside its backoff window")
+	})
+
+	t.Run("removes what it wrote once the workload is gone", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		mounts := NewMockMounts(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+		row.DeletedAt = time.Now()
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+
+		forgotten := make(chan string, 1)
+		mounts.EXPECT().Forget("workload-id").RunAndReturn(func(id string) error {
+			select {
+			case forgotten <- id:
+			default:
+			}
+
+			return nil
+		})
+
+		repo.EXPECT().Delete(mock.Anything, "example").Return(nil)
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Mounts:    mounts,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		// This is what takes a mounted secret's plaintext off the disk, and it has to
+		// happen before the row goes: after that there is no identifier to find the
+		// files by.
+		id := <-forgotten
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Equal(t, "workload-id", id)
+	})
+
+	t.Run("removes what it wrote for workloads that no longer exist", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		mounts := NewMockMounts(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).
+			Return([]driver.Instance{{Workload: "example", SpecHash: "hash-one", State: driver.StateRunning}}, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		mounts.EXPECT().Refresh(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, nil).Maybe()
+
+		pruned := make(chan []string, 1)
+		mounts.EXPECT().Prune(mock.Anything).RunAndReturn(func(keep []string) error {
+			select {
+			case pruned <- keep:
+			default:
+			}
+
+			return nil
+		})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Mounts:    mounts,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		// A teardown removes these itself. The prune is for the server that stopped
+		// between stopping the work and removing the row.
+		keep := <-pruned
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Equal(t, []string{"workload-id"}, keep)
+	})
+}
+
+func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
+	t.Parallel()
+
+	running := []driver.Instance{{
+		Workload: "example",
+		SpecHash: "hash-one",
+		State:    driver.StateRunning,
+	}}
+
+	t.Run("signals a running workload whose mounted value changed", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		mounts := NewMockMounts(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+		row.Spec = specWithSignalledMount("example")
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).Return(running, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+
+		mounts.EXPECT().Refresh(mock.Anything, "example", "workload-id", 1, mock.Anything).
+			Return([]service.Refresh{{
+				Reference: manifest.Reference{Kind: manifest.KindSecret, Name: "tls-cert"},
+				Signal:    manifest.SignalHUP,
+			}}, nil)
+
+		signalled := make(chan string, 1)
+		d.EXPECT().Signal(mock.Anything, "workload-id", "example", mock.Anything).
+			RunAndReturn(func(_ context.Context, _, _, signal string) error {
+				select {
+				case signalled <- signal:
+				default:
+				}
+
+				return nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Mounts:    mounts,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		// The workload is told rather than replaced, which is what naming a signal asks
+		// for. The mock has no expectation for Stop or Start, so replacing it would fail
+		// the test.
+		signal := <-signalled
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Equal(t, "SIGHUP", signal)
+	})
+
+	t.Run("signals once for several mounts naming the same signal", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		mounts := NewMockMounts(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+		row.Spec = specWithSignalledMount("example")
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(running, nil)
+
+		refreshed := []service.Refresh{
+			{
+				Reference: manifest.Reference{Kind: manifest.KindSecret, Name: "tls-cert"},
+				Signal:    manifest.SignalHUP,
+			},
+			{
+				Reference: manifest.Reference{Kind: manifest.KindSecret, Name: "tls-key"},
+				Signal:    manifest.SignalHUP,
+			},
+		}
+
+		mounts.EXPECT().Refresh(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(refreshed, nil).Once()
+		mounts.EXPECT().Refresh(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, nil).Maybe()
+
+		signals := newCounter()
+		d.EXPECT().Signal(mock.Anything, mock.Anything, mock.Anything, "SIGHUP").
+			RunAndReturn(func(context.Context, string, string, string) error {
+				signals.inc()
+
+				return nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Mounts:    mounts,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+		awaitPasses(t, r, 1)
+
+		cancel()
+		require.NoError(t, <-done)
+
+		// A workload that rotated three secrets wants to be told to reload, not told
+		// three times.
+		assert.Equal(t, 1, signals.get())
+	})
+
+	t.Run("does not signal a workload whose values are unchanged", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		mounts := NewMockMounts(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+		row.Spec = specWithSignalledMount("example")
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(running, nil)
+
+		// Nothing moved, so the workload is not disturbed. The mock has no expectation
+		// for Signal, so sending one would fail the test.
+		mounts.EXPECT().Refresh(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, nil)
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Mounts:    mounts,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+
+		// A second pass, so that an unchanged value is checked more than once and still
+		// tells the workload nothing.
+		r.Notify()
+		passes.wait(t, 2)
+
+		cancel()
+		require.NoError(t, <-done)
+	})
+
+	t.Run("replaces a stale workload rather than refreshing it", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		mounts := NewMockMounts(t)
+
+		row := storedWorkload("example", "hash-two")
+		row.ID = "workload-id"
+		row.Spec = specWithSignalledMount("example")
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).Return(running, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+
+		// An instance about to be replaced has nothing worth signalling, and delivery
+		// writes the current value as its replacement starts. The mock has no
+		// expectation for Refresh or Signal, so either would fail the test.
+		mounts.EXPECT().Deliver(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+		d.EXPECT().Stop(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+		started := make(chan struct{}, 1)
+		d.EXPECT().Start(mock.Anything, mock.Anything).
+			RunAndReturn(func(context.Context, driver.Workload) (string, error) {
+				select {
+				case started <- struct{}{}:
+				default:
+				}
+
+				return "instance-two", nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Mounts:    mounts,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		<-started
+
+		cancel()
+		require.NoError(t, <-done)
+	})
+}
+
 // The counter type counts reconciliation passes as the loop drives them, so that
 // tests can wait on the pass itself rather than polling the mock's call log —
 // which the loop is concurrently writing to.
@@ -1982,6 +2418,26 @@ func awaitPasses(t *testing.T, r *reconciler.Reconciler, passes uint64) {
 	require.Eventuallyf(t, func() bool {
 		return r.Passes() >= passes
 	}, 5*time.Second, time.Millisecond, "the reconciler completed fewer than %d passes", passes)
+}
+
+// specWithSignalledMount returns a stored specification mounting a secret that asks to
+// be signalled when it changes, which is what makes a workload worth refreshing.
+func specWithSignalledMount(name string) []byte {
+	spec, err := json.Marshal(api.WorkloadSpec{
+		Version:   "v1",
+		Name:      name,
+		Container: &api.ContainerSpec{Image: "example/example:latest"},
+		Volumes: new([]api.VolumeMount{{
+			Secret: new("tls-cert"),
+			To:     "/etc/tls/cert.pem",
+			Signal: new(api.SIGHUP),
+		}}),
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return spec
 }
 
 // specWithHealth returns a stored specification declaring a check, so the reconciler
