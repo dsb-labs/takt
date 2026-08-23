@@ -118,6 +118,16 @@ func Run(ctx context.Context, config Config) error {
 		Rehash:    rehash,
 	})
 
+	// The services rather than the repositories, because materialising a mounted value
+	// means reading the value itself — which for a secret is decryption, and lives
+	// behind the secret service.
+	mountSvc := service.NewMountService(service.MountServiceConfig{
+		Logger:    logger,
+		Secrets:   secretSvc,
+		Variables: variableSvc,
+		Directory: config.Data.Directory,
+	})
+
 	// The drivers are keyed by the name each one declares, which is what a workload's
 	// runtime is matched against. A runtime with no driver is stored and left alone.
 	//
@@ -139,6 +149,9 @@ func Run(ctx context.Context, config Config) error {
 			Secrets:   secretSvc,
 			Variables: variableSvc,
 		}),
+		// Written as a workload starts and removed when it stops, so a mounted value's
+		// plaintext is on the disk for no longer than the workload reading it.
+		Mounts:  mountSvc,
 		Checker: checker,
 		// A check goes to where the workload's ports are published, which is not
 		// loopback for a server told to publish somewhere specific.
