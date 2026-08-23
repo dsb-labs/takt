@@ -21,6 +21,21 @@ read back from a label or a record is treated as a value rather than as a path. 
 directories the exec runtime keeps are named for the identifier orca assigned, and a
 name is read from inside a record rather than from the directory holding it.
 
+One thing a driver reports is not work it is doing. Replacing a workload means stopping
+it and starting it again, which would destroy the output of the attempt being replaced —
+so a driver keeps that attempt rather than removing it, and `orca workload logs
+--previous` reads it.
+
+Such an instance has ended and nothing will restart it, so it is reported as retained
+and left out of every decision about what to run. Counted as an instance it would read
+as a stale one to replace, as a failure to pace, or as work already present that needs
+nothing done.
+
+It is reported rather than hidden because one part of a pass does need to see it: a
+workload deleted while the server was down leaves a retained instance behind, and an
+instance absent from an observation would never be reaped. So the sweep that removes
+work nothing asked for sees everything, and convergence sees only what is live.
+
 ## Reconciliation
 
 A pass reads the full desired state, asks every driver what it is running, and acts on

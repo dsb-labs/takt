@@ -119,9 +119,11 @@ trees:
 exec/workloads/<id>/<version>/
   cwd/            the process's working directory
   output.log      the process's output, both streams combined
+  previous.log    the output of the attempt this one replaced
 
 exec/state/<id>/<version>/
   state.json      the process orca started, and how it ended
+  retained        present when the record is kept only for its output
 ```
 
 The process runs in `cwd`. What orca records about it lives in the other tree, which
@@ -135,6 +137,12 @@ never a path component. It is read from inside a record when orca needs it.
 
 `output.log` grows for as long as the workload runs. orca does not rotate or truncate
 it, so a workload that writes continuously needs watching.
+
+`previous.log` is the output of the attempt a replacement took the place of, which is
+what `orca workload logs --previous` reads. Stopping a workload moves `output.log` to it,
+so the attempt starting next writes to a file of its own rather than appending to the one
+before it. Only the most recent replaced attempt is kept, so this is one file rather than
+one per restart.
 
 `state.json` records the process identifier and the kernel's start time for that
 process. Both have to match for orca to claim the workload is still running. A process
@@ -241,6 +249,37 @@ orca workload logs example --tail 20
 For a container, orca reads the logs from the Docker daemon. For an exec workload it
 reads `output.log`. Either way both output streams come back combined in the order
 they were written.
+
+### The attempt before this one
+
+orca replaces a workload by stopping it and starting it again, so the output an
+operator wants is often the attempt that has just gone. It keeps that attempt:
+
+```sh
+orca workload logs example --previous
+```
+
+This matters most for a workload that keeps restarting. The attempt running now has not
+failed yet, so its output does not say why the workload is failing. The attempt before
+it does.
+
+One attempt is kept per workload, so a workload crashing in a loop does not fill the
+disk. Reading the previous output of a workload that has only ever run once gives
+nothing, because there is no earlier attempt.
+
+What is kept is not counted as running. It has no bearing on the workload's state, and a
+container being kept for its output is not a second instance:
+
+```sh
+orca workload get example
+```
+
+It goes when the workload does. Deleting a workload removes what was kept along with
+everything else, so nothing is left on the host afterwards.
+
+For a container this is the stopped container itself, which `docker ps --all` shows with
+orca's labels on it. For an exec workload it is a `previous.log` beside the
+`output.log` the current attempt is writing.
 
 ## Watching what orca is doing
 

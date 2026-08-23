@@ -97,14 +97,21 @@ A workload that names a schedule also reports when it next runs.
 ```sh
 orca workload logs example
 orca workload logs example --tail 20
+orca workload logs example --previous
 ```
 
 | Flag | Default | Description |
 |---|---|---|
 | `--tail`, `-n` | `100` | Lines to read from the end of the logs. |
+| `--previous`, `-p` | `false` | Read the instance that was replaced rather than the one running now. |
 
 Prints a workload's recent output. Both output streams are combined in the order they
 were written.
+
+`--previous` reads the attempt before the one running now, which is what a workload
+that keeps restarting needs: the current attempt has not failed yet, so its output does
+not say why the workload is failing. A workload that has only ever run once has no
+earlier attempt, and the output is empty.
 
 ## workload delete
 
