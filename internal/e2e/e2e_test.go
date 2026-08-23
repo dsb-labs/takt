@@ -17,7 +17,9 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -26,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	execdriver "github.com/dsb-labs/orca/internal/server/driver/exec"
 	"github.com/dsb-labs/orca/pkg/client"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -39,6 +42,17 @@ const (
 	// of what these tests are checking.
 	convergeTimeout = 2 * time.Minute
 )
+
+// TestMain lets this test binary act as a confinement trampoline.
+//
+// The server runs inside the test process, so the binary it executes to start a
+// confined exec workload is this one. Without this the workload would run the suite a
+// second time instead of confining itself and becoming the command.
+func TestMain(m *testing.M) {
+	execdriver.Confine()
+
+	os.Exit(m.Run())
+}
 
 func TestEndToEnd(t *testing.T) {
 	if testing.Short() {
@@ -818,6 +832,45 @@ func (s *Suite) TestExecWorkloadIsStoppedOnDelete() {
 	s.Require().Eventuallyf(func() bool {
 		return syscall.Kill(pid, 0) != nil
 	}, convergeTimeout, 500*time.Millisecond, "the process outlived the workload it belonged to")
+}
+
+// TestExecWorkloadCannotReachTheDataDirectory covers the confinement every exec
+// workload runs under, against a real server holding real state.
+//
+// An exec workload runs as the server's own uid, so nothing about file ownership keeps
+// it out of the database or the encryption key beside it. This is the one place that is
+// exercised against a server that actually has both: the unit tests confine against a
+// file a test wrote, where this confines against the real thing.
+func (s *Suite) TestExecWorkloadCannotReachTheDataDirectory() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// The key the server generated on startup, which opens every secret it holds.
+	key := filepath.Join(s.directory, "secret.key")
+
+	contents, err := os.ReadFile(key)
+	s.Require().NoError(err, "this test needs a key file the server's own user can read")
+	s.Require().NotEmpty(contents)
+
+	// Reading the key and the database, both of which sit in the data directory the
+	// server is using. Ending cleanly either way, so this is about what the command
+	// could read rather than how it exited.
+	spec := s.execSpec(name, "sh", "-c",
+		"cat "+key+" 2>&1; cat "+filepath.Join(s.directory, "state.db")+" 2>&1; exit 0")
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartOnFailure}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+
+	var out bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 20))
+
+	// The kernel refused both, so the workload printed the refusal rather than the
+	// contents.
+	s.NotContains(out.String(), string(contents), "an exec workload read the secret encryption key")
+	s.Contains(out.String(), "Permission denied")
 }
 
 // TestScheduledWorkloadRunsOnItsSchedule covers the schedule against a real daemon: a
