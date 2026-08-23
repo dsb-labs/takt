@@ -517,6 +517,113 @@ func (s *Suite) TestFailedJobIsRestarted() {
 	}, convergeTimeout, 500*time.Millisecond, "a failed job was never retried")
 }
 
+// TestRestartsArePaced covers the backoff through the whole stack, which is what
+// stops a workload that cannot start from spinning the reconciler and the daemon.
+//
+// The reconciler's own tests drive this against a clock they control. What they cannot
+// show is that a real container exiting immediately is paced at all: it is observed as
+// running on its way through, and treating that as convergence cleared the backoff on
+// every pass and let such a workload restart as fast as docker could be asked. Only a
+// real daemon produces that sighting.
+func (s *Suite) TestRestartsArePaced() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// Exits the moment it starts, so every pass finds it dead and wants to run it
+	// again. The delay is what the pacing is built from, and doubles each time: one
+	// restart is immediate, the next waits two seconds, then four.
+	spec := s.jobSpec(name, manifest.RestartAlways, 1)
+	spec.Restart.Delay = time.Second
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitInstance(name)
+
+	// Counted by identifier rather than by container, because a restart clears the
+	// corpse before it starts the replacement: however fast the workload loops, only
+	// one container exists at a time and counting them would report one either way.
+	seen := make(map[string]struct{})
+
+	// Long enough for dozens of unpaced restarts, since the reconciler ticks every
+	// second and each container ending prompts a pass of its own. Under the backoff it
+	// fits the immediate restart and the two-second wait after it.
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		workload, err := s.client.Get(s.ctx(), name)
+		s.Require().NoError(err)
+
+		for _, instance := range workload.Instances {
+			seen[instance.ID] = struct{}{}
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	s.LessOrEqualf(len(seen), 6,
+		"a workload exiting at once ran %d instances, so the backoff is not pacing it", len(seen))
+
+	// The other half of the claim. A workload being paced is still being retried, and
+	// one that stopped entirely would also pass the check above.
+	s.Greaterf(len(seen), 1, "a workload under always was not restarted at all")
+}
+
+// TestGivesUpAfterTheAttemptsAllowed covers the end of the backoff: a workload that
+// caps its attempts is eventually left alone rather than retried forever.
+func (s *Suite) TestGivesUpAfterTheAttemptsAllowed() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// Two attempts and no wait worth speaking of, so the cap is reached quickly and
+	// is the only thing that can stop the retries.
+	spec := s.jobSpec(name, manifest.RestartAlways, 1)
+	spec.Restart.Attempts = 2
+	spec.Restart.Delay = 100 * time.Millisecond
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	instance := s.awaitInstance(name)
+
+	// The attempts are spent well inside this. Counted by identifier for the reason
+	// the paced test counts that way: only one container exists at a time.
+	seen := map[string]struct{}{instance: {}}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		workload, err := s.client.Get(s.ctx(), name)
+		s.Require().NoError(err)
+
+		for _, current := range workload.Instances {
+			seen[current.ID] = struct{}{}
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Two attempts on top of the instance the workload started with, so a third
+	// restart is one the cap should have stopped.
+	s.LessOrEqualf(len(seen), 3, "a workload capped at two attempts ran %d instances", len(seen))
+
+	settled := len(seen)
+
+	// Nothing further is started once the cap is reached, which is what distinguishes
+	// giving up from waiting: a paced workload keeps producing new instances, just
+	// more slowly.
+	for range 5 {
+		time.Sleep(time.Second)
+
+		workload, err := s.client.Get(s.ctx(), name)
+		s.Require().NoError(err)
+
+		for _, current := range workload.Instances {
+			seen[current.ID] = struct{}{}
+		}
+
+		s.Require().Lenf(seen, settled, "a workload past its attempt cap was restarted again")
+	}
+}
+
 // TestNeverPolicyKeepsAFailureVisible covers a workload retired without being called a
 // success, which is the distinction between what a policy decides and how a workload
 // ended.
