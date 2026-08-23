@@ -432,10 +432,12 @@ func (s *MountService) version(tree, id string, version int) (string, error) {
 // nothing else on the host can enter, and the mode is narrowed again before the caller
 // signals anything.
 func write(path, value string) error {
-	// Only the mode matters here, not the error: a file that does not exist yet is the
-	// ordinary case, and one that cannot be made writable fails the write below with a
-	// message about the write rather than about the mode.
-	_ = os.Chmod(path, 0o600)
+	// A file that does not exist yet is the ordinary case, since a value is written
+	// before it is ever rewritten. Anything else is reported here rather than left to
+	// fail the write below, which would name the write when the mode is what stopped it.
+	if err := os.Chmod(path, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("failed to make mounted value writable: %w", err)
+	}
 
 	if err := os.WriteFile(path, []byte(value), 0o444); err != nil {
 		return fmt.Errorf("failed to write mounted value: %w", err)
