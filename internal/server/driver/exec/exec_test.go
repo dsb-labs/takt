@@ -260,6 +260,113 @@ func TestDriver_Stop(t *testing.T) {
 	})
 }
 
+func TestDriver_Signal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("signals the process the workload runs", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		// The script records that it was signalled, which is the only way to prove the
+		// signal arrived at the process rather than merely being sent somewhere. It
+		// announces its trap first: a signal is only handled once a handler exists, and
+		// SIGHUP before then ends the process rather than being caught.
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one",
+			`trap 'echo reloaded > reloaded.txt' HUP; touch trapped.txt; while true; do sleep 0.05; done`))
+		require.NoError(t, err)
+
+		cwd := filepath.Join(root, "workloads", testID, "1", "cwd")
+
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(filepath.Join(cwd, "trapped.txt"))
+
+			return err == nil
+		}, 10*time.Second, 50*time.Millisecond, "the process never installed its handler")
+
+		require.NoError(t, d.Signal(t.Context(), testID, "example", "SIGHUP"))
+
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(filepath.Join(cwd, "reloaded.txt"))
+
+			return err == nil
+		}, 10*time.Second, 50*time.Millisecond, "the process was never signalled")
+
+		// Still running. A reload is not a stop, which is the whole point of naming
+		// one.
+		awaitState(t, d, "example", driver.StateRunning)
+	})
+
+	t.Run("leaves what the command started alone", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		// Stopping a workload signals the group, so that whatever the command started
+		// goes with it. A reload is for the program that read the file, so a child that
+		// never asked for one must not be signalled.
+		//
+		// The parent installs a handler rather than ignoring the signal, which is what
+		// makes this test able to fail: an ignored disposition is inherited across a
+		// fork, so a child of a shell that ignored SIGHUP would survive a signal to the
+		// whole group and prove nothing. A handler is not inherited, so this child takes
+		// the default action and dies if the group is signalled.
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one",
+			`trap 'echo reloaded > reloaded.txt' HUP; sleep 300 & echo $! > child.pid; `+
+				`touch trapped.txt; while true; do sleep 0.05; done`))
+		require.NoError(t, err)
+
+		cwd := filepath.Join(root, "workloads", testID, "1", "cwd")
+		child := awaitChildPID(t, root, "example", 1)
+
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(filepath.Join(cwd, "trapped.txt"))
+
+			return err == nil
+		}, 10*time.Second, 50*time.Millisecond, "the process never installed its handler")
+
+		require.NoError(t, d.Signal(t.Context(), testID, "example", "SIGHUP"))
+
+		// The workload itself was told, so the signal did arrive somewhere.
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(filepath.Join(cwd, "reloaded.txt"))
+
+			return err == nil
+		}, 10*time.Second, 50*time.Millisecond, "the process was never signalled")
+
+		assert.Never(t, func() bool {
+			return syscall.Kill(child, 0) != nil
+		}, time.Second, 100*time.Millisecond, "a process the command started was signalled")
+	})
+
+	t.Run("refuses a signal it does not send", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		// Whether a workload runs is the reconciler's decision, so a driver that could
+		// be asked to kill a process would be taking it.
+		for _, signal := range []string{"SIGKILL", "SIGTERM", "SIGINT", "HUP", "1", ""} {
+			err := d.Signal(t.Context(), testID, "example", signal)
+			assert.ErrorIs(t, err, exec.ErrUnknownSignal, "accepted the signal %q", signal)
+		}
+	})
+
+	t.Run("does nothing for a workload it has never run", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		// A workload of another runtime looks like this from here.
+		assert.NoError(t, d.Signal(t.Context(), "", "example", "SIGHUP"))
+	})
+
+	t.Run("does nothing for a workload that has ended", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "exit 0"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		// There is no process left to reload, and the pid may since have been reused by
+		// something that has nothing to do with orca.
+		assert.NoError(t, d.Signal(t.Context(), testID, "example", "SIGHUP"))
+	})
+}
+
 func TestDriver_Stop_ResolvesAnOrphanByItsRecordedName(t *testing.T) {
 	t.Parallel()
 

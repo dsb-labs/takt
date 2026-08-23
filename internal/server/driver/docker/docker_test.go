@@ -330,6 +330,72 @@ func TestDriver_Stop(t *testing.T) {
 	})
 }
 
+func TestDriver_Signal(t *testing.T) {
+	t.Parallel()
+
+	t.Run("signals every running container it owns for the workload", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one", State: dockercontainer.StateRunning},
+			{ID: "container-two", State: dockercontainer.StateRunning},
+		}, nil).Once()
+
+		for _, id := range []string{"container-one", "container-two"} {
+			client.EXPECT().ContainerKill(mock.Anything, id, "SIGHUP").Return(nil).Once()
+		}
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		require.NoError(t, d.Signal(t.Context(), "", "example", "SIGHUP"))
+	})
+
+	t.Run("leaves a container that is not running alone", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one", State: dockercontainer.StateExited},
+			{ID: "container-two", State: dockercontainer.StateRunning},
+		}, nil).Once()
+
+		// Docker refuses to signal a container that has stopped, and one that has
+		// stopped has nothing to reload.
+		client.EXPECT().ContainerKill(mock.Anything, "container-two", "SIGHUP").Return(nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		require.NoError(t, d.Signal(t.Context(), "", "example", "SIGHUP"))
+	})
+
+	t.Run("succeeds when it owns nothing for the workload", func(t *testing.T) {
+		client := NewMockClient(t)
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		// The reconciler asks the driver that runs the workload, and there is nothing
+		// here to reload.
+		require.NoError(t, d.Signal(t.Context(), "", "example", "SIGHUP"))
+	})
+
+	t.Run("reports a signal the daemon refused", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one", State: dockercontainer.StateRunning},
+		}, nil).Once()
+
+		client.EXPECT().ContainerKill(mock.Anything, "container-one", "SIGHUP").
+			Return(errors.New("daemon said no")).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		// The file has already been rewritten, so a workload that was not told is
+		// something the caller has to hear about.
+		assert.Error(t, d.Signal(t.Context(), "", "example", "SIGHUP"))
+	})
+}
+
 func TestDriver_Observe(t *testing.T) {
 	t.Parallel()
 

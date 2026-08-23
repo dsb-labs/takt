@@ -34,6 +34,9 @@ type (
 		ContainerStop(ctx context.Context, id string, options container.StopOptions) error
 		// ContainerRemove should remove the container with the given identifier.
 		ContainerRemove(ctx context.Context, id string, options container.RemoveOptions) error
+		// ContainerKill should send the named signal to the container with the given
+		// identifier.
+		ContainerKill(ctx context.Context, id, signal string) error
 		// ContainerList should return the containers matching the given options.
 		ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
 		// ContainerInspect should return the full state of the container with the
@@ -96,6 +99,10 @@ func (c *engineClient) ContainerStop(ctx context.Context, id string, options con
 
 func (c *engineClient) ContainerRemove(ctx context.Context, id string, options container.RemoveOptions) error {
 	return c.inner.ContainerRemove(ctx, id, options)
+}
+
+func (c *engineClient) ContainerKill(ctx context.Context, id, signal string) error {
+	return c.inner.ContainerKill(ctx, id, signal)
 }
 
 func (c *engineClient) ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {

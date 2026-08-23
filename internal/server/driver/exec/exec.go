@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 // Name is how this driver identifies itself, and is what the server maps a workload's
@@ -63,7 +64,24 @@ var (
 	// ErrUnknownWorkload is returned when the driver has no record of a workload it
 	// was asked about by name.
 	ErrUnknownWorkload = errors.New("driver has no record of the workload")
+	// ErrUnknownSignal is returned when the driver is asked to send a signal it does
+	// not recognise.
+	ErrUnknownSignal = errors.New("signal is not one this driver sends")
 )
+
+// The signals this driver will send, keyed by the name a specification uses.
+//
+// A map rather than a parse of the name, so that the set is exactly what a manifest may
+// ask for. Keyed on the manifest's own constants rather than on literals, so that the
+// accepted set cannot drift from what a manifest may say.
+//
+// Nothing here stops a workload: whether one runs is the reconciler's decision, so a
+// driver that could be asked to kill a process would be taking it.
+var signals = map[string]syscall.Signal{
+	string(manifest.SignalHUP):  syscall.SIGHUP,
+	string(manifest.SignalUSR1): syscall.SIGUSR1,
+	string(manifest.SignalUSR2): syscall.SIGUSR2,
+}
 
 // The identifiers orca assigns are xid values: twenty lowercase alphanumeric
 // characters. Checked rather than trusted, because this driver removes directories and
@@ -350,6 +368,68 @@ func (d *Driver) Stop(ctx context.Context, id, workload string) error {
 	}
 
 	d.logger.With("workload", workload).Debug("workload stopped")
+
+	return nil
+}
+
+// Signal sends the named signal to every process the driver runs for the named
+// workload.
+//
+// This exists for a workload that mounts a value and asked to be told when it changes
+// rather than replaced.
+//
+// The process is signalled rather than its group, which is the opposite of what Stop
+// does and deliberately so: stopping a workload has to reach whatever it started, where
+// a reload is for the program that read the file. A group-wide reload would reach
+// children that never asked for one.
+func (d *Driver) Signal(_ context.Context, id, workload, signal string) error {
+	sig, ok := signals[signal]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrUnknownSignal, signal)
+	}
+
+	if id == "" {
+		found, err := d.identify(workload)
+		if err != nil {
+			if errors.Is(err, ErrUnknownWorkload) {
+				// Nothing here belongs to that workload, which is what a workload of
+				// another runtime looks like from here.
+				return nil
+			}
+
+			return err
+		}
+
+		id = found
+	}
+
+	versions, err := d.versions(d.state, id)
+	if err != nil {
+		return err
+	}
+
+	for _, path := range versions {
+		recorded, err := readState(path)
+		if err != nil {
+			// Nothing readable to signal. A record that cannot be read describes
+			// nothing that can be converged, which Observe already reports.
+			continue
+		}
+
+		if !recorded.alive() {
+			continue
+		}
+
+		if !signalable(recorded.PID) {
+			return fmt.Errorf("refusing to signal pid %d", recorded.PID)
+		}
+
+		if err = syscall.Kill(recorded.PID, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
+			return fmt.Errorf("failed to signal process: %w", err)
+		}
+
+		d.logger.With("workload", workload, "pid", recorded.PID, "signal", signal).Debug("process signalled")
+	}
 
 	return nil
 }

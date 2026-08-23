@@ -188,6 +188,35 @@ func (d *Driver) Stop(ctx context.Context, _, workload string) error {
 	return nil
 }
 
+// Signal sends the named signal to every container the driver holds for the named
+// workload.
+//
+// This exists for a workload that mounts a value and asked to be told when it changes
+// rather than replaced. Only a container that is running is signalled: docker refuses
+// to signal one that has stopped, and a stopped container has nothing to reload.
+//
+// The workload's identifier is not used, for the same reason Stop does not use it.
+func (d *Driver) Signal(ctx context.Context, _, workload, signal string) error {
+	containers, err := d.containers(ctx, workload)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range containers {
+		if state(c.State) != driver.StateRunning {
+			continue
+		}
+
+		if err = d.client.ContainerKill(ctx, c.ID, signal); err != nil {
+			return fmt.Errorf("failed to signal container: %w", err)
+		}
+
+		d.logger.With("workload", workload, "container", c.ID, "signal", signal).Debug("container signalled")
+	}
+
+	return nil
+}
+
 // Observe returns an instance for every container the driver owns, whatever state
 // it is in.
 //
