@@ -125,6 +125,31 @@ type (
 		// HEALTHCHECK that docker is already running, and ignoring it would discard
 		// something the operator asked for.
 		RuntimeHealth string
+		// Whether the instance is kept only so that its output can still be read.
+		//
+		// A driver retains the instance it most recently stopped rather than destroying
+		// it, so the output of an attempt that failed outlives the attempt. Such an
+		// instance is not work the driver is doing: it has ended, nothing will restart
+		// it, and whoever reasons about what is running has to leave it out or a corpse
+		// reads as an instance.
+		//
+		// It is reported rather than hidden because the orphan sweep needs to see it. A
+		// workload deleted while the server was down leaves one behind, and one absent
+		// from an observation would never be reaped.
+		Retained bool
+	}
+
+	// The LogOptions type describes which of a workload's output to read.
+	LogOptions struct {
+		// How many lines to read from the end of the output.
+		Tail int
+		// Whether to read the instance the driver retained rather than the ones it is
+		// running.
+		//
+		// The two are never combined. A driver holds the current attempt and the one
+		// before it, and concatenating them would return two runs spliced together with
+		// nothing marking the boundary.
+		Previous bool
 	}
 
 	// The Port type describes a published port of an instance.
