@@ -14,6 +14,7 @@ require (
 	github.com/docker/go-connections v0.8.1
 	github.com/go-ozzo/ozzo-validation/v4 v4.4.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
+	github.com/landlock-lsm/go-landlock v0.9.0
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/robfig/cron/v3 v3.0.1
@@ -101,6 +102,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
 	honnef.co/go/tools v0.7.0 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect

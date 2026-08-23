@@ -32,6 +32,17 @@ var (
 	_ service.Driver    = (*exec.Driver)(nil)
 )
 
+// TestMain lets this test binary act as a confinement trampoline.
+//
+// A confined workload is started by orca executing itself, so the tests need the same
+// of the binary they run in: started as a trampoline it has to confine itself and
+// become the command, rather than run the suite a second time inside the workload.
+func TestMain(m *testing.M) {
+	exec.Confine()
+
+	os.Exit(m.Run())
+}
+
 func TestDriver_Start(t *testing.T) {
 	t.Parallel()
 
