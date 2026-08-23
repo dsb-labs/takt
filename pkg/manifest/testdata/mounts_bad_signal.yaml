@@ -1,0 +1,10 @@
+version: v1
+name: example
+
+volumes:
+  - secret: secret-name
+    to: /var/secret.json
+    signal: SIGKILL
+
+container:
+  image: example/example:latest

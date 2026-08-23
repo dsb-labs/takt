@@ -1,0 +1,11 @@
+version: v1
+name: example
+
+volumes:
+  - secret: shared-name
+    to: /var/secret.json
+  - var: shared-name
+    to: /var/variable.json
+
+container:
+  image: example/example:latest

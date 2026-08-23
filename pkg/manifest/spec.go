@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -20,6 +21,19 @@ type (
 	// The OverlapPolicy type names what happens when an occurrence comes due while
 	// the previous run is still going.
 	OverlapPolicy string
+
+	// The MountKind type names what a mount takes its contents from, which
+	// determines which of a mount's source fields is used.
+	MountKind string
+
+	// The Signal type names the signal a workload is sent when a value it mounts
+	// changes.
+	//
+	// Only a signal a program reloads on can be named. One that would stop the
+	// workload is refused: the reconciler owns whether a workload runs, so a
+	// manifest that could stop it would be deciding that behind the restart
+	// policy's back.
+	Signal string
 
 	// The Schedule type describes when a workload runs.
 	Schedule struct {
@@ -139,21 +153,38 @@ type (
 		Command []string
 	}
 
-	// The VolumeMount type describes a volume a workload mounts, and where the
+	// The VolumeMount type describes something a workload mounts, and where the
 	// workload finds it.
+	//
+	// Exactly one source must be named, and which one it is decides what appears at
+	// the path: a volume is a directory that outlives the workload, where a secret or
+	// a variable is a file holding what orca holds under that name. The source is
+	// derived from the field that is present rather than from a discriminator, as a
+	// specification's runtime is.
 	VolumeMount struct {
 		// The volume to mount, which must already exist.
 		Name string
-		// Where the workload finds the volume, written the same way whichever
+		// The secret to mount as a file, which must already exist.
+		Secret string
+		// The variable to mount as a file, which must already exist.
+		Var string
+		// Where the workload finds what is mounted, written the same way whichever
 		// runtime runs it. Where it resolves to differs, because a container has a
 		// filesystem of its own and a process on the host does not.
 		//
 		// For a container it is the path inside the container. For an exec workload
-		// the volume is placed at this path relative to the workload's working
+		// what is mounted is placed at this path relative to the workload's working
 		// directory, and such a workload reaches it by that relative path: confining
 		// the process so the absolute one resolved there would need privileges orca
 		// does not have.
 		To string
+		// The signal to send the workload when the mounted value changes, rather than
+		// replacing its instance. Empty replaces the instance, which is what a
+		// workload that reads a file once wants.
+		//
+		// Only a mounted secret or variable may name one. A volume holds whatever the
+		// workload puts there, so there is no change orca could report.
+		Signal Signal
 	}
 
 	// The Volume type describes a volume, which is no more than its name. A volume
@@ -205,6 +236,104 @@ const (
 	// is what a job that must not be interrupted wants.
 	OverlapSkip OverlapPolicy = "skip"
 )
+
+const (
+	// MountVolume mounts a volume, which is a directory that outlives the workload.
+	MountVolume MountKind = "volume"
+	// MountSecret mounts a secret's value as a file.
+	MountSecret MountKind = "secret"
+	// MountVariable mounts a variable's value as a file.
+	MountVariable MountKind = "var"
+)
+
+const (
+	// SignalHUP is what most programs reload their configuration on.
+	SignalHUP Signal = "SIGHUP"
+	// SignalUSR1 is what a program reloading on a user-defined signal may use.
+	SignalUSR1 Signal = "SIGUSR1"
+	// SignalUSR2 is the other user-defined signal, for a program that already means
+	// something else by the first.
+	SignalUSR2 Signal = "SIGUSR2"
+)
+
+// Every signal a mount may name.
+//
+// A slice rather than a set so that the error naming the accepted signals lists them
+// the same way each time.
+var signals = []Signal{SignalHUP, SignalUSR1, SignalUSR2}
+
+// KindOf reports which source mount names, which is determined by the field it
+// carries rather than by a discriminator.
+//
+// Returns ErrNoMountSource when no source is named, or ErrAmbiguousMountSource when
+// more than one is.
+func KindOf(mount VolumeMount) (MountKind, error) {
+	named := make([]MountKind, 0, 3)
+	for _, candidate := range []struct {
+		kind  MountKind
+		value string
+	}{
+		{MountVolume, mount.Name},
+		{MountSecret, mount.Secret},
+		{MountVariable, mount.Var},
+	} {
+		if candidate.value != "" {
+			named = append(named, candidate.kind)
+		}
+	}
+
+	switch len(named) {
+	case 0:
+		return "", ErrNoMountSource
+	case 1:
+		return named[0], nil
+	default:
+		return "", fmt.Errorf("%w: %s", ErrAmbiguousMountSource, joinKinds(named))
+	}
+}
+
+// Source returns the name of what the mount takes its contents from, whichever kind
+// of source that is.
+//
+// This exists so that code which does not care where a mount points — reporting it,
+// checking it for duplicates — does not have to ask which field to read.
+func (m VolumeMount) Source() string {
+	switch {
+	case m.Secret != "":
+		return m.Secret
+	case m.Var != "":
+		return m.Var
+	default:
+		return m.Name
+	}
+}
+
+// Reference returns what the mount reads, reporting false for a mount of a volume.
+//
+// A mounted secret or variable is the same thing an env value references, so it
+// resolves through the same identity rather than through a second notion of what a
+// workload reads.
+func (m VolumeMount) Reference() (Reference, bool) {
+	switch {
+	case m.Secret != "":
+		return Reference{Kind: KindSecret, Name: m.Secret}, true
+	case m.Var != "":
+		return Reference{Kind: KindVariable, Name: m.Var}, true
+	default:
+		return Reference{}, false
+	}
+}
+
+// joinKinds names several mount sources for an error reporting that a mount named
+// more than one.
+func joinKinds(kinds []MountKind) string {
+	names := make([]string, 0, len(kinds))
+	for _, kind := range kinds {
+		names = append(names, string(kind))
+	}
+
+	return strings.Join(names, " and ")
+}
 
 // DefaultRestartDelay is how long to wait before the first restart when the manifest
 // does not say.
@@ -286,6 +415,11 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 
 // NewVolumeMount maps a wire mount onto the canonical shape.
 //
+// Exported so that a caller which only cares about what a workload mounts can convert
+// those alone. Converting the whole specification through NewSpec allocates a restart
+// policy and the rest of it, which is waste on a path asked about every workload on
+// every reconciliation pass.
+//
 // The source fields are carried across as they were given rather than being resolved
 // to a kind here. Which source a mount names is derived wherever it matters, so a
 // mount naming none or naming two survives to be reported by validation instead of
@@ -295,6 +429,15 @@ func NewVolumeMount(mount api.VolumeMount) VolumeMount {
 
 	if mount.Name != nil {
 		out.Name = *mount.Name
+	}
+	if mount.Secret != nil {
+		out.Secret = *mount.Secret
+	}
+	if mount.Var != nil {
+		out.Var = *mount.Var
+	}
+	if mount.Signal != nil {
+		out.Signal = Signal(*mount.Signal)
 	}
 
 	return out

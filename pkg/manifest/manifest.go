@@ -26,6 +26,11 @@ var (
 	// ErrAmbiguousRuntime is returned when a manifest describes more than one
 	// runtime, leaving no single driver to run it.
 	ErrAmbiguousRuntime = errors.New("more than one runtime specified")
+	// ErrNoMountSource is returned when a mount names nothing to mount.
+	ErrNoMountSource = errors.New("no mount source specified")
+	// ErrAmbiguousMountSource is returned when a mount names more than one thing to
+	// mount, leaving no single source for what appears at the path.
+	ErrAmbiguousMountSource = errors.New("more than one mount source specified")
 )
 
 // The manifest schema version this package understands.
@@ -275,28 +280,46 @@ func validatePorts(spec Spec, runtime Runtime) error {
 // runtime wants which spelling. Where the path resolves to differs — a container has
 // a filesystem of its own, an exec workload has its working directory — but what a
 // manifest may say does not.
+//
+// A mount names exactly one source, and the rules that follow from the source are
+// checked against the kind rather than against whichever field happened to be set: a
+// volume takes no signal, and a value mount is a file rather than a directory.
 func validateVolumes(mounts []VolumeMount) error {
 	if len(mounts) == 0 {
 		return nil
 	}
 
-	names := make(map[string]struct{}, len(mounts))
+	// Keyed by kind and name together, so that a secret and a variable sharing a name
+	// are two mounts rather than a duplicate. They resolve from different places, as
+	// the two kinds of reference do.
+	sources := make(map[Reference]struct{}, len(mounts))
 	paths := make(map[string]struct{}, len(mounts))
 
 	for _, mount := range mounts {
-		if !namePattern.MatchString(mount.Name) || len(mount.Name) > 63 {
-			return fmt.Errorf("invalid volumes: %q is not a volume name: must be lowercase "+
-				"alphanumeric, optionally separated by dashes", mount.Name)
+		kind, err := KindOf(mount)
+		if err != nil {
+			return fmt.Errorf("invalid volumes: %w", err)
 		}
 
-		if _, ok := names[mount.Name]; ok {
-			return fmt.Errorf("invalid volumes: volume %q is mounted more than once", mount.Name)
+		source := mount.Source()
+		if !namePattern.MatchString(source) || len(source) > 63 {
+			return fmt.Errorf("invalid volumes: %q is not a %s name: must be lowercase "+
+				"alphanumeric, optionally separated by dashes", source, kind)
 		}
-		names[mount.Name] = struct{}{}
+
+		if err = validateMountSignal(mount, kind); err != nil {
+			return err
+		}
+
+		key := Reference{Kind: ReferenceKind(kind), Name: source}
+		if _, ok := sources[key]; ok {
+			return fmt.Errorf("invalid volumes: %s %q is mounted more than once", kind, source)
+		}
+		sources[key] = struct{}{}
 
 		if !path.IsAbs(mount.To) {
-			return fmt.Errorf("invalid volumes: volume %q must name an absolute path to mount at, got %q",
-				mount.Name, mount.To)
+			return fmt.Errorf("invalid volumes: %s %q must name an absolute path to mount at, got %q",
+				kind, source, mount.To)
 		}
 
 		// Cleaned before comparing, so that "/data" and "/data/" are recognised as
@@ -306,7 +329,7 @@ func validateVolumes(mounts []VolumeMount) error {
 		// A working directory is not a volume, and for a container this would be the
 		// whole filesystem.
 		if to == "/" {
-			return fmt.Errorf("invalid volumes: volume %q cannot be mounted at %q", mount.Name, mount.To)
+			return fmt.Errorf("invalid volumes: %s %q cannot be mounted at %q", kind, source, mount.To)
 		}
 
 		if _, ok := paths[to]; ok {
@@ -316,6 +339,42 @@ func validateVolumes(mounts []VolumeMount) error {
 	}
 
 	return nil
+}
+
+// validateMountSignal reports whether the signal a mount names is one orca will send
+// for a mount of that kind.
+//
+// A volume takes none at all. orca does not know what a workload writes into a volume,
+// so there is no change it could report — and a manifest naming a signal there is
+// asking for something that would never happen, which is worth saying rather than
+// ignoring.
+func validateMountSignal(mount VolumeMount, kind MountKind) error {
+	if mount.Signal == "" {
+		return nil
+	}
+
+	if kind == MountVolume {
+		return fmt.Errorf("invalid volumes: volume %q cannot name a signal, because orca does not "+
+			"know when its contents change", mount.Name)
+	}
+
+	if !slices.Contains(signals, mount.Signal) {
+		return fmt.Errorf("invalid volumes: %s %q names signal %q, which must be one of %s",
+			kind, mount.Source(), mount.Signal, acceptedSignals())
+	}
+
+	return nil
+}
+
+// acceptedSignals names every signal a mount may ask for, for an error reporting one
+// that is not among them.
+func acceptedSignals() string {
+	names := make([]string, 0, len(signals))
+	for _, signal := range signals {
+		names = append(names, string(signal))
+	}
+
+	return strings.Join(names, ", ")
 }
 
 // validateHealth reports whether the workload's health check is one its runtime can

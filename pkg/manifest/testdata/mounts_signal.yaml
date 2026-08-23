@@ -1,0 +1,13 @@
+version: v1
+name: example
+
+volumes:
+  - secret: tls-cert
+    to: /etc/tls/cert.pem
+    signal: SIGHUP
+  - var: app-config
+    to: /etc/app/config.json
+    signal: SIGUSR1
+
+container:
+  image: example/example:latest

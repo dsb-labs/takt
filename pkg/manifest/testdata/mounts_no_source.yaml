@@ -1,0 +1,8 @@
+version: v1
+name: example
+
+volumes:
+  - to: /var/secret.json
+
+container:
+  image: example/example:latest

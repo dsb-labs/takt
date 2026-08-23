@@ -457,6 +457,195 @@ func TestReferences(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, references)
 	})
+
+	t.Run("names what a mount reads", func(t *testing.T) {
+		// A mounted value is the same thing an env value references, so it is recorded
+		// as read: that is what makes deleting one report the workloads holding it.
+		references, err := manifest.References(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
+				{Var: "app-config", To: "/etc/app/config.json"},
+				{Name: "example-data", To: "/var/lib/example"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{secret("tls-cert"), variable("app-config")}, references)
+	})
+
+	t.Run("names what a mount reads whatever its delivery mode", func(t *testing.T) {
+		// Naming a signal changes how a change is delivered, not whether the workload
+		// reads the value.
+		references, err := manifest.References(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Secret: "tls-cert", To: "/etc/tls/cert.pem", Signal: manifest.SignalHUP},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{secret("tls-cert")}, references)
+	})
+
+	t.Run("counts a value read from both places once", func(t *testing.T) {
+		references, err := manifest.References(manifest.Spec{
+			Env:     map[string]string{"CERT": "${secret:tls-cert}"},
+			Volumes: []manifest.VolumeMount{{Secret: "tls-cert", To: "/etc/tls/cert.pem"}},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{secret("tls-cert")}, references)
+	})
+}
+
+func TestRefreshed(t *testing.T) {
+	t.Parallel()
+
+	secret := func(name string) manifest.Reference {
+		return manifest.Reference{Kind: manifest.KindSecret, Name: name}
+	}
+
+	variable := func(name string) manifest.Reference {
+		return manifest.Reference{Kind: manifest.KindVariable, Name: name}
+	}
+
+	t.Run("names what only a signalling mount reads", func(t *testing.T) {
+		// These are the references whose value must stay out of the hash, or the
+		// instance would be replaced rather than signalled.
+		refreshed, err := manifest.Refreshed(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Secret: "tls-cert", To: "/etc/tls/cert.pem", Signal: manifest.SignalHUP},
+				{Var: "app-config", To: "/etc/app/config.json", Signal: manifest.SignalUSR1},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{secret("tls-cert"), variable("app-config")}, refreshed)
+	})
+
+	t.Run("ignores a mount that asked to be replaced", func(t *testing.T) {
+		refreshed, err := manifest.Refreshed(manifest.Spec{
+			Volumes: []manifest.VolumeMount{{Secret: "tls-cert", To: "/etc/tls/cert.pem"}},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, refreshed)
+	})
+
+	t.Run("ignores a value the environment also reads", func(t *testing.T) {
+		// An environment variable is fixed once a process has started, so a workload
+		// reading the value there has to be replaced to see a change. Refreshing the
+		// file it also mounts happens anyway and costs nothing.
+		refreshed, err := manifest.Refreshed(manifest.Spec{
+			Env: map[string]string{"CERT": "${secret:tls-cert}"},
+			Volumes: []manifest.VolumeMount{
+				{Secret: "tls-cert", To: "/etc/tls/cert.pem", Signal: manifest.SignalHUP},
+			},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, refreshed)
+	})
+
+	t.Run("ignores a value another mount asked to be replaced for", func(t *testing.T) {
+		// One mount asked to be replaced, so the workload is replaced — and a hash that
+		// did not move would leave that mount's file stale.
+		refreshed, err := manifest.Refreshed(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Secret: "tls-cert", To: "/etc/tls/cert.pem", Signal: manifest.SignalHUP},
+				{Secret: "tls-cert", To: "/etc/other/cert.pem"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, refreshed)
+	})
+
+	t.Run("returns nothing for a workload that mounts no value", func(t *testing.T) {
+		refreshed, err := manifest.Refreshed(manifest.Spec{
+			Env:     map[string]string{"CERT": "${secret:tls-cert}"},
+			Volumes: []manifest.VolumeMount{{Name: "example-data", To: "/var/lib/example"}},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, refreshed)
+	})
+}
+
+func TestKindOf(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name      string
+		Mount     manifest.VolumeMount
+		Expected  manifest.MountKind
+		ExpectErr error
+	}{
+		{
+			Name:     "a mounted volume",
+			Mount:    manifest.VolumeMount{Name: "example-data", To: "/var/lib/example"},
+			Expected: manifest.MountVolume,
+		},
+		{
+			Name:     "a mounted secret",
+			Mount:    manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
+			Expected: manifest.MountSecret,
+		},
+		{
+			Name:     "a mounted variable",
+			Mount:    manifest.VolumeMount{Var: "app-config", To: "/etc/app/config.json"},
+			Expected: manifest.MountVariable,
+		},
+		{
+			Name:      "no source at all",
+			Mount:     manifest.VolumeMount{To: "/etc/tls/cert.pem"},
+			ExpectErr: manifest.ErrNoMountSource,
+		},
+		{
+			Name:      "two sources",
+			Mount:     manifest.VolumeMount{Secret: "tls-cert", Var: "app-config", To: "/etc/tls/cert.pem"},
+			ExpectErr: manifest.ErrAmbiguousMountSource,
+		},
+		{
+			Name: "three sources",
+			Mount: manifest.VolumeMount{
+				Name:   "example-data",
+				Secret: "tls-cert",
+				Var:    "app-config",
+				To:     "/etc/tls/cert.pem",
+			},
+			ExpectErr: manifest.ErrAmbiguousMountSource,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			kind, err := manifest.KindOf(tc.Mount)
+			if tc.ExpectErr != nil {
+				assert.ErrorIs(t, err, tc.ExpectErr)
+				assert.Empty(t, kind)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.Expected, kind)
+		})
+	}
+}
+
+func TestVolumeMount_Reference(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports what a mounted secret reads", func(t *testing.T) {
+		reference, ok := manifest.VolumeMount{Secret: "tls-cert"}.Reference()
+		require.True(t, ok)
+		assert.Equal(t, manifest.Reference{Kind: manifest.KindSecret, Name: "tls-cert"}, reference)
+	})
+
+	t.Run("reports what a mounted variable reads", func(t *testing.T) {
+		reference, ok := manifest.VolumeMount{Var: "app-config"}.Reference()
+		require.True(t, ok)
+		assert.Equal(t, manifest.Reference{Kind: manifest.KindVariable, Name: "app-config"}, reference)
+	})
+
+	t.Run("reports that a mounted volume reads nothing", func(t *testing.T) {
+		// A volume holds whatever the workload puts there, so there is nothing orca
+		// resolves for it.
+		_, ok := manifest.VolumeMount{Name: "example-data"}.Reference()
+		assert.False(t, ok)
+	})
 }
 
 func TestNames(t *testing.T) {

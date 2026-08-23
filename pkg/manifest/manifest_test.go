@@ -318,6 +318,71 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// The three sources in one list, which is the point of putting them there:
+			// a workload says what appears in its filesystem in one place, however the
+			// contents are produced.
+			Name: "mounts a volume, a secret and a variable",
+			File: "mounts_values.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, []manifest.VolumeMount{
+					{Name: "example-data", To: "/var/lib/example"},
+					{Secret: "secret-name", To: "/var/secret.json"},
+					{Var: "variable-name", To: "/var/example.json"},
+				}, spec.Volumes)
+			},
+		},
+		{
+			Name: "mounts values that ask to be signalled",
+			File: "mounts_signal.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, []manifest.VolumeMount{
+					{Secret: "tls-cert", To: "/etc/tls/cert.pem", Signal: manifest.SignalHUP},
+					{Var: "app-config", To: "/etc/app/config.json", Signal: manifest.SignalUSR1},
+				}, spec.Volumes)
+			},
+		},
+		{
+			// A secret and a variable may share a name and hold different values, so
+			// mounting both is two mounts rather than a duplicate.
+			Name: "mounts a secret and a variable sharing a name",
+			File: "mounts_same_name.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, []manifest.VolumeMount{
+					{Secret: "shared-name", To: "/var/secret.json"},
+					{Var: "shared-name", To: "/var/variable.json"},
+				}, spec.Volumes)
+			},
+		},
+		{
+			Name:      "rejects a mount naming nothing to mount",
+			File:      "mounts_no_source.yaml",
+			ExpectErr: manifest.ErrNoMountSource,
+		},
+		{
+			Name:      "rejects a mount naming two things to mount",
+			File:      "mounts_two_sources.yaml",
+			ExpectErr: manifest.ErrAmbiguousMountSource,
+		},
+		{
+			// orca does not know what a workload writes into a volume, so a signal there
+			// asks for something that would never happen.
+			Name:         "rejects a signal on a mounted volume",
+			File:         "mounts_volume_signal.yaml",
+			ExpectsError: true,
+		},
+		{
+			// Whether a workload runs is the reconciler's decision, so a manifest that
+			// could stop one would be taking it.
+			Name:         "rejects a signal that would stop the workload",
+			File:         "mounts_bad_signal.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects the same secret mounted twice",
+			File:         "mounts_duplicate_secret.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name: "keeps a secret reference as written",
 			File: "env_secrets.yaml",
 			Assert: func(t *testing.T, spec manifest.Spec) {

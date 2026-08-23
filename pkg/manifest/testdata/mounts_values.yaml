@@ -1,0 +1,34 @@
+version: v1
+name: example
+schedule:
+  cron: "*/5 * * * *"
+  overlap: skip
+
+restart:
+  policy: on-failure
+  attempts: 5
+  delay: 10s
+
+labels:
+  some-key: some-value
+
+ports:
+  - to: 8080
+    from: 4141
+  - to: 9090
+
+env:
+  EXAMPLE: ${secret:secret-name}
+  EXAMPLE2: ${var:variable-name}
+
+volumes:
+  - name: example-data
+    to: /var/lib/example
+  - secret: secret-name
+    to: /var/secret.json
+  - var: variable-name
+    to: /var/example.json
+
+container:
+  image: example/example:latest
+  command: ["sh", "-c", "exit 0"]

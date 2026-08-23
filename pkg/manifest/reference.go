@@ -170,12 +170,17 @@ func Expand(value string, resolve func(reference Reference) (string, bool)) (str
 	return out.String(), nil
 }
 
-// References returns every reference the workload's environment holds, sorted so
-// that the result is stable.
+// References returns every reference the workload reads, from its environment and
+// from what it mounts, sorted so that the result is stable.
 //
 // Stable because these references reach the hash of a workload's specification. An
 // order that depended on map iteration would make an unchanged workload hash
 // differently each time it was applied.
+//
+// A mounted secret or variable is included whatever its delivery mode. This is what
+// records that the workload reads it, so deleting one still reports the workloads
+// holding it; whether a change replaces the instance or refreshes the file is a
+// separate question, which Refreshed answers.
 func References(spec Spec) ([]Reference, error) {
 	var references []Reference
 
@@ -193,9 +198,98 @@ func References(spec Spec) ([]Reference, error) {
 		}
 	}
 
+	for _, mount := range spec.Volumes {
+		reference, ok := mount.Reference()
+		if !ok {
+			continue
+		}
+
+		if !slices.Contains(references, reference) {
+			references = append(references, reference)
+		}
+	}
+
 	slices.SortFunc(references, func(a, b Reference) int {
 		return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Name, b.Name))
 	})
+
+	return references, nil
+}
+
+// Refreshed returns the references the workload reads only through a mount that names
+// a signal, sorted as References is.
+//
+// These are the references whose value must not reach the specification's hash. A
+// change to one is delivered by rewriting the file and signalling the workload, and a
+// hash that moved with it would have the reconciler replace the instance instead —
+// which is the thing naming a signal asks not to happen.
+//
+// A reference read anywhere else as well is absent from the result. An environment
+// variable is fixed once a process has started and another mount may ask to be
+// replaced, so a reference with any such reading has to move the hash; refreshing the
+// file it also appears at costs nothing and happens anyway.
+func Refreshed(spec Spec) ([]Reference, error) {
+	// Nothing can be refreshed without a mount asking for it, so a workload with no
+	// mounts at all is answered without scanning its environment.
+	signalled := make(map[Reference]struct{}, len(spec.Volumes))
+	for _, mount := range spec.Volumes {
+		if mount.Signal == "" {
+			continue
+		}
+
+		if reference, ok := mount.Reference(); ok {
+			signalled[reference] = struct{}{}
+		}
+	}
+
+	if len(signalled) == 0 {
+		return nil, nil
+	}
+
+	read, err := References(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	// What is read in a way that a change cannot be delivered to in place. Built from
+	// the same scan References made, rather than by parsing every env value again.
+	replaced := make(map[Reference]struct{}, len(read))
+	for key, value := range spec.Env {
+		// References has already rejected a malformed value, so a failure here is
+		// impossible rather than merely unlikely. Reported anyway, since silently
+		// treating a value as holding no reference would put its value in the hash.
+		found, err := ParseReferences(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid env %s: %w", key, err)
+		}
+
+		for _, reference := range found {
+			replaced[reference] = struct{}{}
+		}
+	}
+
+	for _, mount := range spec.Volumes {
+		if mount.Signal != "" {
+			continue
+		}
+
+		if reference, ok := mount.Reference(); ok {
+			replaced[reference] = struct{}{}
+		}
+	}
+
+	var references []Reference
+	for _, reference := range read {
+		if _, ok := signalled[reference]; !ok {
+			continue
+		}
+
+		if _, ok := replaced[reference]; ok {
+			continue
+		}
+
+		references = append(references, reference)
+	}
 
 	return references, nil
 }
@@ -221,6 +315,9 @@ func Names(references []Reference, kind ReferenceKind) []string {
 // Only the values are scanned. A key is the name of an environment variable rather
 // than something a workload reads, so a reference in one has nothing to substitute
 // into and is left as the literal text it is.
+//
+// A mount names what it reads directly rather than as reference text, so there is no
+// syntax to reject there. validateVolumes checks those names.
 func validateEnv(spec Spec) error {
 	_, err := References(spec)
 
