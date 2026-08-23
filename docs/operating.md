@@ -86,6 +86,8 @@ secret.key        the key secrets are encrypted with
 exec/state/       what orca started, one directory per exec workload
 exec/workloads/   where exec workloads run, one directory each
 volumes/          one directory per volume
+mounts/files/     the secrets and variables workloads mount, one directory each
+mounts/state/     what orca wrote for each of them
 ```
 
 The database holds each workload's stored specification, environment included, so orca
@@ -96,6 +98,13 @@ a backup of `state.db` alone does not disclose one. `secret.key` is what decrypt
 them, and it needs a backup of its own: a value sealed under a key that is gone cannot
 be recovered. Keeping the two apart is what makes the database safe to copy. See
 [Secrets](secrets.md#the-encryption-key).
+
+`mounts/files/` is the exception. A workload that mounts a secret gets a file holding
+the plaintext, because there is no way to put a value inside a container without writing
+it somewhere first. Those files are written as a workload starts and removed once
+nothing is running for it, and their directories are readable only by the user running
+the server. **A backup of the data directory includes them in the clear.** See
+[Mounting a secret as a file](secrets.md#mounting-a-secret-as-a-file).
 
 The database holds desired state only. What is actually running is observed from the
 runtime when asked, so nothing persisted can go stale against reality. A restarted

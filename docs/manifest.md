@@ -49,7 +49,7 @@ container:
 | `labels` | no | Arbitrary key-value pairs. |
 | `ports` | no | The ports the workload publishes. |
 | `env` | no | Environment variables set for the workload. A value may reference a secret or a variable. |
-| `volumes` | no | The volumes the workload mounts, and where it finds each one. |
+| `volumes` | no | What the workload mounts — a volume, a secret or a variable — and where it finds each one. |
 | `restart` | no | What happens when the workload ends. |
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
 | `health` | no | How orca decides the workload is working. |
@@ -227,7 +227,27 @@ returned by the API. A secret's is not. See [Variables](variables.md) and
 volumes:
   - name: example-data
     to: /var/lib/example
+  - secret: secret-name
+    to: /var/secret.json
+  - var: variable-name
+    to: /var/example.json
 ```
+
+An entry names exactly one source, and which one it names decides what appears at the
+path:
+
+| Source | What appears at `to` |
+|---|---|
+| `name` | A volume, which is a directory that outlives the workload. |
+| `secret` | A file holding the secret's value. |
+| `var` | A file holding the variable's value. |
+
+Naming none, or naming two, is an error. One list rather than two, because what a
+workload finds in its filesystem is one question however the contents are produced.
+
+`to` is where the workload finds it, and works the same way for all three. The rest of
+this section is about mounting a volume. [Mounting a value](#mounting-a-value) covers
+the other two.
 
 `name` is the volume to mount. `to` is where the workload finds it.
 
@@ -283,6 +303,77 @@ difference, so `/data` and `/data/` are the same mount.
 
 Volumes sit beside the runtime blocks rather than inside one, for the same reason ports
 do: where a workload keeps its data is a question about the workload.
+
+## Mounting a value
+
+A mount can name a secret or a variable instead of a volume. The workload then finds a
+file holding that value:
+
+```yaml
+volumes:
+  - secret: tls-cert
+    to: /etc/tls/cert.pem
+  - var: app-config
+    to: /etc/app/config.json
+```
+
+This is the option for a value that is a file — a certificate, a key, a credentials
+document, a configuration fragment. An `env` reference covers a value that fits in an
+environment variable. Use whichever the program wants.
+
+The file holds the value and nothing else. No trailing newline is added, so what a
+workload reads is what `orca secret set` was given.
+
+The value has to exist before a workload can mount it, exactly as a volume does.
+Applying a manifest naming one that does not is rejected, and the message names it.
+
+`to` resolves the same way it does for a volume, so an exec workload reaches the file by
+the relative path. Two mounts cannot share a path. A secret and a variable may share a
+*name*, and mounting both is two mounts rather than a duplicate.
+
+**A mounted secret is written to the host filesystem.** There is no way to put a value
+inside a container without writing it somewhere first. An `env` reference is the option
+that writes nothing. See [Secrets](secrets.md#mounting-a-secret-as-a-file) for what that
+exposes and for how long.
+
+### When a mounted value changes
+
+By default, changing a mounted value replaces the workload's instances, exactly as
+changing a referenced secret does. That is what a program which reads its file once at
+startup needs.
+
+`signal` asks for the other behaviour:
+
+```yaml
+volumes:
+  - secret: tls-cert
+    to: /etc/tls/cert.pem
+    signal: SIGHUP
+```
+
+orca then rewrites the file in place and sends the signal. The workload keeps running,
+so a program that rereads its configuration keeps its connections and its uptime
+through a rotation.
+
+| Signal | |
+|---|---|
+| `SIGHUP` | What most programs reload on. |
+| `SIGUSR1` | For a program that reloads on a user-defined signal. |
+| `SIGUSR2` | The other user-defined signal. |
+
+Anything else is rejected, including `SIGTERM` and `SIGKILL`. Whether a workload runs
+is orca's decision to make through the [restart policy](#restart), so a manifest that
+could stop one would be taking it.
+
+Only a mounted secret or variable may name a signal. A volume holds whatever the
+workload puts there, so there is no change orca could report.
+
+The file is rewritten rather than replaced. A mount follows the file it was given, so a
+replacement would leave the workload reading the old contents.
+
+A value read from `env` as well as from a signalling mount still replaces the workload.
+An environment variable is fixed once a process has started, so there is no way to
+change one without a restart.
 
 ## Restart
 

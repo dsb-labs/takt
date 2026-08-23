@@ -19,6 +19,10 @@ For a value that is not worth hiding — a hostname, a log level — use a
 [variable](variables.md) instead. It works the same way, and its value is readable
 back.
 
+A workload that wants a file rather than an environment variable can mount the secret
+instead. That writes the value to disk, which is covered in
+[Mounting a secret as a file](#mounting-a-secret-as-a-file).
+
 ## What orca guarantees
 
 - **The value is not readable back.** No endpoint returns one, so no command prints
@@ -67,6 +71,39 @@ whitespace is not orca's to correct.
 An empty value is a value. A workload reading it gets an empty variable rather than
 none.
 
+## Mounting a secret as a file
+
+Some secrets are files. A certificate, a private key, a service-account document: a
+program wants a path, not an environment variable. A mount gives it one:
+
+```yaml
+volumes:
+  - secret: tls-cert
+    to: /etc/tls/cert.pem
+```
+
+The syntax is documented in the
+[manifest reference](manifest.md#mounting-a-value).
+
+**This writes the plaintext to the host filesystem.** There is no way to put a value
+inside a container without writing it somewhere first, so mounting a secret trades the
+"not on disk" guarantee above for a file the workload can open. It is worth knowing
+exactly what that costs:
+
+- The file lives under the data directory, in `mounts/files/`, in directories readable
+  only by the user running the server.
+- The file itself is read-only and readable by any user that can reach it. A container
+  runs as a user of its own, so a file only the server's user could read would be
+  unreadable by the workload that mounted it. The directory above is what keeps
+  everything else out.
+- The file is written as the workload starts and removed once nothing is running for it.
+  A `orca workload delete` takes it off the disk.
+- A backup of the data directory includes it, in the clear. This is the one place a
+  secret's value is not encrypted at rest.
+
+An `env` reference remains the option that writes nothing to disk. Prefer it when the
+program will take a value that way.
+
 ## Rotation
 
 Setting a secret to a new value moves its revision, which moves the specification hash
@@ -84,6 +121,19 @@ every run therefore does not restart the fleet each time.
 
 The revision is random rather than a counter, and says nothing about the value. It is
 reported so that a rotation can be confirmed without the value being shown.
+
+A mounted secret can ask to be signalled instead of replaced:
+
+```yaml
+volumes:
+  - secret: tls-cert
+    to: /etc/tls/cert.pem
+    signal: SIGHUP
+```
+
+orca then rewrites the file and signals the workload, which keeps running. This is what
+a server holding open connections wants from a certificate rotation. See
+[When a mounted value changes](manifest.md#when-a-mounted-value-changes).
 
 ## Deleting
 

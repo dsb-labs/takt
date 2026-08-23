@@ -71,6 +71,9 @@ container:
 A workload names exactly one runtime block. `container:` runs an image and `exec:`
 runs a command on the host. Everything else applies to either.
 
+A `volumes` entry names a volume, a secret or a variable. A volume is storage; the other
+two are files holding what orca holds under that name.
+
 A volume is created before the workload that mounts it and outlives that workload, so
 deleting a workload never destroys what it stored. Its manifest is a name and nothing
 else:
@@ -99,6 +102,20 @@ env:
 
 Changing a secret's value replaces the workloads reading it, so a rotation does not
 have to be followed by an apply.
+
+A secret that is a file — a certificate, a key — can be mounted instead of read from
+the environment:
+
+```yaml
+volumes:
+  - secret: tls-cert
+    to: /etc/tls/cert.pem
+    signal: SIGHUP
+```
+
+`signal` asks orca to rewrite the file and signal the workload when the value changes,
+rather than replacing it. Leave it out to have the workload replaced. Mounting a secret
+writes it to the host filesystem, which [Secrets](docs/secrets.md) covers.
 
 A variable is the same thing for a value worth reading back — a hostname, a log level,
 a feature flag:

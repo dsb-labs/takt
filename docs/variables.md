@@ -15,6 +15,19 @@ env:
 
 The reference syntax is documented in the [manifest reference](manifest.md#reading-a-variable).
 
+A variable can also be mounted as a file, for a value a program reads from a path rather
+than from its environment:
+
+```yaml
+volumes:
+  - var: app-config
+    to: /etc/app/config.json
+```
+
+That is documented in [Mounting a value](manifest.md#mounting-a-value). Unlike a
+mounted secret, a file holding a variable exposes nothing that was not already readable
+through the API.
+
 ## Variable or secret
 
 The two work the same way. The difference is whether the value is readable back:
@@ -26,6 +39,7 @@ The two work the same way. The difference is whether the value is readable back:
 | Reported by `list` | with its value | name and revision only |
 | Set from an argument | yes | no |
 | Changing it redeploys readers | yes | yes |
+| Mountable as a file | yes | yes, at a documented cost |
 
 Use a variable for a hostname, a port, a log level, a feature flag, a region — a value
 you would want to read back when working out how something is configured. Use a
