@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -97,6 +98,9 @@ type (
 		// Where a workload keeps its working directory and its output, which it
 		// necessarily can reach.
 		workloads string
+		// The paths every workload may read, beyond the host's own files that a
+		// command needs to run at all.
+		allowed []string
 
 		// Guards the supervised set, which the reconciler's goroutine and every
 		// supervising goroutine both touch.
@@ -119,6 +123,13 @@ type (
 		// The directory beneath which the driver keeps everything, both its own
 		// records and the directories it gives workloads.
 		Root string
+		// Extra paths every workload may read, for a runtime that lives somewhere the
+		// host's own directories do not cover.
+		//
+		// Read-only, and the operator's decision rather than a workload's: the API has
+		// no authentication, so a workload able to widen its own confinement would undo
+		// it.
+		AllowPaths []string
 	}
 
 	// The supervised type is a process this server started.
@@ -139,6 +150,7 @@ func New(config Config) *Driver {
 		// running process are kept where the workload has no path to them.
 		state:      filepath.Join(config.Root, stateDir),
 		workloads:  filepath.Join(config.Root, workloadDir),
+		allowed:    config.AllowPaths,
 		supervised: make(map[string]*supervised),
 		// Buffered so that a process ending never blocks its own supervisor on a
 		// reconciler that is mid-pass.
@@ -156,6 +168,10 @@ func (d *Driver) Name() string {
 // The process is given a directory of its own, a process group of its own, and an
 // environment holding only what the workload asked for. Its output goes to a file in
 // that directory, which is what Logs reads.
+//
+// It is also confined: the kernel refuses it every path outside its own directory, the
+// volumes it mounts, the values it mounts and the host's own files. A host whose kernel
+// cannot do that is refused here rather than running the workload unconfined.
 func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	spec := w.Spec.Exec
 	if spec == nil {
@@ -164,6 +180,12 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 
 	if len(spec.Command) == 0 {
 		return "", fmt.Errorf("%w: no command", ErrNotExecWorkload)
+	}
+
+	// Asked before anything is created, so a host that cannot confine leaves no
+	// half-started workload behind.
+	if err := Confinable(); err != nil {
+		return "", err
 	}
 
 	workload, err := d.version(d.workloads, w.ID, w.Version)
@@ -176,7 +198,9 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", err
 	}
 
-	if err = os.MkdirAll(filepath.Join(workload, workingDir), 0o700); err != nil {
+	cwd := filepath.Join(workload, workingDir)
+
+	if err = os.MkdirAll(cwd, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create workload directory: %w", err)
 	}
 
@@ -184,36 +208,95 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", fmt.Errorf("failed to create state directory: %w", err)
 	}
 
-	if err = mount(filepath.Join(workload, workingDir), w.Volumes); err != nil {
+	if err = mount(cwd, w.Volumes); err != nil {
 		return "", err
 	}
 
+	env := environment(w.Env)
+
+	// Resolved before the ruleset is built, because a grant is a path and a command may
+	// name none: "sh" is found on a PATH. Looked up against the workload's own PATH
+	// rather than the server's, so the binary granted is the one the exec will find.
+	//
+	// After the working directory exists, since a command named relatively is resolved
+	// against it.
+	command, err := resolve(spec.Command, env, cwd)
+	if err != nil {
+		return "", err
+	}
+
+	// Opened before the process is confined, and stays writable to it afterwards: a
+	// descriptor already open is not reached through a path, so the ruleset does not
+	// have to grant the file the driver's own tree holds.
 	output, err := os.OpenFile(filepath.Join(workload, outputFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return "", fmt.Errorf("failed to open workload output: %w", err)
 	}
 
-	cmd := exec.Command(spec.Command[0], spec.Command[1:]...) //nolint:gosec // the command is what the workload is
-	cmd.Dir = filepath.Join(workload, workingDir)
+	// Orca itself rather than the workload's command. The process confines itself and
+	// then becomes the command, which is the only point a ruleset can be applied: after
+	// the fork, so it restricts the workload rather than the server, and before the
+	// exec, so the command never runs unconfined.
+	self, err := os.Executable()
+	if err != nil {
+		_ = output.Close()
+
+		return "", fmt.Errorf("failed to locate the orca binary: %w", err)
+	}
+
+	cmd := exec.Command(self, confineArg)
+	cmd.Dir = cwd
 	cmd.Stdout, cmd.Stderr = output, output
-	cmd.Env = environment(w.Env)
+	cmd.Env = env
 
 	// Its own process group, so that stopping the workload reaches whatever it
 	// started rather than only the command itself. Setsid rather than Setpgid so the
 	// process survives a signal sent to the server's own group, which is what makes a
 	// long-running workload outlive an interrupted server.
+	//
+	// The exec keeps it, so the command lands in the group the driver recorded.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+
+	rules, status, closePipes, err := pipes(cmd)
+	if err != nil {
+		_ = output.Close()
+
+		return "", err
+	}
 
 	if err = cmd.Start(); err != nil {
 		_ = output.Close()
+		closePipes()
 
 		return "", fmt.Errorf("failed to start command: %w", err)
 	}
 
-	// Closed here rather than deferred: the child holds its own descriptor, so the
-	// parent's copy has no further use and would otherwise be held for the life of
-	// the server.
+	// Closed here rather than deferred: the child holds its own descriptors, so the
+	// parent's copies have no further use and would otherwise be held for the life of
+	// the server. The status pipe in particular only reports the workload is running by
+	// reaching end of file, which it cannot while this process can still write to it.
 	_ = output.Close()
+	closePipes()
+
+	if err = confineWith(cmd, rules, status, ruleset{
+		Command: command,
+		// Its own directory and its volumes, which is everything it may write. The
+		// volumes are named by where they are on the host rather than by the link
+		// inside the working directory, because the kernel resolves a link before it
+		// decides.
+		Write: append([]string{cwd}, hosts(w.Volumes)...),
+		Read:  d.allowed,
+		// A mounted value is a file rather than a directory, and lives beside every
+		// other workload's. Granting the file rather than the directory is what stops
+		// one workload reading another's.
+		Files: append(files(w.Volumes), command[0]),
+	}); err != nil {
+		// The process is confined or it is not running, so there is nothing left to
+		// supervise either way.
+		_ = d.kill(cmd.Process.Pid)
+
+		return "", err
+	}
 
 	ticks, err := startTicks(cmd.Process.Pid)
 	if err != nil {
@@ -846,3 +929,65 @@ func environment(env map[string]string) []string {
 
 // The PATH given to a workload that names none of its own.
 const defaultPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+// resolve returns the workload's command with its binary named by an absolute path.
+//
+// A confined workload is granted its binary, and a grant is a path: "sh" is not one, so
+// it has to be found before the ruleset is built. The lookup uses the workload's own
+// PATH rather than the server's, so the file granted is the one the exec will find.
+//
+// A command that cannot be found is reported here, where the failure names it, rather
+// than as a ruleset that could not be populated.
+func resolve(command, env []string, cwd string) ([]string, error) {
+	// Absolute already, so there is nothing to look up and nothing about the
+	// environment that could change what runs.
+	if filepath.IsAbs(command[0]) {
+		return command, nil
+	}
+
+	// A name with a separator in it is relative to the working directory, which the
+	// process starts in. Resolved against that rather than searched for, because a
+	// PATH lookup is only for a bare name.
+	if strings.Contains(command[0], string(filepath.Separator)) {
+		return named(command, filepath.Join(cwd, command[0]))
+	}
+
+	for _, dir := range filepath.SplitList(pathOf(env)) {
+		if dir == "" {
+			continue
+		}
+
+		candidate := filepath.Join(dir, command[0])
+
+		// Executable by somebody, which is what a PATH search looks for. Whether this
+		// process may run it is the kernel's answer, and the exec reports it.
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode().Perm()&0o111 != 0 {
+			return named(command, candidate)
+		}
+	}
+
+	return nil, fmt.Errorf("%w: %s was not found on the workload's path", ErrNotExecWorkload, command[0])
+}
+
+// named returns the command with its binary replaced by the path it resolved to.
+//
+// A copy rather than the specification's own slice, which is decoded from the stored
+// workload and has no business being rewritten.
+func named(command []string, path string) ([]string, error) {
+	out := slices.Clone(command)
+	out[0] = path
+
+	return out, nil
+}
+
+// pathOf returns the PATH from a rendered environment, which is what a bare command
+// name is searched for on.
+func pathOf(env []string) string {
+	for _, entry := range env {
+		if value, ok := strings.CutPrefix(entry, "PATH="); ok {
+			return value
+		}
+	}
+
+	return defaultPath
+}

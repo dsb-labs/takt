@@ -4,20 +4,30 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	osexec "os/exec"
+	"strings"
 	"syscall"
 
 	"github.com/landlock-lsm/go-landlock/landlock"
 	ll "github.com/landlock-lsm/go-landlock/landlock/syscall"
+
+	"github.com/dsb-labs/orca/internal/server/driver"
 )
 
-// ErrNotConfinable is returned when the kernel does not offer the Landlock support an
-// exec workload is confined with.
-//
-// There is deliberately no degraded mode. A confinement that silently did nothing on
-// some hosts would be a guarantee nothing could reason about, and every mention of it
-// would have to be qualified.
-var ErrNotConfinable = errors.New("kernel does not support confining exec workloads")
+var (
+	// ErrNotConfinable is returned when the kernel does not offer the Landlock support
+	// an exec workload is confined with.
+	//
+	// There is deliberately no degraded mode. A confinement that silently did nothing
+	// on some hosts would be a guarantee nothing could reason about, and every mention
+	// of it would have to be qualified.
+	ErrNotConfinable = errors.New("kernel does not support confining exec workloads")
+	// ErrNotConfined is returned when a workload could not be confined to the paths it
+	// was given, and so was not started.
+	ErrNotConfined = errors.New("workload could not be confined")
+)
 
 const (
 	// The argument that makes orca confine itself and exec a command rather than run
@@ -210,6 +220,119 @@ func restrict(rs ruleset) error {
 	}
 
 	return landlock.V3.RestrictPaths(rules...)
+}
+
+// pipes attaches the two descriptors a confinement talks over to a command that has
+// not started yet, returning the server's ends of them.
+//
+// Two rather than one, and both rather than the command's own streams: the streams
+// belong to the workload and end up in its log, where a ruleset and a failure to apply
+// one are the server's business.
+// The returned close function gives up the ends the child holds, and has to be called
+// once the process has started. Held any longer, the status pipe would never reach end
+// of file: this process would still hold a descriptor open for writing, so a confined
+// workload would look like one that never reported.
+func pipes(cmd *osexec.Cmd) (rules, status *os.File, close func(), err error) {
+	ruleReader, ruleWriter, err := os.Pipe()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to open the ruleset pipe: %w", err)
+	}
+
+	statusReader, statusWriter, err := os.Pipe()
+	if err != nil {
+		_ = ruleReader.Close()
+		_ = ruleWriter.Close()
+
+		return nil, nil, nil, fmt.Errorf("failed to open the status pipe: %w", err)
+	}
+
+	// The order is the contract: the ruleset is read from the first descriptor and the
+	// reason it could not be applied is written to the second.
+	cmd.ExtraFiles = []*os.File{ruleReader, statusWriter}
+
+	return ruleWriter, statusReader, func() {
+		_ = ruleReader.Close()
+		_ = statusWriter.Close()
+	}, nil
+}
+
+// confineWith sends a ruleset to a started process and waits to learn whether it
+// confined itself.
+//
+// Returns once the process has become the workload's command, which is what closing the
+// status descriptor across the exec reports. Anything read from it instead is why the
+// workload is not running, and it names the path or the command that caused it.
+//
+// This is what makes a refused path a failure to start rather than an exit code nobody
+// can explain.
+func confineWith(cmd *osexec.Cmd, rules, status *os.File, rs ruleset) error {
+	// The parent's copies of the child's ends are already closed, so reading the status
+	// below reaches end of file rather than blocking on a descriptor this process holds.
+	defer status.Close()
+
+	if err := json.NewEncoder(rules).Encode(rs); err != nil {
+		_ = rules.Close()
+
+		return fmt.Errorf("failed to send the ruleset: %w", err)
+	}
+
+	if err := rules.Close(); err != nil {
+		return fmt.Errorf("failed to close the ruleset: %w", err)
+	}
+
+	reason, err := io.ReadAll(status)
+	if err != nil {
+		return fmt.Errorf("failed to read whether the workload was confined: %w", err)
+	}
+
+	if len(reason) > 0 {
+		return fmt.Errorf("%w: %s", ErrNotConfined, strings.TrimSpace(string(reason)))
+	}
+
+	return nil
+}
+
+// hosts returns where each volume is on the host, which is what a ruleset grants.
+//
+// The host path rather than the link inside the working directory: the kernel resolves
+// a symbolic link before deciding, so granting the link would grant nothing.
+func hosts(volumes []driver.Volume) []string {
+	out := make([]string, 0, len(volumes))
+	for _, volume := range volumes {
+		if directory(volume.Host) {
+			out = append(out, volume.Host)
+		}
+	}
+
+	return out
+}
+
+// files returns the volumes that are a single file rather than a directory, which is
+// what a mounted secret or variable is.
+//
+// Separated from the directories because the two are granted differently: a mounted
+// value sits beside every other workload's, so granting its directory would hand over
+// all of them.
+func files(volumes []driver.Volume) []string {
+	out := make([]string, 0, len(volumes))
+	for _, volume := range volumes {
+		if !directory(volume.Host) {
+			out = append(out, volume.Host)
+		}
+	}
+
+	return out
+}
+
+// directory reports whether a path is a directory, treating one it cannot read as a
+// file.
+//
+// A path that cannot be read at all is left to the ruleset to refuse, which reports it
+// naming the path rather than having this decide what it was.
+func directory(path string) bool {
+	info, err := os.Stat(path)
+
+	return err == nil && info.IsDir()
 }
 
 // Confinable reports whether this host can confine a workload at all, returning

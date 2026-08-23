@@ -577,7 +577,7 @@ func TestDriver_Release(t *testing.T) {
 }
 
 // newDriver returns a driver rooted in a temporary directory, along with that root.
-func newDriver(t *testing.T) (*exec.Driver, string) {
+func newDriver(t *testing.T, options ...option) (*exec.Driver, string) {
 	t.Helper()
 
 	root := t.TempDir()
@@ -587,10 +587,25 @@ func newDriver(t *testing.T) (*exec.Driver, string) {
 		level = slog.LevelDebug
 	}
 
-	return exec.New(exec.Config{
+	config := exec.Config{
 		Logger: slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: level})),
 		Root:   root,
-	}), root
+	}
+
+	for _, option := range options {
+		option(&config)
+	}
+
+	return exec.New(config), root
+}
+
+// The option type modifies how a test's driver is configured.
+type option func(*exec.Config)
+
+// withAllowedPaths grants every workload the driver runs read-only access to the given
+// paths, standing in for what an operator put in the server's configuration.
+func withAllowedPaths(paths ...string) option {
+	return func(c *exec.Config) { c.AllowPaths = paths }
 }
 
 // The identifier the tests use for their workload. Directories are named for the
@@ -625,6 +640,17 @@ func awaitState(t *testing.T, d *exec.Driver, workload string, want driver.State
 
 		return instances[0].Workload == workload && instances[0].State == want
 	}, 10*time.Second, 50*time.Millisecond, "workload %q never reached %q", workload, want)
+}
+
+// output returns everything a workload has written, which is where a denial from the
+// kernel lands: the command's own stderr.
+func output(t *testing.T, d *exec.Driver, workload string) string {
+	t.Helper()
+
+	var out bytes.Buffer
+	require.NoError(t, d.Logs(t.Context(), &out, workload, 100))
+
+	return out.String()
 }
 
 // awaitChildPID reads the pid a command wrote into its working directory, which is how
@@ -798,6 +824,194 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 			_, err = os.Stat(volume)
 			assert.NoError(t, err, "the target %q destroyed the volume", target)
 		}
+	})
+}
+
+func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
+	t.Parallel()
+
+	t.Run("refuses a path the workload was never granted", func(t *testing.T) {
+		// The reason this exists. An exec workload runs as the server's own uid, so
+		// nothing about file ownership stops it reading the database, the encryption key
+		// or another workload's mounted plaintext. The kernel is what does.
+		d, _ := newDriver(t)
+
+		secret := filepath.Join(t.TempDir(), "secret.key")
+		require.NoError(t, os.WriteFile(secret, []byte("SEALED"), 0o600))
+
+		// Readable by whoever runs the tests, so an unconfined command would print it.
+		contents, err := os.ReadFile(secret)
+		require.NoError(t, err)
+		require.Equal(t, "SEALED", string(contents), "this test needs a file the user can read")
+
+		_, err = d.Start(t.Context(), workload("example", 1, "hash-one", "cat "+secret+" 2>&1; exit 0"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		out := output(t, d, "example")
+		assert.NotContains(t, out, "SEALED", "a confined workload read a file it was never granted")
+		assert.Contains(t, out, "Permission denied")
+	})
+
+	t.Run("allows the working directory it was given", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo written > file"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		contents, err := os.ReadFile(filepath.Join(root, "workloads", testID, "1", "cwd", "file"))
+		require.NoError(t, err, "a confined workload could not write its own working directory")
+		assert.Equal(t, "written\n", string(contents))
+	})
+
+	t.Run("allows a volume it mounts", func(t *testing.T) {
+		// A volume lives outside the working directory and is reached through a link
+		// into it. The kernel resolves the link before deciding, so the volume has to be
+		// granted where it really is or the workload cannot write what it asked for.
+		d, _ := newDriver(t)
+		volume := newVolume(t, "example-data")
+
+		w := workload("example", 1, "hash-one", "echo written > var/lib/example/file")
+		w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: "/var/lib/example"}}
+
+		_, err := d.Start(t.Context(), w)
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		contents, err := os.ReadFile(filepath.Join(volume, "file"))
+		require.NoError(t, err, "a confined workload could not write a volume it mounts")
+		assert.Equal(t, "written\n", string(contents))
+	})
+
+	t.Run("allows a mounted value to be read, and no other in its directory", func(t *testing.T) {
+		// Mounted values all live in one tree, one directory per workload version. A
+		// ruleset granting the directory rather than the file would hand a workload
+		// every other workload's secrets, which is the failure this pins.
+		d, _ := newDriver(t)
+
+		dir := t.TempDir()
+
+		mine := filepath.Join(dir, "secret-mine")
+		require.NoError(t, os.WriteFile(mine, []byte("MINE"), 0o444))
+
+		theirs := filepath.Join(dir, "secret-theirs")
+		require.NoError(t, os.WriteFile(theirs, []byte("THEIRS"), 0o444))
+
+		w := workload("example", 1, "hash-one", "cat token 2>&1; cat "+theirs+" 2>&1; exit 0")
+		w.Volumes = []driver.Volume{{Name: "secret-mine", Host: mine, Target: "/token"}}
+
+		_, err := d.Start(t.Context(), w)
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		out := output(t, d, "example")
+		assert.Contains(t, out, "MINE", "a confined workload could not read the value it mounts")
+		assert.NotContains(t, out, "THEIRS", "a confined workload read a value another workload mounts")
+	})
+
+	t.Run("cannot write a value it mounts", func(t *testing.T) {
+		// A mounted value is granted read-only, and from the third Landlock ABI that
+		// covers truncation too. Below it a workload could empty a value it cannot
+		// rewrite, which is why that ABI is the floor.
+		d, _ := newDriver(t)
+
+		value := filepath.Join(t.TempDir(), "secret-token")
+		require.NoError(t, os.WriteFile(value, []byte("MOUNTED"), 0o444))
+
+		// Both attempts run in a subshell: a redirection the kernel refuses ends the
+		// shell that tried it, and the second attempt is the one this test is about.
+		w := workload("example", 1, "hash-one",
+			"(echo overwrite > token) 2>&1; (: > token) 2>&1; exit 0")
+		w.Volumes = []driver.Volume{{Name: "secret-token", Host: value, Target: "/token"}}
+
+		_, err := d.Start(t.Context(), w)
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		contents, err := os.ReadFile(value)
+		require.NoError(t, err)
+		assert.Equal(t, "MOUNTED", string(contents), "a confined workload changed a value it mounts")
+	})
+
+	t.Run("refuses another process's environment", func(t *testing.T) {
+		// An exec workload's environment is readable at /proc/<pid>/environ by the user
+		// running it, and every exec workload runs as that same user. Without
+		// confinement one workload can therefore read another's secrets straight out of
+		// it. This is what closes that.
+		d, _ := newDriver(t)
+
+		pid := orphan(t)
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one",
+			"cat /proc/"+strconv.Itoa(pid)+"/environ 2>&1; exit 0"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		assert.Contains(t, output(t, d, "example"), "Permission denied")
+	})
+
+	t.Run("allows the host's own files, so an ordinary command runs", func(t *testing.T) {
+		// A dynamically linked program needs its interpreter and its libraries, and the
+		// tests above would all pass against a ruleset so tight that nothing ran at all.
+		// This is what says confinement is strict rather than useless.
+		d, _ := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one",
+			`cat /etc/hostname > /dev/null && echo read-etc; echo discarded > /dev/null && echo wrote-devnull`))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		out := output(t, d, "example")
+		assert.Contains(t, out, "read-etc")
+		assert.Contains(t, out, "wrote-devnull")
+	})
+
+	t.Run("allows a path the operator granted", func(t *testing.T) {
+		// The escape hatch, for a runtime that lives somewhere the host's own
+		// directories do not cover. Read-only, and the operator's decision rather than
+		// the workload's.
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "runtime"), []byte("GRANTED"), 0o444))
+
+		d, _ := newDriver(t, withAllowedPaths(dir))
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one",
+			"cat "+filepath.Join(dir, "runtime")+" 2>&1; echo denied > "+filepath.Join(dir, "written")+" 2>&1; exit 0"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		out := output(t, d, "example")
+		assert.Contains(t, out, "GRANTED", "a workload could not read a path the operator granted")
+
+		// Granted for reading only, so a path the operator opened is not one a workload
+		// can write.
+		_, err = os.Stat(filepath.Join(dir, "written"))
+		assert.True(t, os.IsNotExist(err), "a workload wrote a path granted only for reading")
+	})
+
+	t.Run("refuses a command that is not there, naming it", func(t *testing.T) {
+		// Reported as a failure to start rather than as an exit code, because a command
+		// that cannot be found is not a workload that ran and failed.
+		d, _ := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "exit 0"))
+		require.NoError(t, err)
+
+		w := workload("missing", 1, "hash-one", "exit 0")
+		w.Spec.Exec.Command = []string{"definitely-not-a-command-on-this-host"}
+
+		_, err = d.Start(t.Context(), w)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "definitely-not-a-command-on-this-host")
 	})
 }
 
