@@ -128,13 +128,7 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[s
 // what reports it. That keeps one description of an unresolved reference, whichever
 // kind it named and wherever expansion was called from.
 func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference) (string, bool, error) {
-	store := r.secrets
-	missing := ErrSecretNotFound
-
-	if reference.Kind == manifest.KindVariable {
-		store = r.variables
-		missing = ErrVariableNotFound
-	}
+	store, missing := storeFor(r.secrets, r.variables, reference.Kind)
 
 	// A server holding no store of that kind holds nothing under the name, which is
 	// the same answer as a name nobody created.
@@ -151,4 +145,20 @@ func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference) (
 	}
 
 	return value, true, nil
+}
+
+// storeFor returns the store holding values of the given kind, along with the error
+// reporting that nothing holds a name of that kind. The store is nil when the server
+// holds none.
+//
+// The rule lives here rather than in each caller so that the two things which read a
+// reference — an environment being resolved and a value being mounted — cannot disagree
+// about which store answers for a kind. Each keeps its own policy on what a name nobody
+// holds means, which is where the two genuinely differ.
+func storeFor(secrets, variables ValueStore, kind manifest.ReferenceKind) (ValueStore, error) {
+	if kind == manifest.KindVariable {
+		return variables, ErrVariableNotFound
+	}
+
+	return secrets, ErrSecretNotFound
 }
