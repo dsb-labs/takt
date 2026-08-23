@@ -159,8 +159,7 @@ func TestLoadKey(t *testing.T) {
 	})
 
 	t.Run("refuses a key file others can read", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "secret.key")
-		require.NoError(t, os.WriteFile(path, make([]byte, secret.KeyLength), 0o644))
+		path := writeKey(t, 0o644)
 
 		// Whoever else could read it has already had the chance, so starting anyway
 		// would report every secret as protected when one of them may not be.
@@ -169,14 +168,37 @@ func TestLoadKey(t *testing.T) {
 	})
 
 	t.Run("refuses a key file others can write", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "secret.key")
-		require.NoError(t, os.WriteFile(path, make([]byte, secret.KeyLength), 0o622))
+		path := writeKey(t, 0o622)
 
 		// Replacing the key is enough to make orca seal new values under one somebody
 		// else chose, without ever reading the one it had.
 		_, err := secret.LoadKey(path)
 		assert.ErrorIs(t, err, secret.ErrKeyReadable)
 	})
+}
+
+// writeKey puts a key file of the right length at a temporary path, with exactly the
+// permissions asked for, and returns where it is.
+//
+// The mode is applied with Chmod rather than left to WriteFile. WriteFile's mode is a
+// request the process umask filters, so a test asking for a group-writable file gets
+// one only on a host whose umask permits it. That made these tests pass locally under
+// umask 002 and fail in CI under umask 022, which is the opposite of what a permission
+// test should depend on.
+func writeKey(t *testing.T, mode os.FileMode) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "secret.key")
+	require.NoError(t, os.WriteFile(path, make([]byte, secret.KeyLength), mode))
+	require.NoError(t, os.Chmod(path, mode))
+
+	// The point of the test is the mode, so a host that would not give us the one we
+	// asked for has to say so rather than quietly exercise a different case.
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, mode, info.Mode().Perm(), "the test needs a key file with mode %#o", mode)
+
+	return path
 }
 
 func newTestCipher(t *testing.T) *secret.Cipher {
