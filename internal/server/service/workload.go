@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -190,6 +191,14 @@ type (
 		revisions map[string]string
 		// The value of each variable that exists, keyed by name.
 		values map[string]string
+		// What the specification reads only through a mount naming a signal, which is
+		// deliberately kept out of the hash.
+		//
+		// Such a workload asked to be signalled rather than replaced, and a hash that
+		// moved with the value would have the reconciler replace it — which is the one
+		// thing naming a signal asks not to happen. That the workload reads it is
+		// still recorded, so deleting one still reports the workloads holding it.
+		refreshed []manifest.Reference
 	}
 
 	// The WorkloadService type orchestrates the persistence layer and the driver
@@ -685,6 +694,15 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 	}
 
 	if hash == row.SpecHash {
+		// Nothing about the workload moved, which for a workload mounting a value it
+		// asked to be signalled about is exactly right: such a value stays out of the
+		// hash so that the instance is not replaced. The reconciler is still woken, or
+		// nothing would compare what was delivered against what orca now holds until
+		// its next tick.
+		if len(read.refreshed) > 0 {
+			s.wake()
+		}
+
 		return false, nil
 	}
 
@@ -813,17 +831,38 @@ func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map
 // A volume has to exist before it can be mounted. Creating one here would make a
 // mistyped name a second empty volume, which reads as success while the data the
 // workload wanted sits under the name that was meant.
+// Only a mount naming a volume is resolved. A mounted secret or variable is written
+// by the reconciler as the workload starts, at a path that changes with every version,
+// so storing one would move the hash for a reason the operator did not ask for and put
+// orca's own layout in the API.
 func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadSpec) (api.WorkloadSpec, error) {
 	if spec.Volumes == nil || len(*spec.Volumes) == 0 {
 		return spec, nil
 	}
 
-	if s.volumes == nil {
-		return spec, fmt.Errorf("%w: this server holds no volumes", ErrVolumeNotFound)
-	}
-
 	mounts := make([]api.VolumeMount, 0, len(*spec.Volumes))
 	for _, mount := range *spec.Volumes {
+		// Which source a mount names is read through the same rules validation applied,
+		// rather than by inspecting the wire fields again here. Each mount is converted
+		// on its own, so nothing depends on a conversion of the whole specification
+		// yielding one element per wire mount in the same order.
+		kind, err := manifest.KindOf(manifest.NewVolumeMount(mount))
+		if err != nil {
+			return spec, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+		}
+
+		if kind != manifest.MountVolume {
+			// The source fields are carried across untouched, so what the workload
+			// reads is stored as written rather than as a value.
+			mounts = append(mounts, mount)
+
+			continue
+		}
+
+		if s.volumes == nil {
+			return spec, fmt.Errorf("%w: this server holds no volumes", ErrVolumeNotFound)
+		}
+
 		// Whatever went wrong is returned as it stands, including a volume that does
 		// not exist: the locator already names what it could not find, so wrapping it
 		// again would only repeat the name.
@@ -856,7 +895,14 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadS
 // which is how they come to report that something they need has gone. Refusing the
 // reference is the business of the caller that can act on it.
 func (s *WorkloadService) resolveReferences(ctx context.Context, spec api.WorkloadSpec) (references, error) {
-	found, err := manifest.References(manifest.NewSpec(spec))
+	resolvedSpec := manifest.NewSpec(spec)
+
+	found, err := manifest.References(resolvedSpec)
+	if err != nil {
+		return references{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+	}
+
+	refreshed, err := manifest.Refreshed(resolvedSpec)
 	if err != nil {
 		return references{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
@@ -864,6 +910,7 @@ func (s *WorkloadService) resolveReferences(ctx context.Context, spec api.Worklo
 	resolved := references{
 		secrets:   manifest.Names(found, manifest.KindSecret),
 		variables: manifest.Names(found, manifest.KindVariable),
+		refreshed: refreshed,
 	}
 
 	switch {
@@ -1040,6 +1087,10 @@ func runtimeOf(spec api.WorkloadSpec) (api.Runtime, error) {
 // reported and one computed over a value would confirm a guess at it. A variable
 // contributes its value, which the API reports anyway.
 //
+// What the workload reads only through a mount naming a signal contributes nothing.
+// Such a mount asked for the file to be rewritten and the workload signalled, and a
+// hash that moved with the value would replace the instance instead.
+//
 // A workload reading neither hashes exactly as it would without this, which is what
 // stops an upgrade replacing every running instance.
 func canonicalise(spec api.WorkloadSpec, read references) ([]byte, string, error) {
@@ -1048,7 +1099,9 @@ func canonicalise(spec api.WorkloadSpec, read references) ([]byte, string, error
 		return nil, "", fmt.Errorf("failed to encode workload spec: %w", err)
 	}
 
-	if len(read.revisions) == 0 && len(read.values) == 0 {
+	revisions, values := read.hashed()
+
+	if len(revisions) == 0 && len(values) == 0 {
 		sum := sha256.Sum256(encoded)
 
 		return encoded, hex.EncodeToString(sum[:]), nil
@@ -1056,8 +1109,8 @@ func canonicalise(spec api.WorkloadSpec, read references) ([]byte, string, error
 
 	hashed, err := json.Marshal(hashedSpec{
 		Spec:      encoded,
-		Secrets:   read.revisions,
-		Variables: read.values,
+		Secrets:   revisions,
+		Variables: values,
 	})
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to encode workload spec: %w", err)
@@ -1066,6 +1119,42 @@ func canonicalise(spec api.WorkloadSpec, read references) ([]byte, string, error
 	sum := sha256.Sum256(hashed)
 
 	return encoded, hex.EncodeToString(sum[:]), nil
+}
+
+// hashed returns what reaches the specification's hash: the revision of each secret
+// and the value of each variable, less anything read only through a mount naming a
+// signal.
+//
+// Both maps come back nil when nothing is left, rather than empty. hashedSpec omits an
+// empty map, so a workload whose only reading is refreshed hashes exactly as one that
+// reads nothing at all — which is what keeps adding a signalling mount from being a
+// specification change in its own right.
+func (r references) hashed() (map[string]string, map[string]string) {
+	if len(r.refreshed) == 0 {
+		return r.revisions, r.values
+	}
+
+	revisions := maps.Clone(r.revisions)
+	values := maps.Clone(r.values)
+
+	for _, reference := range r.refreshed {
+		if reference.Kind == manifest.KindVariable {
+			delete(values, reference.Name)
+
+			continue
+		}
+
+		delete(revisions, reference.Name)
+	}
+
+	if len(revisions) == 0 {
+		revisions = nil
+	}
+	if len(values) == 0 {
+		values = nil
+	}
+
+	return revisions, values
 }
 
 func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, reported Health) (Workload, error) {

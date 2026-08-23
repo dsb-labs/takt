@@ -1414,6 +1414,187 @@ func TestWorkloadService_Rehash(t *testing.T) {
 // applyForHash applies spec against the given secret revisions and returns the hash
 // the service stored, so that a test can compare two hashes without repeating the
 // mock wiring.
+func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
+	t.Parallel()
+
+	// The literal hash of a workload mounting nothing, which is what every assertion
+	// about a mounted value not reaching the hash is compared against.
+	const plainHash = "485029cc492e6cb9a301bdde6d7632286d9613ebae081824118e64611dcdf60f"
+
+	t.Run("moves the hash when a mounted secret's revision moves", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Volumes = new([]api.VolumeMount{{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"}})
+
+		first := applyForHash(t, spec, map[string]string{"tls-cert": "rev-one"})
+		second := applyForHash(t, spec, map[string]string{"tls-cert": "rev-two"})
+
+		// A mount that named no signal asked to be replaced, which is what a moved hash
+		// arranges.
+		assert.NotEqual(t, first, second)
+	})
+
+	t.Run("moves the hash when a mounted variable's value moves", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Volumes = new([]api.VolumeMount{{Var: new("app-config"), To: "/etc/app/config.json"}})
+
+		first := applyForHashOf(t, spec, nil, map[string]string{"app-config": "first"})
+		second := applyForHashOf(t, spec, nil, map[string]string{"app-config": "second"})
+
+		assert.NotEqual(t, first, second)
+	})
+
+	t.Run("keeps the hash when a signalled secret's revision moves", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Volumes = new([]api.VolumeMount{{
+			Secret: new("tls-cert"),
+			To:     "/etc/tls/cert.pem",
+			Signal: new(api.SIGHUP),
+		}})
+
+		first := applyForHash(t, spec, map[string]string{"tls-cert": "rev-one"})
+		second := applyForHash(t, spec, map[string]string{"tls-cert": "rev-two"})
+
+		// The whole point of naming a signal. A hash that moved would have the
+		// reconciler replace the instance, which is the one thing the signal asks not to
+		// happen.
+		assert.Equal(t, first, second)
+	})
+
+	t.Run("keeps the hash when a signalled variable's value moves", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Volumes = new([]api.VolumeMount{{
+			Var:    new("app-config"),
+			To:     "/etc/app/config.json",
+			Signal: new(api.SIGUSR1),
+		}})
+
+		first := applyForHashOf(t, spec, nil, map[string]string{"app-config": "first"})
+		second := applyForHashOf(t, spec, nil, map[string]string{"app-config": "second"})
+
+		assert.Equal(t, first, second)
+	})
+
+	t.Run("moves the hash when the value is also read from the environment", func(t *testing.T) {
+		// An environment variable is fixed once a process has started, so a workload
+		// reading the value there has to be replaced however its mount asked to be told.
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = new(map[string]string{"CERT": "${secret:tls-cert}"})
+		spec.Volumes = new([]api.VolumeMount{{
+			Secret: new("tls-cert"),
+			To:     "/etc/tls/cert.pem",
+			Signal: new(api.SIGHUP),
+		}})
+
+		first := applyForHash(t, spec, map[string]string{"tls-cert": "rev-one"})
+		second := applyForHash(t, spec, map[string]string{"tls-cert": "rev-two"})
+
+		assert.NotEqual(t, first, second)
+	})
+
+	t.Run("hashes a workload whose only reading is signalled exactly as one reading nothing", func(t *testing.T) {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Volumes = new([]api.VolumeMount{{
+			Secret: new("tls-cert"),
+			To:     "/etc/tls/cert.pem",
+			Signal: new(api.SIGHUP),
+		}})
+
+		hash := applyForHash(t, spec, map[string]string{"tls-cert": "rev-one"})
+
+		// Not the same as plainHash — the mount is part of the specification, so it is
+		// part of the encoding. What must not appear is the revision, which is what the
+		// next assertion covers by proving the hash does not move with it.
+		assert.NotEqual(t, plainHash, hash)
+	})
+
+	t.Run("stores the mount as written rather than the value", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets := NewMockSecretRevisions(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Volumes = new([]api.VolumeMount{{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"}})
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		secrets.EXPECT().Revisions(mock.Anything, []string{"tls-cert"}).
+			Return(map[string]string{"tls-cert": "rev-one"}, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+
+		var stored database.Workload
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				stored = w
+
+				return w, true, nil
+			}).Once()
+
+		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+		require.NoError(t, err)
+
+		// A mounted value is stored as the name it reads, and no path is resolved for it:
+		// where the file is written changes with every version, so storing one would move
+		// the hash for a reason the operator did not ask for.
+		assert.Contains(t, string(stored.Spec), `"secret":"tls-cert"`)
+		assert.NotContains(t, string(stored.Spec), "rev-one")
+		assert.NotContains(t, string(stored.Spec), `"from"`)
+
+		// Recorded so that rotating the secret can find this workload, whatever the
+		// mount asked to be told.
+		assert.Equal(t, []string{"tls-cert"}, stored.Secrets)
+	})
+
+	t.Run("refuses a mount of a secret that does not exist", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets := NewMockSecretRevisions(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Volumes = new([]api.VolumeMount{{Secret: new("nope"), To: "/etc/tls/cert.pem"}})
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		secrets.EXPECT().Revisions(mock.Anything, []string{"nope"}).Return(nil, nil).Once()
+
+		// The workload could never start, and the operator applying it is the one who can
+		// correct the name.
+		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+		require.ErrorIs(t, err, service.ErrSecretNotFound)
+		assert.Contains(t, err.Error(), "nope")
+	})
+
+	t.Run("refuses a mount naming nothing to mount", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Volumes = new([]api.VolumeMount{{To: "/etc/tls/cert.pem"}})
+
+		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec)
+		assert.ErrorIs(t, err, service.ErrInvalidSpec)
+	})
+
+	t.Run("does not ask the volume locator about a mounted value", func(t *testing.T) {
+		// A mounted value is not a volume, so a server holding no volumes at all still
+		// runs a workload that mounts one.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets := NewMockSecretRevisions(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Volumes = new([]api.VolumeMount{{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"}})
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		secrets.EXPECT().Revisions(mock.Anything, mock.Anything).
+			Return(map[string]string{"tls-cert": "rev-one"}, nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				return w, true, nil
+			}).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+
+		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+		require.NoError(t, err)
+	})
+}
+
 func applyForHash(t *testing.T, spec api.WorkloadSpec, revisions map[string]string) string {
 	t.Helper()
 
