@@ -820,11 +820,6 @@ func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map
 	return database.Port{Container: mapping.To, Host: host, Dynamic: true}, nil
 }
 
-// withResolvedPorts returns spec with every port's host side filled in.
-//
-// The resolved ports are part of the specification that gets hashed, which is what
-// makes a reallocated port replace the container running on the old one: to the
-// reconciler it is simply a specification that has changed.
 // resolveVolumes fills in where each mounted volume lives on the host, rejecting a
 // specification naming one that does not exist.
 //
@@ -951,6 +946,11 @@ func missing(names []string, held map[string]string) []string {
 	return absent
 }
 
+// withResolvedPorts returns spec with every port's host side filled in.
+//
+// The resolved ports are part of the specification that gets hashed, which is what
+// makes a reallocated port replace the container running on the old one: to the
+// reconciler it is simply a specification that has changed.
 func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.WorkloadSpec {
 	if spec.Ports == nil || len(ports) == 0 {
 		return spec

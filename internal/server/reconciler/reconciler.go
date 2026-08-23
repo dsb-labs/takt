@@ -241,8 +241,8 @@ func clock(now func() time.Time) func() time.Time {
 	return now
 }
 
-// New returns a Reconciler that converges the driver in config onto the desired
-// state in its repository.https://github.com/octplane
+// New returns a Reconciler that converges the drivers in config onto the desired
+// state in its repository.
 func New(config Config) *Reconciler {
 	return &Reconciler{
 		logger:     config.Logger.With("component", "reconciler"),
