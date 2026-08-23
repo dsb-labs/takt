@@ -173,8 +173,9 @@ volume it points at is not.
 The mount path is written the same way for either runtime, so a workload moved between
 them keeps its manifest. Where it resolves to cannot be: an exec workload reaches its
 volume by the path taken as relative to the directory it runs in, because making the
-absolute path resolve there would mean confining the process, which again needs
-privileges orca has not got.
+absolute path resolve there would mean giving the process a filesystem root of its own,
+which needs privileges orca has not got. Landlock restricts which paths a process may
+reach, not what they resolve to, so it cannot stand in for that.
 
 The path a volume resolves to is part of the stored specification, so it is covered by
 the specification hash. A volume whose path changed therefore replaces the instances
@@ -256,3 +257,36 @@ start gives up the host ports orca chose for it, because something outside orca 
 have taken one. A secret that cannot be resolved has nothing to do with ports, and
 moving a workload's address for that reason would be a change an operator could not
 account for.
+
+## The kernel confines an exec workload, and there is no opt-out
+
+An exec workload runs as the same user as the server, so file permissions draw no
+boundary around it. Without one it reads `secret.key`, reads the database, reads every
+other workload's mounted plaintext, and writes to every volume. A container gets that
+boundary from the runtime. An exec process had none.
+
+Running workloads as separate users would be the conventional answer, and orca cannot
+take it: allocating users and changing to them needs privileges orca deliberately does
+not ask for. Landlock needs none. An unprivileged process applies a ruleset to itself,
+and the kernel enforces it from then on.
+
+It is applied by orca executing itself. A ruleset has to land after the fork, so it
+restricts the workload rather than the server, and before the command runs, so nothing
+runs unconfined. Go exposes no hook between the two, so the driver starts orca, that
+process confines itself, and it then becomes the command. Executing a command keeps the
+process identifier, so the record the driver wrote still describes the running workload
+and adoption is unaffected.
+
+Confinement is mandatory rather than best-effort. A ruleset that quietly did nothing on
+some hosts would be a guarantee that could not be reasoned about, and every mention of
+it in these documents would need qualifying. So a host whose kernel offers less refuses
+to run exec workloads, and says so at startup. It still runs containers.
+
+The cost is a kernel floor: Linux 6.2, which is where a read-only grant also stops a
+file being truncated. Requiring less would mean a workload could empty a mounted value
+it cannot rewrite, which is not what "read-only" should mean.
+
+What confinement covers is filesystem paths, and `ptrace`, which Landlock scopes
+between domains — without that, restricting paths alone could be defeated by attaching
+to the server. It does not cover signals or the network. Those remain what running
+several workloads as one user costs.

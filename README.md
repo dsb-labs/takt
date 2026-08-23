@@ -144,6 +144,9 @@ env:
 ## Requirements
 
 - Linux. The `exec:` runtime reads `/proc` to identify the processes it started.
+- Linux 6.2 or later with Landlock enabled, for workloads that name `exec:`. Every
+  `exec` workload is confined by the kernel, and a host that cannot do that refuses to
+  run one. See [Confinement](docs/operating.md#confinement).
 - A Docker daemon, for workloads that name `container:`. The `exec:` runtime needs
   nothing beyond the host.
 

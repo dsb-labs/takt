@@ -144,6 +144,51 @@ something else.
 A workload's directories in both trees are removed when the workload is deleted, so its
 output survives for as long as the workload does.
 
+## Confinement
+
+An `exec` workload runs as the same user as the server. File permissions therefore
+stop it reaching nothing that user can reach, which includes `secret.key`, the
+database, and every other workload's mounted plaintext. Running workloads as a
+separate user would need privileges orca deliberately does not ask for.
+
+The kernel is what draws the boundary instead. orca confines every `exec` workload with
+[Landlock](https://landlock.io), which lets an unprivileged process restrict itself
+before it runs the command. A confined workload reaches:
+
+- its own working directory, for reading and writing,
+- each volume it mounts, for reading and writing,
+- each secret or variable it mounts, for reading only,
+- its own command, and the host's system directories,
+- anything `exec.allow-paths` names, for reading only.
+
+Everything else is refused, the rest of the data directory included. There is no
+opt-out, and no reduced mode on a host that offers less: confinement that did nothing
+on some hosts would be a guarantee nobody could rely on.
+
+**This requires Linux 6.2 or later, with Landlock enabled.** A host below that refuses
+to start `exec` workloads and says so at startup. Container workloads are unaffected,
+so such a host still runs everything else. The version is set by the third Landlock
+interface, which is the first where a read-only grant also prevents truncation. Below
+it a workload could empty a value it cannot rewrite.
+
+Two consequences are worth knowing:
+
+- **A workload cannot read another process's environment.** An `exec` workload's
+  environment is readable at `/proc/<pid>/environ` by the user running it, so without
+  confinement one workload could read another's secrets from it. Confinement closes
+  that.
+- **A workload cannot attach a debugger to the server.** Landlock scopes `ptrace`
+  between domains. Without that, restricting the filesystem alone would be defeatable.
+
+What it does not cover is anything not reached through a filesystem path. Signal
+scoping arrives in a later Landlock version than orca requires, so a confined workload
+can still send a signal to the server. The network is not restricted either.
+
+There is deliberately no grant for `/tmp`. It is shared by every process running as
+the same user, so granting it would let one workload read what another wrote there. A
+workload needing scratch space has its own working directory, and `TMPDIR` will point
+a command at it.
+
 ## Volumes
 
 Each volume gets a directory named for the identifier orca assigned it:

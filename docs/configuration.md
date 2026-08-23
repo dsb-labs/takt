@@ -23,6 +23,9 @@ bind = "127.0.0.1"
 min-port = 20000
 max-port = 32000
 
+[exec]
+allow-paths = []
+
 [secrets]
 key-file = ""
 
@@ -115,6 +118,33 @@ published on it.
 This applies to a port orca publishes for a workload, which means a container. An
 `exec` workload binds its own port, so what it listens on is the process's business and
 this setting does not reach it.
+
+## exec
+
+| Key | Default | Description |
+|---|---|---|
+| `allow-paths` | empty | Extra paths every `exec` workload may read. |
+
+Every `exec` workload is confined by the kernel. It reaches its own working directory,
+the volumes and values it mounts, and the host's system directories — `/usr`, `/bin`,
+`/etc` and the rest. Everything else is refused, including the data directory. See
+[Confinement](operating.md#confinement).
+
+That covers a command installed the ordinary way. It does not cover a runtime living
+somewhere else: a language under a home directory, or a nix store. Name those here:
+
+```toml
+[exec]
+allow-paths = ["/opt/jdk", "/nix/store"]
+```
+
+Each path is granted read-only, so this widens what a workload may read and never what
+it may change. Each path must be absolute. A path that is not on the host is ignored,
+so one list can cover several hosts.
+
+There is no manifest equivalent, and that is deliberate. The API has no
+authentication, so a workload able to name its own paths could grant itself the data
+directory. Which paths are opened is the operator's decision.
 
 ## secrets
 

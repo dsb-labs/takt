@@ -39,8 +39,10 @@ the process:
 
 - A container's environment is readable with `docker inspect`, and to anything else
   that can reach the Docker socket.
-- An exec workload's environment is readable at `/proc/<pid>/environ`, by the user
-  running it and by root.
+- An exec workload's environment is readable at `/proc/<pid>/environ`, by root and by
+  the user running it. Another exec workload is not one of those readers: every exec
+  workload is confined by the kernel, which refuses it that file. See
+  [Confinement](operating.md#confinement).
 
 Both are inherent to giving a process an environment. Any orchestrator that sets
 environment variables has the same property. What orca guarantees is narrower and
@@ -96,6 +98,9 @@ exactly what that costs:
   runs as a user of its own, so a file only the server's user could read would be
   unreadable by the workload that mounted it. The directory above is what keeps
   everything else out.
+- An exec workload is granted the files it mounts and no others, so one exec workload
+  cannot read what another mounts even though both run as the same user. See
+  [Confinement](operating.md#confinement).
 - The file is written as the workload starts and removed once nothing is running for it.
   A `orca workload delete` takes it off the disk.
 - A backup of the data directory includes it, in the clear. This is the one place a
