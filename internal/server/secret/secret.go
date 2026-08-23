@@ -20,6 +20,9 @@ import (
 var (
 	// ErrInvalidKey is returned when a key is not the length the cipher needs.
 	ErrInvalidKey = errors.New("invalid encryption key")
+	// ErrKeyReadable is returned when a key file can be read by someone other than
+	// its owner.
+	ErrKeyReadable = errors.New("encryption key is readable by more than its owner")
 	// ErrInvalidCiphertext is returned when a sealed value cannot be opened, which
 	// covers a value that was tampered with, one sealed under a different key, and
 	// one sealed under a different name.
@@ -110,12 +113,25 @@ func (c *Cipher) Open(name string, sealed []byte) ([]byte, error) {
 // sealed something can open it again. The file is readable only by the user running
 // the server, like the database beside it: anything that can read the key can read
 // every secret orca holds.
+//
+// An existing key that anyone else can read is refused rather than narrowed. Whoever
+// could read it has already had the chance, so tightening the mode would hide that
+// rather than undo it, and orca cannot tell a mistake from a deliberate share.
 func LoadKey(path string) ([]byte, error) {
 	key, err := os.ReadFile(path)
 	switch {
 	case err == nil:
 		if len(key) != KeyLength {
 			return nil, fmt.Errorf("%w: %s holds %d bytes, need %d", ErrInvalidKey, path, len(key), KeyLength)
+		}
+
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read encryption key: %w", err)
+		}
+
+		if mode := info.Mode().Perm(); mode&0o077 != 0 {
+			return nil, fmt.Errorf("%w: %s is %#o, want 0600", ErrKeyReadable, path, mode)
 		}
 
 		return key, nil

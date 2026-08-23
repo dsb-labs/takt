@@ -157,6 +157,26 @@ func TestLoadKey(t *testing.T) {
 		_, err := secret.LoadKey(path)
 		assert.ErrorIs(t, err, secret.ErrInvalidKey)
 	})
+
+	t.Run("refuses a key file others can read", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "secret.key")
+		require.NoError(t, os.WriteFile(path, make([]byte, secret.KeyLength), 0o644))
+
+		// Whoever else could read it has already had the chance, so starting anyway
+		// would report every secret as protected when one of them may not be.
+		_, err := secret.LoadKey(path)
+		assert.ErrorIs(t, err, secret.ErrKeyReadable)
+	})
+
+	t.Run("refuses a key file others can write", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "secret.key")
+		require.NoError(t, os.WriteFile(path, make([]byte, secret.KeyLength), 0o622))
+
+		// Replacing the key is enough to make orca seal new values under one somebody
+		// else chose, without ever reading the one it had.
+		_, err := secret.LoadKey(path)
+		assert.ErrorIs(t, err, secret.ErrKeyReadable)
+	})
 }
 
 func newTestCipher(t *testing.T) *secret.Cipher {
