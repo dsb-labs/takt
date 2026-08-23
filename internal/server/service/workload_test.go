@@ -1703,8 +1703,8 @@ func TestWorkloadService_Logs(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Logs(mock.Anything, mock.Anything, "example", 20).
-			RunAndReturn(func(_ context.Context, out io.Writer, _ string, _ int) error {
+		d.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 20}).
+			RunAndReturn(func(_ context.Context, out io.Writer, _ string, _ driver.LogOptions) error {
 				_, err := out.Write([]byte("hello world\n"))
 				return err
 			}).Once()
@@ -1712,7 +1712,7 @@ func TestWorkloadService_Logs(t *testing.T) {
 		svc := newTestService(t, d, repo, ports, nil)
 
 		var out strings.Builder
-		require.NoError(t, svc.Logs(t.Context(), &out, "example", 20))
+		require.NoError(t, svc.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 20}))
 		assert.Equal(t, "hello world\n", out.String())
 	})
 
@@ -1723,9 +1723,52 @@ func TestWorkloadService_Logs(t *testing.T) {
 
 		svc := newTestService(t, d, repo, ports, nil)
 
-		err := svc.Logs(t.Context(), io.Discard, "nope", 20)
+		err := svc.Logs(t.Context(), io.Discard, "nope", driver.LogOptions{Tail: 20})
 		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
 	})
+
+	t.Run("passes the request for an earlier attempt to the driver", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+
+		// The service does not know which attempt is which — the driver holds them, so
+		// the selection goes through untouched.
+		d.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 20, Previous: true}).
+			Return(nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		require.NoError(t, svc.Logs(t.Context(), io.Discard, "example", driver.LogOptions{Tail: 20, Previous: true}))
+	})
+}
+
+func TestWorkloadService_Get_LeavesOutARetainedInstance(t *testing.T) {
+	t.Parallel()
+
+	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+	repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+	// What a workload looks like just after a restart: the attempt now running, and the
+	// failed one the driver keeps so that its output can still be read.
+	d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+		{ID: "current", Workload: "example", State: driver.StateRunning},
+		{ID: "retained", Workload: "example", State: driver.StateFailed, ExitCode: 1, Retained: true},
+	}, nil).Once()
+
+	svc := newTestService(t, d, repo, ports, nil)
+
+	workload, err := svc.Get(t.Context(), "example")
+	require.NoError(t, err)
+
+	// Only the live instance is reported, and the workload reads as running. Counting
+	// the retained one would report a healthy workload as failed on the strength of the
+	// attempt before it, which is the opposite of what keeping the output is for.
+	require.Len(t, workload.Instances, 1)
+	assert.Equal(t, "current", workload.Instances[0].ID)
+	assert.Equal(t, api.WorkloadStateRunning, workload.State)
 }
 
 // newTestService builds a service whose port repository answers the reads every path

@@ -82,6 +82,41 @@ func writeState(path string, s state) error {
 	return nil
 }
 
+// retained reports whether a record describes an attempt that was stopped and kept,
+// rather than one that ended on its own and is waiting to be restarted.
+//
+// A file beside the record rather than a field in it, because the record is rewritten by
+// the goroutine waiting on the process: a flag written into it as the workload is
+// replaced is lost the moment that goroutine collects the exit code. Separate files mean
+// the two writers never touch the same one and no ordering has to hold.
+func retained(path string) bool {
+	_, err := os.Stat(filepath.Join(path, retainedFile))
+
+	return err == nil
+}
+
+// retain marks a record as describing an attempt that was kept.
+func retain(path string) error {
+	if err := os.WriteFile(filepath.Join(path, retainedFile), nil, 0o600); err != nil {
+		return fmt.Errorf("failed to mark instance state as retained: %w", err)
+	}
+
+	return nil
+}
+
+// unretain clears the mark, for a version directory an attempt is being started in.
+//
+// A restart at an unchanged version reuses the directory the previous attempt stopped
+// in, so the mark left there describes the attempt that has just been replaced rather
+// than the one about to run. Left in place it would report a running process as kept.
+func unretain(path string) error {
+	if err := os.Remove(filepath.Join(path, retainedFile)); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to clear the retained mark: %w", err)
+	}
+
+	return nil
+}
+
 // alive reports whether the recorded process is still running and is still the same
 // process.
 //

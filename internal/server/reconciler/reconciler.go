@@ -36,12 +36,20 @@ type (
 		Name() string
 		// Start should run the given workload, returning the driver's handle for it.
 		Start(ctx context.Context, w driver.Workload) (string, error)
-		// Stop should stop and discard everything the driver runs for a workload.
+		// Stop should stop everything the driver runs for a workload, keeping the
+		// instance it most recently stopped so that its output can still be read.
 		//
 		// The identifier is empty for an orphan, which by definition has no stored
 		// workload to take one from. A driver that keys its own storage on the
 		// identifier has to find such a workload by its name instead.
 		Stop(ctx context.Context, id, workload string) error
+		// Discard should stop everything the driver runs for a workload and remove all
+		// of it, including whatever Stop kept for its output.
+		//
+		// This is what a workload nobody wants any more takes. A kept instance exists so
+		// that an operator can read why an attempt failed, and a deleted workload has no
+		// such reader — one left behind is work the orphan sweep would find forever.
+		Discard(ctx context.Context, id, workload string) error
 		// Signal should send the named signal to everything the driver runs for a
 		// workload, so that a workload mounting a value can be told the value
 		// changed rather than being replaced.
@@ -345,8 +353,25 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 		return
 	}
 
+	// Two views of the same observation, because two questions are being asked of it.
+	//
+	// A driver keeps the instance it most recently stopped so that its output survives
+	// the attempt that produced it. Such an instance has ended and nothing will restart
+	// it, so anything deciding what to run has to leave it out: counted as an instance
+	// it would read as a stale one to replace, as a failure to pace, or as work already
+	// present that needs nothing done. Orphan detection is the opposite — a workload
+	// deleted while the server was down leaves a retained instance, and one left out
+	// here would never be reaped.
 	observed := make(map[string][]driver.Instance, len(instances))
+	held := make(map[string]struct{}, len(instances))
+
 	for _, instance := range instances {
+		held[instance.Workload] = struct{}{}
+
+		if instance.Retained {
+			continue
+		}
+
 		observed[instance.Workload] = append(observed[instance.Workload], r.checked(instance))
 	}
 
@@ -359,9 +384,9 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 
 	r.convergeAll(ctx, rows, observed)
 
-	// Anything a driver is running that nothing asked for is an orphan — most often
-	// the remnant of a workload deleted while the server was down.
-	for workload := range observed {
+	// Anything a driver holds that nothing asked for is an orphan — most often the
+	// remnant of a workload deleted while the server was down.
+	for workload := range held {
 		if _, ok := desired[workload]; ok {
 			continue
 		}
@@ -948,13 +973,30 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 
 		r.logger.With("workload", row.Name).Debug("stopping deleted workload")
 
-		if err := r.stop(ctx, row); err != nil {
+		// Discarded rather than stopped, even here where something is still running.
+		// Stopping keeps the instance for its output, and the driver would then never
+		// report the workload as gone — so the pass below that removes the row would
+		// never be reached and a deleted workload would be torn down forever.
+		//
+		// A workload on its way out has no reader for its output at any stage, which is
+		// what makes this the right call rather than a workaround for that loop.
+		if err := r.discard(ctx, row); err != nil {
 			return fmt.Errorf("failed to stop deleted workload: %w", err)
 		}
 
 		// The stop may not have taken effect yet, so the row is left for the next
 		// pass to reap once the driver reports the work is gone.
 		return nil
+	}
+
+	// Nothing is running, but a driver may still hold what it kept for a workload it has
+	// no live instance for — an attempt stopped before the delete, or one this pass has
+	// just discarded and not yet observed as gone.
+	//
+	// Before the row goes, for the same reason the mounted values are: once it is gone
+	// there is no identifier to find either by.
+	if err := r.discard(ctx, row); err != nil {
+		return err
 	}
 
 	// Nothing is running, so the values the workload mounted have no reader left. This
@@ -1270,23 +1312,48 @@ func (r *Reconciler) stop(ctx context.Context, row database.Workload) error {
 	return nil
 }
 
-// stopOrphan stops work nothing asked for, which means asking every driver.
+// stopOrphan removes work nothing asked for, which means asking every driver.
 //
 // An orphan has no stored workload by definition, so there is no runtime to read and
 // no way to know which driver owns it. A driver with nothing for the name does nothing,
 // so asking all of them is the only way to be sure it is gone.
+//
+// Discarded rather than stopped. Nothing asked for this work, so there is nobody to read
+// the output of it, and an instance kept for that reason would be found again on every
+// pass from here on.
 func (r *Reconciler) stopOrphan(ctx context.Context, workload string) error {
 	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
 
 	for _, d := range r.drivers {
 		// An orphan has no stored workload, so there is no identifier to give.
-		if err := d.Stop(ctx, "", workload); err != nil {
+		if err := d.Discard(ctx, "", workload); err != nil {
 			return fmt.Errorf("failed to stop workload on the %s runtime: %w", d.Name(), err)
 		}
 	}
 
 	r.forget(workload)
+
+	return nil
+}
+
+// discard asks the driver that runs a workload to remove everything it holds for it,
+// including whatever it kept for its output.
+//
+// Bounded like stop, and only that driver is asked, for the reasons stop gives.
+func (r *Reconciler) discard(ctx context.Context, row database.Workload) error {
+	d, ok := r.driverFor(row)
+	if !ok {
+		// Nothing runs this runtime, so nothing can be holding anything for it.
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
+	defer cancel()
+
+	if err := d.Discard(ctx, row.ID, row.Name); err != nil {
+		return fmt.Errorf("failed to discard workload on the %s runtime: %w", d.Name(), err)
+	}
 
 	return nil
 }

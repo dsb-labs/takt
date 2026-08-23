@@ -27,8 +27,9 @@ type (
 		// Delete should mark the workload with the given name for deletion,
 		// returning it as it now stands.
 		Delete(ctx context.Context, name string) (service.Workload, error)
-		// Logs should write the recent output of the named workload to out.
-		Logs(ctx context.Context, out io.Writer, name string, tail int) error
+		// Logs should write the recent output of the named workload to out, as the
+		// options describe.
+		Logs(ctx context.Context, out io.Writer, name string, options driver.LogOptions) error
 	}
 
 	// The WorkloadAPI type exposes HTTP endpoints for managing workloads.
@@ -232,9 +233,13 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 	// Clamped at both ends. The specification declares the range and the generated
 	// code enforces neither, so the bounds the server documents are the server's to
 	// apply.
-	tail := defaultLogTail
+	options := driver.LogOptions{Tail: defaultLogTail}
 	if request.Params.Tail != nil {
-		tail = min(max(*request.Params.Tail, minLogTail), maxLogTail)
+		options.Tail = min(max(*request.Params.Tail, minLogTail), maxLogTail)
+	}
+
+	if request.Params.Previous != nil {
+		options.Previous = *request.Params.Previous
 	}
 
 	// A missing workload is established before anything is written, because once the
@@ -260,7 +265,7 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 
 	return logsResponse{
 		write: func(w io.Writer) error {
-			return a.workloads.Logs(ctx, w, request.Name, tail)
+			return a.workloads.Logs(ctx, w, request.Name, options)
 		},
 	}, nil
 }

@@ -33,6 +33,10 @@ func TestDriver_Start(t *testing.T) {
 			Name:     "starts a container with orca's ownership labels",
 			Workload: withEnv(workload("example", 2, "hash-two", containerSpec("example/example:latest", nil), ports(8080, 4141), map[string]string{"some-key": "some-value"}), map[string]string{"EXAMPLE": "EXAMPLE"}),
 			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
 
@@ -53,7 +57,7 @@ func TestDriver_Start(t *testing.T) {
 						return len(bindings) == 1 && bindings[0].HostPort == "4141" &&
 							bindings[0].HostIP == "127.0.0.1"
 					}),
-					mock.Anything, mock.Anything, "orca-example-2",
+					mock.Anything, mock.Anything, "orca-example-2-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -69,6 +73,10 @@ func TestDriver_Start(t *testing.T) {
 				driver.Volume{Name: "example-data", Host: "/var/lib/orca/volumes/abc", Target: "/var/lib/example"},
 			),
 			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
 
@@ -82,7 +90,7 @@ func TestDriver_Start(t *testing.T) {
 							host.Mounts[0].Source == "/var/lib/orca/volumes/abc" &&
 							host.Mounts[0].Target == "/var/lib/example"
 					}),
-					mock.Anything, mock.Anything, "orca-example-1",
+					mock.Anything, mock.Anything, "orca-example-1-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -95,6 +103,10 @@ func TestDriver_Start(t *testing.T) {
 			Name:     "runs the command the workload names",
 			Workload: workload("example", 1, "hash-one", containerSpec("example/example:latest", []string{"sh", "-c", "exit 0"}), nil, nil),
 			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
 
@@ -102,7 +114,7 @@ func TestDriver_Start(t *testing.T) {
 					mock.MatchedBy(func(config *dockercontainer.Config) bool {
 						return len(config.Cmd) == 3 && config.Cmd[0] == "sh" && config.Cmd[2] == "exit 0"
 					}),
-					mock.Anything, mock.Anything, mock.Anything, "orca-example-1",
+					mock.Anything, mock.Anything, mock.Anything, "orca-example-1-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -118,6 +130,10 @@ func TestDriver_Start(t *testing.T) {
 			Name:     "leaves the image's own command alone when the workload names none",
 			Workload: workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
 
@@ -125,7 +141,7 @@ func TestDriver_Start(t *testing.T) {
 					mock.MatchedBy(func(config *dockercontainer.Config) bool {
 						return config.Cmd == nil
 					}),
-					mock.Anything, mock.Anything, mock.Anything, "orca-example-1",
+					mock.Anything, mock.Anything, mock.Anything, "orca-example-1-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -146,6 +162,10 @@ func TestDriver_Start(t *testing.T) {
 				docker.LabelVersion:  "999",
 			}),
 			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
 
@@ -155,7 +175,7 @@ func TestDriver_Start(t *testing.T) {
 							config.Labels[docker.LabelSpecHash] == "hash-two" &&
 							config.Labels[docker.LabelVersion] == "2"
 					}),
-					mock.Anything, mock.Anything, mock.Anything, "orca-example-2",
+					mock.Anything, mock.Anything, mock.Anything, "orca-example-2-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -168,6 +188,10 @@ func TestDriver_Start(t *testing.T) {
 			Name:     "pulls the image when it isn't present locally",
 			Workload: workload("example", 0, "", containerSpec("example/example:latest", nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return(nil, nil).Once()
 				c.EXPECT().ImagePull(mock.Anything, "example/example:latest", mock.Anything).
@@ -184,6 +208,10 @@ func TestDriver_Start(t *testing.T) {
 			Name:     "removes the container when it cannot be started",
 			Workload: workload("example", 0, "", containerSpec("example/example:latest", nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
 				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -252,6 +280,10 @@ func TestDriver_Start_PublishAddress(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			client := NewMockClient(t)
 
+			// Read to number the attempt, so a replacement cannot collide with a
+			// container being kept for its output.
+			client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
 			client.EXPECT().ImageList(mock.Anything, mock.Anything).
 				Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
 
@@ -280,16 +312,44 @@ func TestDriver_Start_PublishAddress(t *testing.T) {
 func TestDriver_Stop(t *testing.T) {
 	t.Parallel()
 
-	t.Run("stops and removes every container it owns for the workload", func(t *testing.T) {
+	t.Run("stops every container and keeps the newest for its output", func(t *testing.T) {
 		client := NewMockClient(t)
 
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
-			{ID: "container-one"},
-			{ID: "container-two"},
+			{ID: "container-one", Labels: map[string]string{docker.LabelAttempt: "1"}},
+			{ID: "container-two", Labels: map[string]string{docker.LabelAttempt: "2"}},
 		}, nil).Once()
 
 		for _, id := range []string{"container-one", "container-two"} {
 			client.EXPECT().ContainerStop(mock.Anything, id, mock.Anything).Return(nil).Once()
+		}
+
+		// The newest is kept and the one it replaced goes. Docker holds the logs of a
+		// container that exists, so keeping the container is what makes the output of
+		// the attempt that just failed readable afterwards.
+		client.EXPECT().ContainerRemove(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
+	})
+
+	t.Run("keeps exactly one container however many attempts there have been", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		// Unbounded retention is a disk leak on a workload crashing in a loop, so
+		// everything but the newest goes on every stop rather than accumulating.
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one", Labels: map[string]string{docker.LabelAttempt: "1"}},
+			{ID: "container-two", Labels: map[string]string{docker.LabelAttempt: "2"}},
+			{ID: "container-three", Labels: map[string]string{docker.LabelAttempt: "3"}},
+		}, nil).Once()
+
+		for _, id := range []string{"container-one", "container-two", "container-three"} {
+			client.EXPECT().ContainerStop(mock.Anything, id, mock.Anything).Return(nil).Once()
+		}
+
+		for _, id := range []string{"container-one", "container-two"} {
 			client.EXPECT().ContainerRemove(mock.Anything, id, mock.Anything).Return(nil).Once()
 		}
 
@@ -302,10 +362,13 @@ func TestDriver_Stop(t *testing.T) {
 		client := NewMockClient(t)
 
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
-			{ID: "container-one"},
+			{ID: "container-one", Labels: map[string]string{docker.LabelAttempt: "1"}},
+			{ID: "container-two", Labels: map[string]string{docker.LabelAttempt: "2"}},
 		}, nil).Once()
 
-		client.EXPECT().ContainerStop(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+		for _, id := range []string{"container-one", "container-two"} {
+			client.EXPECT().ContainerStop(mock.Anything, id, mock.Anything).Return(nil).Once()
+		}
 
 		// ContainerStop returns before the container has necessarily stopped, so an
 		// unforced remove fails with "container is running" and leaves the
@@ -327,6 +390,40 @@ func TestDriver_Stop(t *testing.T) {
 		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
 
 		require.NoError(t, d.Stop(t.Context(), "", "example"))
+	})
+}
+
+func TestDriver_Discard(t *testing.T) {
+	t.Parallel()
+
+	t.Run("removes everything including what a stop retained", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one", Labels: map[string]string{docker.LabelAttempt: "1"}},
+			{ID: "container-two", Labels: map[string]string{docker.LabelAttempt: "2"}},
+		}, nil).Once()
+
+		// Nothing is kept. A retained container exists so an operator can read why the
+		// previous attempt failed, and a workload nobody asked for has no such reader —
+		// one left behind is a container the orphan sweep finds on every pass forever.
+		for _, id := range []string{"container-one", "container-two"} {
+			client.EXPECT().ContainerStop(mock.Anything, id, mock.Anything).Return(nil).Once()
+			client.EXPECT().ContainerRemove(mock.Anything, id, mock.Anything).Return(nil).Once()
+		}
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		require.NoError(t, d.Discard(t.Context(), "", "example"))
+	})
+
+	t.Run("succeeds when it owns nothing for the workload", func(t *testing.T) {
+		client := NewMockClient(t)
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		require.NoError(t, d.Discard(t.Context(), "", "example"))
 	})
 }
 
@@ -553,6 +650,97 @@ func TestDriver_Observe(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, instances)
 	})
+
+	t.Run("marks a container something has replaced as retained", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:     "retained",
+				State:  dockercontainer.StateExited,
+				Labels: map[string]string{docker.LabelWorkload: "example", docker.LabelAttempt: "1"},
+			},
+			{
+				ID:     "current",
+				State:  dockercontainer.StateRunning,
+				Labels: map[string]string{docker.LabelWorkload: "example", docker.LabelAttempt: "2"},
+			},
+		}, nil).Once()
+
+		client.EXPECT().ContainerInspect(mock.Anything, "retained").Return(dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				State: &dockercontainer.State{Status: dockercontainer.StateExited, ExitCode: 1},
+			},
+		}, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 2)
+
+		byID := make(map[string]driver.Instance, len(instances))
+		for _, instance := range instances {
+			byID[instance.ID] = instance
+		}
+
+		// Reported rather than hidden, so the orphan sweep can still find it, and
+		// flagged so that nothing deciding what to run mistakes it for an instance.
+		assert.True(t, byID["retained"].Retained)
+		assert.False(t, byID["current"].Retained)
+
+		// Its real state, so nothing has to invent one for it.
+		assert.Equal(t, driver.StateFailed, byID["retained"].State)
+	})
+
+	t.Run("marks nothing retained for a workload that has run once", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:     "current",
+				State:  dockercontainer.StateRunning,
+				Labels: map[string]string{docker.LabelWorkload: "example", docker.LabelAttempt: "1"},
+			},
+		}, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+
+		assert.False(t, instances[0].Retained)
+	})
+
+	t.Run("keeps each workload's attempts to itself", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		// Attempts are numbered per workload, so a workload on its first attempt must
+		// not read as superseded by another workload's second.
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:     "first-of-one",
+				State:  dockercontainer.StateRunning,
+				Labels: map[string]string{docker.LabelWorkload: "one", docker.LabelAttempt: "1"},
+			},
+			{
+				ID:     "second-of-two",
+				State:  dockercontainer.StateRunning,
+				Labels: map[string]string{docker.LabelWorkload: "two", docker.LabelAttempt: "2"},
+			},
+		}, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 2)
+
+		for _, instance := range instances {
+			assert.Falsef(t, instance.Retained, "%s read as replaced by another workload's container", instance.ID)
+		}
+	})
 }
 
 func TestDriver_Logs(t *testing.T) {
@@ -572,9 +760,94 @@ func TestDriver_Logs(t *testing.T) {
 		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
 
 		var out strings.Builder
-		require.NoError(t, d.Logs(t.Context(), &out, "example", 20))
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 20}))
 		assert.Equal(t, "hello world\n", out.String())
 	})
+
+	t.Run("reads the current attempt and not the one it replaced", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "retained", Labels: map[string]string{docker.LabelWorkload: "example", docker.LabelAttempt: "1"}},
+			{ID: "current", Labels: map[string]string{docker.LabelWorkload: "example", docker.LabelAttempt: "2"}},
+		}, nil).Once()
+
+		// Only the current one. Writing both would return two runs spliced together
+		// with nothing marking the boundary.
+		client.EXPECT().ContainerLogs(mock.Anything, "current", mock.Anything).
+			Return(io.NopCloser(strings.NewReader(multiplexed("this attempt\n"))), nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		var out strings.Builder
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 20}))
+		assert.Equal(t, "this attempt\n", out.String())
+	})
+
+	t.Run("reads the attempt that was replaced when asked for the previous one", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "retained", Labels: map[string]string{docker.LabelWorkload: "example", docker.LabelAttempt: "1"}},
+			{ID: "current", Labels: map[string]string{docker.LabelWorkload: "example", docker.LabelAttempt: "2"}},
+		}, nil).Once()
+
+		// The whole point of retaining it: for a workload crashing in a loop this is
+		// the attempt that failed, where the current one has not failed yet.
+		client.EXPECT().ContainerLogs(mock.Anything, "retained", mock.Anything).
+			Return(io.NopCloser(strings.NewReader(multiplexed("why it died\n"))), nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		var out strings.Builder
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 20, Previous: true}))
+		assert.Equal(t, "why it died\n", out.String())
+	})
+
+	t.Run("writes nothing when the workload has only ever run once", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "current", Labels: map[string]string{docker.LabelWorkload: "example", docker.LabelAttempt: "1"}},
+		}, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		// There is no earlier attempt, and saying so by writing nothing is better than
+		// falling back to the current one and labelling it as the previous.
+		var out strings.Builder
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 20, Previous: true}))
+		assert.Empty(t, out.String())
+	})
+}
+
+func TestDriver_Start_NumbersEachAttempt(t *testing.T) {
+	t.Parallel()
+
+	// A restart at an unchanged version reuses the version, so the attempt is what
+	// stops a replacement colliding with the container being kept for its output.
+	client := NewMockClient(t)
+
+	client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+		{ID: "retained", Labels: map[string]string{docker.LabelWorkload: "example", docker.LabelAttempt: "2"}},
+	}, nil).Once()
+
+	client.EXPECT().ImageList(mock.Anything, mock.Anything).
+		Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+	client.EXPECT().ContainerCreate(mock.Anything,
+		mock.MatchedBy(func(config *dockercontainer.Config) bool {
+			return config.Labels[docker.LabelAttempt] == "3"
+		}),
+		mock.Anything, mock.Anything, mock.Anything, "orca-example-1-3",
+	).Return(dockercontainer.CreateResponse{ID: "container-three"}, nil).Once()
+
+	client.EXPECT().ContainerStart(mock.Anything, "container-three", mock.Anything).Return(nil).Once()
+
+	d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+	_, err := d.Start(t.Context(), workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil))
+	require.NoError(t, err)
 }
 
 // multiplexed frames payload the way the docker daemon frames the output of a

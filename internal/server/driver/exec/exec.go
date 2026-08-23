@@ -38,6 +38,18 @@ const Name = "exec"
 const (
 	// The file holding what the driver knows about an instance.
 	stateFile = "state.json"
+	// The file marking a record that describes an attempt which was stopped and kept,
+	// rather than one waiting to be restarted. Its presence is the whole signal, so it
+	// holds nothing.
+	retainedFile = "retained"
+	// The file holding the output of the attempt a replacement took the place of.
+	//
+	// A separate file rather than a marker beside the output, because a restart at an
+	// unchanged version runs in the directory the previous attempt used: sharing one
+	// file would append the new attempt's output to the old, and nothing could then say
+	// where one ended and the other began. Renaming on stop is what separates them, and
+	// it means the current attempt always opens a file of its own.
+	previousFile = "previous.log"
 	// The file the process's output is written to. Both streams go to the one file so
 	// that reading it back gives them interleaved in the order they were written,
 	// which is what the docker driver's demultiplexing produces.
@@ -206,6 +218,13 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 
 	if err = os.MkdirAll(recordPath, 0o700); err != nil {
 		return "", fmt.Errorf("failed to create state directory: %w", err)
+	}
+
+	// A restart at an unchanged version reuses the directory the previous attempt was
+	// stopped in, so the mark left there describes the attempt this one replaces. Left in
+	// place it would report a running process as one kept for its output.
+	if err = unretain(recordPath); err != nil {
+		return "", err
 	}
 
 	if err = mount(cwd, w.Volumes); err != nil {
@@ -382,58 +401,112 @@ func (d *Driver) supervise(ctx context.Context, workload string, process *superv
 	})
 }
 
-// Stop ends everything the driver runs for a workload and forgets its directories.
+// Stop ends everything the driver runs for a workload, keeping the output of the
+// version it most recently ran so that it can still be read.
 //
 // The process group is signalled rather than the process, so that anything the command
 // started is stopped with it. A group given time to stop and still running is killed:
 // a workload that ignores the request must not be able to block the pass that asked.
+//
+// One version's output is kept for the reason the docker driver keeps a container: the
+// reconciler stops a workload before it starts it, so removing everything here is what
+// used to discard the output of the attempt that just failed. What survives is that
+// version's output.log and its record, marked retained. The working directory goes with
+// the rest, because it holds the symlinks to the workload's volumes and nothing is left
+// to read them.
+//
+// Every other version goes, in both trees. Keeping one version rather than all of them
+// bounds what a workload crashing in a loop leaves on the disk.
 func (d *Driver) Stop(ctx context.Context, id, workload string) error {
-	// An orphan has no stored workload, so no identifier comes with it. The record in
-	// each directory carries the name it belongs to, so the identifier is found by
-	// reading those rather than by treating the name as a path.
-	if id == "" {
-		found, err := d.identify(workload)
-		if err != nil {
-			if errors.Is(err, ErrUnknownWorkload) {
-				// Nothing here belongs to that workload, which is what an orphan of
-				// another runtime looks like from here.
-				return nil
-			}
+	found, err := d.resolve(workload, id)
+	if err != nil || found == "" {
+		return err
+	}
 
+	id = found
+
+	versions, err := d.halt(ctx, id, workload)
+	if err != nil {
+		return err
+	}
+
+	keep := newest(versions)
+
+	for _, path := range versions {
+		if path == keep {
+			continue
+		}
+
+		if err = d.discardVersion(id, path); err != nil {
+			return err
+		}
+	}
+
+	if keep == "" {
+		return nil
+	}
+
+	if err = d.keep(id, keep); err != nil {
+		return err
+	}
+
+	d.logger.With("workload", workload).Debug("workload stopped, keeping its output")
+
+	return nil
+}
+
+// Discard ends everything the driver runs for a workload and removes both of its trees,
+// including the output Stop kept.
+//
+// This is what a delete and an orphan take, where Stop is what a replacement takes. The
+// kept output exists so that an operator can read why the previous attempt failed, and a
+// workload nobody asked for has no such reader.
+func (d *Driver) Discard(ctx context.Context, id, workload string) error {
+	found, err := d.resolve(workload, id)
+	if err != nil || found == "" {
+		return err
+	}
+
+	if _, err = d.halt(ctx, found, workload); err != nil {
+		return err
+	}
+
+	for _, tree := range []string{d.state, d.workloads} {
+		path, err := d.dir(tree, found)
+		if err != nil {
 			return err
 		}
 
-		id = found
+		if err = os.RemoveAll(path); err != nil {
+			return fmt.Errorf("failed to remove workload directory: %w", err)
+		}
 	}
 
-	states, err := d.dir(d.state, id)
-	if err != nil {
-		d.logger.With("workload", workload, "error", err).Error("refusing to stop a workload")
+	d.logger.With("workload", workload).Debug("workload discarded")
 
-		return err
-	}
+	return nil
+}
 
-	directories, err := d.dir(d.workloads, id)
-	if err != nil {
-		return err
-	}
-
+// halt ends every process the driver runs for a workload and returns the version
+// directories it has records in, so that a caller can decide what to keep.
+func (d *Driver) halt(ctx context.Context, id, workload string) ([]string, error) {
 	versions, err := d.versions(d.state, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for _, path := range versions {
 		recorded, err := readState(path)
 		if err != nil {
-			// Nothing readable to stop. The directories are still removed below, since
-			// a record that cannot be read describes nothing that can be converged.
+			// Nothing readable to stop. The directory is still dealt with by the caller,
+			// since a record that cannot be read describes nothing that can be
+			// converged.
 			continue
 		}
 
 		if recorded.alive() {
 			if err = d.terminate(ctx, recorded.PID); err != nil {
-				return fmt.Errorf("failed to stop process: %w", err)
+				return nil, fmt.Errorf("failed to stop process: %w", err)
 			}
 		}
 	}
@@ -442,17 +515,117 @@ func (d *Driver) Stop(ctx context.Context, id, workload string) error {
 	delete(d.supervised, workload)
 	d.mux.Unlock()
 
-	// Removed only once nothing is running, so a workload's output survives for as
-	// long as the workload does.
-	for _, path := range []string{states, directories} {
-		if err = os.RemoveAll(path); err != nil {
+	return versions, nil
+}
+
+// resolve finds the identifier of the workload a caller means, reporting an empty one
+// when the driver has no record of it.
+//
+// An orphan has no stored workload, so no identifier comes with it. The record in each
+// directory carries the name it belongs to, so the identifier is found by reading those
+// rather than by treating the name as a path.
+func (d *Driver) resolve(workload, id string) (string, error) {
+	if id != "" {
+		return id, nil
+	}
+
+	found, err := d.identify(workload)
+	if err != nil {
+		if errors.Is(err, ErrUnknownWorkload) {
+			// Nothing here belongs to that workload, which is what a workload of
+			// another runtime looks like from here.
+			return "", nil
+		}
+
+		return "", err
+	}
+
+	return found, nil
+}
+
+// keep sets a version's output aside as the previous attempt's and removes the directory
+// the process ran in.
+//
+// The output is moved rather than left where it is, because a restart at an unchanged
+// version reuses this directory: the next attempt opens the output file afresh, and
+// without the move it would append to the attempt this one is keeping.
+//
+// The working directory goes because it holds the symlinks to the workload's volumes and
+// whatever the command wrote beside them, none of which has a reader once the process has
+// ended.
+func (d *Driver) keep(id, path string) error {
+	recorded, err := readState(path)
+	if err != nil {
+		// No record to read, so there is no version to find the output under. Observe
+		// skips such a version anyway, and the files are left rather than moved on the
+		// strength of a record that could not be read.
+		return nil
+	}
+
+	workload, err := d.version(d.workloads, id, recorded.Version)
+	if err != nil {
+		return err
+	}
+
+	if err = os.RemoveAll(filepath.Join(workload, workingDir)); err != nil {
+		return fmt.Errorf("failed to remove workload directory: %w", err)
+	}
+
+	// Renamed over whatever the last stop kept, so one attempt's output is held rather
+	// than accumulating one file per attempt. A workload that has written nothing has no
+	// file to move, which is not a failure.
+	err = os.Rename(filepath.Join(workload, outputFile), filepath.Join(workload, previousFile))
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to keep the previous output: %w", err)
+	}
+
+	return retain(path)
+}
+
+// discardVersion removes one version of a workload from both trees.
+func (d *Driver) discardVersion(id, path string) error {
+	recorded, err := readState(path)
+	if err == nil {
+		workload, err := d.version(d.workloads, id, recorded.Version)
+		if err != nil {
+			return err
+		}
+
+		if err = os.RemoveAll(workload); err != nil {
 			return fmt.Errorf("failed to remove workload directory: %w", err)
 		}
 	}
 
-	d.logger.With("workload", workload).Debug("workload stopped")
+	if err = os.RemoveAll(path); err != nil {
+		return fmt.Errorf("failed to remove workload directory: %w", err)
+	}
 
 	return nil
+}
+
+// newest returns the version directory holding the most recent record, which is the one
+// worth keeping for its output.
+//
+// Ordered by the version the record names rather than by the directory's name, so
+// nothing depends on how a path sorts — "10" sorts before "9" as text.
+func newest(versions []string) string {
+	var (
+		newest  string
+		version = -1
+	)
+
+	for _, path := range versions {
+		recorded, err := readState(path)
+		if err != nil {
+			continue
+		}
+
+		if recorded.Version > version {
+			newest, version = path, recorded.Version
+		}
+	}
+
+	return newest
 }
 
 // Signal sends the named signal to every process the driver runs for the named
@@ -698,7 +871,7 @@ func (d *Driver) Observe(_ context.Context) ([]driver.Instance, error) {
 				continue
 			}
 
-			instances = append(instances, instance(recorded.Workload, recorded))
+			instances = append(instances, instance(recorded.Workload, recorded, retained(path)))
 		}
 	}
 
@@ -706,7 +879,7 @@ func (d *Driver) Observe(_ context.Context) ([]driver.Instance, error) {
 }
 
 // instance maps a record onto what the server reads.
-func instance(workload string, recorded state) driver.Instance {
+func instance(workload string, recorded state, retained bool) driver.Instance {
 	out := driver.Instance{
 		ID:        strconv.Itoa(recorded.PID),
 		Workload:  workload,
@@ -714,6 +887,7 @@ func instance(workload string, recorded state) driver.Instance {
 		Version:   recorded.Version,
 		StartedAt: recorded.StartedAt,
 		ExitCode:  recorded.ExitCode,
+		Retained:  retained,
 	}
 
 	switch {
@@ -764,10 +938,15 @@ func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 
 // Logs writes the tail of a workload's output.
 //
+// Which output that is depends on options: the version now running by default, and the
+// one a replacement kept when Previous is asked for. The two are never combined, for the
+// reason the docker driver does not combine them — the result would be two runs spliced
+// together with nothing marking the boundary.
+//
 // Both streams were written to one file, so they come back interleaved in the order
 // the process wrote them. A workload the driver has nothing for writes nothing, since
 // the caller does not know which runtime holds it.
-func (d *Driver) Logs(_ context.Context, out io.Writer, workload string, tail int) error {
+func (d *Driver) Logs(_ context.Context, out io.Writer, workload string, options driver.LogOptions) error {
 	id, err := d.identify(workload)
 	if err != nil {
 		if errors.Is(err, ErrUnknownWorkload) {
@@ -779,14 +958,21 @@ func (d *Driver) Logs(_ context.Context, out io.Writer, workload string, tail in
 		return err
 	}
 
-	// Output lives in the workload's own tree, which is the one it writes to.
+	// Output lives in the workload's own tree, which is the one it writes to. Which file
+	// holds which attempt is the whole of the bookkeeping: the current one writes to
+	// outputFile, and a stop moves it aside to previousFile.
 	versions, err := d.versions(d.workloads, id)
 	if err != nil {
 		return err
 	}
 
+	name := outputFile
+	if options.Previous {
+		name = previousFile
+	}
+
 	for _, path := range versions {
-		if err = tailFile(out, filepath.Join(path, outputFile), tail); err != nil {
+		if err = tailFile(out, filepath.Join(path, name), options.Tail); err != nil {
 			return err
 		}
 	}

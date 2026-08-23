@@ -189,6 +189,12 @@ paths:
       description: |
         Returns the combined output of the workload's instances as plain text, most
         recent last.
+
+        The server keeps the instance it most recently stopped so that the output of
+        an attempt that ended is still readable after a replacement has taken its
+        place. Set `previous` to read that instead of what is running now, which is
+        what a workload restarting repeatedly needs: the current attempt has not
+        failed yet, so its output does not say why the workload is failing.
       parameters:
         - name: tail
           in: query
@@ -202,6 +208,18 @@ paths:
             minimum: 1
             maximum: 10000
             default: 100
+        - name: previous
+          in: query
+          required: false
+          description: |
+            Read the instance that was replaced rather than the one running now.
+
+            The two are never combined, because concatenating them would return two
+            runs spliced together with nothing marking the boundary. A workload that
+            has only ever run once has no earlier attempt, so the response is empty.
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: The workload's logs.

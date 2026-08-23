@@ -37,6 +37,19 @@ const (
 	// LabelVersion names the container label holding the workload version a
 	// container was created from.
 	LabelVersion = "orca.version"
+	// LabelAttempt names the container label holding which attempt at running a
+	// workload a container is.
+	//
+	// The container's name carries it too, but the label is what the driver reads. A
+	// name is an output of this driver rather than an input to it, so nothing parses
+	// one back to learn what it means.
+	//
+	// It is also how a retained container is recognised. Docker fixes a container's
+	// labels when it is created and offers no way to change them, so retention cannot
+	// be written onto a container once something has replaced it. It does not need to
+	// be: a container is superseded exactly when the workload has another with a
+	// higher attempt, which is a comparison rather than a mark.
+	LabelAttempt = "orca.attempt"
 )
 
 var (
@@ -112,13 +125,24 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 
 	exposed, bindings := portBindings(d.bind, w.Ports)
 
-	labels := make(map[string]string, len(w.Labels)+3)
+	// Which attempt this is, read from what the driver already holds. A retained
+	// container from the previous attempt keeps its name, so a replacement has to be
+	// named something else or docker refuses to create it.
+	held, err := d.containers(ctx, w.Name)
+	if err != nil {
+		return "", err
+	}
+
+	attempt := nextAttempt(held)
+
+	labels := make(map[string]string, len(w.Labels)+4)
 	for k, v := range w.Labels {
 		labels[k] = v
 	}
 	labels[LabelWorkload] = w.Name
 	labels[LabelSpecHash] = w.SpecHash
 	labels[LabelVersion] = strconv.Itoa(w.Version)
+	labels[LabelAttempt] = strconv.Itoa(attempt)
 
 	created, err := d.client.ContainerCreate(ctx,
 		&container.Config{
@@ -135,7 +159,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 			Mounts:       mounts(w.Volumes),
 		},
 		nil, nil,
-		containerName(w.Name, w.Version),
+		containerName(w.Name, w.Version, attempt),
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create container: %w", err)
@@ -157,10 +181,24 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	return created.ID, nil
 }
 
-// Stop stops and removes every container the driver holds for the named workload.
+// Stop stops every container the driver holds for the named workload, keeping the most
+// recently created one so that its output can still be read.
 //
 // The workload's identifier is not used. This driver's ownership is expressed in
 // container labels rather than on disk, so the name is all it needs to find its work.
+//
+// One container is retained because this is the path a replacement and a restart both
+// take: the reconciler stops a workload before it starts it, so removing everything
+// here is what used to discard the output of the attempt that just failed. Docker keeps
+// the logs of a container that exists, so retaining the container is all it takes and
+// orca does not have to invent a retention policy or a size cap of its own.
+//
+// Exactly one is retained, and every other container the workload has — including
+// whatever the previous stop retained — is removed in the same call. Unbounded
+// retention would be a disk leak on a workload crashing in a loop, and pruning here
+// rather than once a replacement has settled means the invariant holds at every moment
+// rather than between passes. What that discards is the older corpse, where the one
+// being kept is more recent evidence of the same failure.
 //
 // Removal is forced because ContainerStop only asks the container to stop and
 // returns before it necessarily has: an unforced remove races that shutdown and
@@ -178,11 +216,61 @@ func (d *Driver) Stop(ctx context.Context, _, workload string) error {
 			return fmt.Errorf("failed to stop container: %w", err)
 		}
 
-		if err = d.client.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil {
-			return fmt.Errorf("failed to remove container: %w", err)
+		d.logger.With("workload", workload, "container", c.ID).Debug("container stopped")
+	}
+
+	keep := newest(containers)
+
+	for _, c := range containers {
+		if c.ID == keep {
+			continue
 		}
 
-		d.logger.With("workload", workload, "container", c.ID).Debug("container stopped")
+		if err = d.remove(ctx, c.ID); err != nil {
+			return err
+		}
+	}
+
+	if keep == "" {
+		return nil
+	}
+
+	d.logger.With("workload", workload, "container", keep).Debug("retained a stopped container so its output survives")
+
+	return nil
+}
+
+// Discard stops and removes everything the driver holds for the named workload,
+// including whatever Stop retained.
+//
+// This is what a delete and an orphan take, where Stop is what a replacement takes. A
+// retained container exists so that an operator can read why the previous attempt
+// failed; a workload nobody asked for has no such reader, and one left behind is a
+// container the orphan sweep would find on every pass forever.
+func (d *Driver) Discard(ctx context.Context, _, workload string) error {
+	containers, err := d.containers(ctx, workload)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range containers {
+		if err = d.client.ContainerStop(ctx, c.ID, container.StopOptions{}); err != nil {
+			return fmt.Errorf("failed to stop container: %w", err)
+		}
+
+		if err = d.remove(ctx, c.ID); err != nil {
+			return err
+		}
+
+		d.logger.With("workload", workload, "container", c.ID).Debug("container discarded")
+	}
+
+	return nil
+}
+
+func (d *Driver) remove(ctx context.Context, id string) error {
+	if err := d.client.ContainerRemove(ctx, id, container.RemoveOptions{Force: true}); err != nil {
+		return fmt.Errorf("failed to remove container: %w", err)
 	}
 
 	return nil
@@ -222,11 +310,16 @@ func (d *Driver) Signal(ctx context.Context, _, workload, signal string) error {
 //
 // This is the driver's report of what is actually running, and the only source of
 // that information — the server persists nothing about it.
+//
+// A container something has already replaced is reported as retained, so that a caller
+// deciding what to run leaves it out while one sweeping up orphans still finds it.
 func (d *Driver) Observe(ctx context.Context) ([]driver.Instance, error) {
 	containers, err := d.containers(ctx, "")
 	if err != nil {
 		return nil, err
 	}
+
+	superseded := supersededBy(containers)
 
 	instances := make([]driver.Instance, 0, len(containers))
 	for _, c := range containers {
@@ -239,6 +332,7 @@ func (d *Driver) Observe(ctx context.Context) ([]driver.Instance, error) {
 			Version:  version,
 			State:    state(c.State),
 			Ports:    instancePorts(c.Ports),
+			Retained: superseded[c.ID],
 			// When the container was created, which the summary carries and the
 			// caller uses to tell a container that is up from one that has stayed up.
 			// An inspect would give the moment it actually started, but the two differ
@@ -313,21 +407,36 @@ func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 	return out, nil
 }
 
-// Logs writes the combined output of every container the driver holds for the named
-// workload to out, limited to the last tail lines of each.
+// Logs writes the output of the containers the driver holds for the named workload to
+// out, limited to the last Tail lines of each.
+//
+// Which containers those are is what options decides. The current attempt is read by
+// default, and the retained one when Previous is asked for. The two are never combined:
+// the driver holds the attempt now running and the one before it, so writing both would
+// return two runs spliced together with nothing marking the boundary.
 //
 // The output is written as it is read rather than accumulated and returned. A
 // workload's logs are unbounded in principle — a chatty container plus a generous
 // tail is as much memory as the caller asks for — so holding the whole response
 // before sending any of it would let one request decide how much the server uses.
-func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, tail int) error {
+func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, options driver.LogOptions) error {
 	containers, err := d.containers(ctx, workload)
 	if err != nil {
 		return err
 	}
 
+	superseded := supersededBy(containers)
+
 	for _, c := range containers {
-		if err = d.containerLogs(ctx, out, c.ID, tail); err != nil {
+		// A container nothing has replaced is the current attempt, and one that has
+		// been replaced is the retained one. Asking for the previous output when the
+		// workload has only ever run once writes nothing, which is the honest answer:
+		// there is no earlier attempt to read.
+		if superseded[c.ID] != options.Previous {
+			continue
+		}
+
+		if err = d.containerLogs(ctx, out, c.ID, options.Tail); err != nil {
 			return err
 		}
 	}
@@ -567,8 +676,82 @@ func environment(env map[string]string) []string {
 // containerName builds a predictable, human-readable container name. The version
 // suffix keeps a replacement from colliding with the container it replaces while
 // the old one is still being removed.
-func containerName(workload string, version int) string {
-	return fmt.Sprintf("orca-%s-%d", workload, version)
+//
+// The attempt suffix is what makes retention possible. A restart at an unchanged
+// version reuses the version, so the two components together are what stop a
+// replacement colliding with the container it is replacing — which now outlives it
+// rather than being removed on the way past.
+func containerName(workload string, version, attempt int) string {
+	return fmt.Sprintf("orca-%s-%d-%d", workload, version, attempt)
+}
+
+// nextAttempt reports which attempt at running a workload the next container is, given
+// what the driver already holds for it.
+//
+// Counted from the highest attempt seen rather than from how many containers there are,
+// so that removing one does not hand its number to the next container and collide with
+// whatever still holds the name.
+func nextAttempt(containers []container.Summary) int {
+	highest := 0
+	for _, c := range containers {
+		if attempt, err := strconv.Atoi(c.Labels[LabelAttempt]); err == nil && attempt > highest {
+			highest = attempt
+		}
+	}
+
+	return highest + 1
+}
+
+// newest reports the container a workload most recently ran, which is the one worth
+// keeping for its output.
+//
+// Ordered by attempt, falling back to creation time for a container from a server that
+// wrote no attempt label. Docker does not promise an order from a list, so nothing here
+// depends on one.
+func newest(containers []container.Summary) string {
+	var (
+		id      string
+		attempt = -1
+		created int64
+	)
+
+	for _, c := range containers {
+		this, err := strconv.Atoi(c.Labels[LabelAttempt])
+		if err != nil {
+			this = 0
+		}
+
+		if this > attempt || (this == attempt && c.Created > created) {
+			id, attempt, created = c.ID, this, c.Created
+		}
+	}
+
+	return id
+}
+
+// supersededBy reports which containers another container has replaced, keyed by
+// identifier.
+//
+// A container is superseded when its workload has another with a higher attempt, which
+// is what retention means here: docker fixes a container's labels at creation, so being
+// replaced cannot be written onto the container and is derived by comparison instead.
+func supersededBy(containers []container.Summary) map[string]bool {
+	byWorkload := make(map[string][]container.Summary)
+	for _, c := range containers {
+		workload := c.Labels[LabelWorkload]
+		byWorkload[workload] = append(byWorkload[workload], c)
+	}
+
+	superseded := make(map[string]bool, len(containers))
+	for _, held := range byWorkload {
+		current := newest(held)
+
+		for _, c := range held {
+			superseded[c.ID] = c.ID != current
+		}
+	}
+
+	return superseded
 }
 
 // command returns the command a container should run, or nil when the specification

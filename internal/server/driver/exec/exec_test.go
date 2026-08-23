@@ -114,7 +114,7 @@ func TestDriver_Start(t *testing.T) {
 		awaitState(t, d, "example", driver.StateExited)
 
 		var out bytes.Buffer
-		require.NoError(t, d.Logs(t.Context(), &out, "example", 10))
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 10}))
 
 		// HOME is absent, EXAMPLE is what the workload asked for, and PATH is supplied
 		// so that a command named by anything but an absolute path can be found.
@@ -131,7 +131,7 @@ func TestDriver_Observe(t *testing.T) {
 
 		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = d.Stop(context.Background(), "", "example") })
+		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -229,8 +229,33 @@ func TestDriver_Observe(t *testing.T) {
 func TestDriver_Stop(t *testing.T) {
 	t.Parallel()
 
-	t.Run("stops a running process and removes its files", func(t *testing.T) {
+	t.Run("stops a running process and keeps its output", func(t *testing.T) {
 		d, root := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo working; sleep 300"))
+		require.NoError(t, err)
+
+		// Waited for before the stop, or the test races the shell writing it and proves
+		// nothing about what retention keeps.
+		awaitOutput(t, d, "example", "working")
+
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
+
+		// The output survives the process, which is what makes a failed attempt
+		// readable after the reconciler has replaced it.
+		var out bytes.Buffer
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 10, Previous: true}))
+		assert.Contains(t, out.String(), "working")
+
+		// The directory the process ran in does not. It holds the symlinks to the
+		// workload's volumes and whatever the command wrote beside them, none of which
+		// has a reader once the process has ended.
+		_, err = os.Stat(filepath.Join(root, "workloads", testID, "1", "cwd"))
+		assert.True(t, os.IsNotExist(err), "the working directory outlived the process")
+	})
+
+	t.Run("reports the instance it kept as retained", func(t *testing.T) {
+		d, _ := newDriver(t)
 
 		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
 		require.NoError(t, err)
@@ -239,12 +264,35 @@ func TestDriver_Stop(t *testing.T) {
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
-		assert.Empty(t, instances)
+		require.Len(t, instances, 1)
 
-		for _, tree := range []string{"state", "workloads"} {
-			_, err = os.Stat(filepath.Join(root, tree, testID))
-			assert.True(t, os.IsNotExist(err), "the workload's %s directory outlived it", tree)
+		// Reported rather than hidden, so the orphan sweep still finds it, and flagged
+		// so nothing deciding what to run mistakes it for work in progress.
+		assert.True(t, instances[0].Retained)
+	})
+
+	t.Run("keeps one version's output however many there have been", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		// Three versions in turn, which is what a workload replaced twice leaves
+		// behind. Keeping all of them would be a disk leak on a workload that crashes
+		// in a loop.
+		for version := 1; version <= 3; version++ {
+			_, err := d.Start(t.Context(), workload("example", version, "hash-one", "echo version; sleep 300"))
+			require.NoError(t, err)
+
+			require.NoError(t, d.Stop(t.Context(), "", "example"))
 		}
+
+		for _, version := range []string{"1", "2"} {
+			_, err := os.Stat(filepath.Join(root, "workloads", testID, version))
+			assert.Truef(t, os.IsNotExist(err), "version %s outlived the version that replaced it", version)
+		}
+
+		// Set aside as the previous attempt's rather than left where it was, so that a
+		// restart at this version opens a file of its own instead of appending to it.
+		_, err := os.Stat(filepath.Join(root, "workloads", testID, "3", "previous.log"))
+		assert.NoError(t, err, "the most recent version's output was not kept")
 	})
 
 	t.Run("stops whatever the command started", func(t *testing.T) {
@@ -268,6 +316,52 @@ func TestDriver_Stop(t *testing.T) {
 		d, _ := newDriver(t)
 
 		assert.NoError(t, d.Stop(t.Context(), "", "nothing-here"))
+	})
+}
+
+func TestDriver_Discard(t *testing.T) {
+	t.Parallel()
+
+	t.Run("removes both trees including the output a stop kept", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo working; sleep 300"))
+		require.NoError(t, err)
+
+		// Stopped first, so what is discarded is a workload that has already been
+		// through the path which keeps its output. That is the state a delete finds.
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
+		require.NoError(t, d.Discard(t.Context(), "", "example"))
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		assert.Empty(t, instances)
+
+		for _, tree := range []string{"state", "workloads"} {
+			_, err = os.Stat(filepath.Join(root, tree, testID))
+			assert.Truef(t, os.IsNotExist(err), "the workload's %s directory outlived it", tree)
+		}
+	})
+
+	t.Run("stops a running process before removing it", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300 & echo $! > child.pid; wait"))
+		require.NoError(t, err)
+
+		child := awaitChildPID(t, root, "example", 1)
+
+		require.NoError(t, d.Discard(t.Context(), "", "example"))
+
+		assert.Eventually(t, func() bool {
+			return syscall.Kill(child, 0) != nil
+		}, 10*time.Second, 50*time.Millisecond, "a process the command started outlived the workload")
+	})
+
+	t.Run("does nothing for a workload it has never run", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		assert.NoError(t, d.Discard(t.Context(), "", "nothing-here"))
 	})
 }
 
@@ -396,7 +490,9 @@ func TestDriver_Stop_ResolvesAnOrphanByItsRecordedName(t *testing.T) {
 		"startedAt":  time.Now().Format(time.RFC3339Nano),
 	})
 
-	require.NoError(t, d.Stop(t.Context(), "", "example"))
+	// Discarded rather than stopped, which is what the reconciler does to an orphan:
+	// nothing asked for the work, so there is nobody left to read its output.
+	require.NoError(t, d.Discard(t.Context(), "", "example"))
 
 	instances, err := d.Observe(t.Context())
 	require.NoError(t, err)
@@ -496,7 +592,7 @@ func TestDriver_Logs(t *testing.T) {
 		awaitState(t, d, "example", driver.StateExited)
 
 		var out bytes.Buffer
-		require.NoError(t, d.Logs(t.Context(), &out, "example", 10))
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 10}))
 		assert.Equal(t, "first\nsecond\nthird\n", out.String())
 	})
 
@@ -509,7 +605,7 @@ func TestDriver_Logs(t *testing.T) {
 		awaitState(t, d, "example", driver.StateExited)
 
 		var out bytes.Buffer
-		require.NoError(t, d.Logs(t.Context(), &out, "example", 3))
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 3}))
 		assert.Equal(t, "98\n99\n100\n", out.String())
 	})
 
@@ -517,7 +613,116 @@ func TestDriver_Logs(t *testing.T) {
 		d, _ := newDriver(t)
 
 		var out bytes.Buffer
-		require.NoError(t, d.Logs(t.Context(), &out, "nothing-here", 10))
+		require.NoError(t, d.Logs(t.Context(), &out, "nothing-here", driver.LogOptions{Tail: 10}))
+		assert.Empty(t, out.String())
+	})
+
+	t.Run("separates the current attempt from the one it replaced", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		// The first attempt, then the replacement, which is what the reconciler does to
+		// a workload whose specification changed or whose process died.
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo first attempt; sleep 300"))
+		require.NoError(t, err)
+
+		awaitOutput(t, d, "example", "first attempt")
+
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
+
+		_, err = d.Start(t.Context(), workload("example", 2, "hash-two", "echo second attempt; sleep 300"))
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
+
+		var previous bytes.Buffer
+		require.NoError(t, d.Logs(t.Context(), &previous, "example", driver.LogOptions{Tail: 10, Previous: true}))
+
+		// The attempt that ended, which for a crash-looping workload is the one that
+		// failed. Without retention this was gone by the time anything could read it.
+		assert.Contains(t, previous.String(), "first attempt")
+		assert.NotContains(t, previous.String(), "second attempt")
+
+		var current bytes.Buffer
+		require.Eventually(t, func() bool {
+			current.Reset()
+			require.NoError(t, d.Logs(t.Context(), &current, "example", driver.LogOptions{Tail: 10}))
+
+			return strings.Contains(current.String(), "second attempt")
+		}, 10*time.Second, 50*time.Millisecond, "the current attempt's output never arrived")
+
+		// Never both. Concatenating them would return two runs spliced together with
+		// nothing marking the boundary.
+		assert.NotContains(t, current.String(), "first attempt")
+	})
+
+	t.Run("separates two attempts at the same version", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		// A crash-looping workload restarts at an unchanged version, so both attempts
+		// run in the same directory. Nothing distinguishes them but the file each one's
+		// output ends up in, which is what makes this the case retention gets wrong most
+		// easily: appending to one file would leave nothing able to say where the first
+		// attempt ended and the second began.
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo first attempt; sleep 300"))
+		require.NoError(t, err)
+
+		awaitOutput(t, d, "example", "first attempt")
+
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
+
+		_, err = d.Start(t.Context(), workload("example", 1, "hash-one", "echo second attempt; sleep 300"))
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
+
+		awaitOutput(t, d, "example", "second attempt")
+
+		var current bytes.Buffer
+		require.NoError(t, d.Logs(t.Context(), &current, "example", driver.LogOptions{Tail: 10}))
+		assert.NotContains(t, current.String(), "first attempt")
+
+		var previous bytes.Buffer
+		require.NoError(t, d.Logs(t.Context(), &previous, "example", driver.LogOptions{Tail: 10, Previous: true}))
+		assert.Contains(t, previous.String(), "first attempt")
+		assert.NotContains(t, previous.String(), "second attempt")
+	})
+
+	t.Run("reports a restart at the same version as running", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		// The record for the replaced attempt is marked kept, and the replacement reuses
+		// its directory. A mark left in place would report the running process as one
+		// held only for its output, and the reconciler would never see it running.
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
+		require.NoError(t, err)
+
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
+
+		_, err = d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+
+		assert.False(t, instances[0].Retained, "a running process was reported as kept for its output")
+		assert.Equal(t, driver.StateRunning, instances[0].State)
+	})
+
+	t.Run("writes nothing for a previous attempt that does not exist", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo only attempt"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		// A workload that has only ever run once has no earlier attempt, and saying so
+		// beats falling back to the current one under the wrong heading.
+		var out bytes.Buffer
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 10, Previous: true}))
 		assert.Empty(t, out.String())
 	})
 }
@@ -550,7 +755,7 @@ func TestDriver_Release(t *testing.T) {
 
 	_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
 	require.NoError(t, err)
-	t.Cleanup(func() { _ = d.Stop(context.Background(), "", "example") })
+	t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
 
 	instances, err := d.Observe(t.Context())
 	require.NoError(t, err)
@@ -642,13 +847,31 @@ func awaitState(t *testing.T, d *exec.Driver, workload string, want driver.State
 	}, 10*time.Second, 50*time.Millisecond, "workload %q never reached %q", workload, want)
 }
 
+// awaitOutput waits until a workload has written the given text.
+//
+// A process is started asynchronously, so anything asserting about what it wrote has to
+// wait for it. Stopping a workload the instant it starts otherwise races the command's
+// first write, and a retained output file that is merely empty proves nothing.
+func awaitOutput(t *testing.T, d *exec.Driver, workload, want string) {
+	t.Helper()
+
+	require.Eventuallyf(t, func() bool {
+		var out bytes.Buffer
+		if err := d.Logs(t.Context(), &out, workload, driver.LogOptions{Tail: 100}); err != nil {
+			return false
+		}
+
+		return strings.Contains(out.String(), want)
+	}, 10*time.Second, 50*time.Millisecond, "workload %q never wrote %q", workload, want)
+}
+
 // output returns everything a workload has written, which is where a denial from the
 // kernel lands: the command's own stderr.
 func output(t *testing.T, d *exec.Driver, workload string) string {
 	t.Helper()
 
 	var out bytes.Buffer
-	require.NoError(t, d.Logs(t.Context(), &out, workload, 100))
+	require.NoError(t, d.Logs(t.Context(), &out, workload, driver.LogOptions{Tail: 100}))
 
 	return out.String()
 }

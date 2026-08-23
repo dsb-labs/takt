@@ -66,11 +66,11 @@ type (
 		Name() string
 		// Observe should report every instance the driver is currently running.
 		Observe(ctx context.Context) ([]driver.Instance, error)
-		// Logs should write the recent output of the named workload to out, limited
-		// to the last tail lines. A driver with nothing for the name should write
-		// nothing rather than fail, since the caller does not know which runtime
-		// holds the workload.
-		Logs(ctx context.Context, out io.Writer, workload string, tail int) error
+		// Logs should write the recent output of the named workload to out, as the
+		// options describe. A driver with nothing for the name should write nothing
+		// rather than fail, since the caller does not know which runtime holds the
+		// workload.
+		Logs(ctx context.Context, out io.Writer, workload string, options driver.LogOptions) error
 	}
 
 	// The WorkloadRepository interface describes the persistence operations the
@@ -514,12 +514,12 @@ func (s *WorkloadService) Delete(ctx context.Context, name string) (Workload, er
 	return s.hydrate(ctx, marked)
 }
 
-// Logs writes the recent output of the named workload to out, limited to the last
-// tail lines. Returns ErrWorkloadNotFound when no such workload exists.
+// Logs writes the recent output of the named workload to out, as the options describe.
+// Returns ErrWorkloadNotFound when no such workload exists.
 //
 // The output is streamed rather than returned so that a workload with a lot to say
 // doesn't have to be held in memory in its entirety before any of it is sent.
-func (s *WorkloadService) Logs(ctx context.Context, out io.Writer, name string, tail int) error {
+func (s *WorkloadService) Logs(ctx context.Context, out io.Writer, name string, options driver.LogOptions) error {
 	if _, err := s.workloads.Get(ctx, name); err != nil {
 		if errors.Is(err, database.ErrWorkloadNotFound) {
 			return ErrWorkloadNotFound
@@ -532,7 +532,7 @@ func (s *WorkloadService) Logs(ctx context.Context, out io.Writer, name string, 
 	// row, but a driver with nothing for the name writes nothing, so asking is
 	// cheaper than threading the runtime through and getting it wrong.
 	for _, runtime := range s.drivers {
-		if err := runtime.Logs(ctx, out, name, tail); err != nil {
+		if err := runtime.Logs(ctx, out, name, options); err != nil {
 			return fmt.Errorf("failed to read workload logs: %w", err)
 		}
 	}
@@ -1165,6 +1165,15 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 
 	deleting := !row.DeletedAt.IsZero()
 	policy := manifest.NewSpec(spec).Restart
+
+	// An instance a driver keeps only so that its output can still be read is left out
+	// of what the workload reports. It has ended and nothing will restart it, so
+	// reporting it would have a workload that is running perfectly well read as failed
+	// on the strength of the attempt before it — which is the opposite of what retaining
+	// the output is for. Its output is reached through the logs endpoint instead.
+	instances = slices.DeleteFunc(instances, func(instance driver.Instance) bool {
+		return instance.Retained
+	})
 
 	// Health is folded into the instance states before the workload's own state is
 	// derived, so a container that is up but not working reads as failed rather than

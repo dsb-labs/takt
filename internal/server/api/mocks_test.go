@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/service"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -1198,16 +1199,16 @@ func (_c *MockWorkloadService_List_Call) RunAndReturn(run func(ctx context.Conte
 }
 
 // Logs provides a mock function for the type MockWorkloadService
-func (_mock *MockWorkloadService) Logs(ctx context.Context, out io.Writer, name string, tail int) error {
-	ret := _mock.Called(ctx, out, name, tail)
+func (_mock *MockWorkloadService) Logs(ctx context.Context, out io.Writer, name string, options driver.LogOptions) error {
+	ret := _mock.Called(ctx, out, name, options)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Logs")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, io.Writer, string, int) error); ok {
-		r0 = returnFunc(ctx, out, name, tail)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, io.Writer, string, driver.LogOptions) error); ok {
+		r0 = returnFunc(ctx, out, name, options)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1223,12 +1224,12 @@ type MockWorkloadService_Logs_Call struct {
 //   - ctx context.Context
 //   - out io.Writer
 //   - name string
-//   - tail int
-func (_e *MockWorkloadService_Expecter) Logs(ctx any, out any, name any, tail any) *MockWorkloadService_Logs_Call {
-	return &MockWorkloadService_Logs_Call{Call: _e.mock.On("Logs", ctx, out, name, tail)}
+//   - options driver.LogOptions
+func (_e *MockWorkloadService_Expecter) Logs(ctx any, out any, name any, options any) *MockWorkloadService_Logs_Call {
+	return &MockWorkloadService_Logs_Call{Call: _e.mock.On("Logs", ctx, out, name, options)}
 }
 
-func (_c *MockWorkloadService_Logs_Call) Run(run func(ctx context.Context, out io.Writer, name string, tail int)) *MockWorkloadService_Logs_Call {
+func (_c *MockWorkloadService_Logs_Call) Run(run func(ctx context.Context, out io.Writer, name string, options driver.LogOptions)) *MockWorkloadService_Logs_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1242,9 +1243,9 @@ func (_c *MockWorkloadService_Logs_Call) Run(run func(ctx context.Context, out i
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
-		var arg3 int
+		var arg3 driver.LogOptions
 		if args[3] != nil {
-			arg3 = args[3].(int)
+			arg3 = args[3].(driver.LogOptions)
 		}
 		run(
 			arg0,
@@ -1261,7 +1262,7 @@ func (_c *MockWorkloadService_Logs_Call) Return(err error) *MockWorkloadService_
 	return _c
 }
 
-func (_c *MockWorkloadService_Logs_Call) RunAndReturn(run func(ctx context.Context, out io.Writer, name string, tail int) error) *MockWorkloadService_Logs_Call {
+func (_c *MockWorkloadService_Logs_Call) RunAndReturn(run func(ctx context.Context, out io.Writer, name string, options driver.LogOptions) error) *MockWorkloadService_Logs_Call {
 	_c.Call.Return(run)
 	return _c
 }

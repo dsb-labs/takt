@@ -95,7 +95,7 @@ func (s *Suite) TestWorkloadLifecycle() {
 	// nginx announces itself on startup, so finding it here proves the log stream is
 	// demultiplexed rather than returned as raw framed bytes.
 	var logs strings.Builder
-	s.Require().NoError(s.client.Logs(s.ctx(), &logs, name, 50))
+	s.Require().NoError(s.client.Logs(s.ctx(), &logs, name, client.WithTail(50)))
 	s.Contains(logs.String(), "nginx")
 
 	workloads, err := s.client.List(s.ctx())
@@ -731,7 +731,7 @@ func (s *Suite) TestExecJobRunsAndCompletes() {
 	// The command's output is captured on disk, which is what logs reads for a runtime
 	// with no daemon to ask.
 	var out bytes.Buffer
-	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 10))
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
 	s.Contains(out.String(), "did-the-work")
 }
 
@@ -751,7 +751,7 @@ func (s *Suite) TestExecWorkloadPassesOnlyItsOwnEnvironment() {
 	s.awaitState(name, client.WorkloadStateCompleted)
 
 	var out bytes.Buffer
-	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 10))
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
 	s.Contains(out.String(), "[hello]")
 }
 
@@ -777,6 +777,197 @@ func (s *Suite) TestExecJobIsRestartedWhenItFails() {
 
 		return current.Instances[0].ID != original
 	}, convergeTimeout, 500*time.Millisecond, "a failed exec job was never retried")
+}
+
+// TestLogsOfAReplacedContainerSurviveIt covers the reason log retention exists: a
+// container workload that keeps failing, where the attempt now running has not failed
+// yet and the one that did is the one worth reading.
+//
+// Before the driver kept a stopped container, this output was destroyed by the same pass
+// that started the replacement, so `orca workload logs` reported the attempt which had
+// yet to fail — exactly inverted from what the operator needs.
+func (s *Suite) TestLogsOfAReplacedContainerSurviveIt() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// Each attempt announces the container it is running in and then fails, so the two
+	// are told apart by their output rather than by timing. Docker sets the hostname to
+	// the container's own identifier, which is what makes the marker unique per attempt
+	// — a timestamp is not, since two attempts land in the same second. Something also
+	// goes to stderr, which is what proves both streams survive retention.
+	spec := s.containerSpec(name)
+	spec.Container.Command = []string{"sh", "-c", `echo "attempt $(hostname)" ; echo on-stderr 1>&2 ; exit 1`}
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartAlways}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	// The first attempt's output, read before anything replaces it.
+	var first bytes.Buffer
+
+	s.Require().Eventuallyf(func() bool {
+		first.Reset()
+		if err := s.client.Logs(s.ctx(), &first, name, client.WithTail(10)); err != nil {
+			return false
+		}
+
+		return strings.Contains(first.String(), "attempt ")
+	}, convergeTimeout, 500*time.Millisecond, "the first attempt never wrote anything")
+
+	s.Contains(first.String(), "on-stderr", "the container's stderr was not captured")
+
+	// Exactly which attempt was read, so what follows can assert that this one turns up
+	// under --previous rather than merely that something did.
+	replaced := strings.TrimSpace(first.String())
+
+	// The retained output arrives once the reconciler has replaced that attempt. Keyed
+	// on the marker that attempt wrote, so this cannot pass on its own output before
+	// anything has replaced it.
+	var previous bytes.Buffer
+
+	s.Require().Eventuallyf(func() bool {
+		previous.Reset()
+		if err := s.client.Logs(s.ctx(), &previous, name, client.WithTail(10), client.WithPrevious()); err != nil {
+			return false
+		}
+
+		return strings.TrimSpace(previous.String()) == replaced
+	}, convergeTimeout, 500*time.Millisecond, "the replaced attempt's output was not kept")
+
+	// The current output is a different attempt from the retained one, which is what
+	// says the two are not the same container read twice.
+	var current bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &current, name, client.WithTail(10)))
+
+	s.NotEqual(previous.String(), current.String(), "--previous returned the attempt that is running now")
+
+	// One retained container, however many times the workload has failed. Two would be
+	// the disk leak retention is bounded to avoid, and the count includes the attempt
+	// currently running.
+	s.LessOrEqual(len(s.containers(name)), 2, "more than one stopped container was kept")
+}
+
+// TestLogsOfAReplacedProcessSurviveIt is the exec runtime's half of retention, which
+// matters because the two runtimes have to mean the same thing by --previous.
+//
+// The audit that asked for retention believed exec was already unaffected. It was not:
+// stopping an exec workload removed its output tree, so a replacement destroyed the
+// output of the attempt it replaced exactly as a container did.
+func (s *Suite) TestLogsOfAReplacedProcessSurviveIt() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// An exec workload has no container to name itself after, so the marker is the
+	// process's own pid: unique per attempt, where a timestamp is not.
+	spec := s.execSpec(name, "sh", "-c", `echo "attempt $$" ; echo on-stderr 1>&2 ; exit 1`)
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartAlways}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	var first bytes.Buffer
+
+	s.Require().Eventuallyf(func() bool {
+		first.Reset()
+		if err := s.client.Logs(s.ctx(), &first, name, client.WithTail(10)); err != nil {
+			return false
+		}
+
+		return strings.Contains(first.String(), "attempt ")
+	}, convergeTimeout, 500*time.Millisecond, "the first attempt never wrote anything")
+
+	// Both streams go to one file, so this is what proves the file is the one kept.
+	s.Contains(first.String(), "on-stderr", "the process's stderr was not captured")
+
+	replaced := strings.TrimSpace(first.String())
+
+	var previous bytes.Buffer
+
+	s.Require().Eventuallyf(func() bool {
+		previous.Reset()
+		if err := s.client.Logs(s.ctx(), &previous, name, client.WithTail(10), client.WithPrevious()); err != nil {
+			return false
+		}
+
+		return strings.TrimSpace(previous.String()) == replaced
+	}, convergeTimeout, 500*time.Millisecond, "the replaced attempt's output was not kept")
+
+	var current bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &current, name, client.WithTail(10)))
+
+	s.NotEqual(previous.String(), current.String(), "--previous returned the attempt that is running now")
+}
+
+// TestARetainedContainerDoesNotMakeAWorkloadFail covers what retention must not do: a
+// kept container has failed, and counting it would report a workload that is running
+// perfectly well as broken.
+func (s *Suite) TestARetainedContainerDoesNotMakeAWorkloadFail() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// A workload that fails once and then serves. The specification changes rather than
+	// the command deciding, so the first attempt is replaced for the ordinary reason and
+	// the second one stays up.
+	spec := s.containerSpec(name)
+	spec.Container.Command = []string{"sh", "-c", "echo first-attempt; exit 1"}
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartAlways}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitInstance(name)
+
+	// Now a specification that stays up, which replaces the failing attempt.
+	serving := s.containerSpec(name)
+	serving.Restart = &manifest.Restart{Policy: manifest.RestartAlways}
+
+	_, _, err = s.client.Apply(s.ctx(), serving)
+	s.Require().NoError(err)
+
+	// Running, not failed. The kept container is still there and still reports the
+	// failure it ended with, so this is the assertion that it stays out of the state the
+	// workload reports.
+	workload := s.awaitState(name, client.WorkloadStateRunning)
+
+	for _, instance := range workload.Instances {
+		s.Equal(client.InstanceStateRunning, instance.State,
+			"a container kept for its output was reported as an instance")
+	}
+}
+
+// TestDeletingAWorkloadRemovesWhatWasRetained covers the other half of retention: a
+// workload nobody wants any more has nobody to read its output, and a container left
+// behind is one the orphan sweep would find on every pass from then on.
+func (s *Suite) TestDeletingAWorkloadRemovesWhatWasRetained() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name)
+	spec.Container.Command = []string{"sh", "-c", "echo working; exit 1"}
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartAlways}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	// Waited for so that something has actually been retained by the time it is
+	// deleted, or the test would pass against a workload that never kept anything.
+	s.Require().Eventuallyf(func() bool {
+		var out bytes.Buffer
+		if err := s.client.Logs(s.ctx(), &out, name, client.WithTail(10), client.WithPrevious()); err != nil {
+			return false
+		}
+
+		return strings.Contains(out.String(), "working")
+	}, convergeTimeout, 500*time.Millisecond, "nothing was ever retained to delete")
+
+	_, err = s.client.Delete(s.ctx(), name, client.WithWait())
+	s.Require().NoError(err)
+
+	// Nothing left, including what was kept. Docker is asked directly rather than the
+	// API, since the question is what is on the host once orca says the workload is gone.
+	s.Require().Eventuallyf(func() bool {
+		return len(s.containers(name)) == 0
+	}, convergeTimeout, 500*time.Millisecond, "a retained container outlived the workload it belonged to")
 }
 
 // TestExecWorkloadAdoptedAfterServerRestart covers the claim that makes restarting the
@@ -865,7 +1056,7 @@ func (s *Suite) TestExecWorkloadCannotReachTheDataDirectory() {
 	s.awaitState(name, client.WorkloadStateCompleted)
 
 	var out bytes.Buffer
-	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 20))
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(20)))
 
 	// The kernel refused both, so the workload printed the refusal rather than the
 	// contents.
@@ -946,7 +1137,7 @@ func (s *Suite) TestMissingWorkload() {
 	_, err = s.client.Delete(s.ctx(), "does-not-exist")
 	s.ErrorIs(err, client.ErrWorkloadNotFound)
 
-	s.ErrorIs(s.client.Logs(s.ctx(), io.Discard, "does-not-exist", 10), client.ErrWorkloadNotFound)
+	s.ErrorIs(s.client.Logs(s.ctx(), io.Discard, "does-not-exist", client.WithTail(10)), client.ErrWorkloadNotFound)
 }
 
 // TestVolumeSurvivesAnExecWorkloadBeingReplaced covers the thing volumes exist for.
@@ -1122,7 +1313,7 @@ func (s *Suite) TestWorkloadReadsASecret() {
 	// Reading it back out of the container is the only proof the value was resolved
 	// on the path that actually starts work.
 	var out bytes.Buffer
-	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 10))
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
 	s.Contains(out.String(), "[postgres://app:hunter2@localhost/app]")
 
 	// What was stored is the reference, because the API echoes the specification back
@@ -1314,7 +1505,7 @@ func (s *Suite) TestSecretSurvivesAServerRestart() {
 	s.awaitState(name, client.WorkloadStateCompleted)
 
 	var out bytes.Buffer
-	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 10))
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
 	s.Contains(out.String(), "[across-restarts]")
 }
 
@@ -1351,7 +1542,7 @@ func (s *Suite) TestWorkloadReadsAVariable() {
 	// Reading it back out of the container is the only proof the value was resolved
 	// on the path that actually starts work.
 	var out bytes.Buffer
-	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 10))
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
 	s.Contains(out.String(), "[postgres://app@localhost/app]")
 
 	// What was stored is the reference. A variable's value is not a secret, but
@@ -1400,7 +1591,7 @@ func (s *Suite) TestWorkloadReadsBothKinds() {
 	// Both kinds resolved in one value. A pass that handled only one would have
 	// refused the other rather than substituting it.
 	var out bytes.Buffer
-	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 10))
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
 	s.Contains(out.String(), "[postgres://app:hunter2@db.internal/app]")
 
 	// The secret's value is still nowhere in the database, even though the variable
@@ -1606,7 +1797,7 @@ func (s *Suite) TestWorkloadMountsValues() {
 	// Reading the files from inside the container is the only proof they were written
 	// and mounted where the manifest asked for.
 	var out bytes.Buffer
-	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 10))
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
 	s.Contains(out.String(), `{"key":"hunter2"}`)
 	s.Contains(out.String(), `{"level":"debug"}`)
 
@@ -1792,6 +1983,6 @@ func (s *Suite) TestExecWorkloadMountsAValue() {
 	s.awaitState(name, client.WorkloadStateCompleted)
 
 	var out bytes.Buffer
-	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, 10))
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
 	s.Contains(out.String(), "exec-mounted")
 }

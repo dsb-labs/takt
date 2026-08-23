@@ -1441,16 +1441,16 @@ func (_m *MockDriver) EXPECT() *MockDriver_Expecter {
 }
 
 // Logs provides a mock function for the type MockDriver
-func (_mock *MockDriver) Logs(ctx context.Context, out io.Writer, workload string, tail int) error {
-	ret := _mock.Called(ctx, out, workload, tail)
+func (_mock *MockDriver) Logs(ctx context.Context, out io.Writer, workload string, options driver.LogOptions) error {
+	ret := _mock.Called(ctx, out, workload, options)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Logs")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, io.Writer, string, int) error); ok {
-		r0 = returnFunc(ctx, out, workload, tail)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, io.Writer, string, driver.LogOptions) error); ok {
+		r0 = returnFunc(ctx, out, workload, options)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1466,12 +1466,12 @@ type MockDriver_Logs_Call struct {
 //   - ctx context.Context
 //   - out io.Writer
 //   - workload string
-//   - tail int
-func (_e *MockDriver_Expecter) Logs(ctx any, out any, workload any, tail any) *MockDriver_Logs_Call {
-	return &MockDriver_Logs_Call{Call: _e.mock.On("Logs", ctx, out, workload, tail)}
+//   - options driver.LogOptions
+func (_e *MockDriver_Expecter) Logs(ctx any, out any, workload any, options any) *MockDriver_Logs_Call {
+	return &MockDriver_Logs_Call{Call: _e.mock.On("Logs", ctx, out, workload, options)}
 }
 
-func (_c *MockDriver_Logs_Call) Run(run func(ctx context.Context, out io.Writer, workload string, tail int)) *MockDriver_Logs_Call {
+func (_c *MockDriver_Logs_Call) Run(run func(ctx context.Context, out io.Writer, workload string, options driver.LogOptions)) *MockDriver_Logs_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1485,9 +1485,9 @@ func (_c *MockDriver_Logs_Call) Run(run func(ctx context.Context, out io.Writer,
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
-		var arg3 int
+		var arg3 driver.LogOptions
 		if args[3] != nil {
-			arg3 = args[3].(int)
+			arg3 = args[3].(driver.LogOptions)
 		}
 		run(
 			arg0,
@@ -1504,7 +1504,7 @@ func (_c *MockDriver_Logs_Call) Return(err error) *MockDriver_Logs_Call {
 	return _c
 }
 
-func (_c *MockDriver_Logs_Call) RunAndReturn(run func(ctx context.Context, out io.Writer, workload string, tail int) error) *MockDriver_Logs_Call {
+func (_c *MockDriver_Logs_Call) RunAndReturn(run func(ctx context.Context, out io.Writer, workload string, options driver.LogOptions) error) *MockDriver_Logs_Call {
 	_c.Call.Return(run)
 	return _c
 }

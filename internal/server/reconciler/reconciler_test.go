@@ -132,19 +132,29 @@ func TestReconciler_Run(t *testing.T) {
 
 				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
-				// The work is stopped, but the row is left for a later pass: the
-				// stop may not have taken effect yet, and removing the desired
-				// state now would leave nothing describing work still running.
-				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
+				// The work is discarded rather than stopped, and the row is left for a
+				// later pass: the removal may not have taken effect yet, and removing
+				// the desired state now would leave nothing describing work still
+				// running.
+				//
+				// Discarded because keeping the instance for its output would mean the
+				// driver never reported the workload gone, so the pass that removes the
+				// row would never be reached.
+				d.EXPECT().Discard(mock.Anything, mock.Anything, "example").Return(nil)
 			},
 		},
 		{
 			Name: "removes the desired state once a deleted workload has no work left",
-			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
+			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
 				row := storedWorkload("example", "hash-one")
 				row.DeletedAt = time.Now().UTC()
 
 				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// Anything the driver kept for its output goes with the workload. The
+				// output exists so an operator can read why an attempt failed, and a
+				// deleted workload has no such reader.
+				d.EXPECT().Discard(mock.Anything, mock.Anything, "example").Return(nil)
 
 				// The driver reports nothing for the workload, so there is nothing
 				// left for the row to describe and it is finally removed.
@@ -177,9 +187,9 @@ func TestReconciler_Run(t *testing.T) {
 
 				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
-				// A failed stop must not remove the row, or the container would be
+				// A failed teardown must not remove the row, or the container would be
 				// left running with nothing recording that it exists.
-				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(errors.New("docker is down"))
+				d.EXPECT().Discard(mock.Anything, mock.Anything, "example").Return(errors.New("docker is down"))
 			},
 		},
 		{
@@ -204,7 +214,40 @@ func TestReconciler_Run(t *testing.T) {
 			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
 				repo.EXPECT().List(mock.Anything).Return(nil, nil)
 
-				d.EXPECT().Stop(mock.Anything, mock.Anything, "orphan").Return(nil)
+				// Discarded rather than stopped: nothing asked for this work, so there
+				// is nobody to read its output, and an instance kept for that reason
+				// would be found again on every pass from here on.
+				d.EXPECT().Discard(mock.Anything, mock.Anything, "orphan").Return(nil)
+			},
+		},
+		{
+			Name: "reaps the retained instance of a workload nothing asked for",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "orphan", SpecHash: "hash-one", State: driver.StateExited, Retained: true},
+			},
+			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
+				repo.EXPECT().List(mock.Anything).Return(nil, nil)
+
+				// What a delete performed while the server was down leaves behind. A
+				// retained instance is deliberately left out of what a pass converges,
+				// so this is the case that proves it is not left out of the sweep as
+				// well — one hidden from both would never be removed at all.
+				d.EXPECT().Discard(mock.Anything, mock.Anything, "orphan").Return(nil)
+			},
+		},
+		{
+			Name: "leaves a workload whose only other instance is retained alone",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning},
+				{ID: "container-two", Workload: "example", SpecHash: "hash-zero", State: driver.StateFailed, Retained: true},
+			},
+			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{storedWorkload("example", "hash-one")}, nil)
+
+				// The retained instance holds an older specification and has failed, so
+				// counting it would have the pass replace a workload that is running
+				// perfectly well, and pace it as though it were crashing. Neither a stop
+				// nor a start is expected.
 			},
 		},
 		{
@@ -635,6 +678,8 @@ func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{deleting}, nil)
 	repo.EXPECT().Delete(mock.Anything, "example").Return(nil).Once()
 
+	d.EXPECT().Discard(mock.Anything, mock.Anything, "example").Return(nil)
+
 	ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
 		"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
 	}, nil)
@@ -884,10 +929,10 @@ func TestReconciler_Run_StopsOnlyTheDriverThatRunsIt(t *testing.T) {
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 	repo.EXPECT().Delete(mock.Anything, "example").Return(nil).Maybe()
 
-	container.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
+	container.EXPECT().Discard(mock.Anything, mock.Anything, "example").Return(nil)
 
-	// No Stop is expected on the other driver at all, which is the assertion: the mock
-	// fails the test if one arrives.
+	// No Stop and no Discard is expected on the other driver at all, which is the
+	// assertion: the mock fails the test if one arrives.
 	events := make(chan driver.Event)
 	container.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
 	other.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
@@ -937,8 +982,8 @@ func TestReconciler_Run_StopsAnOrphanOnEveryDriver(t *testing.T) {
 	// An orphan has no stored workload by definition, so there is no runtime to read
 	// and no way to know which driver owns it. Both are asked, and a driver with
 	// nothing for the name does nothing.
-	container.EXPECT().Stop(mock.Anything, mock.Anything, "orphan").Return(nil)
-	other.EXPECT().Stop(mock.Anything, mock.Anything, "orphan").Return(nil)
+	container.EXPECT().Discard(mock.Anything, mock.Anything, "orphan").Return(nil)
+	other.EXPECT().Discard(mock.Anything, mock.Anything, "orphan").Return(nil)
 
 	events := make(chan driver.Event)
 	container.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
@@ -2062,6 +2107,7 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
 		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		d.EXPECT().Discard(mock.Anything, mock.Anything, "example").Return(nil)
 		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
 
 		forgotten := make(chan string, 1)

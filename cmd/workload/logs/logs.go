@@ -13,6 +13,7 @@ import (
 func Command() *cobra.Command {
 	var address string
 	var tail int
+	var previous bool
 
 	cmd := &cobra.Command{
 		Use:   "logs <name>",
@@ -24,7 +25,12 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			if err = c.Logs(cmd.Context(), cmd.OutOrStdout(), args[0], tail); err != nil {
+			options := []client.LogOption{client.WithTail(tail)}
+			if previous {
+				options = append(options, client.WithPrevious())
+			}
+
+			if err = c.Logs(cmd.Context(), cmd.OutOrStdout(), args[0], options...); err != nil {
 				return fmt.Errorf("failed to read workload logs: %w", err)
 			}
 
@@ -35,6 +41,7 @@ func Command() *cobra.Command {
 	flags := cmd.Flags()
 	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 	flags.IntVarP(&tail, "tail", "n", 100, "number of lines to read from the end of the logs")
+	flags.BoolVarP(&previous, "previous", "p", false, "read the instance that was replaced rather than the one running now")
 
 	return cmd
 }

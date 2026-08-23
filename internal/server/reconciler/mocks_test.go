@@ -42,6 +42,69 @@ func (_m *MockDriver) EXPECT() *MockDriver_Expecter {
 	return &MockDriver_Expecter{mock: &_m.Mock}
 }
 
+// Discard provides a mock function for the type MockDriver
+func (_mock *MockDriver) Discard(ctx context.Context, id string, workload string) error {
+	ret := _mock.Called(ctx, id, workload)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Discard")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) error); ok {
+		r0 = returnFunc(ctx, id, workload)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockDriver_Discard_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Discard'
+type MockDriver_Discard_Call struct {
+	*mock.Call
+}
+
+// Discard is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id string
+//   - workload string
+func (_e *MockDriver_Expecter) Discard(ctx any, id any, workload any) *MockDriver_Discard_Call {
+	return &MockDriver_Discard_Call{Call: _e.mock.On("Discard", ctx, id, workload)}
+}
+
+func (_c *MockDriver_Discard_Call) Run(run func(ctx context.Context, id string, workload string)) *MockDriver_Discard_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDriver_Discard_Call) Return(err error) *MockDriver_Discard_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockDriver_Discard_Call) RunAndReturn(run func(ctx context.Context, id string, workload string) error) *MockDriver_Discard_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Name provides a mock function for the type MockDriver
 func (_mock *MockDriver) Name() string {
 	ret := _mock.Called()

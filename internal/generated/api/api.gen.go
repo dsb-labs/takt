@@ -1065,6 +1065,13 @@ type GetWorkloadLogsParams struct {
 	// the server reads what it is asked for and an unbounded request would let
 	// a caller decide how much work the server does.
 	Tail *int `form:"tail,omitempty" json:"tail,omitempty"`
+
+	// Previous Read the instance that was replaced rather than the one running now.
+	//
+	// The two are never combined, because concatenating them would return two
+	// runs spliced together with nothing marking the boundary. A workload that
+	// has only ever run once has no earlier attempt, so the response is empty.
+	Previous *bool `form:"previous,omitempty" json:"previous,omitempty"`
 }
 
 // SetSecretJSONRequestBody defines body for SetSecret for application/json ContentType.
@@ -1418,6 +1425,12 @@ type ClientInterface interface {
 	//
 	// Returns the combined output of the workload's instances as plain text, most
 	// recent last.
+	//
+	// The server keeps the instance it most recently stopped so that the output of
+	// an attempt that ended is still readable after a replacement has taken its
+	// place. Set `previous` to read that instead of what is running now, which is
+	// what a workload restarting repeatedly needs: the current attempt has not
+	// failed yet, so its output does not say why the workload is failing.
 	//
 	// Corresponds with GET /api/v1/workloads/{name}/logs (the `GetWorkloadLogs` operationId).
 	GetWorkloadLogs(ctx context.Context, name WorkloadName, params *GetWorkloadLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1888,6 +1901,12 @@ func (c *Client) ApplyWorkload(ctx context.Context, name WorkloadName, body Appl
 //
 // Returns the combined output of the workload's instances as plain text, most
 // recent last.
+//
+// The server keeps the instance it most recently stopped so that the output of
+// an attempt that ended is still readable after a replacement has taken its
+// place. Set `previous` to read that instead of what is running now, which is
+// what a workload restarting repeatedly needs: the current attempt has not
+// failed yet, so its output does not say why the workload is failing.
 //
 // Corresponds with GET /api/v1/workloads/{name}/logs (the `GetWorkloadLogs` operationId).
 func (c *Client) GetWorkloadLogs(ctx context.Context, name WorkloadName, params *GetWorkloadLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -2618,6 +2637,18 @@ func NewGetWorkloadLogsRequest(server string, name WorkloadName, params *GetWork
 
 		}
 
+		if params.Previous != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "previous", *params.Previous, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if encoded := queryValues.Encode(); encoded != "" {
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
@@ -2965,6 +2996,12 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns the combined output of the workload's instances as plain text, most
 	// recent last.
+	//
+	// The server keeps the instance it most recently stopped so that the output of
+	// an attempt that ended is still readable after a replacement has taken its
+	// place. Set `previous` to read that instead of what is running now, which is
+	// what a workload restarting repeatedly needs: the current attempt has not
+	// failed yet, so its output does not say why the workload is failing.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -4359,6 +4396,12 @@ func (c *ClientWithResponses) ApplyWorkloadWithResponse(ctx context.Context, nam
 // Returns the combined output of the workload's instances as plain text, most
 // recent last.
 //
+// The server keeps the instance it most recently stopped so that the output of
+// an attempt that ended is still readable after a replacement has taken its
+// place. Set `previous` to read that instead of what is running now, which is
+// what a workload restarting repeatedly needs: the current attempt has not
+// failed yet, so its output does not say why the workload is failing.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/v1/workloads/{name}/logs (the `GetWorkloadLogs` operationId).
@@ -5606,6 +5649,19 @@ func (siw *ServerInterfaceWrapper) GetWorkloadLogs(w http.ResponseWriter, r *htt
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tail"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tail", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "previous" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "previous", r.URL.Query(), &params.Previous, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "previous"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "previous", Err: err})
 		}
 		return
 	}

@@ -334,15 +334,57 @@ func (c *Client) waitForTeardown(ctx context.Context, name string, interval time
 	}
 }
 
-// Logs writes the recent output of the named workload to out, limited to the last
-// tail lines. A tail of zero leaves the limit to the server.
+type (
+	// The LogOption type is a function that modifies which output is read.
+	LogOption func(*logConfig)
+
+	logConfig struct {
+		tail     int
+		previous bool
+	}
+)
+
+// WithTail modifies a read to return only the last lines of the output.
+//
+// A count of zero or less leaves the limit to the server, which is also what happens
+// when this is not passed at all. The server caps what it will read either way, so a
+// generous count is answered with as much as it is willing to serve rather than
+// refused.
+func WithTail(lines int) LogOption {
+	return func(c *logConfig) { c.tail = lines }
+}
+
+// WithPrevious modifies a read to return the output of the instance that was replaced
+// rather than the one running now.
+//
+// The server keeps the instance it most recently stopped so that the output of an
+// attempt that ended survives it. For a workload restarting repeatedly this is the
+// attempt that failed, where the one running now has not failed yet. A workload that
+// has only ever run once has no earlier attempt, and nothing is written.
+func WithPrevious() LogOption {
+	return func(c *logConfig) { c.previous = true }
+}
+
+// Logs writes the recent output of the named workload to out, as the options describe.
+//
+// Passing no options reads the current instance with the server deciding how much of it
+// to return.
 //
 // The output is copied as it arrives rather than returned, so a workload with a lot
 // of output doesn't have to fit in the caller's memory before any of it is usable.
-func (c *Client) Logs(ctx context.Context, out io.Writer, name string, tail int) error {
+func (c *Client) Logs(ctx context.Context, out io.Writer, name string, options ...LogOption) error {
+	var config logConfig
+	for _, option := range options {
+		option(&config)
+	}
+
 	var params api.GetWorkloadLogsParams
-	if tail > 0 {
-		params.Tail = new(tail)
+	if config.tail > 0 {
+		params.Tail = new(config.tail)
+	}
+
+	if config.previous {
+		params.Previous = new(true)
 	}
 
 	resp, err := c.api.GetWorkloadLogs(ctx, name, &params)

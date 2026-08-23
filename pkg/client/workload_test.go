@@ -34,7 +34,7 @@ func TestClient_Logs_LimitsTheErrorItReads(t *testing.T) {
 		_, _ = fmt.Fprintf(w, `{"error":%q}`, endless)
 	})
 
-	err := c.Logs(t.Context(), io.Discard, "example", 10)
+	err := c.Logs(t.Context(), io.Discard, "example", client.WithTail(10))
 	require.Error(t, err)
 
 	// The request fails, and the message the client ends up reporting is bounded by
@@ -459,18 +459,30 @@ func TestClient_Logs(t *testing.T) {
 		})
 
 		var logs strings.Builder
-		require.NoError(t, c.Logs(t.Context(), &logs, "example", 20))
+		require.NoError(t, c.Logs(t.Context(), &logs, "example", client.WithTail(20)))
 		assert.Equal(t, "hello world\n", logs.String())
 	})
 
-	t.Run("leaves the limit to the server when tail is zero", func(t *testing.T) {
+	t.Run("leaves the limit to the server when no tail is asked for", func(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Empty(t, r.URL.Query().Get("tail"))
 
 			_, _ = w.Write([]byte("hello world\n"))
 		})
 
-		require.NoError(t, c.Logs(t.Context(), io.Discard, "example", 0))
+		require.NoError(t, c.Logs(t.Context(), io.Discard, "example"))
+	})
+
+	t.Run("leaves the limit to the server for a tail of zero", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			// A caller passing a computed count of zero means the same as one that asked
+			// for nothing, rather than a request for no lines at all.
+			assert.Empty(t, r.URL.Query().Get("tail"))
+
+			_, _ = w.Write([]byte("hello world\n"))
+		})
+
+		require.NoError(t, c.Logs(t.Context(), io.Discard, "example", client.WithTail(0)))
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
@@ -478,8 +490,32 @@ func TestClient_Logs(t *testing.T) {
 			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})
 		})
 
-		err := c.Logs(t.Context(), io.Discard, "nope", 0)
+		err := c.Logs(t.Context(), io.Discard, "nope")
 		assert.ErrorIs(t, err, client.ErrWorkloadNotFound)
+	})
+
+	t.Run("asks for the attempt that was replaced", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "true", r.URL.Query().Get("previous"))
+
+			_, _ = w.Write([]byte("why it died\n"))
+		})
+
+		var logs strings.Builder
+		require.NoError(t, c.Logs(t.Context(), &logs, "example", client.WithTail(20), client.WithPrevious()))
+		assert.Equal(t, "why it died\n", logs.String())
+	})
+
+	t.Run("asks for the current attempt by default", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			// Absent rather than false, so the server applies its own default and the
+			// meaning of an unasked-for parameter stays the server's to decide.
+			assert.Empty(t, r.URL.Query().Get("previous"))
+
+			_, _ = w.Write([]byte("this attempt\n"))
+		})
+
+		require.NoError(t, c.Logs(t.Context(), io.Discard, "example", client.WithTail(20)))
 	})
 }
 

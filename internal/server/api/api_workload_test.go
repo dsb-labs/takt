@@ -557,8 +557,8 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 	t.Run("returns the logs as plain text", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", generated.WorkloadStateRunning), nil).Once()
-		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", 100).
-			RunAndReturn(func(_ context.Context, out io.Writer, _ string, _ int) error {
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 100}).
+			RunAndReturn(func(_ context.Context, out io.Writer, _ string, _ driver.LogOptions) error {
 				_, err := out.Write([]byte("hello world\n"))
 				return err
 			}).Once()
@@ -573,7 +573,7 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 	t.Run("honours the tail parameter", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", generated.WorkloadStateRunning), nil).Once()
-		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", 20).Return(nil).Once()
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 20}).Return(nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?tail=20", nil)
 		assert.Equal(t, http.StatusOK, resp.Code)
@@ -586,7 +586,7 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 
 		// The server reads what it is asked to read, so an uncapped request would let
 		// a caller decide how much work it does.
-		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", 10000).Return(nil).Once()
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 10000}).Return(nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?tail=999999999", nil)
 		assert.Equal(t, http.StatusOK, resp.Code)
@@ -600,7 +600,7 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 		// Docker reads a negative count as every line, so passing one straight
 		// through would return the whole of a workload's output and make the cap
 		// above bypassable by a minus sign.
-		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", 1).Return(nil).Once()
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 1}).Return(nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?tail=-1", nil)
 		assert.Equal(t, http.StatusOK, resp.Code)
@@ -613,6 +613,30 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/nope/logs", nil)
 		assert.Equal(t, http.StatusNotFound, resp.Code)
+	})
+
+	t.Run("asks for the attempt that was replaced", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", generated.WorkloadStateRunning), nil).Once()
+
+		// For a workload restarting repeatedly this is the attempt that failed, where
+		// the one running now has not failed yet.
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 20, Previous: true}).
+			Return(nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?tail=20&previous=true", nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("reads the current attempt when nothing asks otherwise", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", generated.WorkloadStateRunning), nil).Once()
+
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 100}).
+			Return(nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs", nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
 	})
 }
 
