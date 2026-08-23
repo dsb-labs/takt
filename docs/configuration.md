@@ -54,6 +54,11 @@ A request naming anything else is refused with `421`. That check is what stops a
 in the operator's browser from reaching a loopback-bound API — see
 [Operating orca](operating.md#exposure).
 
+A request body is read up to 1 MiB and no further. There is no key for it: a manifest
+is a document an operator wrote by hand, and anything past a megabyte is a mistake or
+an attempt to see how much the server will hold in memory. A body over the limit is
+refused with `400` and `request body too large`.
+
 ## data
 
 | Key | Default | Description |
