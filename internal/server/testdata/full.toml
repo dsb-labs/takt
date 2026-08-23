@@ -16,6 +16,9 @@ bind = "0.0.0.0"
 min-port = 25000
 max-port = 26000
 
+[exec]
+allow-paths = ["/opt/runtime", "/nix/store"]
+
 [secrets]
 key-file = "/etc/orca/secret.key"
 

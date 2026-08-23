@@ -24,6 +24,8 @@ type (
 		Data DataConfig `toml:"data"`
 		// Docker daemon settings.
 		Docker DockerConfig `toml:"docker"`
+		// Settings for the exec runtime.
+		Exec ExecConfig `toml:"exec"`
 		// Reconciliation settings.
 		Reconcile ReconcileConfig `toml:"reconcile"`
 		// Settings for the workloads orca runs.
@@ -73,6 +75,26 @@ type (
 		// The daemon to connect to. Empty uses the environment's configuration,
 		// which falls back to the local socket.
 		Host string `toml:"host"`
+	}
+
+	// The ExecConfig type contains configuration for the exec runtime.
+	ExecConfig struct {
+		// Extra paths every exec workload may read.
+		//
+		// An exec workload is confined to its own directory, the volumes and values it
+		// mounts, and the host's own system directories. That covers a command
+		// installed the ordinary way and not one whose runtime lives elsewhere — a
+		// language installed under a home directory, or a nix store. Name those here.
+		//
+		// Read-only, so this opens what a workload may read rather than what it may
+		// change. It is host configuration rather than a manifest field on purpose: the
+		// API has no authentication, so a workload able to widen its own confinement
+		// would undo it. Which paths are opened is a decision the operator who
+		// administers the host makes.
+		//
+		// Every path must be absolute. A path that is not there is ignored, so a list
+		// covering several hosts does not have to match each one exactly.
+		AllowPaths []string `toml:"allow-paths"`
 	}
 
 	// The ReconcileConfig type contains configuration for the reconciliation loop.
@@ -189,6 +211,7 @@ func (c *Config) Validate() error {
 		c.Data.validate(),
 		c.Reconcile.validate(),
 		c.Workload.validate(),
+		c.Exec.validate(),
 		c.Logging.validate(),
 	)
 }
@@ -232,6 +255,19 @@ func (c WorkloadConfig) validate() error {
 		return errors.New("workload port range maximum must be between 1 and 65535")
 	case c.MinPort > c.MaxPort:
 		return errors.New("workload port range minimum must not exceed its maximum")
+	}
+
+	return nil
+}
+
+func (c ExecConfig) validate() error {
+	for _, path := range c.AllowPaths {
+		// Absolute, because this opens a path to every exec workload and each one runs
+		// in a directory of its own. A relative path would name somewhere different for
+		// each of them, and nowhere the operator meant.
+		if !filepath.IsAbs(path) {
+			return fmt.Errorf("exec allowed path must be absolute, got %q", path)
+		}
 	}
 
 	return nil

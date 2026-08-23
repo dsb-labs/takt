@@ -36,6 +36,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, 26000, config.Workload.MaxPort)
 				assert.Equal(t, "/etc/orca/secret.key", config.Secrets.KeyFile)
 				assert.Equal(t, "/etc/orca/secret.key", config.KeyPath())
+				assert.Equal(t, []string{"/opt/runtime", "/nix/store"}, config.Exec.AllowPaths)
 				assert.Equal(t, "debug", config.Logging.Level)
 			},
 		},
@@ -177,6 +178,17 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			Name:         "an unknown log level",
 			Mutate:       func(c *server.Config) { c.Logging.Level = "chatty" },
+			ExpectsError: true,
+		},
+		{
+			Name:   "absolute paths an exec workload may read",
+			Mutate: func(c *server.Config) { c.Exec.AllowPaths = []string{"/opt/runtime", "/nix/store"} },
+		},
+		{
+			// Every exec workload runs in a directory of its own, so a relative path
+			// names somewhere different for each of them and nowhere the operator meant.
+			Name:         "a relative path an exec workload may read",
+			Mutate:       func(c *server.Config) { c.Exec.AllowPaths = []string{"runtime"} },
 			ExpectsError: true,
 		},
 	}

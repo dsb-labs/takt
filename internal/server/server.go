@@ -75,11 +75,24 @@ func Run(ctx context.Context, config Config) error {
 	variables := database.NewVariableRepository(db)
 	checker := health.New()
 
+	// A host that cannot confine an exec workload is reported here rather than when the
+	// first one is started, so an operator learns at startup instead of from a workload
+	// that will not run.
+	//
+	// Not fatal: the docker runtime is unaffected, and refusing to serve at all would
+	// take container workloads down over a runtime the operator may not be using.
+	if err = exec.Confinable(); err != nil {
+		logger.With("error", err).Warn("exec workloads cannot run on this host and will be refused")
+	}
+
 	// The exec driver keeps its own trees under the data directory, beside the
 	// database, so that everything orca owns on disk is in one place.
 	execDriver := exec.New(exec.Config{
 		Logger: logger,
 		Root:   filepath.Join(config.Data.Directory, "exec"),
+		// Read-only paths beyond the host's own directories, for a runtime that lives
+		// somewhere those do not cover.
+		AllowPaths: config.Exec.AllowPaths,
 	})
 
 	dockerDriver := docker.New(docker.Config{
