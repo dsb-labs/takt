@@ -285,6 +285,27 @@ Every other pull policy contributes nothing, so a workload that never asked for 
 of this hashes exactly as it did before the policy existed — the same property the
 secret and variable contributions hold to, and for the same reason.
 
+## Registry credentials are docker's, not orca's
+
+A pull or a digest lookup against a private registry carries credentials resolved
+from the docker credential file — the `config.json` that `docker login` writes.
+There is no registry username or password in orca's own configuration, and no
+registry credential stored as an orca secret.
+
+Reusing docker's file means reusing what the operator already has. A host that can
+`docker pull` an image can run it as a workload, with no second place to keep the
+same login. It also carries the credential helpers the file can name: on many hosts
+the file holds no password at all, just a `credsStore` entry pointing at the OS
+keychain, and running the helper is something orca gets by reading the file the way
+docker does.
+
+Storing registry credentials as orca secrets was considered and rejected as
+circular — the secret subsystem would have to be up before the driver could pull,
+and it would put a secret-reading path inside a driver that has none. The file is
+read at pull time rather than cached, so a `docker login` on the host takes effect
+without a restart, and the resolved credential goes to the daemon and nowhere
+else — never into a log line, an error, or anything the API reports.
+
 ## A secret is decrypted as late as possible
 
 The value is decrypted when a workload starts, and nowhere else. Nothing else asks:

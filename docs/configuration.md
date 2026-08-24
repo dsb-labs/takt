@@ -14,6 +14,7 @@ directory = "~/.local/share/orca"
 
 [docker]
 host = ""
+config-file = ""
 
 [reconcile]
 interval = "10s"
@@ -76,9 +77,30 @@ orca creates it readable only by the user running the server.
 | Key | Default | Description |
 |---|---|---|
 | `host` | empty | The Docker daemon to talk to. |
+| `config-file` | empty | The docker credential file registry credentials come from. |
 
-Empty uses the environment, then the local socket. Set it to reach a daemon
+Empty `host` uses the environment, then the local socket. Set it to reach a daemon
 elsewhere, such as `tcp://127.0.0.1:2375`.
+
+`config-file` names the `config.json` that `docker login` writes. When a workload's
+image is pulled, or its digest resolved for `pull: always`, the driver reads the
+file and sends the credentials it holds for the image's registry. Empty reads
+docker's own default location — `~/.docker/config.json`, or wherever
+`DOCKER_CONFIG` points — so a `docker login` by the user running the server just
+works. Set it when that default holds nothing, notably when orca itself runs in a
+container:
+
+```toml
+[docker]
+config-file = "/etc/orca/docker-config.json"
+```
+
+The path must be absolute. The file is read when a pull happens rather than at
+startup, so a `docker login` on the host takes effect without restarting orca.
+Credential helpers named by the file — a `credsStore` or `credHelpers` entry —
+are run, so logins kept in the OS keychain work, provided the helper is on the
+server's `PATH`. An absent file means anonymous pulls, which is all a public
+image needs.
 
 ## reconcile
 

@@ -102,11 +102,14 @@ and the tag's digest is resolved from the registry and folded into the specifica
 hash — so a rebuilt tag reads as an ordinary specification change and the instance is
 replaced. The digest is resolved when the server computes the hash: an apply, a
 changed secret or variable, or a port reallocation. It is not watched continuously,
-so re-applying the manifest is how a rebuilt tag is picked up on demand. Two costs
-follow from this. Each of those operations is a registry round-trip, and fails when
+so re-applying the manifest is how a rebuilt tag is picked up on demand. One cost
+follows from this. Each of those operations is a registry round-trip, and fails when
 the registry is unreachable — including changing a secret that a `pull: always`
-workload reads. And the registry is asked anonymously, so `pull: always` does not
-work against a private registry.
+workload reads.
+
+Pulls and digest lookups carry the credentials the host's docker credential file
+holds for the image's registry, so a private image works wherever a `docker pull` on
+the host would. See [Configuration](configuration.md#docker).
 
 `pull: never` never pulls, and starting fails when the image is absent. It is for a
 host whose images arrive some other way — built locally, or loaded from an archive.
