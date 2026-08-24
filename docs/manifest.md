@@ -75,6 +75,7 @@ that runs it, so there is no separate field saying which to use.
 ```yaml
 container:
   image: nginx:1.27-alpine
+  pull: missing
   command: ["nginx", "-g", "daemon off;"]
   user: "65532:65532"
   readOnly: true
@@ -84,12 +85,31 @@ container:
 
 | Field | Required | Description |
 |---|---|---|
-| `image` | yes | The image reference to run. Pulled when it is not present locally. |
+| `image` | yes | The image reference to run. |
+| `pull` | no | When the image is pulled: `always`, `missing` or `never`. Defaults to `missing`. |
 | `command` | no | Replaces the command the image declares. |
 | `user` | no | The user to run as, replacing the one the image declares. |
 | `readOnly` | no | Make the root filesystem read-only. |
 | `capAdd` | no | Kernel capabilities to grant beyond the default set. |
 | `capDrop` | no | Kernel capabilities to remove from the default set. |
+
+`pull: missing` pulls the image only when it is not present on the host, which pins a
+tag that is already there until something removes it. This rewards pinning a tag or a
+digest in `image`, which is the deterministic way to run a container.
+
+`pull: always` is for a tag that moves, such as `:latest`. It pulls on every start,
+and the tag's digest is resolved from the registry and folded into the specification
+hash — so a rebuilt tag reads as an ordinary specification change and the instance is
+replaced. The digest is resolved when the server computes the hash: an apply, a
+changed secret or variable, or a port reallocation. It is not watched continuously,
+so re-applying the manifest is how a rebuilt tag is picked up on demand. Two costs
+follow from this. Each of those operations is a registry round-trip, and fails when
+the registry is unreachable — including changing a secret that a `pull: always`
+workload reads. And the registry is asked anonymously, so `pull: always` does not
+work against a private registry.
+
+`pull: never` never pulls, and starting fails when the image is absent. It is for a
+host whose images arrive some other way — built locally, or loaded from an archive.
 
 `command` is the command and its arguments rather than a string. Nothing has to decide
 where to split it, and no shell is involved unless the command names one. Leaving it

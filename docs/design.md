@@ -257,6 +257,34 @@ neither hashes exactly as it would if none of this existed, and a workload readi
 secrets hashes exactly as it did before variables were added. Without that, adding this
 feature would have replaced every running instance that reads a secret.
 
+## A pull-always image's digest is hashed, and resolved rather than remembered
+
+A workload whose pull policy is `always` asked for a tag that moves, so the tag's
+content is part of what its hash has to cover — or a rebuilt `:latest` would change
+nothing until the manifest happened to change too. The registry's digest for the tag
+is what reaches the hash: it moves exactly when the content moves, and it travels the
+way a secret's revision does, into the hash and never into the stored specification.
+The API echoes a specification back as what was submitted, and the operator did not
+write a digest.
+
+The digest is resolved from the registry every time a hash is computed — an apply, a
+rehash after a secret or variable changes, a port reallocation — rather than stored
+and carried forward. Storing it would save the round-trip, but each recomputation
+would then trust a value some earlier operation recorded, and the operations could
+disagree about what the tag holds. Resolving it fresh means every hash states what
+the registry said at that moment, and a rebuilt tag is noticed by whichever operation
+computes a hash next.
+
+The cost is deliberate: each of those operations fails when the registry is
+unreachable, including changing a secret that a pull-always workload reads. That is
+the honest outcome. A hash computed without the digest would claim the image is
+unchanged when nothing checked, and the failure names the workload whose registry
+could not be asked.
+
+Every other pull policy contributes nothing, so a workload that never asked for any
+of this hashes exactly as it did before the policy existed — the same property the
+secret and variable contributions hold to, and for the same reason.
+
 ## A secret is decrypted as late as possible
 
 The value is decrypted when a workload starts, and nowhere else. Nothing else asks:
