@@ -149,6 +149,18 @@ func TestWorkloadService_Apply(t *testing.T) {
 			ExpectErr:  service.ErrInvalidSpec,
 		},
 		{
+			// The CLI checks this, but a caller that skips the CLI must not be able
+			// to store a label key orca's own documented rules refuse.
+			Name: "rejects a label using the reserved orca. prefix",
+			Spec: func() api.WorkloadSpec {
+				spec := containerSpec("example", "example/example:latest")
+				spec.Labels = &map[string]string{"orca.workload": "spoof"}
+				return spec
+			}(),
+			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
+			ExpectErr:  service.ErrInvalidSpec,
+		},
+		{
 			// Accepted rather than refused, which is what the exec runtime arriving
 			// means: the service records desired state and the reconciler routes it to
 			// whichever driver runs it.
