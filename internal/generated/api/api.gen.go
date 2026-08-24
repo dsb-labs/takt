@@ -261,8 +261,9 @@ type ContainerSpec struct {
 	// The digest behind `always` is resolved when the server computes the hash: an
 	// apply, a changed secret or variable, or a port reallocation. It is not
 	// watched continuously, so a rebuilt tag is picked up when one of those
-	// happens rather than on a timer. Resolution asks the registry anonymously,
-	// so `always` does not work against a private registry yet.
+	// happens rather than on a timer. Resolution carries the credentials the
+	// host's docker credential file holds for the registry, so a private image
+	// resolves wherever a docker pull on the host would.
 	Pull *PullPolicy `json:"pull,omitempty"`
 
 	// ReadOnly Whether the container's root filesystem is read-only. Mounted volumes
@@ -587,8 +588,9 @@ type PortMapping struct {
 // The digest behind `always` is resolved when the server computes the hash: an
 // apply, a changed secret or variable, or a port reallocation. It is not
 // watched continuously, so a rebuilt tag is picked up when one of those
-// happens rather than on a timer. Resolution asks the registry anonymously,
-// so `always` does not work against a private registry yet.
+// happens rather than on a timer. Resolution carries the credentials the
+// host's docker credential file holds for the registry, so a private image
+// resolves wherever a docker pull on the host would.
 type PullPolicy string
 
 // ResolvedPort A port mapping as it was actually applied, with the host port the server
