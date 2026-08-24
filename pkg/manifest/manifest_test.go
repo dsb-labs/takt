@@ -462,6 +462,24 @@ func TestParse(t *testing.T) {
 			File:         "resources_negative_cpu.yaml",
 			ExpectsError: true,
 		},
+		{
+			Name: "a hardened container manifest",
+			File: "container_hardened.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Container)
+				assert.Equal(t, "65532:65532", spec.Container.User)
+				assert.True(t, spec.Container.ReadOnly)
+				assert.Equal(t, []string{"NET_ADMIN"}, spec.Container.CapAdd)
+				assert.Equal(t, []string{"ALL"}, spec.Container.CapDrop)
+			},
+		},
+		{
+			// An empty element reaches the runtime as a capability that means nothing
+			// or was not written, so it is rejected the way an empty command element is.
+			Name:         "rejects an empty capability element",
+			File:         "container_empty_capability.yaml",
+			ExpectsError: true,
+		},
 	}
 
 	for _, tc := range tt {
@@ -847,6 +865,10 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	require.NotNil(t, spec.Container)
 	assert.NotEmpty(t, spec.Container.Image)
 	assert.NotEmpty(t, spec.Container.Command)
+	assert.NotEmpty(t, spec.Container.User)
+	assert.True(t, spec.Container.ReadOnly)
+	assert.NotEmpty(t, spec.Container.CapAdd)
+	assert.NotEmpty(t, spec.Container.CapDrop)
 	assert.NotEmpty(t, spec.Env)
 	assert.NotEmpty(t, spec.Ports)
 	assert.NotEmpty(t, spec.Volumes)

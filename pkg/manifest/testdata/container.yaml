@@ -27,3 +27,7 @@ resources:
 container:
   image: example/example:latest
   command: ["sh", "-c", "exit 0"]
+  user: "65532:65532"
+  readOnly: true
+  capAdd: [NET_ADMIN]
+  capDrop: [ALL]

@@ -150,12 +150,32 @@ type (
 	}
 
 	// The Container type describes the container a workload runs.
+	//
+	// The hardening fields live here rather than beside the runtime blocks because a
+	// capability set and a root filesystem are container concepts: an exec workload
+	// cannot even spell them, so nothing has to reject them for it.
 	Container struct {
 		// The image reference to run.
 		Image string
 		// The command to run, replacing the one the image declares. Empty runs what
 		// the image already declares.
 		Command []string
+		// The user to run as, replacing the one the image declares. Any form docker
+		// accepts: a name, a numeric identifier, or a "user:group" pair. Empty runs
+		// as the user the image declares.
+		User string
+		// Whether the root filesystem is read-only. Mounted volumes and values are
+		// separate mounts, so they stay writable and readable whatever this says.
+		//
+		// The yaml tags on this and the fields below are explicit for the reason
+		// Health.StartPeriod's is: yaml.v3 matches against the lowercased Go field
+		// name, and these keys are spelled camelCase on the wire.
+		ReadOnly bool `yaml:"readOnly"`
+		// Kernel capabilities to grant beyond the runtime's default set.
+		CapAdd []string `yaml:"capAdd"`
+		// Kernel capabilities to remove from the runtime's default set. Dropping ALL
+		// and adding back what the workload needs is the hardened configuration.
+		CapDrop []string `yaml:"capDrop"`
 	}
 
 	// The Port type describes a port to publish.
@@ -426,6 +446,18 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 
 		if spec.Container.Command != nil {
 			out.Container.Command = *spec.Container.Command
+		}
+		if spec.Container.User != nil {
+			out.Container.User = *spec.Container.User
+		}
+		if spec.Container.ReadOnly != nil {
+			out.Container.ReadOnly = *spec.Container.ReadOnly
+		}
+		if spec.Container.CapAdd != nil {
+			out.Container.CapAdd = *spec.Container.CapAdd
+		}
+		if spec.Container.CapDrop != nil {
+			out.Container.CapDrop = *spec.Container.CapDrop
 		}
 	}
 

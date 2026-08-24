@@ -524,6 +524,19 @@ func validateContainer(spec Container) error {
 		return fmt.Errorf("invalid container: %w", err)
 	}
 
+	// The user and the capability names are not held to a pattern. Docker accepts
+	// several spellings of a user and its capability set changes between versions,
+	// so a pattern here would reject forms the runtime is happy with. An empty
+	// element is still rejected, the way an empty command element is: it reaches
+	// the runtime as a capability that means nothing or was not written.
+	for _, capabilities := range [][]string{spec.CapAdd, spec.CapDrop} {
+		for i, capability := range capabilities {
+			if strings.TrimSpace(capability) == "" {
+				return fmt.Errorf("invalid container: capability element %d is empty", i)
+			}
+		}
+	}
+
 	return nil
 }
 

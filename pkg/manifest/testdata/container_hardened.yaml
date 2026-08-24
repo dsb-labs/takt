@@ -1,0 +1,8 @@
+version: v1
+name: example
+container:
+  image: example/example:latest
+  user: "65532:65532"
+  readOnly: true
+  capAdd: [NET_ADMIN]
+  capDrop: [ALL]
