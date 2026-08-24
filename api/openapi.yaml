@@ -779,6 +779,8 @@ components:
           description: The image reference to run.
           minLength: 1
           examples: ["example/example:latest"]
+        pull:
+          $ref: "#/components/schemas/PullPolicy"
         command:
           type: array
           description: |
@@ -832,6 +834,29 @@ components:
             type: string
             minLength: 1
           examples: [["ALL"]]
+
+    PullPolicy:
+      type: string
+      description: |
+        When the docker driver pulls the workload's image.
+
+        `missing` pulls only when the image is not present on the host, so a tag
+        that is already there is pinned until something removes it. `always` pulls
+        on every start, and the image's digest is resolved from the registry and
+        folded into the specification hash — so a rebuilt tag reads as an ordinary
+        specification change and replaces the instance. `never` refuses to pull at
+        all, and starting fails when the image is absent.
+
+        The digest behind `always` is resolved when the server computes the hash: an
+        apply, a changed secret or variable, or a port reallocation. It is not
+        watched continuously, so a rebuilt tag is picked up when one of those
+        happens rather than on a timer. Resolution asks the registry anonymously,
+        so `always` does not work against a private registry yet.
+      enum:
+        - always
+        - missing
+        - never
+      default: missing
 
     ResourcesSpec:
       type: object

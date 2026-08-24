@@ -110,21 +110,42 @@ func (e OverlapPolicy) Valid() bool {
 	}
 }
 
+// Defines values for PullPolicy.
+const (
+	PullPolicyAlways  PullPolicy = "always"
+	PullPolicyMissing PullPolicy = "missing"
+	PullPolicyNever   PullPolicy = "never"
+)
+
+// Valid indicates whether the value is a known member of the PullPolicy enum.
+func (e PullPolicy) Valid() bool {
+	switch e {
+	case PullPolicyAlways:
+		return true
+	case PullPolicyMissing:
+		return true
+	case PullPolicyNever:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RestartPolicy.
 const (
-	Always    RestartPolicy = "always"
-	Never     RestartPolicy = "never"
-	OnFailure RestartPolicy = "on-failure"
+	RestartPolicyAlways    RestartPolicy = "always"
+	RestartPolicyNever     RestartPolicy = "never"
+	RestartPolicyOnFailure RestartPolicy = "on-failure"
 )
 
 // Valid indicates whether the value is a known member of the RestartPolicy enum.
 func (e RestartPolicy) Valid() bool {
 	switch e {
-	case Always:
+	case RestartPolicyAlways:
 		return true
-	case Never:
+	case RestartPolicyNever:
 		return true
-	case OnFailure:
+	case RestartPolicyOnFailure:
 		return true
 	default:
 		return false
@@ -227,6 +248,22 @@ type ContainerSpec struct {
 	//
 	// Examples: example/example:latest
 	Image string `json:"image"`
+
+	// Pull When the docker driver pulls the workload's image.
+	//
+	// `missing` pulls only when the image is not present on the host, so a tag
+	// that is already there is pinned until something removes it. `always` pulls
+	// on every start, and the image's digest is resolved from the registry and
+	// folded into the specification hash — so a rebuilt tag reads as an ordinary
+	// specification change and replaces the instance. `never` refuses to pull at
+	// all, and starting fails when the image is absent.
+	//
+	// The digest behind `always` is resolved when the server computes the hash: an
+	// apply, a changed secret or variable, or a port reallocation. It is not
+	// watched continuously, so a rebuilt tag is picked up when one of those
+	// happens rather than on a timer. Resolution asks the registry anonymously,
+	// so `always` does not work against a private registry yet.
+	Pull *PullPolicy `json:"pull,omitempty"`
 
 	// ReadOnly Whether the container's root filesystem is read-only. Mounted volumes
 	// and mounted values are separate mounts with rules of their own, so they
@@ -537,6 +574,22 @@ type PortMapping struct {
 	// Examples: 8080
 	To int `json:"to"`
 }
+
+// PullPolicy When the docker driver pulls the workload's image.
+//
+// `missing` pulls only when the image is not present on the host, so a tag
+// that is already there is pinned until something removes it. `always` pulls
+// on every start, and the image's digest is resolved from the registry and
+// folded into the specification hash — so a rebuilt tag reads as an ordinary
+// specification change and replaces the instance. `never` refuses to pull at
+// all, and starting fails when the image is absent.
+//
+// The digest behind `always` is resolved when the server computes the hash: an
+// apply, a changed secret or variable, or a port reallocation. It is not
+// watched continuously, so a rebuilt tag is picked up when one of those
+// happens rather than on a timer. Resolution asks the registry anonymously,
+// so `always` does not work against a private registry yet.
+type PullPolicy string
 
 // ResolvedPort A port mapping as it was actually applied, with the host port the server
 // settled on. This is what a caller uses to reach a workload.
