@@ -9,6 +9,7 @@ import (
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/registry"
 	"github.com/docker/docker/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -26,6 +27,9 @@ type (
 		// ImagePull should pull the named image, returning the progress stream the
 		// caller must drain and close for the pull to complete.
 		ImagePull(ctx context.Context, ref string, options image.PullOptions) (io.ReadCloser, error)
+		// DistributionInspect should ask the image's registry for its manifest,
+		// which carries the digest the reference currently resolves to.
+		DistributionInspect(ctx context.Context, ref, encodedAuth string) (registry.DistributionInspect, error)
 		// ContainerCreate should create a container from the given configuration.
 		ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, name string) (container.CreateResponse, error)
 		// ContainerStart should start the container with the given identifier.
@@ -83,6 +87,10 @@ func (c *engineClient) ImageList(ctx context.Context, options image.ListOptions)
 
 func (c *engineClient) ImagePull(ctx context.Context, ref string, options image.PullOptions) (io.ReadCloser, error) {
 	return c.inner.ImagePull(ctx, ref, options)
+}
+
+func (c *engineClient) DistributionInspect(ctx context.Context, ref, encodedAuth string) (registry.DistributionInspect, error) {
+	return c.inner.DistributionInspect(ctx, ref, encodedAuth)
 }
 
 func (c *engineClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, name string) (container.CreateResponse, error) {

@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/api/types/registry"
 	"github.com/opencontainers/image-spec/specs-go/v1"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -633,6 +634,78 @@ func (_c *MockClient_ContainerStop_Call) Return(err error) *MockClient_Container
 }
 
 func (_c *MockClient_ContainerStop_Call) RunAndReturn(run func(ctx context.Context, id string, options container.StopOptions) error) *MockClient_ContainerStop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DistributionInspect provides a mock function for the type MockClient
+func (_mock *MockClient) DistributionInspect(ctx context.Context, ref string, encodedAuth string) (registry.DistributionInspect, error) {
+	ret := _mock.Called(ctx, ref, encodedAuth)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DistributionInspect")
+	}
+
+	var r0 registry.DistributionInspect
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (registry.DistributionInspect, error)); ok {
+		return returnFunc(ctx, ref, encodedAuth)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) registry.DistributionInspect); ok {
+		r0 = returnFunc(ctx, ref, encodedAuth)
+	} else {
+		r0 = ret.Get(0).(registry.DistributionInspect)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, ref, encodedAuth)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockClient_DistributionInspect_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DistributionInspect'
+type MockClient_DistributionInspect_Call struct {
+	*mock.Call
+}
+
+// DistributionInspect is a helper method to define mock.On call
+//   - ctx context.Context
+//   - ref string
+//   - encodedAuth string
+func (_e *MockClient_Expecter) DistributionInspect(ctx any, ref any, encodedAuth any) *MockClient_DistributionInspect_Call {
+	return &MockClient_DistributionInspect_Call{Call: _e.mock.On("DistributionInspect", ctx, ref, encodedAuth)}
+}
+
+func (_c *MockClient_DistributionInspect_Call) Run(run func(ctx context.Context, ref string, encodedAuth string)) *MockClient_DistributionInspect_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockClient_DistributionInspect_Call) Return(distributionInspect registry.DistributionInspect, err error) *MockClient_DistributionInspect_Call {
+	_c.Call.Return(distributionInspect, err)
+	return _c
+}
+
+func (_c *MockClient_DistributionInspect_Call) RunAndReturn(run func(ctx context.Context, ref string, encodedAuth string) (registry.DistributionInspect, error)) *MockClient_DistributionInspect_Call {
 	_c.Call.Return(run)
 	return _c
 }

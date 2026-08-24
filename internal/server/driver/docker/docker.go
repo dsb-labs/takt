@@ -123,7 +123,14 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", ErrNotContainerWorkload
 	}
 
-	if err := d.ensureImage(ctx, spec.Image); err != nil {
+	// The policy is read through the pointer here so that a specification stored
+	// before the field existed, which carries none, keeps today's behaviour.
+	var policy api.PullPolicy
+	if spec.Pull != nil {
+		policy = *spec.Pull
+	}
+
+	if err := d.ensureImage(ctx, spec.Image, policy); err != nil {
 		return "", err
 	}
 
@@ -536,16 +543,29 @@ func (d *Driver) inspect(ctx context.Context, instance *driver.Instance) {
 	}
 }
 
-func (d *Driver) ensureImage(ctx context.Context, ref string) error {
-	images, err := d.client.ImageList(ctx, image.ListOptions{
-		Filters: filters.NewArgs(filters.Arg("reference", ref)),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to list images: %w", err)
-	}
+// ensureImage makes the named image available under the workload's pull policy.
+//
+// The empty policy means api.PullPolicyMissing, so a specification written before
+// the policy existed behaves as it always did. An always policy pulls without
+// looking at what is held locally, since the point of asking for it is to fetch the
+// tag's current content. A never policy must fail when the image is absent rather
+// than falling through to a pull, or it is indistinguishable from missing.
+func (d *Driver) ensureImage(ctx context.Context, ref string, policy api.PullPolicy) error {
+	if policy != api.PullPolicyAlways {
+		images, err := d.client.ImageList(ctx, image.ListOptions{
+			Filters: filters.NewArgs(filters.Arg("reference", ref)),
+		})
+		if err != nil {
+			return fmt.Errorf("failed to list images: %w", err)
+		}
 
-	if len(images) > 0 {
-		return nil
+		if len(images) > 0 {
+			return nil
+		}
+
+		if policy == api.PullPolicyNever {
+			return fmt.Errorf("image %q is not present and the pull policy forbids pulling it", ref)
+		}
 	}
 
 	d.logger.With("image", ref).Debug("pulling image")
@@ -563,6 +583,23 @@ func (d *Driver) ensureImage(ctx context.Context, ref string) error {
 	}
 
 	return nil
+}
+
+// Digest asks the image's registry which digest the given reference currently
+// resolves to.
+//
+// This is what folds a pull-always workload's image content into its specification
+// hash: the workload service calls it whenever it computes the hash, so a rebuilt
+// tag moves the hash and the instance is replaced through the ordinary stale path.
+// The registry is asked anonymously, so a private image cannot be resolved until
+// the driver learns about registry credentials.
+func (d *Driver) Digest(ctx context.Context, ref string) (string, error) {
+	inspect, err := d.client.DistributionInspect(ctx, ref, "")
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve image digest: %w", err)
+	}
+
+	return inspect.Descriptor.Digest.String(), nil
 }
 
 // hasHealthCheck reports whether a container summary mentions a health check.

@@ -11,6 +11,8 @@ import (
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/registry"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -197,6 +199,55 @@ func TestDriver_Start(t *testing.T) {
 					Return(nil, nil).Once()
 				c.EXPECT().ImagePull(mock.Anything, "example/example:latest", mock.Anything).
 					Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			// An always policy exists to fetch the tag's current content, so what is
+			// held locally is not even asked about: the strict mocks fail this case
+			// if ImageList is called.
+			Name:     "pulls on every start under the always policy",
+			Workload: workload("example", 0, "", pulledSpec("example/example:latest", api.PullPolicyAlways), nil, nil),
+			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImagePull(mock.Anything, "example/example:latest", mock.Anything).
+					Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+					Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			// A never policy that fell through to a pull would be indistinguishable
+			// from missing, so an absent image must fail: the strict mocks fail this
+			// case if ImagePull is called.
+			Name:     "refuses to start under the never policy when the image is absent",
+			Workload: workload("example", 0, "", pulledSpec("example/example:latest", api.PullPolicyNever), nil, nil),
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+			},
+		},
+		{
+			Name:     "starts under the never policy when the image is present",
+			Workload: workload("example", 0, "", pulledSpec("example/example:latest", api.PullPolicyNever), nil, nil),
+			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
 				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 					Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -973,6 +1024,37 @@ func TestDriver_Start_NumbersEachAttempt(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestDriver_Digest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the digest the registry reports", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().DistributionInspect(mock.Anything, "example/example:latest", "").
+			Return(registry.DistributionInspect{
+				Descriptor: ocispec.Descriptor{Digest: "sha256:abc123"},
+			}, nil).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		digest, err := d.Digest(t.Context(), "example/example:latest")
+		require.NoError(t, err)
+		assert.Equal(t, "sha256:abc123", digest)
+	})
+
+	t.Run("reports a registry it cannot reach", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().DistributionInspect(mock.Anything, "example/example:latest", "").
+			Return(registry.DistributionInspect{}, errors.New("registry unreachable")).Once()
+
+		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+
+		_, err := d.Digest(t.Context(), "example/example:latest")
+		assert.Error(t, err)
+	})
+}
+
 // multiplexed frames payload the way the docker daemon frames the output of a
 // container without a TTY: an 8 byte header carrying the stream type and the
 // payload length, followed by the payload itself.
@@ -1049,6 +1131,11 @@ func containerSpec(image string, command []string) api.ContainerSpec {
 	}
 
 	return spec
+}
+
+// pulledSpec builds a container block naming a pull policy.
+func pulledSpec(image string, policy api.PullPolicy) api.ContainerSpec {
+	return api.ContainerSpec{Image: image, Pull: &policy}
 }
 
 // hardenedSpec builds a container block naming every hardening field.
