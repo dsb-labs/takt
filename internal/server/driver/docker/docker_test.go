@@ -1,9 +1,13 @@
 package docker_test
 
 import (
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -403,7 +407,7 @@ func TestDriver_Start(t *testing.T) {
 			client := NewMockClient(t)
 			tc.SetupMocks(client)
 
-			d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+			d := testDriver(t, client)
 
 			id, err := d.Start(t.Context(), tc.Workload)
 			switch {
@@ -472,9 +476,10 @@ func TestDriver_Start_PublishAddress(t *testing.T) {
 			client.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
 
 			d := docker.New(docker.Config{
-				Logger: newTestLogger(t),
-				Client: client,
-				Bind:   tc.Bind,
+				Logger:     newTestLogger(t),
+				Client:     client,
+				Bind:       tc.Bind,
+				ConfigFile: filepath.Join(t.TempDir(), "config.json"),
 			})
 
 			_, err := d.Start(t.Context(), workload("example", 1, "hash", containerSpec("example/example:latest", nil), ports(8080, 4141), nil))
@@ -503,7 +508,7 @@ func TestDriver_Stop(t *testing.T) {
 		// the attempt that just failed readable afterwards.
 		client.EXPECT().ContainerRemove(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		require.NoError(t, d.Stop(t.Context(), "", "example"))
 	})
@@ -527,7 +532,7 @@ func TestDriver_Stop(t *testing.T) {
 			client.EXPECT().ContainerRemove(mock.Anything, id, mock.Anything).Return(nil).Once()
 		}
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		require.NoError(t, d.Stop(t.Context(), "", "example"))
 	})
@@ -552,7 +557,7 @@ func TestDriver_Stop(t *testing.T) {
 				return options.Force
 			})).Return(nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		require.NoError(t, d.Stop(t.Context(), "", "example"))
 	})
@@ -561,7 +566,7 @@ func TestDriver_Stop(t *testing.T) {
 		client := NewMockClient(t)
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		require.NoError(t, d.Stop(t.Context(), "", "example"))
 	})
@@ -586,7 +591,7 @@ func TestDriver_Discard(t *testing.T) {
 			client.EXPECT().ContainerRemove(mock.Anything, id, mock.Anything).Return(nil).Once()
 		}
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		require.NoError(t, d.Discard(t.Context(), "", "example"))
 	})
@@ -595,7 +600,7 @@ func TestDriver_Discard(t *testing.T) {
 		client := NewMockClient(t)
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		require.NoError(t, d.Discard(t.Context(), "", "example"))
 	})
@@ -616,7 +621,7 @@ func TestDriver_Signal(t *testing.T) {
 			client.EXPECT().ContainerKill(mock.Anything, id, "SIGHUP").Return(nil).Once()
 		}
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		require.NoError(t, d.Signal(t.Context(), "", "example", "SIGHUP"))
 	})
@@ -633,7 +638,7 @@ func TestDriver_Signal(t *testing.T) {
 		// stopped has nothing to reload.
 		client.EXPECT().ContainerKill(mock.Anything, "container-two", "SIGHUP").Return(nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		require.NoError(t, d.Signal(t.Context(), "", "example", "SIGHUP"))
 	})
@@ -642,7 +647,7 @@ func TestDriver_Signal(t *testing.T) {
 		client := NewMockClient(t)
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		// The reconciler asks the driver that runs the workload, and there is nothing
 		// here to reload.
@@ -659,7 +664,7 @@ func TestDriver_Signal(t *testing.T) {
 		client.EXPECT().ContainerKill(mock.Anything, "container-one", "SIGHUP").
 			Return(errors.New("daemon said no")).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		// The file has already been rewritten, so a workload that was not told is
 		// something the caller has to hear about.
@@ -685,7 +690,7 @@ func TestDriver_Observe(t *testing.T) {
 			},
 		}, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -722,7 +727,7 @@ func TestDriver_Observe(t *testing.T) {
 			},
 		}, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -752,7 +757,7 @@ func TestDriver_Observe(t *testing.T) {
 			},
 		}, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -776,7 +781,7 @@ func TestDriver_Observe(t *testing.T) {
 			},
 		}, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -803,7 +808,7 @@ func TestDriver_Observe(t *testing.T) {
 			},
 		}, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -818,7 +823,7 @@ func TestDriver_Observe(t *testing.T) {
 		client := NewMockClient(t)
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -847,7 +852,7 @@ func TestDriver_Observe(t *testing.T) {
 			},
 		}, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -878,7 +883,7 @@ func TestDriver_Observe(t *testing.T) {
 			},
 		}, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -905,7 +910,7 @@ func TestDriver_Observe(t *testing.T) {
 			},
 		}, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -931,7 +936,7 @@ func TestDriver_Logs(t *testing.T) {
 			return options.ShowStdout && options.ShowStderr && options.Tail == "20"
 		})).Return(io.NopCloser(strings.NewReader(multiplexed("hello world\n"))), nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		var out strings.Builder
 		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 20}))
@@ -951,7 +956,7 @@ func TestDriver_Logs(t *testing.T) {
 		client.EXPECT().ContainerLogs(mock.Anything, "current", mock.Anything).
 			Return(io.NopCloser(strings.NewReader(multiplexed("this attempt\n"))), nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		var out strings.Builder
 		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 20}))
@@ -971,7 +976,7 @@ func TestDriver_Logs(t *testing.T) {
 		client.EXPECT().ContainerLogs(mock.Anything, "retained", mock.Anything).
 			Return(io.NopCloser(strings.NewReader(multiplexed("why it died\n"))), nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		var out strings.Builder
 		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 20, Previous: true}))
@@ -985,7 +990,7 @@ func TestDriver_Logs(t *testing.T) {
 			{ID: "current", Labels: map[string]string{docker.LabelWorkload: "example", docker.LabelAttempt: "1"}},
 		}, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		// There is no earlier attempt, and saying so by writing nothing is better than
 		// falling back to the current one and labelling it as the previous.
@@ -1018,7 +1023,7 @@ func TestDriver_Start_NumbersEachAttempt(t *testing.T) {
 
 	client.EXPECT().ContainerStart(mock.Anything, "container-three", mock.Anything).Return(nil).Once()
 
-	d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+	d := testDriver(t, client)
 
 	_, err := d.Start(t.Context(), workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil))
 	require.NoError(t, err)
@@ -1035,7 +1040,7 @@ func TestDriver_Digest(t *testing.T) {
 				Descriptor: ocispec.Descriptor{Digest: "sha256:abc123"},
 			}, nil).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		digest, err := d.Digest(t.Context(), "example/example:latest")
 		require.NoError(t, err)
@@ -1048,11 +1053,115 @@ func TestDriver_Digest(t *testing.T) {
 		client.EXPECT().DistributionInspect(mock.Anything, "example/example:latest", "").
 			Return(registry.DistributionInspect{}, errors.New("registry unreachable")).Once()
 
-		d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client})
+		d := testDriver(t, client)
 
 		_, err := d.Digest(t.Context(), "example/example:latest")
 		assert.Error(t, err)
 	})
+
+	t.Run("asks with the credentials the file holds for the registry", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().DistributionInspect(mock.Anything, "registry.example.com/app:latest", mock.MatchedBy(sentCredentials("some-user", "some-password"))).
+			Return(registry.DistributionInspect{
+				Descriptor: ocispec.Descriptor{Digest: "sha256:abc123"},
+			}, nil).Once()
+
+		d := credentialedDriver(t, client, credentialFile(t, "registry.example.com", "some-user", "some-password"))
+
+		digest, err := d.Digest(t.Context(), "registry.example.com/app:latest")
+		require.NoError(t, err)
+		assert.Equal(t, "sha256:abc123", digest)
+	})
+
+	t.Run("finds a docker hub login under the legacy index key", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		// A docker login against Docker Hub is stored under the legacy index
+		// address, not the docker.io domain a bare reference normalises to.
+		client.EXPECT().DistributionInspect(mock.Anything, "example/example:latest", mock.MatchedBy(sentCredentials("some-user", "some-password"))).
+			Return(registry.DistributionInspect{
+				Descriptor: ocispec.Descriptor{Digest: "sha256:abc123"},
+			}, nil).Once()
+
+		d := credentialedDriver(t, client, credentialFile(t, "https://index.docker.io/v1/", "some-user", "some-password"))
+
+		_, err := d.Digest(t.Context(), "example/example:latest")
+		require.NoError(t, err)
+	})
+
+	t.Run("asks anonymously about a registry the file does not mention", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().DistributionInspect(mock.Anything, "other.example.com/app:latest", "").
+			Return(registry.DistributionInspect{
+				Descriptor: ocispec.Descriptor{Digest: "sha256:abc123"},
+			}, nil).Once()
+
+		d := credentialedDriver(t, client, credentialFile(t, "registry.example.com", "some-user", "some-password"))
+
+		_, err := d.Digest(t.Context(), "other.example.com/app:latest")
+		require.NoError(t, err)
+	})
+
+	t.Run("refuses a credential file it cannot parse", func(t *testing.T) {
+		// The registry is never asked: the strict mocks fail this case if
+		// DistributionInspect is called.
+		client := NewMockClient(t)
+
+		path := filepath.Join(t.TempDir(), "config.json")
+		require.NoError(t, os.WriteFile(path, []byte("not json"), 0o600))
+
+		d := credentialedDriver(t, client, path)
+
+		_, err := d.Digest(t.Context(), "example/example:latest")
+		assert.Error(t, err)
+	})
+
+	t.Run("reports a credential helper it cannot run without what it resolved", func(t *testing.T) {
+		// The registry is never asked: the strict mocks fail this case if
+		// DistributionInspect is called.
+		client := NewMockClient(t)
+
+		path := filepath.Join(t.TempDir(), "config.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{"credHelpers":{"registry.example.com":"orca-test-absent"}}`), 0o600))
+
+		d := credentialedDriver(t, client, path)
+
+		_, err := d.Digest(t.Context(), "registry.example.com/app:latest")
+		require.Error(t, err)
+		assert.ErrorContains(t, err, "registry.example.com")
+	})
+}
+
+func TestDriver_Start_RegistryAuth(t *testing.T) {
+	t.Parallel()
+
+	// The pull carries the same credentials a digest lookup does, resolved from
+	// the file each time so a docker login on the host takes effect without a
+	// restart.
+	client := NewMockClient(t)
+
+	// Read to number the attempt, so a replacement cannot collide with a
+	// container being kept for its output.
+	client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+	client.EXPECT().ImageList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+	client.EXPECT().ImagePull(mock.Anything, "registry.example.com/app:latest",
+		mock.MatchedBy(func(options image.PullOptions) bool {
+			return sentCredentials("some-user", "some-password")(options.RegistryAuth)
+		}),
+	).Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
+
+	client.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+	client.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+
+	d := credentialedDriver(t, client, credentialFile(t, "registry.example.com", "some-user", "some-password"))
+
+	_, err := d.Start(t.Context(), workload("example", 1, "hash-one", containerSpec("registry.example.com/app:latest", nil), nil, nil))
+	require.NoError(t, err)
 }
 
 // multiplexed frames payload the way the docker daemon frames the output of a
@@ -1081,6 +1190,54 @@ func newTestLogger(t *testing.T) *slog.Logger {
 		AddSource: testing.Verbose(),
 		Level:     level,
 	}))
+}
+
+// testDriver builds a driver whose credential file is pinned to a path holding
+// nothing, so a docker login on the machine running the tests cannot reach them.
+func testDriver(t *testing.T, client docker.Client) *docker.Driver {
+	t.Helper()
+
+	return credentialedDriver(t, client, filepath.Join(t.TempDir(), "config.json"))
+}
+
+// credentialedDriver builds a driver reading registry credentials from the given
+// file.
+func credentialedDriver(t *testing.T, client docker.Client, configFile string) *docker.Driver {
+	t.Helper()
+
+	return docker.New(docker.Config{
+		Logger:     newTestLogger(t),
+		Client:     client,
+		ConfigFile: configFile,
+	})
+}
+
+// credentialFile writes a docker credential file holding a single login, keyed
+// as a docker login would key it, and returns its path. The login is held in the
+// file itself rather than behind a helper, so resolving it runs no programs.
+func credentialFile(t *testing.T, registry, username, password string) string {
+	t.Helper()
+
+	auth := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
+	content := fmt.Sprintf(`{"auths":{%q:{"auth":%q}}}`, registry, auth)
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	return path
+}
+
+// sentCredentials matches the encoded credential the engine API takes, asserting
+// the login inside it rather than comparing encodings byte for byte.
+func sentCredentials(username, password string) func(string) bool {
+	return func(encoded string) bool {
+		auth, err := registry.DecodeAuthConfig(encoded)
+		if err != nil {
+			return false
+		}
+
+		return auth.Username == username && auth.Password == password
+	}
 }
 
 // workload builds the neutral shape a driver is handed, so a test names only the

@@ -65,9 +65,10 @@ var (
 type (
 	// The Driver type runs workloads as Docker containers.
 	Driver struct {
-		logger *slog.Logger
-		client Client
-		bind   string
+		logger     *slog.Logger
+		client     Client
+		bind       string
+		configFile string
 	}
 
 	// The Config type contains fields used to construct a Driver.
@@ -79,6 +80,10 @@ type (
 		// The address a container's host ports are published on. Empty publishes on
 		// loopback, which is the narrower of the two things this can mean.
 		Bind string
+		// The docker credential file registry credentials are resolved from. Empty
+		// reads docker's own default location, decided when a pull happens rather
+		// than here.
+		ConfigFile string
 	}
 )
 
@@ -103,9 +108,10 @@ func New(config Config) *Driver {
 	}
 
 	return &Driver{
-		logger: config.Logger.With("component", "driver", "driver", "docker"),
-		client: config.Client,
-		bind:   bind,
+		logger:     config.Logger.With("component", "driver", "driver", "docker"),
+		client:     config.Client,
+		bind:       bind,
+		configFile: config.ConfigFile,
 	}
 }
 
@@ -568,9 +574,14 @@ func (d *Driver) ensureImage(ctx context.Context, ref string, policy api.PullPol
 		}
 	}
 
+	auth, err := d.registryAuth(ref)
+	if err != nil {
+		return err
+	}
+
 	d.logger.With("image", ref).Debug("pulling image")
 
-	pull, err := d.client.ImagePull(ctx, ref, image.PullOptions{})
+	pull, err := d.client.ImagePull(ctx, ref, image.PullOptions{RegistryAuth: auth})
 	if err != nil {
 		return fmt.Errorf("failed to pull image: %w", err)
 	}
@@ -591,10 +602,15 @@ func (d *Driver) ensureImage(ctx context.Context, ref string, policy api.PullPol
 // This is what folds a pull-always workload's image content into its specification
 // hash: the workload service calls it whenever it computes the hash, so a rebuilt
 // tag moves the hash and the instance is replaced through the ordinary stale path.
-// The registry is asked anonymously, so a private image cannot be resolved until
-// the driver learns about registry credentials.
+// The registry is asked with the credentials the docker credential file holds for
+// it, so a private image resolves wherever a docker pull on the host would.
 func (d *Driver) Digest(ctx context.Context, ref string) (string, error) {
-	inspect, err := d.client.DistributionInspect(ctx, ref, "")
+	auth, err := d.registryAuth(ref)
+	if err != nil {
+		return "", err
+	}
+
+	inspect, err := d.client.DistributionInspect(ctx, ref, auth)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve image digest: %w", err)
 	}
