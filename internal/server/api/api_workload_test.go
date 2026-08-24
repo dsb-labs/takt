@@ -449,6 +449,44 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		assert.Nil(t, (*got.Instances)[0].Health)
 	})
 
+	t.Run("reports why a workload is not converging", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+
+		failing := workload("example", generated.WorkloadStatePending)
+		failing.LastError = "failed to start workload: no such image"
+		failing.LastErrorAt = time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+		svc.EXPECT().Get(mock.Anything, "example").Return(failing, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		var result generated.GetWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		got := result.Workload
+
+		require.NotNil(t, got.LastError)
+		assert.Equal(t, failing.LastError, *got.LastError)
+		require.NotNil(t, got.LastErrorAt)
+		assert.Equal(t, failing.LastErrorAt, *got.LastErrorAt)
+	})
+
+	t.Run("reports no error for a converging workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").
+			Return(workload("example", generated.WorkloadStateRunning), nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		var result generated.GetWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		assert.Nil(t, result.Workload.LastError)
+		assert.Nil(t, result.Workload.LastErrorAt)
+	})
+
 	t.Run("reports a missing workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "nope").

@@ -198,7 +198,10 @@ func Run(ctx context.Context, config Config) error {
 		Images:    dockerDriver,
 		Allocator: port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort}),
 		Checker:   checker,
-		Notify:    reconcile.Notify,
+		// The reconciler itself, because a converge error is only observable during
+		// the pass that hits it: the reconciler is the one component that has it.
+		Errors: reconcile,
+		Notify: reconcile.Notify,
 	})
 
 	mux := http.NewServeMux()

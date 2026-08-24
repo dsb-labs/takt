@@ -335,6 +335,11 @@ func newWorkload(w service.Workload) api.Workload {
 		workload.NextRun = new(w.NextRun)
 	}
 
+	if w.LastError != "" {
+		workload.LastError = new(w.LastError)
+		workload.LastErrorAt = new(w.LastErrorAt)
+	}
+
 	if w.Deleting {
 		workload.Deleting = new(true)
 	}
