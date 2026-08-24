@@ -23,6 +23,7 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 
 	spec.Restart = manifest.WireRestart(s.Restart)
 	spec.Health = manifest.WireHealth(s.Health)
+	spec.Resources = manifest.WireResources(s.Resources)
 
 	if len(s.Env) > 0 {
 		spec.Env = new(s.Env)
@@ -58,6 +59,18 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 
 		if len(s.Container.Command) > 0 {
 			spec.Container.Command = new(s.Container.Command)
+		}
+		if s.Container.User != "" {
+			spec.Container.User = new(s.Container.User)
+		}
+		if s.Container.ReadOnly {
+			spec.Container.ReadOnly = new(s.Container.ReadOnly)
+		}
+		if len(s.Container.CapAdd) > 0 {
+			spec.Container.CapAdd = new(s.Container.CapAdd)
+		}
+		if len(s.Container.CapDrop) > 0 {
+			spec.Container.CapDrop = new(s.Container.CapDrop)
 		}
 	}
 

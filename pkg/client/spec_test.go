@@ -25,8 +25,13 @@ func TestWireSpec(t *testing.T) {
 		assert.Nil(t, wire.Schedule)
 		assert.Nil(t, wire.Labels)
 		assert.Nil(t, wire.Restart)
+		assert.Nil(t, wire.Resources)
 		require.NotNil(t, wire.Container)
 		assert.Nil(t, wire.Container.Command)
+		assert.Nil(t, wire.Container.User)
+		assert.Nil(t, wire.Container.ReadOnly)
+		assert.Nil(t, wire.Container.CapAdd)
+		assert.Nil(t, wire.Container.CapDrop)
 		assert.Nil(t, wire.Env)
 		assert.Nil(t, wire.Ports)
 		assert.Nil(t, wire.Exec)
@@ -40,12 +45,17 @@ func TestWireSpec(t *testing.T) {
 			Labels:   map[string]string{"some-key": "some-value"},
 			// Resolved rather than empty, because a round trip runs the value
 			// through NewSpec, which applies the defaults.
-			Restart: &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay},
-			Ports:   []manifest.Port{{To: 8080, From: 4141}},
-			Env:     map[string]string{"EXAMPLE": "EXAMPLE"},
+			Restart:   &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay},
+			Ports:     []manifest.Port{{To: 8080, From: 4141}},
+			Env:       map[string]string{"EXAMPLE": "EXAMPLE"},
+			Resources: &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 100},
 			Container: &manifest.Container{
-				Image:   "example/example:latest",
-				Command: []string{"sh", "-c", "exit 0"},
+				Image:    "example/example:latest",
+				Command:  []string{"sh", "-c", "exit 0"},
+				User:     "65532:65532",
+				ReadOnly: true,
+				CapAdd:   []string{"NET_ADMIN"},
+				CapDrop:  []string{"ALL"},
 			},
 		}
 
