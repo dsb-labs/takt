@@ -194,6 +194,7 @@ func Run(ctx context.Context, config Config) error {
 		// each thing currently holds and nothing else.
 		Secrets:   secrets,
 		Variables: variables,
+		Images:    dockerDriver,
 		Allocator: port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort}),
 		Checker:   checker,
 		Notify:    reconcile.Notify,

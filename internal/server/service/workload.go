@@ -150,6 +150,11 @@ type (
 		// confirm a guess at it; a variable's value is reported by the API anyway, so
 		// the indirection would protect nothing and cost a column.
 		Variables map[string]string `json:"variables,omitempty"`
+		// The digest the image's registry reports, set only for a workload whose pull
+		// policy is always. It reaches the hash without being stored, the way a
+		// secret's revision does, so a rebuilt tag replaces the instance without the
+		// digest being echoed back as though the operator wrote it.
+		Digest string `json:"digest,omitempty"`
 	}
 
 	// The SecretRevisions interface describes how the service learns what version of
@@ -172,6 +177,17 @@ type (
 		// Values should return the current value of each named variable, keyed by
 		// name, omitting any that do not exist.
 		Values(ctx context.Context, names []string) (map[string]string, error)
+	}
+
+	// The ImageResolver interface describes how the service learns which digest an
+	// image reference currently resolves to.
+	//
+	// Narrower than the docker driver it is satisfied by: hashing a pull-always
+	// workload needs the digest and nothing else.
+	ImageResolver interface {
+		// Digest should return the digest the image's registry currently reports
+		// for the given reference.
+		Digest(ctx context.Context, ref string) (string, error)
 	}
 
 	// The references type carries what a workload reads and what those things
@@ -211,6 +227,7 @@ type (
 		volumes   VolumeLocator
 		secrets   SecretRevisions
 		variables VariableValues
+		images    ImageResolver
 		allocator Allocator
 		checker   Checker
 		notify    func()
@@ -237,6 +254,9 @@ type WorkloadServiceConfig struct {
 	// Where the values of the variables a workload reads are read from. May be nil,
 	// in which case a workload referencing a variable is rejected.
 	Variables VariableValues
+	// Where a pull-always workload's image digest is resolved. May be nil, in which
+	// case such a workload is rejected.
+	Images ImageResolver
 	// The allocator used to choose host ports.
 	Allocator Allocator
 	// The checker that establishes whether workloads are working. May be nil, in
@@ -258,6 +278,7 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		volumes:   config.Volumes,
 		secrets:   config.Secrets,
 		variables: config.Variables,
+		images:    config.Images,
 		allocator: config.Allocator,
 		checker:   config.Checker,
 		notify:    config.Notify,
@@ -345,7 +366,14 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 		return Workload{}, false, fmt.Errorf("%w: %s", ErrVariableNotFound, strings.Join(absent, ", "))
 	}
 
-	stored, created, err := s.store(ctx, spec, runtime, held, read)
+	// Resolved here rather than inside store, whose port retries would repeat the
+	// registry round-trip for nothing: the digest does not depend on the ports.
+	digest, err := s.resolveDigest(ctx, spec)
+	if err != nil {
+		return Workload{}, false, err
+	}
+
+	stored, created, err := s.store(ctx, spec, runtime, held, read, digest)
 	if err != nil {
 		return Workload{}, false, err
 	}
@@ -376,6 +404,7 @@ func (s *WorkloadService) store(
 	runtime api.Runtime,
 	held []database.Port,
 	read references,
+	digest string,
 ) (database.Workload, bool, error) {
 	// Bounded because a caller waiting on a request would rather hear that orca
 	// couldn't settle its ports than wait indefinitely for a quiet moment.
@@ -387,7 +416,7 @@ func (s *WorkloadService) store(
 			return database.Workload{}, false, err
 		}
 
-		encoded, hash, err := canonicalise(withResolvedPorts(spec, ports), read)
+		encoded, hash, err := canonicalise(withResolvedPorts(spec, ports), read, digest)
 		if err != nil {
 			return database.Workload{}, false, err
 		}
@@ -633,7 +662,12 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 		return false, err
 	}
 
-	encoded, hash, err := canonicalise(withResolvedPorts(spec, ports), read)
+	digest, err := s.resolveDigest(ctx, spec)
+	if err != nil {
+		return false, err
+	}
+
+	encoded, hash, err := canonicalise(withResolvedPorts(spec, ports), read, digest)
 	if err != nil {
 		return false, err
 	}
@@ -669,6 +703,11 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 // Something that has been deleted moves the hash too. The workload is then asking for
 // something orca no longer holds, which is reported when it next tries to start
 // rather than by silently leaving the old value running.
+//
+// A pull-always workload's image digest is resolved again here as well, so a rehash
+// can also pick up a rebuilt tag — and fails when the registry is unreachable, since
+// a hash computed without the digest would claim the image is unchanged when nothing
+// checked.
 func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error) {
 	row, err := s.workloads.Get(ctx, name)
 	switch {
@@ -688,7 +727,12 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 		return false, err
 	}
 
-	_, hash, err := canonicalise(spec, read)
+	digest, err := s.resolveDigest(ctx, spec)
+	if err != nil {
+		return false, err
+	}
+
+	_, hash, err := canonicalise(spec, read, digest)
 	if err != nil {
 		return false, err
 	}
@@ -931,6 +975,32 @@ func (s *WorkloadService) resolveReferences(ctx context.Context, spec api.Worklo
 	return resolved, nil
 }
 
+// resolveDigest returns the digest a pull-always workload's image currently
+// resolves to, and the empty string for every other workload.
+//
+// The digest is read whenever a hash is computed — an apply, a rehash, a port
+// reallocation — rather than stored, so each of those picks up a rebuilt tag and
+// none can disagree with the others about what the tag holds. The cost is that
+// each is a registry round-trip, and each fails when the registry is unreachable.
+// That is the honest outcome: a hash computed without the digest would claim the
+// image is unchanged when nothing checked.
+func (s *WorkloadService) resolveDigest(ctx context.Context, spec api.WorkloadSpec) (string, error) {
+	if spec.Container == nil || spec.Container.Pull == nil || *spec.Container.Pull != api.PullPolicyAlways {
+		return "", nil
+	}
+
+	if s.images == nil {
+		return "", fmt.Errorf("%w: this server cannot resolve image digests", ErrInvalidSpec)
+	}
+
+	digest, err := s.images.Digest(ctx, spec.Container.Image)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve image digest: %w", err)
+	}
+
+	return digest, nil
+}
+
 // missing names the referenced things of one kind that do not exist.
 //
 // Every name is checked rather than the counts compared, so that an operator is told
@@ -1091,9 +1161,12 @@ func runtimeOf(spec api.WorkloadSpec) (api.Runtime, error) {
 // Such a mount asked for the file to be rewritten and the workload signalled, and a
 // hash that moved with the value would replace the instance instead.
 //
-// A workload reading neither hashes exactly as it would without this, which is what
-// stops an upgrade replacing every running instance.
-func canonicalise(spec api.WorkloadSpec, read references) ([]byte, string, error) {
+// A pull-always workload's image digest is mixed in the same way, so a rebuilt tag
+// reads as an ordinary specification change. It is empty for every other workload.
+//
+// A workload reading none of these hashes exactly as it would without this, which is
+// what stops an upgrade replacing every running instance.
+func canonicalise(spec api.WorkloadSpec, read references, digest string) ([]byte, string, error) {
 	encoded, err := json.Marshal(spec)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to encode workload spec: %w", err)
@@ -1101,7 +1174,7 @@ func canonicalise(spec api.WorkloadSpec, read references) ([]byte, string, error
 
 	revisions, values := read.hashed()
 
-	if len(revisions) == 0 && len(values) == 0 {
+	if len(revisions) == 0 && len(values) == 0 && digest == "" {
 		sum := sha256.Sum256(encoded)
 
 		return encoded, hex.EncodeToString(sum[:]), nil
@@ -1111,6 +1184,7 @@ func canonicalise(spec api.WorkloadSpec, read references) ([]byte, string, error
 		Spec:      encoded,
 		Secrets:   revisions,
 		Variables: values,
+		Digest:    digest,
 	})
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to encode workload spec: %w", err)

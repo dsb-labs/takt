@@ -1262,6 +1262,98 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 	})
 }
 
+func TestWorkloadService_Apply_HashesImageDigest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("hashes a workload without a pull policy exactly as before", func(t *testing.T) {
+		// Pinned to the literal from before the pull policy existed. The resolver
+		// mock is strict, so this also proves no registry round-trip is made for a
+		// workload that never asked for one.
+		assert.Equal(t,
+			"485029cc492e6cb9a301bdde6d7632286d9613ebae081824118e64611dcdf60f",
+			applyForDigestHash(t, containerSpec("example", "example/example:latest"), nil))
+	})
+
+	t.Run("moves the hash when the digest moves", func(t *testing.T) {
+		spec := pullAlwaysSpec("example", "example/example:latest")
+
+		first := applyForDigestHash(t, spec, map[string]string{"example/example:latest": "sha256:one"})
+		second := applyForDigestHash(t, spec, map[string]string{"example/example:latest": "sha256:two"})
+
+		// The digest is what is hashed, so a rebuilt tag is a specification change
+		// and the reconciler replaces the instance running the old content.
+		assert.NotEqual(t, first, second)
+	})
+
+	t.Run("keeps the hash when the digest is unchanged", func(t *testing.T) {
+		spec := pullAlwaysSpec("example", "example/example:latest")
+
+		first := applyForDigestHash(t, spec, map[string]string{"example/example:latest": "sha256:one"})
+		second := applyForDigestHash(t, spec, map[string]string{"example/example:latest": "sha256:one"})
+
+		// Re-applying an unchanged manifest against an unchanged tag must not
+		// restart anything.
+		assert.Equal(t, first, second)
+	})
+
+	t.Run("stores the specification without the digest", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		images := NewMockImageResolver(t)
+
+		spec := pullAlwaysSpec("example", "example/example:latest")
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").
+			Return("sha256:abc123", nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+
+		var stored database.Workload
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				stored = w
+
+				return w, true, nil
+			}).Once()
+
+		_, _, err := newTestImageAwareService(t, d, repo, ports, images).Apply(t.Context(), spec)
+		require.NoError(t, err)
+
+		// The API echoes the stored specification back as what was submitted, and
+		// the operator did not write a digest.
+		assert.NotContains(t, string(stored.Spec), "sha256:abc123")
+	})
+
+	t.Run("fails the apply when the digest cannot be resolved", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		images := NewMockImageResolver(t)
+
+		spec := pullAlwaysSpec("example", "example/example:latest")
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").
+			Return("", errors.New("registry unreachable")).Once()
+
+		// A hash computed without the digest would claim the image is unchanged
+		// when nothing checked, so the apply is refused instead.
+		_, _, err := newTestImageAwareService(t, d, repo, ports, images).Apply(t.Context(), spec)
+		assert.Error(t, err)
+	})
+
+	t.Run("refuses a pull-always workload on a server that cannot resolve digests", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		spec := pullAlwaysSpec("example", "example/example:latest")
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec)
+		assert.ErrorIs(t, err, service.ErrInvalidSpec)
+	})
+}
+
 func TestWorkloadService_Rehash(t *testing.T) {
 	t.Parallel()
 
@@ -1415,6 +1507,57 @@ func TestWorkloadService_Rehash(t *testing.T) {
 			Rehash(t.Context(), "example")
 		require.NoError(t, err)
 		assert.False(t, changed)
+	})
+
+	t.Run("moves the hash when a pull-always image is rebuilt", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		images := NewMockImageResolver(t)
+
+		spec := pullAlwaysSpec("example", "example/example:latest")
+
+		// The hash the workload holds for the tag's previous content.
+		hash := applyForDigestHash(t, spec, map[string]string{"example/example:latest": "sha256:one"})
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{ID: "workload-id", Name: "example", Spec: encoded, SpecHash: hash}, nil).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").
+			Return("sha256:two", nil).Once()
+		ports.EXPECT().List(mock.Anything, "workload-id").Return(nil, nil).Once()
+
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				return w, false, nil
+			}).Once()
+
+		// The digest is resolved again rather than remembered, so a rehash is also
+		// where a rebuilt tag is noticed.
+		changed, err := newTestImageAwareService(t, d, repo, ports, images).Rehash(t.Context(), "example")
+		require.NoError(t, err)
+		assert.True(t, changed)
+	})
+
+	t.Run("fails when a pull-always image's registry is unreachable", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		images := NewMockImageResolver(t)
+
+		spec := pullAlwaysSpec("example", "example/example:latest")
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{ID: "workload-id", Name: "example", Spec: encoded, SpecHash: "stale"}, nil).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").
+			Return("", errors.New("registry unreachable")).Once()
+
+		// A hash computed without the digest would claim the image is unchanged when
+		// nothing checked, so the rehash fails instead — which surfaces through
+		// whatever secret or variable change asked for it.
+		_, err = newTestImageAwareService(t, d, repo, ports, images).Rehash(t.Context(), "example")
+		assert.Error(t, err)
 	})
 
 	t.Run("reports a workload that does not exist", func(t *testing.T) {
@@ -1647,6 +1790,40 @@ func applyForHashOf(t *testing.T, spec api.WorkloadSpec, revisions, values map[s
 	return hash
 }
 
+// applyForDigestHash applies spec against a resolver answering the given digests and
+// returns the hash the service stored. A nil digests map builds a service with no
+// resolver at all, for the workloads that never ask for one.
+func applyForDigestHash(t *testing.T, spec api.WorkloadSpec, digests map[string]string) string {
+	t.Helper()
+
+	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+	repo.EXPECT().Get(mock.Anything, spec.Name).
+		Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+	d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+
+	var hash string
+	repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+			hash = w.SpecHash
+
+			return w, true, nil
+		}).Once()
+
+	var images *MockImageResolver
+	if digests != nil {
+		images = NewMockImageResolver(t)
+		for ref, digest := range digests {
+			images.EXPECT().Digest(mock.Anything, ref).Return(digest, nil).Once()
+		}
+	}
+
+	_, _, err := newTestImageAwareService(t, d, repo, ports, images).Apply(t.Context(), spec)
+	require.NoError(t, err)
+
+	return hash
+}
+
 func TestWorkloadService_Reallocate(t *testing.T) {
 	t.Parallel()
 
@@ -1804,6 +1981,39 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 	})
 }
 
+// newTestImageAwareService builds a service that can resolve image digests, for the
+// tests about what a pull-always image does to a workload's hash.
+func newTestImageAwareService(
+	t *testing.T,
+	d *MockDriver,
+	repo *MockWorkloadRepository,
+	ports *MockPortRepository,
+	images *MockImageResolver,
+) *service.WorkloadService {
+	t.Helper()
+
+	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().HolderOf(mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+
+	config := service.WorkloadServiceConfig{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]service.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Allocator: allocatorStub{},
+	}
+
+	// Left nil rather than set to a typed nil, so that the service sees no resolver
+	// at all and a test can exercise a server that has none.
+	if images != nil {
+		config.Images = images
+	}
+
+	return service.NewWorkloadService(config)
+}
+
 // newTestSecretAwareService builds a service that can read secret revisions, for the
 // tests about what a referenced secret does to a workload's hash.
 func newTestSecretAwareService(
@@ -1873,6 +2083,15 @@ func containerSpec(name, image string) api.WorkloadSpec {
 		Name:      name,
 		Container: &api.ContainerSpec{Image: image},
 	}
+}
+
+// pullAlwaysSpec builds a container workload whose pull policy asks for the image's
+// digest to reach the hash.
+func pullAlwaysSpec(name, image string) api.WorkloadSpec {
+	spec := containerSpec(name, image)
+	spec.Container.Pull = new(api.PullPolicyAlways)
+
+	return spec
 }
 
 func storedWorkload(name string) database.Workload {
