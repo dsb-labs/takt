@@ -665,6 +665,54 @@ func (s *Suite) TestNeverPolicyKeepsAFailureVisible() {
 	}
 }
 
+// TestNeverPullPolicyRefusesAnAbsentImage covers the pull policy's loud failure: a
+// workload forbidden to pull must not fall through to a pull when its image is
+// absent, or the policy is indistinguishable from missing.
+func (s *Suite) TestNeverPullPolicyRefusesAnAbsentImage() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// An image no host holds: the tag does not exist, so a fall-through to a pull
+	// would fail this test through the timeout below rather than silently pass it.
+	spec := s.containerSpec(name)
+	spec.Container.Image = "orca-e2e/does-not-exist:latest"
+	spec.Container.Pull = manifest.PullNever
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	// The apply is accepted — the policy fails the start, not the write — so the
+	// workload sits in paced restarts without ever producing a container.
+	for range 8 {
+		time.Sleep(time.Second)
+
+		workload, err := s.client.Get(s.ctx(), name)
+		s.Require().NoError(err)
+		s.Equal(client.WorkloadStatePending, workload.State)
+		s.Empty(s.containers(name), "a workload under pull never created a container")
+	}
+}
+
+// TestNeverPullPolicyRunsAPresentImage covers the policy's other half: an image that
+// is already on the host starts normally, since never forbids pulling rather than
+// running.
+func (s *Suite) TestNeverPullPolicyRunsAPresentImage() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// Pulled here rather than assumed, so the test holds up when run on its own
+	// instead of depending on an earlier test having wanted the image.
+	s.Require().NoError(exec.Command("docker", "pull", testImage).Run())
+
+	spec := s.containerSpec(name)
+	spec.Container.Pull = manifest.PullNever
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+}
+
 // TestChangingASpecRerunsACompletedJob covers the re-run trigger. A finished job runs
 // again when the operator changes what they asked for, and not otherwise.
 func (s *Suite) TestChangingASpecRerunsACompletedJob() {
