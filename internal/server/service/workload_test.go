@@ -550,7 +550,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			// The default policy restarts whatever happened, so a clean exit is a
 			// workload waiting to come back rather than one that finished.
 			Name:   "a clean exit under always is stopped",
-			Policy: api.Always,
+			Policy: api.RestartPolicyAlways,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 			},
@@ -558,7 +558,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 		},
 		{
 			Name:   "a clean exit under on-failure is completed",
-			Policy: api.OnFailure,
+			Policy: api.RestartPolicyOnFailure,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 			},
@@ -568,7 +568,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			// Retired, but not a success. Reporting this as completed would tell an
 			// operator the job did its work when it did not.
 			Name:   "a failure under never is still failed",
-			Policy: api.Never,
+			Policy: api.RestartPolicyNever,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateFailed, ExitCode: 1},
 			},
@@ -576,7 +576,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 		},
 		{
 			Name:   "a clean exit under never is completed",
-			Policy: api.Never,
+			Policy: api.RestartPolicyNever,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 			},
@@ -586,7 +586,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			// Completion must not mask a problem: the operator needs the failure
 			// first, and the completion is true but not the news.
 			Name:   "a failed instance outranks a completed one",
-			Policy: api.OnFailure,
+			Policy: api.RestartPolicyOnFailure,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 				{ID: "container-two", Workload: "example", State: driver.StateFailed, ExitCode: 1},
@@ -595,7 +595,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 		},
 		{
 			Name:   "a running instance outranks a completed one",
-			Policy: api.OnFailure,
+			Policy: api.RestartPolicyOnFailure,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 				{ID: "container-two", Workload: "example", State: driver.StateRunning},

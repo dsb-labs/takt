@@ -1294,13 +1294,13 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 	}{
 		{
 			Name:          "always restarts a clean exit",
-			Policy:        api.Always,
+			Policy:        api.RestartPolicyAlways,
 			State:         driver.StateExited,
 			ExpectRestart: true,
 		},
 		{
 			Name:          "always restarts a failure",
-			Policy:        api.Always,
+			Policy:        api.RestartPolicyAlways,
 			State:         driver.StateFailed,
 			ExitCode:      1,
 			ExpectRestart: true,
@@ -1309,20 +1309,20 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 			// The job did what it was asked to do, so running it again would repeat
 			// work nobody asked to repeat.
 			Name:          "on-failure leaves a clean exit alone",
-			Policy:        api.OnFailure,
+			Policy:        api.RestartPolicyOnFailure,
 			State:         driver.StateExited,
 			ExpectRestart: false,
 		},
 		{
 			Name:          "on-failure restarts a failure",
-			Policy:        api.OnFailure,
+			Policy:        api.RestartPolicyOnFailure,
 			State:         driver.StateFailed,
 			ExitCode:      1,
 			ExpectRestart: true,
 		},
 		{
 			Name:          "never leaves a clean exit alone",
-			Policy:        api.Never,
+			Policy:        api.RestartPolicyNever,
 			State:         driver.StateExited,
 			ExpectRestart: false,
 		},
@@ -1330,7 +1330,7 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 			// Retired without being called a success: the reconciler stops acting on
 			// it, and the state it reports still says the workload failed.
 			Name:          "never leaves a failure alone",
-			Policy:        api.Never,
+			Policy:        api.RestartPolicyNever,
 			State:         driver.StateFailed,
 			ExitCode:      1,
 			ExpectRestart: false,
@@ -1400,7 +1400,7 @@ func TestReconciler_Run_RerunsARetiredWorkloadWhenItsSpecChanges(t *testing.T) {
 	// moved on. That is what runs a finished job again: the operator changed what they
 	// asked for, so what ran is out of date.
 	row := storedWorkload("example", "hash-two")
-	row.Spec = specWithRestart("example", api.OnFailure)
+	row.Spec = specWithRestart("example", api.RestartPolicyOnFailure)
 
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
@@ -1457,7 +1457,7 @@ func TestReconciler_Run_ForgetsChecksOfARetiredWorkload(t *testing.T) {
 	spec, err := json.Marshal(api.WorkloadSpec{
 		Version:   "v1",
 		Name:      "example",
-		Restart:   &api.RestartSpec{Policy: new(api.OnFailure)},
+		Restart:   &api.RestartSpec{Policy: new(api.RestartPolicyOnFailure)},
 		Health:    &api.HealthSpec{HTTP: new("/healthz")},
 		Container: &api.ContainerSpec{Image: "example/example:latest"},
 	})
