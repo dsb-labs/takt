@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 
@@ -221,6 +222,128 @@ func TestDriver_Start(t *testing.T) {
 				c.EXPECT().ContainerRemove(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
 			},
 			ExpectErr: nil,
+		},
+		{
+			Name: "applies the workload's resource limits",
+			Workload: withResources(
+				workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
+				api.ResourcesSpec{Memory: new("512m"), CPU: new(0.5), Pids: new(100)},
+			),
+			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						// Swap is pinned to the memory limit so the limit is hard: left
+						// alone, docker lets the container swap up to twice the limit.
+						return host.Memory == 512*1024*1024 &&
+							host.MemorySwap == 512*1024*1024 &&
+							host.NanoCPUs == 500_000_000 &&
+							host.PidsLimit != nil && *host.PidsLimit == 100
+					}),
+					mock.Anything, mock.Anything, "orca-example-1-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			// The option is applied by the driver rather than carried in the
+			// specification, so it holds for every container without moving the hash
+			// of a workload that exists already.
+			Name:     "denies new privileges to a workload that asked for nothing",
+			Workload: workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
+			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						return len(host.SecurityOpt) == 1 && host.SecurityOpt[0] == "no-new-privileges" &&
+							host.Memory == 0 && host.MemorySwap == 0 &&
+							host.NanoCPUs == 0 && host.PidsLimit == nil &&
+							!host.ReadonlyRootfs && host.CapAdd == nil && host.CapDrop == nil
+					}),
+					mock.Anything, mock.Anything, "orca-example-1-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			Name:     "applies the container's hardening fields",
+			Workload: workload("example", 1, "hash-one", hardenedSpec("example/example:latest"), nil, nil),
+			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything,
+					mock.MatchedBy(func(config *dockercontainer.Config) bool {
+						return config.User == "65532:65532"
+					}),
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						return host.ReadonlyRootfs &&
+							slices.Equal(host.CapAdd, []string{"NET_ADMIN"}) &&
+							slices.Equal(host.CapDrop, []string{"ALL"})
+					}),
+					mock.Anything, mock.Anything, "orca-example-1-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			// A read-only root filesystem applies to the image's own layers. A volume
+			// and a mounted value are bind mounts with rules of their own, so they
+			// must not inherit the flag or a workload could not write its data.
+			Name: "leaves bind mounts writable under a read-only root filesystem",
+			Workload: withVolumes(
+				workload("example", 1, "hash-one", hardenedSpec("example/example:latest"), nil, nil),
+				driver.Volume{Name: "example-data", Host: "/var/lib/orca/volumes/abc", Target: "/var/lib/example"},
+			),
+			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						return host.ReadonlyRootfs &&
+							len(host.Mounts) == 1 && !host.Mounts[0].ReadOnly
+					}),
+					mock.Anything, mock.Anything, "orca-example-1-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
 		},
 	}
 
@@ -909,6 +1032,14 @@ func withVolumes(w driver.Workload, volumes ...driver.Volume) driver.Workload {
 	return w
 }
 
+// withResources sets the resource limits on a workload, which live beside the
+// runtime block rather than inside it.
+func withResources(w driver.Workload, resources api.ResourcesSpec) driver.Workload {
+	w.Spec.Resources = &resources
+
+	return w
+}
+
 // containerSpec builds a container block, taking nil for the parts a test leaves out.
 func containerSpec(image string, command []string) api.ContainerSpec {
 	spec := api.ContainerSpec{Image: image}
@@ -918,6 +1049,17 @@ func containerSpec(image string, command []string) api.ContainerSpec {
 	}
 
 	return spec
+}
+
+// hardenedSpec builds a container block naming every hardening field.
+func hardenedSpec(image string) api.ContainerSpec {
+	return api.ContainerSpec{
+		Image:    image,
+		User:     new("65532:65532"),
+		ReadOnly: new(true),
+		CapAdd:   new([]string{"NET_ADMIN"}),
+		CapDrop:  new([]string{"ALL"}),
+	}
 }
 
 // ports builds a single published port, which is all any of these tests needs.

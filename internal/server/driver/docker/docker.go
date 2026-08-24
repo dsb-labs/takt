@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,9 +18,12 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/strslice"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
+	"github.com/docker/go-units"
 
+	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
 )
 
@@ -144,12 +148,18 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	labels[LabelVersion] = strconv.Itoa(w.Version)
 	labels[LabelAttempt] = strconv.Itoa(attempt)
 
+	limits, err := resources(w.Spec.Resources)
+	if err != nil {
+		return "", err
+	}
+
 	created, err := d.client.ContainerCreate(ctx,
 		&container.Config{
 			Image: spec.Image,
 			// Nil rather than empty when the workload names no command, so the image
 			// keeps the one it declares. An empty slice would replace it with nothing.
 			Cmd:          command(spec.Command),
+			User:         user(spec.User),
 			Env:          environment(w.Env),
 			Labels:       labels,
 			ExposedPorts: exposed,
@@ -157,6 +167,15 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		&container.HostConfig{
 			PortBindings: bindings,
 			Mounts:       mounts(w.Volumes),
+			Resources:    limits,
+			// Applied here rather than carried in the specification, so that it
+			// cannot reach the specification hash and replace every running
+			// instance on upgrade. It is unconditional because it breaks
+			// essentially nothing that is not already doing something suspect.
+			SecurityOpt:    []string{"no-new-privileges"},
+			CapAdd:         capabilities(spec.CapAdd),
+			CapDrop:        capabilities(spec.CapDrop),
+			ReadonlyRootfs: readOnly(spec.ReadOnly),
 		},
 		nil, nil,
 		containerName(w.Name, w.Version, attempt),
@@ -762,4 +781,70 @@ func command(cmd *[]string) []string {
 	}
 
 	return *cmd
+}
+
+// user returns the user a container should run as, or empty when the specification
+// names none so that the image keeps the one it declares.
+func user(name *string) string {
+	if name == nil {
+		return ""
+	}
+
+	return *name
+}
+
+// readOnly reports whether the specification asks for a read-only root filesystem.
+func readOnly(value *bool) bool {
+	return value != nil && *value
+}
+
+// capabilities converts a specification's capability list into the type docker
+// expects, or nil when the specification names none.
+func capabilities(names *[]string) strslice.StrSlice {
+	if names == nil {
+		return nil
+	}
+
+	return strslice.StrSlice(*names)
+}
+
+// resources converts a specification's resource limits into the cgroup settings
+// docker expects. A limit the specification does not name is left at its zero value,
+// which docker reads as unlimited.
+//
+// Validation proved the memory size parses, so an error here means the stored
+// specification and the rules have diverged rather than that the operator made a
+// mistake.
+func resources(spec *api.ResourcesSpec) (container.Resources, error) {
+	if spec == nil {
+		return container.Resources{}, nil
+	}
+
+	var limits container.Resources
+
+	if spec.Memory != nil && *spec.Memory != "" {
+		memory, err := units.RAMInBytes(*spec.Memory)
+		if err != nil {
+			return container.Resources{}, fmt.Errorf("failed to parse memory limit %q: %w", *spec.Memory, err)
+		}
+
+		limits.Memory = memory
+		// Swap is pinned to the memory limit so the limit is hard. Left alone,
+		// docker lets the container swap up to twice the limit, and a limit the
+		// workload can swap past does not mean what the manifest said.
+		limits.MemorySwap = memory
+	}
+
+	if spec.CPU != nil && *spec.CPU > 0 {
+		// Docker expresses a CPU limit in billionths of a core, so half a core is
+		// 500 million. Rounded rather than truncated so the workload gets the
+		// nearest representable limit to the one it asked for.
+		limits.NanoCPUs = int64(math.Round(*spec.CPU * 1e9))
+	}
+
+	if spec.Pids != nil && *spec.Pids > 0 {
+		limits.PidsLimit = new(int64(*spec.Pids))
+	}
+
+	return limits, nil
 }
