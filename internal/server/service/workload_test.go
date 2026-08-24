@@ -477,6 +477,79 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 	}
 }
 
+func TestWorkloadService_Get_LastError(t *testing.T) {
+	t.Parallel()
+
+	when := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+	tt := []struct {
+		Name     string
+		Message  string
+		At       time.Time
+		Recorded bool
+	}{
+		{
+			Name:     "a failing workload reports why",
+			Message:  "failed to start workload: no such image",
+			At:       when,
+			Recorded: true,
+		},
+		{
+			Name: "a converging workload reports nothing",
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+			errs := NewMockErrors(t)
+
+			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+			ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
+			d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+			errs.EXPECT().LastError("example").Return(tc.Message, tc.At, tc.Recorded)
+
+			svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+				Logger:    newTestLogger(t),
+				Drivers:   map[string]service.Driver{docker.Name: d},
+				Workloads: repo,
+				Ports:     ports,
+				Allocator: allocatorStub{},
+				Errors:    errs,
+			})
+
+			got, err := svc.Get(t.Context(), "example")
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.Message, got.LastError)
+			assert.Equal(t, tc.At, got.LastErrorAt)
+		})
+	}
+
+	t.Run("a service with no error source reports nothing", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]service.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Allocator: allocatorStub{},
+		})
+
+		got, err := svc.Get(t.Context(), "example")
+		require.NoError(t, err)
+
+		assert.Empty(t, got.LastError)
+		assert.True(t, got.LastErrorAt.IsZero())
+	})
+}
+
 func TestWorkloadService_Get_State(t *testing.T) {
 	t.Parallel()
 

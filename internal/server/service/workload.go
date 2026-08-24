@@ -230,6 +230,7 @@ type (
 		images    ImageResolver
 		allocator Allocator
 		checker   Checker
+		errors    Errors
 		notify    func()
 	}
 )
@@ -262,6 +263,9 @@ type WorkloadServiceConfig struct {
 	// The checker that establishes whether workloads are working. May be nil, in
 	// which case no workload is checked and none reports health.
 	Checker Checker
+	// Where the last converge error of each workload is read from. May be nil, in
+	// which case no workload reports one.
+	Errors Errors
 	// Called whenever desired state changes, so that the reconciler can converge
 	// immediately rather than waiting for its next tick. May be nil when no
 	// reconciler is running, as in tests.
@@ -281,6 +285,7 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		images:    config.Images,
 		allocator: config.Allocator,
 		checker:   config.Checker,
+		errors:    config.Errors,
 		notify:    config.Notify,
 	}
 }
@@ -507,7 +512,9 @@ func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Worklo
 
 	workloads := make([]Workload, 0, len(rows))
 	for _, row := range rows {
-		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.health(row.Name))
+		message, at := s.lastError(row.Name)
+
+		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.health(row.Name), message, at)
 		if err != nil {
 			return nil, err
 		}
@@ -1081,7 +1088,9 @@ func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (W
 		return Workload{}, fmt.Errorf("failed to read workload ports: %w", err)
 	}
 
-	return newWorkload(row, s.observe(ctx)[row.Name], ports, s.health(row.Name))
+	message, at := s.lastError(row.Name)
+
+	return newWorkload(row, s.observe(ctx)[row.Name], ports, s.health(row.Name), message, at)
 }
 
 // observe groups the driver's instances by workload name.
@@ -1231,7 +1240,7 @@ func (r references) hashed() (map[string]string, map[string]string) {
 	return revisions, values
 }
 
-func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, reported Health) (Workload, error) {
+func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, reported Health, lastError string, lastErrorAt time.Time) (Workload, error) {
 	var spec api.WorkloadSpec
 	if err := json.Unmarshal(row.Spec, &spec); err != nil {
 		return Workload{}, fmt.Errorf("failed to decode workload spec: %w", err)
@@ -1262,19 +1271,21 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 	}
 
 	return Workload{
-		Name:      row.Name,
-		Version:   row.Version,
-		Runtime:   api.Runtime(row.Runtime),
-		Spec:      spec,
-		Labels:    row.Labels,
-		Instances: instances,
-		Ports:     newResolvedPorts(ports),
-		Health:    reported,
-		State:     stateOf(instances, deleting),
-		Deleting:  deleting,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		NextRun:   nextRun(manifest.NewSpec(spec).Schedule, instances, row.UpdatedAt),
+		Name:        row.Name,
+		Version:     row.Version,
+		Runtime:     api.Runtime(row.Runtime),
+		Spec:        spec,
+		Labels:      row.Labels,
+		Instances:   instances,
+		Ports:       newResolvedPorts(ports),
+		Health:      reported,
+		State:       stateOf(instances, deleting),
+		Deleting:    deleting,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+		NextRun:     nextRun(manifest.NewSpec(spec).Schedule, instances, row.UpdatedAt),
+		LastError:   lastError,
+		LastErrorAt: lastErrorAt,
 	}, nil
 }
 
@@ -1423,4 +1434,11 @@ type Workload struct {
 	// When the workload next runs, for one that names a schedule. Zero for a workload
 	// that runs continuously, and for a scheduled one that has not run yet.
 	NextRun time.Time
+	// Why the last converge pass over the workload failed. Empty for one that is
+	// converging. Held in memory by the reconciler, so it clears when a pass
+	// succeeds and does not survive a server restart.
+	LastError string
+	// When the last converge failure was recorded, meaningful only when LastError
+	// is set.
+	LastErrorAt time.Time
 }
