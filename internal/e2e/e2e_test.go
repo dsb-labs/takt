@@ -1825,6 +1825,46 @@ func (s *Suite) TestWorkloadMountsValues() {
 	s.Equal([]string{name}, heldVariable.UsedBy)
 }
 
+// TestReadOnlyRootfsLeavesMountsUsable covers the interaction between a read-only
+// root filesystem and what orca mounts: a volume and a mounted value are bind mounts
+// with rules of their own, so the volume stays writable and the value stays readable
+// at its 0444 mode while the image's own filesystem refuses writes.
+func (s *Suite) TestReadOnlyRootfsLeavesMountsUsable() {
+	name, secret, volume := s.workloadName(), s.secretName(), s.volumeName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupSecret(secret) })
+	s.T().Cleanup(func() { s.cleanupVolume(volume) })
+
+	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("hunter2"))
+	s.Require().NoError(err)
+
+	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
+	s.Require().NoError(err)
+
+	// The command proves all three properties at once: the mounted value is readable,
+	// the volume accepts a write, and the root filesystem does not. The workload only
+	// exits cleanly when the write to the rootfs failed.
+	spec := s.jobSpec(name, manifest.RestartNever, 0)
+	spec.Container.ReadOnly = true
+	spec.Container.Command = []string{"sh", "-c",
+		`cat /var/secret.txt && echo written > /var/lib/example/file && ! touch /rootfs-write`}
+	spec.Volumes = []manifest.VolumeMount{
+		{Secret: secret, To: "/var/secret.txt"},
+		{Name: volume, To: "/var/lib/example"},
+	}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+
+	var out bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
+	s.Contains(out.String(), "hunter2")
+
+	s.Equal("written\n", s.volumeFile(created.Path, "file"))
+}
+
 // TestChangingAMountedValueRedeploysItsWorkload covers the default delivery mode: a
 // mount naming no signal is replaced, exactly as a referenced secret is.
 func (s *Suite) TestChangingAMountedValueRedeploysItsWorkload() {
