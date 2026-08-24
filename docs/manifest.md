@@ -51,7 +51,7 @@ container:
 |---|---|---|
 | `version` | yes | The schema version. Must be `v1`. |
 | `name` | yes | Identifies the workload. Lowercase alphanumeric and dashes, up to 63 characters. |
-| `labels` | no | Arbitrary key-value pairs. |
+| `labels` | no | Key-value pairs attached to the workload. See [Labels](#labels). |
 | `ports` | no | The ports the workload publishes. |
 | `env` | no | Environment variables set for the workload. A value may reference a secret or a variable. |
 | `volumes` | no | What the workload mounts — a volume, a secret or a variable — and where it finds each one. |
@@ -64,6 +64,20 @@ container:
 
 The name is the workload's identity. Applying the same name again updates that
 workload rather than creating a second one.
+
+## Labels
+
+Labels are how a workload is found: `orca workload list -q '$.labels.app=web'`
+matches against them.
+
+A key is lowercase alphanumeric, optionally separated by dots, dashes, underscores
+or slashes, up to 63 characters — so a key like `app.example.com/name` works as
+written.
+Keys starting with `orca.` are refused. The server writes its own labels under that
+prefix, and refusing yours is better than silently overwriting it.
+
+A value is free text without control characters, up to 256 bytes. An empty value
+is allowed. A workload may carry up to 32 labels.
 
 ## Runtimes
 
