@@ -691,6 +691,13 @@ func (s *Suite) TestNeverPullPolicyRefusesAnAbsentImage() {
 		s.Equal(client.WorkloadStatePending, workload.State)
 		s.Empty(s.containers(name), "a workload under pull never created a container")
 	}
+
+	// A workload that will not converge says why, which is what tells this pending
+	// apart from one that is merely slow to start.
+	workload, err := s.client.Get(s.ctx(), name)
+	s.Require().NoError(err)
+	s.NotEmpty(workload.LastError, "a failing workload reported no reason")
+	s.False(workload.LastErrorAt.IsZero(), "a failing workload reported no failure time")
 }
 
 // TestNeverPullPolicyRunsAPresentImage covers the policy's other half: an image that
