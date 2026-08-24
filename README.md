@@ -69,7 +69,8 @@ container:
 ```
 
 A workload names exactly one runtime block. `container:` runs an image and `exec:`
-runs a command on the host. Everything else applies to either.
+runs a command on the host. Everything else applies to either, except `resources:`,
+which only the container runtime can enforce and the exec runtime rejects.
 
 A `volumes` entry names a volume, a secret or a variable. A volume is storage; the other
 two are files holding what orca holds under that name.
