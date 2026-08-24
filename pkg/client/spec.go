@@ -57,6 +57,11 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 	if s.Container != nil {
 		spec.Container = &api.ContainerSpec{Image: s.Container.Image}
 
+		// The default is sent as absent rather than named, so a manifest that says
+		// missing hashes the same as one that says nothing.
+		if s.Container.Pull != "" && s.Container.Pull != manifest.PullMissing {
+			spec.Container.Pull = new(api.PullPolicy(s.Container.Pull))
+		}
 		if len(s.Container.Command) > 0 {
 			spec.Container.Command = new(s.Container.Command)
 		}

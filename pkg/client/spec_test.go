@@ -27,6 +27,7 @@ func TestWireSpec(t *testing.T) {
 		assert.Nil(t, wire.Restart)
 		assert.Nil(t, wire.Resources)
 		require.NotNil(t, wire.Container)
+		assert.Nil(t, wire.Container.Pull)
 		assert.Nil(t, wire.Container.Command)
 		assert.Nil(t, wire.Container.User)
 		assert.Nil(t, wire.Container.ReadOnly)
@@ -35,6 +36,20 @@ func TestWireSpec(t *testing.T) {
 		assert.Nil(t, wire.Env)
 		assert.Nil(t, wire.Ports)
 		assert.Nil(t, wire.Exec)
+	})
+
+	t.Run("omits the default pull policy when named", func(t *testing.T) {
+		wire := wireSpec(manifest.Spec{
+			Version:   "v1",
+			Name:      "example",
+			Container: &manifest.Container{Image: "example/example:latest", Pull: manifest.PullMissing},
+		})
+
+		// A manifest that names the default has to encode as one that says
+		// nothing, or writing "pull: missing" into an existing manifest would
+		// move its hash and replace its instance for no change in behaviour.
+		require.NotNil(t, wire.Container)
+		assert.Nil(t, wire.Container.Pull)
 	})
 
 	t.Run("round-trips a full specification", func(t *testing.T) {
@@ -51,6 +66,7 @@ func TestWireSpec(t *testing.T) {
 			Resources: &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 100},
 			Container: &manifest.Container{
 				Image:    "example/example:latest",
+				Pull:     manifest.PullAlways,
 				Command:  []string{"sh", "-c", "exit 0"},
 				User:     "65532:65532",
 				ReadOnly: true,
