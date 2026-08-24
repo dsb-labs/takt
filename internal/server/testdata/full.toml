@@ -7,6 +7,7 @@ directory = "/var/lib/orca"
 
 [docker]
 host = "tcp://localhost:2375"
+config-file = "/etc/orca/docker-config.json"
 
 [reconcile]
 interval = "30s"

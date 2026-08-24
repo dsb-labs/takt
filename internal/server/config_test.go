@@ -29,6 +29,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "localhost:9999", config.HTTP.Address)
 				assert.Equal(t, "/var/lib/orca", config.Data.Directory)
 				assert.Equal(t, "tcp://localhost:2375", config.Docker.Host)
+				assert.Equal(t, "/etc/orca/docker-config.json", config.Docker.ConfigFile)
 				assert.Equal(t, 30*time.Second, config.Reconcile.Interval)
 				assert.Equal(t, []string{"orca.example.com"}, config.HTTP.Hosts)
 				assert.Equal(t, "0.0.0.0", config.Workload.Bind)
@@ -183,6 +184,17 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			Name:   "absolute paths an exec workload may read",
 			Mutate: func(c *server.Config) { c.Exec.AllowPaths = []string{"/opt/runtime", "/nix/store"} },
+		},
+		{
+			Name:   "an absolute docker config file",
+			Mutate: func(c *server.Config) { c.Docker.ConfigFile = "/etc/orca/docker-config.json" },
+		},
+		{
+			// The server's working directory is nowhere an operator meant to keep
+			// credentials.
+			Name:         "a relative docker config file",
+			Mutate:       func(c *server.Config) { c.Docker.ConfigFile = "docker-config.json" },
+			ExpectsError: true,
 		},
 		{
 			// Every exec workload runs in a directory of its own, so a relative path

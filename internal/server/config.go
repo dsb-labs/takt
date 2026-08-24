@@ -75,6 +75,15 @@ type (
 		// The daemon to connect to. Empty uses the environment's configuration,
 		// which falls back to the local socket.
 		Host string `toml:"host"`
+		// The docker credential file registry credentials are resolved from when a
+		// workload's image is pulled.
+		//
+		// Empty reads docker's own default location, so a docker login by the user
+		// running the server just works. Set it when that default holds nothing —
+		// notably when orca itself runs in a container. The file is read when a
+		// pull happens rather than at startup, and an absent file means anonymous
+		// pulls.
+		ConfigFile string `toml:"config-file"`
 	}
 
 	// The ExecConfig type contains configuration for the exec runtime.
@@ -211,6 +220,7 @@ func (c *Config) Validate() error {
 		c.Data.validate(),
 		c.Reconcile.validate(),
 		c.Workload.validate(),
+		c.Docker.validate(),
 		c.Exec.validate(),
 		c.Logging.validate(),
 	)
@@ -255,6 +265,17 @@ func (c WorkloadConfig) validate() error {
 		return errors.New("workload port range maximum must be between 1 and 65535")
 	case c.MinPort > c.MaxPort:
 		return errors.New("workload port range minimum must not exceed its maximum")
+	}
+
+	return nil
+}
+
+func (c DockerConfig) validate() error {
+	// Absolute when set, because the server's working directory is nowhere an
+	// operator meant to keep credentials. Whether the file exists is deliberately
+	// not checked: an absent file means anonymous pulls.
+	if c.ConfigFile != "" && !filepath.IsAbs(c.ConfigFile) {
+		return fmt.Errorf("docker config file must be absolute, got %q", c.ConfigFile)
 	}
 
 	return nil

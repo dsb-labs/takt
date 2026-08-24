@@ -96,9 +96,10 @@ func Run(ctx context.Context, config Config) error {
 	})
 
 	dockerDriver := docker.New(docker.Config{
-		Logger: logger,
-		Client: dockerClient,
-		Bind:   config.Workload.Bind,
+		Logger:     logger,
+		Client:     dockerClient,
+		Bind:       config.Workload.Bind,
+		ConfigFile: config.Docker.ConfigFile,
 	})
 
 	// The service and the reconciler each need something from the other: the service
