@@ -1649,6 +1649,125 @@ func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 	assert.Equal(t, 1, starts.get(), "a failing workload was retried inside its backoff window")
 }
 
+func TestReconciler_Run_RemembersWhyAStartFailed(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+		storedWorkload("example", "hash-one"),
+	}, nil)
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(nil, nil)
+
+	d.EXPECT().Start(mock.Anything, mock.Anything).Return("", errors.New("no such image"))
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	// A named clock, so the time the error reports is asserted rather than bounded.
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+		Now:       func() time.Time { return now },
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
+
+	cancel()
+	require.NoError(t, <-done)
+
+	message, at, ok := r.LastError("example")
+	require.True(t, ok, "a failed start left no error to report")
+	assert.Contains(t, message, "no such image")
+	assert.Equal(t, now, at)
+
+	_, _, ok = r.LastError("other")
+	assert.False(t, ok, "a workload that never failed reported an error")
+}
+
+func TestReconciler_Run_ClearsTheErrorOnceSettled(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+		storedWorkload("example", "hash-one"),
+	}, nil)
+
+	// The first pass fails to start the workload, and every later pass observes an
+	// instance that has been up for longer than the settle period — which is what
+	// converging means, and what must take the error with it.
+	started := atomic.Bool{}
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			if !started.Load() {
+				return nil, nil
+			}
+
+			return []driver.Instance{{
+				ID:        "instance-one",
+				Workload:  "example",
+				SpecHash:  "hash-one",
+				State:     driver.StateRunning,
+				StartedAt: time.Now().Add(-time.Minute),
+			}}, nil
+		})
+
+	d.EXPECT().Start(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, driver.Workload) (string, error) {
+			started.Store(true)
+			return "", errors.New("no such image")
+		}).Once()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	awaitPasses(t, r, 1)
+
+	_, _, ok := r.LastError("example")
+	require.True(t, ok, "a failed start left no error to report")
+
+	// The backoff from the failed start would keep a later pass from starting again,
+	// but the instance the driver now reports is already up: the pass settles it and
+	// the error goes with it.
+	r.Notify()
+	awaitPasses(t, r, 2)
+
+	cancel()
+	require.NoError(t, <-done)
+
+	_, _, ok = r.LastError("example")
+	assert.False(t, ok, "a settled workload still reported the failure before it")
+}
+
 func TestReconciler_Run_SurvivesAHangingDriver(t *testing.T) {
 	t.Parallel()
 

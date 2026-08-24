@@ -131,9 +131,9 @@ type (
 	//
 	// Reconciliation is level-triggered: every pass reads the full desired state,
 	// asks the driver what is actually running, and acts on the difference. Nothing
-	// is remembered between passes except restart backoff, so a missed event, a
-	// failed pass, or a server restart all recover on the next pass rather than
-	// leaving the node permanently wrong.
+	// is remembered between passes except restart backoff and the last converge
+	// error, so a missed event, a failed pass, or a server restart all recover on
+	// the next pass rather than leaving the node permanently wrong.
 	Reconciler struct {
 		logger     *slog.Logger
 		drivers    map[string]Driver
@@ -148,11 +148,17 @@ type (
 		interval   time.Duration
 		nudge      chan struct{}
 
-		// Guards backoff, which is the only state a pass carries between workloads
-		// and so the only thing converging them concurrently can contend on.
+		// Guards backoff and lastError, which are the only state a pass carries
+		// between workloads and so the only things converging them concurrently can
+		// contend on.
 		mux sync.Mutex
 		// How long to wait before restarting each workload that keeps failing.
 		backoff map[string]backoff
+		// Why the last converge pass over each workload failed. In memory rather
+		// than stored, because a converge error has no live source to re-derive
+		// from once the pass has ended: after a restart the next pass either fails
+		// again and repopulates it, or succeeds, and either answer is current.
+		lastError map[string]lastError
 		// Counts completed passes, so that a caller can tell a pass has finished
 		// rather than inferring it from something a pass happens to do first.
 		passes atomic.Uint64
@@ -207,6 +213,15 @@ type (
 		attempts int
 		// The earliest time the next restart may be attempted.
 		next time.Time
+	}
+
+	// The lastError type records why a converge pass over a workload failed, so
+	// that a workload sitting pending can say what is stopping it.
+	lastError struct {
+		// What the failing pass reported.
+		message string
+		// When the failure was recorded.
+		at time.Time
 	}
 )
 
@@ -265,6 +280,7 @@ func New(config Config) *Reconciler {
 		now:        clock(config.Now),
 		interval:   config.Interval,
 		backoff:    make(map[string]backoff),
+		lastError:  make(map[string]lastError),
 		// Buffered so that a caller signalling a change never blocks: a pass is
 		// already pending, which is all the signal conveys.
 		nudge: make(chan struct{}, 1),
@@ -468,6 +484,7 @@ func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, 
 
 			if err := r.converge(ctx, row, observed[row.Name]); err != nil {
 				r.logger.With("workload", row.Name, "error", err).Error("failed to reconcile workload")
+				r.fail(row.Name, err)
 			}
 		})
 	}
@@ -1013,8 +1030,9 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 		return fmt.Errorf("failed to delete workload: %w", err)
 	}
 
-	// Backoff is keyed by workload and would otherwise outlive it, pacing the
-	// restarts of a later workload that happens to reuse the name.
+	// Backoff and the last error are keyed by workload and would otherwise outlive
+	// it, pacing the restarts of a later workload that happens to reuse the name and
+	// reporting a failure it never had.
 	r.settle(row.Name)
 
 	r.logger.With("workload", row.Name).Info("workload deleted")
@@ -1121,14 +1139,40 @@ func (r *Reconciler) attempts(workload string) int {
 	return r.backoff[workload].attempts
 }
 
-// settle forgets a workload's backoff, which is what starting from a clean slate
-// means: the next failure is paced from the beginning rather than from where the last
-// run of failures left off.
+// settle forgets a workload's backoff and last error, which is what starting from a
+// clean slate means: the next failure is paced from the beginning rather than from
+// where the last run of failures left off, and nothing is reported as wrong until
+// something is.
+//
+// The error clears here rather than when an attempt begins, so that it stands for
+// exactly as long as the workload has not converged. An error that vanished the
+// moment a retry began would be invisible for the window an operator is looking.
 func (r *Reconciler) settle(workload string) {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
 	delete(r.backoff, workload)
+	delete(r.lastError, workload)
+}
+
+// fail records why a converge pass over a workload failed, so that the workload can
+// report it until a pass succeeds.
+func (r *Reconciler) fail(workload string, err error) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	r.lastError[workload] = lastError{message: err.Error(), at: r.now()}
+}
+
+// LastError reports why the last converge pass over a workload failed and when,
+// reporting false when the workload's last pass succeeded or none has run.
+func (r *Reconciler) LastError(workload string) (string, time.Time, bool) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	recorded, ok := r.lastError[workload]
+
+	return recorded.message, recorded.at, ok
 }
 
 func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
