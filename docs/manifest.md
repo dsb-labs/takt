@@ -37,6 +37,11 @@ health:
   retries: 3
   startPeriod: 30s
 
+resources:
+  memory: 512m
+  cpu: 0.5
+  pids: 100
+
 container:
   image: nginx:1.27-alpine
   command: ["nginx", "-g", "daemon off;"]
@@ -53,6 +58,7 @@ container:
 | `restart` | no | What happens when the workload ends. |
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
 | `health` | no | How orca decides the workload is working. |
+| `resources` | no | The resource limits the workload runs under. Container workloads only. |
 | `container` | one of | Run the workload as a Docker container. |
 | `exec` | one of | Run the workload as a command on the host. |
 
@@ -70,16 +76,40 @@ that runs it, so there is no separate field saying which to use.
 container:
   image: nginx:1.27-alpine
   command: ["nginx", "-g", "daemon off;"]
+  user: "65532:65532"
+  readOnly: true
+  capAdd: [NET_ADMIN]
+  capDrop: [ALL]
 ```
 
 | Field | Required | Description |
 |---|---|---|
 | `image` | yes | The image reference to run. Pulled when it is not present locally. |
 | `command` | no | Replaces the command the image declares. |
+| `user` | no | The user to run as, replacing the one the image declares. |
+| `readOnly` | no | Make the root filesystem read-only. |
+| `capAdd` | no | Kernel capabilities to grant beyond the default set. |
+| `capDrop` | no | Kernel capabilities to remove from the default set. |
 
 `command` is the command and its arguments rather than a string. Nothing has to decide
 where to split it, and no shell is involved unless the command names one. Leaving it
 out runs what the image declares.
+
+Every container is created with the `no-new-privileges` option set, so a process
+inside cannot gain privileges through a setuid binary. It is not a field: it breaks
+essentially nothing that is not already doing something suspect.
+
+The other hardening fields are opt-in. `user` takes any form Docker accepts — a name,
+a numeric identifier, or a `user:group` pair. Many stock images run as root unless
+this says otherwise.
+
+`capDrop: [ALL]` with `capAdd` naming what the workload actually needs is the hardened
+configuration. It is not the default because it breaks too many stock images.
+
+`readOnly` applies to the image's own filesystem. Mounted volumes and mounted values
+are separate mounts with rules of their own, so a volume stays writable and a mounted
+value stays readable whatever this says. An image that writes temporary files needs
+them pointed at a volume before it can run read-only.
 
 ### exec
 
@@ -450,6 +480,35 @@ checks would overlap itself, and the failure count would stop meaning consecutiv
 failures.
 
 A health check needs a published port, whatever the runtime.
+
+## Resources
+
+```yaml
+resources:
+  memory: 512m
+  cpu: 0.5
+  pids: 100
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `memory` | no | The most memory the workload may use, as a size such as `512m` or `1g`. |
+| `cpu` | no | The most CPU the workload may use, in cores. Fractions are allowed. |
+| `pids` | no | The most processes and threads the workload may create. |
+
+A limit that is not named is not applied. There is no default ceiling: a limit orca
+invented would be wrong for most workloads, and a workload killed by a limit nobody
+set is worse than one that was never limited. Unset means unlimited.
+
+`memory` is a hard cap, and it covers swap. A workload that reaches it is killed
+rather than allowed to swap past it, so the limit means what it says. The restart
+policy then treats the kill as any other failure.
+
+Resources sit beside the runtime blocks because how much a workload may consume is a
+question about the workload — but only the container runtime can honour them. An exec
+workload naming them is rejected rather than ignored: enforcing limits on a host
+process needs cgroup privileges orca has not got, so accepting them would silently do
+nothing.
 
 ## Schedule
 
