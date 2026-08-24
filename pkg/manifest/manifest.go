@@ -524,6 +524,15 @@ func validateContainer(spec Container) error {
 		return fmt.Errorf("invalid container: %w", err)
 	}
 
+	// Empty is accepted and means PullMissing. It is not resolved to it here, so that
+	// a manifest which says nothing encodes nothing on the wire.
+	switch spec.Pull {
+	case "", PullAlways, PullMissing, PullNever:
+	default:
+		return fmt.Errorf("invalid container: pull must be %q, %q or %q",
+			PullAlways, PullMissing, PullNever)
+	}
+
 	// The user and the capability names are not held to a pattern. Docker accepts
 	// several spellings of a user and its capability set changes between versions,
 	// so a pattern here would reject forms the runtime is happy with. An empty

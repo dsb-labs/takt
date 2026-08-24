@@ -18,6 +18,9 @@ type (
 	// The RestartPolicy type names what happens when a workload's instance ends.
 	RestartPolicy string
 
+	// The PullPolicy type names when the docker driver pulls a workload's image.
+	PullPolicy string
+
 	// The OverlapPolicy type names what happens when an occurrence comes due while
 	// the previous run is still going.
 	OverlapPolicy string
@@ -157,6 +160,10 @@ type (
 	Container struct {
 		// The image reference to run.
 		Image string
+		// When the image is pulled. Empty means PullMissing, and stays empty rather
+		// than being resolved to it: the default is left off the wire so that a
+		// specification written before the field existed hashes as it always did.
+		Pull PullPolicy
 		// The command to run, replacing the one the image declares. Empty runs what
 		// the image already declares.
 		Command []string
@@ -268,6 +275,17 @@ const (
 	RestartOnFailure RestartPolicy = "on-failure"
 	// RestartNever leaves a workload alone once it ends, whatever its exit code.
 	RestartNever RestartPolicy = "never"
+)
+
+const (
+	// PullAlways pulls the image on every start, and its registry digest reaches the
+	// specification hash so a rebuilt tag replaces the instance.
+	PullAlways PullPolicy = "always"
+	// PullMissing pulls the image only when it is not present on the host. It is the
+	// default.
+	PullMissing PullPolicy = "missing"
+	// PullNever never pulls, and starting fails when the image is absent.
+	PullNever PullPolicy = "never"
 )
 
 const (
@@ -444,6 +462,9 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 	if spec.Container != nil {
 		out.Container = &Container{Image: spec.Container.Image}
 
+		if spec.Container.Pull != nil {
+			out.Container.Pull = PullPolicy(*spec.Container.Pull)
+		}
 		if spec.Container.Command != nil {
 			out.Container.Command = *spec.Container.Command
 		}

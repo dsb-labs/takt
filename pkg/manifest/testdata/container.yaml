@@ -26,6 +26,7 @@ resources:
   pids: 100
 container:
   image: example/example:latest
+  pull: always
   command: ["sh", "-c", "exit 0"]
   user: "65532:65532"
   readOnly: true

@@ -217,6 +217,13 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// A pull policy nobody recognises is a typo, and defaulting it silently
+			// would pin an image the operator asked to have refreshed.
+			Name:         "rejects an unknown pull policy",
+			File:         "bad_pull.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:         "rejects a restart delay that is not a duration",
 			File:         "bad_delay.yaml",
 			ExpectsError: true,
@@ -864,6 +871,7 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	assert.Equal(t, 100, spec.Resources.Pids)
 	require.NotNil(t, spec.Container)
 	assert.NotEmpty(t, spec.Container.Image)
+	assert.Equal(t, manifest.PullAlways, spec.Container.Pull)
 	assert.NotEmpty(t, spec.Container.Command)
 	assert.NotEmpty(t, spec.Container.User)
 	assert.True(t, spec.Container.ReadOnly)
