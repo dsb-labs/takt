@@ -190,7 +190,28 @@ type ApplyWorkloadResult struct {
 }
 
 // ContainerSpec The container runtime block, run by the docker driver.
+//
+// Every container is created with the no-new-privileges option set, so a
+// process inside cannot gain privileges through a setuid binary. It is not a
+// field, because it breaks essentially nothing that is not already doing
+// something suspect, and a knob nobody should turn is surface for free.
 type ContainerSpec struct {
+	// CapAdd Kernel capabilities to grant the container beyond the runtime's default
+	// set, named as docker names them.
+	//
+	//
+	// Examples: ["NET_ADMIN"]
+	CapAdd *[]string `json:"capAdd,omitempty"`
+
+	// CapDrop Kernel capabilities to remove from the runtime's default set, named as
+	// docker names them. Dropping ALL and adding back what the workload needs
+	// is the hardened configuration, and is opt-in because it breaks too many
+	// stock images to be a reasonable default.
+	//
+	//
+	// Examples: ["ALL"]
+	CapDrop *[]string `json:"capDrop,omitempty"`
+
 	// Command The command to run, replacing the one the image declares. Given as the
 	// command and its arguments rather than as a string, so nothing has to
 	// decide where to split it and no shell is involved.
@@ -206,6 +227,25 @@ type ContainerSpec struct {
 	//
 	// Examples: example/example:latest
 	Image string `json:"image"`
+
+	// ReadOnly Whether the container's root filesystem is read-only. Mounted volumes
+	// and mounted values are separate mounts with rules of their own, so they
+	// stay writable and readable whatever this says.
+	//
+	// Leave it out for a writable root filesystem, which is what most images
+	// expect.
+	ReadOnly *bool `json:"readOnly,omitempty"`
+
+	// User The user to run the container's process as, replacing the one the image
+	// declares. Given in the forms docker accepts, such as a name, a numeric
+	// identifier, or a "user:group" pair.
+	//
+	// Leave it out to run as the user the image already declares, which for
+	// many stock images is root.
+	//
+	//
+	// Examples: 65532:65532
+	User *string `json:"user,omitempty"`
 }
 
 // CreateVolumeResult The body returned when a volume is created.
@@ -511,6 +551,36 @@ type ResolvedPort struct {
 
 	// To The port the workload listens on inside its runtime.
 	To int `json:"to"`
+}
+
+// ResourcesSpec The resource limits the workload runs under. A limit that is not named is
+// not applied, so an empty section means what leaving it out means: unlimited.
+//
+// It sits alongside the runtime blocks because how much a workload may consume
+// is a question about the workload. Only the container runtime can honour the
+// limits, and the exec runtime rejects them rather than ignoring them:
+// enforcing memory or CPU on a host process needs cgroup privileges orca has
+// not got, so accepting the section there would silently do nothing.
+type ResourcesSpec struct {
+	// CPU The most CPU the workload may use, in cores. Fractions are allowed, so
+	// 0.5 is half a core.
+	//
+	//
+	// Examples: 0.5
+	CPU *float64 `json:"cpu,omitempty"`
+
+	// Memory The most memory the workload may use, written as a size such as "512m"
+	// or "1g". The limit is hard: it covers swap as well, so the workload is
+	// killed at the limit rather than swapping past it.
+	//
+	//
+	// Examples: 512m
+	Memory *string `json:"memory,omitempty"`
+
+	// Pids The most processes and threads the workload may create.
+	//
+	// Examples: 100
+	Pids *int `json:"pids,omitempty"`
 }
 
 // RestartPolicy What the server does when a workload's instance ends.
@@ -901,6 +971,11 @@ type Workload struct {
 // which one it is selects the driver that runs the workload.
 type WorkloadSpec struct {
 	// Container The container runtime block, run by the docker driver.
+	//
+	// Every container is created with the no-new-privileges option set, so a
+	// process inside cannot gain privileges through a setuid binary. It is not a
+	// field, because it breaks essentially nothing that is not already doing
+	// something suspect, and a knob nobody should turn is surface for free.
 	Container *ContainerSpec `json:"container,omitempty"`
 
 	// Env Environment variables set for the workload.
@@ -955,6 +1030,16 @@ type WorkloadSpec struct {
 	//
 	// The workload reports back what the server settled on, in the same place.
 	Ports *[]PortMapping `json:"ports,omitempty"`
+
+	// Resources The resource limits the workload runs under. A limit that is not named is
+	// not applied, so an empty section means what leaving it out means: unlimited.
+	//
+	// It sits alongside the runtime blocks because how much a workload may consume
+	// is a question about the workload. Only the container runtime can honour the
+	// limits, and the exec runtime rejects them rather than ignoring them:
+	// enforcing memory or CPU on a host process needs cgroup privileges orca has
+	// not got, so accepting the section there would silently do nothing.
+	Resources *ResourcesSpec `json:"resources,omitempty"`
 
 	// Restart What the server does when a workload's instance ends, and how hard it tries.
 	Restart *RestartSpec `json:"restart,omitempty"`

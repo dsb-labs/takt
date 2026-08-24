@@ -756,6 +756,8 @@ components:
           $ref: "#/components/schemas/RestartSpec"
         health:
           $ref: "#/components/schemas/HealthSpec"
+        resources:
+          $ref: "#/components/schemas/ResourcesSpec"
         container:
           $ref: "#/components/schemas/ContainerSpec"
         exec:
@@ -763,7 +765,13 @@ components:
 
     ContainerSpec:
       type: object
-      description: The container runtime block, run by the docker driver.
+      description: |
+        The container runtime block, run by the docker driver.
+
+        Every container is created with the no-new-privileges option set, so a
+        process inside cannot gain privileges through a setuid binary. It is not a
+        field, because it breaks essentially nothing that is not already doing
+        something suspect, and a knob nobody should turn is surface for free.
       required: [image]
       properties:
         image:
@@ -784,6 +792,79 @@ components:
             type: string
             minLength: 1
           examples: [["sh", "-c", "echo hello"]]
+        user:
+          type: string
+          description: |
+            The user to run the container's process as, replacing the one the image
+            declares. Given in the forms docker accepts, such as a name, a numeric
+            identifier, or a "user:group" pair.
+
+            Leave it out to run as the user the image already declares, which for
+            many stock images is root.
+          minLength: 1
+          examples: ["65532:65532"]
+        readOnly:
+          type: boolean
+          description: |
+            Whether the container's root filesystem is read-only. Mounted volumes
+            and mounted values are separate mounts with rules of their own, so they
+            stay writable and readable whatever this says.
+
+            Leave it out for a writable root filesystem, which is what most images
+            expect.
+        capAdd:
+          type: array
+          description: |
+            Kernel capabilities to grant the container beyond the runtime's default
+            set, named as docker names them.
+          items:
+            type: string
+            minLength: 1
+          examples: [["NET_ADMIN"]]
+        capDrop:
+          type: array
+          description: |
+            Kernel capabilities to remove from the runtime's default set, named as
+            docker names them. Dropping ALL and adding back what the workload needs
+            is the hardened configuration, and is opt-in because it breaks too many
+            stock images to be a reasonable default.
+          items:
+            type: string
+            minLength: 1
+          examples: [["ALL"]]
+
+    ResourcesSpec:
+      type: object
+      description: |
+        The resource limits the workload runs under. A limit that is not named is
+        not applied, so an empty section means what leaving it out means: unlimited.
+
+        It sits alongside the runtime blocks because how much a workload may consume
+        is a question about the workload. Only the container runtime can honour the
+        limits, and the exec runtime rejects them rather than ignoring them:
+        enforcing memory or CPU on a host process needs cgroup privileges orca has
+        not got, so accepting the section there would silently do nothing.
+      properties:
+        memory:
+          type: string
+          description: |
+            The most memory the workload may use, written as a size such as "512m"
+            or "1g". The limit is hard: it covers swap as well, so the workload is
+            killed at the limit rather than swapping past it.
+          examples: ["512m"]
+        cpu:
+          type: number
+          format: double
+          description: |
+            The most CPU the workload may use, in cores. Fractions are allowed, so
+            0.5 is half a core.
+          exclusiveMinimum: 0
+          examples: [0.5]
+        pids:
+          type: integer
+          description: The most processes and threads the workload may create.
+          minimum: 1
+          examples: [100]
 
     ScheduleSpec:
       type: object
