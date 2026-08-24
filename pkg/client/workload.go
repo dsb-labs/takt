@@ -56,6 +56,12 @@ type (
 		// When the workload next runs, for one that names a schedule. Zero for a
 		// workload that runs continuously.
 		NextRun time.Time
+		// Why the last attempt to converge the workload failed. Empty for one whose
+		// last attempt succeeded, or that none has been made for.
+		LastError string
+		// When the last converge failure was recorded, meaningful only when
+		// LastError is set.
+		LastErrorAt time.Time
 	}
 
 	// The ResolvedPort type is a port mapping as the server applied it.
@@ -437,6 +443,12 @@ func newWorkload(w api.Workload) Workload {
 	}
 	if w.Deleting != nil {
 		workload.Deleting = *w.Deleting
+	}
+	if w.LastError != nil {
+		workload.LastError = *w.LastError
+	}
+	if w.LastErrorAt != nil {
+		workload.LastErrorAt = *w.LastErrorAt
 	}
 
 	if w.Ports != nil {

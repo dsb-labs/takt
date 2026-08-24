@@ -308,6 +308,36 @@ func TestClient_Get(t *testing.T) {
 		assert.Nil(t, got.Instances[0].Health)
 	})
 
+	t.Run("reports why a workload is not converging", func(t *testing.T) {
+		failing := workload("example", api.WorkloadStatePending)
+		failedAt := time.Now().UTC().Truncate(time.Second)
+
+		failing.LastError = new("failed to start workload: no such image")
+		failing.LastErrorAt = &failedAt
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: failing})
+		})
+
+		got, err := c.Get(t.Context(), "example")
+		require.NoError(t, err)
+
+		assert.Equal(t, "failed to start workload: no such image", got.LastError)
+		assert.Equal(t, failedAt, got.LastErrorAt)
+	})
+
+	t.Run("reports no error for a converging workload", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+		})
+
+		got, err := c.Get(t.Context(), "example")
+		require.NoError(t, err)
+
+		assert.Empty(t, got.LastError)
+		assert.True(t, got.LastErrorAt.IsZero())
+	})
+
 	t.Run("reports a missing workload", func(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})
