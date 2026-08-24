@@ -981,6 +981,20 @@ type Workload struct {
 	// when nothing is running yet.
 	Instances *[]Instance `json:"instances,omitempty"`
 
+	// LastError Why the last attempt to converge the workload failed. Absent for a
+	// workload whose last attempt succeeded, or that none has been made for.
+	//
+	// Held in memory rather than stored: it clears when an attempt succeeds
+	// and does not survive a server restart, after which the next attempt
+	// either fails again and restores it or succeeds. The text is for a human
+	// reading it, not for matching.
+	LastError *string `json:"lastError,omitempty"`
+
+	// LastErrorAt When the last converge failure was recorded. Present exactly when
+	// lastError is, so a failure an hour ago and one on every attempt read
+	// differently.
+	LastErrorAt *time.Time `json:"lastErrorAt,omitempty"`
+
 	// Name The name that identifies the workload.
 	Name string `json:"name"`
 

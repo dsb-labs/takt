@@ -1468,6 +1468,23 @@ components:
 
             Derived when the workload is read rather than stored, like everything else
             about what is actually happening.
+        lastError:
+          type: string
+          description: |
+            Why the last attempt to converge the workload failed. Absent for a
+            workload whose last attempt succeeded, or that none has been made for.
+
+            Held in memory rather than stored: it clears when an attempt succeeds
+            and does not survive a server restart, after which the next attempt
+            either fails again and restores it or succeeds. The text is for a human
+            reading it, not for matching.
+        lastErrorAt:
+          type: string
+          format: date-time
+          description: |
+            When the last converge failure was recorded. Present exactly when
+            lastError is, so a failure an hour ago and one on every attempt read
+            differently.
 
     Instance:
       type: object
