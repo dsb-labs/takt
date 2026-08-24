@@ -1066,7 +1066,16 @@ type WorkloadSpec struct {
 	// rather than ignored.
 	Health *HealthSpec `json:"health,omitempty"`
 
-	// Labels Arbitrary key-value pairs attached to the workload.
+	// Labels Key-value pairs attached to the workload, which the list query filter
+	// matches against.
+	//
+	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+	// underscores or slashes, up to 63 characters, so a key like
+	// app.example.com/name works. Keys with the "orca." prefix are
+	// refused: the server writes its own labels under it.
+	//
+	// Values are free text without control characters, up to 256 bytes. An
+	// empty value is allowed.
 	Labels *map[string]string `json:"labels,omitempty"`
 
 	// Name The name that identifies the workload.

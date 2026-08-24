@@ -705,9 +705,21 @@ components:
           $ref: "#/components/schemas/ScheduleSpec"
         labels:
           type: object
-          description: Arbitrary key-value pairs attached to the workload.
+          description: |
+            Key-value pairs attached to the workload, which the list query filter
+            matches against.
+
+            Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+            underscores or slashes, up to 63 characters, so a key like
+            app.example.com/name works. Keys with the "orca." prefix are
+            refused: the server writes its own labels under it.
+
+            Values are free text without control characters, up to 256 bytes. An
+            empty value is allowed.
+          maxProperties: 32
           additionalProperties:
             type: string
+            maxLength: 256
         ports:
           type: array
           description: |
