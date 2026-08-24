@@ -136,6 +136,19 @@ func TestWorkloadService_Apply(t *testing.T) {
 			ExpectErr:  service.ErrInvalidSpec,
 		},
 		{
+			// The CLI rejects this too, but a caller that skips the CLI must not be
+			// able to store limits the exec runtime would silently never apply.
+			Name: "rejects resource limits on an exec workload",
+			Spec: api.WorkloadSpec{
+				Version:   "v1",
+				Name:      "example",
+				Resources: &api.ResourcesSpec{Memory: new("512m")},
+				Exec:      &api.ExecSpec{Command: []string{"echo", "hello world"}},
+			},
+			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
+			ExpectErr:  service.ErrInvalidSpec,
+		},
+		{
 			// Accepted rather than refused, which is what the exec runtime arriving
 			// means: the service records desired state and the reconciler routes it to
 			// whichever driver runs it.
