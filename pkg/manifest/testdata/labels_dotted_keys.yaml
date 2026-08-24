@@ -1,0 +1,9 @@
+version: v1
+name: example
+labels:
+  app.kubernetes.io/name: web
+  env_tier: prod
+  a: b
+  note: ""
+container:
+  image: example/example:latest

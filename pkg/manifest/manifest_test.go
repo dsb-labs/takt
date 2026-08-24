@@ -1,6 +1,7 @@
 package manifest_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,6 +203,51 @@ func TestParse(t *testing.T) {
 		{
 			Name:         "rejects a schedule that isn't cron",
 			File:         "bad_schedule.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name: "accepts the label convention operators arrive with",
+			File: "labels_dotted_keys.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, map[string]string{
+					"app.kubernetes.io/name": "web",
+					"env_tier":               "prod",
+					"a":                      "b",
+					"note":                   "",
+				}, spec.Labels)
+			},
+		},
+		{
+			// Keys are held to a lowercase printable shape so they survive container
+			// metadata and the list query filter.
+			Name:         "rejects a label key outside the documented shape",
+			File:         "labels_bad_key.yaml",
+			ExpectsError: true,
+		},
+		{
+			// The driver writes its own labels after copying these, so refusal is
+			// feedback — a silently overwritten value would vanish with no explanation.
+			Name:         "rejects a label key using the reserved orca. prefix",
+			File:         "labels_reserved.yaml",
+			ExpectsError: true,
+		},
+		{
+			// The value reaches container metadata and terminal output, where a control
+			// character breaks whatever is displaying it.
+			Name:         "rejects a label value holding a control character",
+			File:         "labels_control_value.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a manifest carrying more than the maximum labels",
+			File:         "labels_too_many.yaml",
+			ExpectsError: true,
+		},
+		{
+			// The decoder refuses duplicate mapping keys, so validation never sees a
+			// manifest where the same label appears twice. This pins that behaviour.
+			Name:         "rejects a label key defined twice",
+			File:         "labels_duplicate_key.yaml",
 			ExpectsError: true,
 		},
 		{
@@ -619,6 +665,80 @@ func TestRuntimeOf(t *testing.T) {
 			assert.Equal(t, tc.Expected, got)
 		})
 	}
+}
+
+// TestValidate_Labels pins the label boundaries that are unwieldy as fixtures:
+// the exact length caps, the byte counting on values, and the printable
+// non-ASCII cases.
+func TestValidate_Labels(t *testing.T) {
+	t.Parallel()
+
+	spec := func(labels map[string]string) manifest.Spec {
+		return manifest.Spec{
+			Version:   "v1",
+			Name:      "example",
+			Labels:    labels,
+			Container: &manifest.Container{Image: "example/example:latest"},
+		}
+	}
+
+	t.Run("rejects keys outside the documented shape", func(t *testing.T) {
+		t.Parallel()
+
+		for _, key := range []string{
+			strings.Repeat("a", 64),
+			"",
+			"-leading",
+			"trailing.",
+			"has space",
+			"orca.workload",
+		} {
+			err := manifest.Validate(spec(map[string]string{key: "value"}))
+			assert.Error(t, err, "accepted the key %q", key)
+		}
+	})
+
+	t.Run("rejects values outside the documented shape", func(t *testing.T) {
+		t.Parallel()
+
+		for _, value := range []string{
+			strings.Repeat("v", 257),
+			// 129 two-byte runes. The cap counts bytes, so 258 bytes is over
+			// the limit even though it reads as 129 characters.
+			strings.Repeat("é", 129),
+			"a\tb",
+			string([]byte{0xff}),
+		} {
+			err := manifest.Validate(spec(map[string]string{"some-key": value}))
+			assert.Error(t, err, "accepted the value %q", value)
+		}
+	})
+
+	t.Run("accepts labels at the boundaries", func(t *testing.T) {
+		t.Parallel()
+
+		for name, labels := range map[string]map[string]string{
+			"a key at the length cap":       {strings.Repeat("a", 63): "value"},
+			"a value at the length cap":     {"some-key": strings.Repeat("v", 256)},
+			"the bare key orca":             {"orca": "value"},
+			"printable non-ascii in values": {"some-key": "café ☕"},
+			"an empty value":                {"some-key": ""},
+		} {
+			err := manifest.Validate(spec(labels))
+			assert.NoError(t, err, "rejected %s", name)
+		}
+	})
+
+	t.Run("accepts exactly the maximum labels", func(t *testing.T) {
+		t.Parallel()
+
+		labels := make(map[string]string, 32)
+		for i := range 32 {
+			labels[fmt.Sprintf("key-%d", i)] = "value"
+		}
+
+		assert.NoError(t, manifest.Validate(spec(labels)))
+	})
 }
 
 // TestParse_EveryFieldDecodes pins the YAML-to-Go field mapping that Parse relies

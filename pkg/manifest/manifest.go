@@ -10,10 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path"
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/docker/go-units"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
@@ -40,6 +43,26 @@ const version = "v1"
 // Names identify a workload in URLs and in the runtime's own namespace, so they
 // are held to the DNS label rules that every runtime can represent.
 var namePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+
+// Label keys follow the convention operators arrive with — app.kubernetes.io/name —
+// rather than the stricter workload name pattern: lowercase alphanumeric at both
+// ends, with dots, dashes, underscores and slashes between.
+var labelKeyPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?$`)
+
+const (
+	// maxLabels caps how many labels one workload may carry. Thirty-two is more
+	// than any sane manifest needs and small enough that the stored labels the
+	// list query filter scans stay bounded.
+	maxLabels = 32
+	// maxLabelKeyLength is the cap every other name in orca is held to.
+	maxLabelKeyLength = 63
+	// maxLabelValueLength is counted in bytes, because the limit protects what
+	// stores and displays the value rather than how many characters it reads
+	// as. Generous enough for a URL or a one-line description.
+	maxLabelValueLength = 256
+	// reservedLabelPrefix marks the keys the docker driver writes for itself.
+	reservedLabelPrefix = "orca."
+)
 
 // Parse reads a workload manifest from r and returns the specification it
 // describes.
@@ -154,6 +177,10 @@ func Validate(spec Spec) error {
 		return err
 	}
 
+	if err = validateLabels(spec.Labels); err != nil {
+		return err
+	}
+
 	runtime, err := RuntimeOf(spec)
 	if err != nil {
 		return fmt.Errorf("invalid manifest: %w", err)
@@ -236,6 +263,54 @@ func validateSchedule(spec Spec) error {
 	// the pair is rejected rather than left to whichever acts first.
 	if spec.Health != nil {
 		return errors.New("invalid schedule: a scheduled workload cannot declare a health check")
+	}
+
+	return nil
+}
+
+// validateLabels reports whether the workload's labels are ones orca will attach.
+//
+// Keys are held to the shape operators arrive with rather than to the workload
+// name pattern, so app.kubernetes.io/name passes. Values are freer still — any
+// printable text, since a label is read by people and compared as text by the
+// list query filter — but control characters are refused because the value
+// reaches container metadata and terminal output.
+//
+// The orca. prefix is refused for feedback rather than safety. The docker driver
+// writes its own labels after copying these, so a spoofed key could never stick —
+// but silently overwriting an operator's value is worse than telling them no.
+func validateLabels(labels map[string]string) error {
+	if len(labels) > maxLabels {
+		return fmt.Errorf("invalid labels: %d labels exceeds the maximum of %d", len(labels), maxLabels)
+	}
+
+	// Keys are visited in sorted order so a manifest with several bad labels
+	// reports the same one every time. The errors name only the key: a value
+	// can be anything up to the request body limit, so it is never echoed.
+	for _, key := range slices.Sorted(maps.Keys(labels)) {
+		if strings.HasPrefix(key, reservedLabelPrefix) {
+			return fmt.Errorf("invalid labels: key %q uses the %q prefix, which is reserved for the labels orca writes itself",
+				key, reservedLabelPrefix)
+		}
+
+		if !labelKeyPattern.MatchString(key) || len(key) > maxLabelKeyLength {
+			return fmt.Errorf("invalid labels: key %q must be lowercase alphanumeric, optionally separated by "+
+				"dots, dashes, underscores or slashes, up to %d characters", key, maxLabelKeyLength)
+		}
+
+		value := labels[key]
+		if !utf8.ValidString(value) {
+			return fmt.Errorf("invalid labels: the value of %q is not valid UTF-8", key)
+		}
+
+		if strings.ContainsFunc(value, unicode.IsControl) {
+			return fmt.Errorf("invalid labels: the value of %q contains a control character", key)
+		}
+
+		if len(value) > maxLabelValueLength {
+			return fmt.Errorf("invalid labels: the value of %q is %d bytes, which exceeds the maximum of %d",
+				key, len(value), maxLabelValueLength)
+		}
 	}
 
 	return nil

@@ -1,0 +1,7 @@
+version: v1
+name: example
+labels:
+  some-key: first
+  some-key: second
+container:
+  image: example/example:latest

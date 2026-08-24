@@ -1,0 +1,6 @@
+version: v1
+name: example
+labels:
+  some-key: "line one\nline two"
+container:
+  image: example/example:latest
