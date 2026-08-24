@@ -1,0 +1,6 @@
+version: v1
+name: example
+resources:
+  cpu: -0.5
+container:
+  image: example/example:latest

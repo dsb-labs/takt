@@ -12,6 +12,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.1
+	github.com/docker/go-units v0.5.0
 	github.com/go-ozzo/ozzo-validation/v4 v4.4.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/landlock-lsm/go-landlock v0.9.0
@@ -36,7 +37,6 @@ require (
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/distribution/reference v0.6.0 // indirect
-	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dprotaso/go-yit v0.0.0-20220510233725-9ba8df137936 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/structs v1.1.0 // indirect

@@ -1,0 +1,6 @@
+version: v1
+name: example
+resources:
+  memory: lots
+container:
+  image: example/example:latest

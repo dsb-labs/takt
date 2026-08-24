@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/docker/go-units"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v3"
@@ -174,6 +175,10 @@ func Validate(spec Spec) error {
 		return err
 	}
 
+	if err = validateResources(spec, runtime); err != nil {
+		return err
+	}
+
 	switch runtime {
 	case RuntimeContainer:
 		return validateContainer(*spec.Container)
@@ -270,6 +275,47 @@ func validatePorts(spec Spec, runtime Runtime) error {
 		return nil
 	default:
 		return fmt.Errorf("invalid ports: the %s runtime cannot publish ports", runtime)
+	}
+}
+
+// validateResources reports whether the workload's resource limits are ones its
+// runtime can enforce.
+//
+// A runtime that cannot enforce them rejects them rather than ignoring them, for the
+// same reason a port it cannot publish is rejected: a limit that never applies looks
+// like orca failing rather than the manifest being wrong.
+func validateResources(spec Spec, runtime Runtime) error {
+	resources := spec.Resources
+	if resources == nil {
+		return nil
+	}
+
+	if resources.Memory == "" && resources.CPU == 0 && resources.Pids == 0 {
+		return errors.New("invalid resources: at least one of memory, cpu or pids is required")
+	}
+
+	if resources.Memory != "" {
+		if size, err := units.RAMInBytes(resources.Memory); err != nil || size <= 0 {
+			return fmt.Errorf("invalid resources: %q is not a memory size", resources.Memory)
+		}
+	}
+
+	switch {
+	case resources.CPU < 0:
+		return errors.New("invalid resources: cpu must not be negative")
+	case resources.Pids < 0:
+		return errors.New("invalid resources: pids must not be negative")
+	}
+
+	switch runtime {
+	case RuntimeContainer:
+		// A container already runs in cgroups of its own, so the limits are ones
+		// its runtime enforces as the container is created.
+		return nil
+	default:
+		// A host process would need cgroup privileges orca has not got, so the
+		// limits are rejected rather than accepted and silently never applied.
+		return fmt.Errorf("invalid resources: the %s runtime cannot enforce limits", runtime)
 	}
 }
 

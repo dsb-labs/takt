@@ -428,6 +428,40 @@ func TestParse(t *testing.T) {
 			File:         "malformed.yaml",
 			ExpectsError: true,
 		},
+		{
+			Name: "a container manifest with resource limits",
+			File: "resources.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Resources)
+				assert.Equal(t, "512m", spec.Resources.Memory)
+				assert.Equal(t, 0.5, spec.Resources.CPU)
+				assert.Equal(t, 100, spec.Resources.Pids)
+			},
+		},
+		{
+			// Enforcing limits on a host process needs cgroup privileges orca has not
+			// got, so accepting them would silently do nothing.
+			Name:         "rejects resource limits on an exec workload",
+			File:         "resources_exec.yaml",
+			ExpectsError: true,
+		},
+		{
+			// An empty block asks for nothing, which leaving the section out already
+			// says.
+			Name:         "rejects a resources block naming no limit",
+			File:         "resources_empty.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a memory limit that is not a size",
+			File:         "resources_bad_memory.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a negative cpu limit",
+			File:         "resources_negative_cpu.yaml",
+			ExpectsError: true,
+		},
 	}
 
 	for _, tc := range tt {
@@ -806,6 +840,10 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	assert.Equal(t, 5, spec.Restart.Attempts)
 	assert.Equal(t, 10*time.Second, spec.Restart.Delay)
 	assert.NotEmpty(t, spec.Labels)
+	require.NotNil(t, spec.Resources)
+	assert.Equal(t, "512m", spec.Resources.Memory)
+	assert.Equal(t, 0.5, spec.Resources.CPU)
+	assert.Equal(t, 100, spec.Resources.Pids)
 	require.NotNil(t, spec.Container)
 	assert.NotEmpty(t, spec.Container.Image)
 	assert.NotEmpty(t, spec.Container.Command)

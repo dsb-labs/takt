@@ -90,6 +90,10 @@ type (
 		Restart *Restart
 		// How to tell whether the workload is working, rather than merely started.
 		Health *Health
+		// The resource limits the workload runs under. Nil applies none, so an
+		// unlimited workload stays what it is today. A runtime that cannot enforce
+		// them rejects them rather than ignoring them.
+		Resources *Resources
 		// The container to run. Exactly one runtime must be set.
 		Container *Container
 		// The command to run on the host. Exactly one runtime must be set.
@@ -125,6 +129,24 @@ type (
 		// The timing fields that were present but unparseable, reported by
 		// validation so that a typo is an error rather than a silent default.
 		invalid []string
+	}
+
+	// The Resources type describes the resource limits a workload runs under.
+	//
+	// A limit left at its zero value is not applied, so a workload naming only a
+	// memory limit is otherwise as unlimited as one naming none.
+	Resources struct {
+		// The most memory the workload may use, written as a size such as "512m".
+		//
+		// Held as the operator wrote it rather than as a byte count, so that the
+		// stored specification and its hash carry exactly what the manifest said.
+		// Validation proves it parses, and the driver reads the number out.
+		Memory string
+		// The most CPU the workload may use, in cores. Fractions are allowed, so
+		// 0.5 is half a core.
+		CPU float64
+		// The most processes and threads the workload may create.
+		Pids int
 	}
 
 	// The Container type describes the container a workload runs.
@@ -397,6 +419,7 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 	}
 
 	out.Health = newHealth(spec.Health)
+	out.Resources = newResources(spec.Resources)
 
 	if spec.Container != nil {
 		out.Container = &Container{Image: spec.Container.Image}
@@ -492,6 +515,31 @@ func newHealth(spec *api.HealthSpec) *Health {
 	health.defaults()
 
 	return &health
+}
+
+// newResources maps wire resource limits onto the canonical shape.
+//
+// The memory size is carried across as written rather than parsed here, so a value
+// that does not parse survives to be reported by validation instead of erroring on
+// the path a client uses to read a workload back.
+func newResources(spec *api.ResourcesSpec) *Resources {
+	if spec == nil {
+		return nil
+	}
+
+	var resources Resources
+
+	if spec.Memory != nil {
+		resources.Memory = *spec.Memory
+	}
+	if spec.CPU != nil {
+		resources.CPU = *spec.CPU
+	}
+	if spec.Pids != nil {
+		resources.Pids = *spec.Pids
+	}
+
+	return &resources
 }
 
 // Parsed returns the schedule's expression ready to ask for occurrence times.
@@ -645,6 +693,27 @@ func WireRestart(restart *Restart) *api.RestartSpec {
 	}
 	if restart.Delay > 0 {
 		spec.Delay = new(restart.Delay.String())
+	}
+
+	return &spec
+}
+
+// WireResources maps the canonical resource limits onto the wire format.
+func WireResources(resources *Resources) *api.ResourcesSpec {
+	if resources == nil {
+		return nil
+	}
+
+	spec := api.ResourcesSpec{}
+
+	if resources.Memory != "" {
+		spec.Memory = new(resources.Memory)
+	}
+	if resources.CPU != 0 {
+		spec.CPU = new(resources.CPU)
+	}
+	if resources.Pids != 0 {
+		spec.Pids = new(resources.Pids)
 	}
 
 	return &spec

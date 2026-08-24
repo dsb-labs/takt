@@ -1,0 +1,8 @@
+version: v1
+name: example
+resources:
+  memory: 512m
+  cpu: 0.5
+  pids: 100
+container:
+  image: example/example:latest

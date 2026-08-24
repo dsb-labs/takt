@@ -1,0 +1,6 @@
+version: v1
+name: example
+resources:
+  memory: 512m
+exec:
+  command: ["/usr/local/bin/backup", "--target", "/data"]
