@@ -92,6 +92,11 @@ and what the runtime reports about each instance.
 
 A workload that names a schedule also reports when it next runs.
 
+A workload that is failing to converge reports why and when, in `lastError` and
+`lastErrorAt`. The error clears once an attempt succeeds, so a workload sitting
+`pending` with an error is one the server has tried and failed to start — where one
+without is merely slow.
+
 ## workload logs
 
 ```sh

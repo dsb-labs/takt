@@ -283,6 +283,13 @@ orca's labels on it. For an exec workload it is a `previous.log` beside the
 
 ## Watching what orca is doing
 
+Start with the workload itself. A workload the server has tried and failed to start
+reports why in `orca workload get`, as `lastError` with the time it was recorded. The
+error stands until an attempt succeeds, so a workload failing on every pass carries a
+recent timestamp where one that failed once an hour ago does not. It is held in
+memory: a server restart clears it, and the next pass either fails again and restores
+it or succeeds.
+
 At `info` the server is quiet unless something is wrong. Setting the level to `debug`
 reports each decision a reconciliation pass makes. Turn it on when a workload is not
 behaving the way its manifest says it should:
