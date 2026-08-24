@@ -213,11 +213,11 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	cwd := filepath.Join(workload, workingDir)
 
 	if err = os.MkdirAll(cwd, 0o700); err != nil {
-		return "", fmt.Errorf("failed to create workload directory: %w", err)
+		return "", fmt.Errorf("failed to create workload directory: %w", pathless(err))
 	}
 
 	if err = os.MkdirAll(recordPath, 0o700); err != nil {
-		return "", fmt.Errorf("failed to create state directory: %w", err)
+		return "", fmt.Errorf("failed to create state directory: %w", pathless(err))
 	}
 
 	// A restart at an unchanged version reuses the directory the previous attempt was
@@ -249,7 +249,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	// have to grant the file the driver's own tree holds.
 	output, err := os.OpenFile(filepath.Join(workload, outputFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return "", fmt.Errorf("failed to open workload output: %w", err)
+		return "", fmt.Errorf("failed to open workload output: %w", pathless(err))
 	}
 
 	// Orca itself rather than the workload's command. The process confines itself and
@@ -478,7 +478,7 @@ func (d *Driver) Discard(ctx context.Context, id, workload string) error {
 		}
 
 		if err = os.RemoveAll(path); err != nil {
-			return fmt.Errorf("failed to remove workload directory: %w", err)
+			return fmt.Errorf("failed to remove workload directory: %w", pathless(err))
 		}
 	}
 
@@ -568,7 +568,7 @@ func (d *Driver) keep(id, path string) error {
 	}
 
 	if err = os.RemoveAll(filepath.Join(workload, workingDir)); err != nil {
-		return fmt.Errorf("failed to remove workload directory: %w", err)
+		return fmt.Errorf("failed to remove workload directory: %w", pathless(err))
 	}
 
 	// Renamed over whatever the last stop kept, so one attempt's output is held rather
@@ -576,7 +576,7 @@ func (d *Driver) keep(id, path string) error {
 	// file to move, which is not a failure.
 	err = os.Rename(filepath.Join(workload, outputFile), filepath.Join(workload, previousFile))
 	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to keep the previous output: %w", err)
+		return fmt.Errorf("failed to keep the previous output: %w", pathless(err))
 	}
 
 	return retain(path)
@@ -592,12 +592,12 @@ func (d *Driver) discardVersion(id, path string) error {
 		}
 
 		if err = os.RemoveAll(workload); err != nil {
-			return fmt.Errorf("failed to remove workload directory: %w", err)
+			return fmt.Errorf("failed to remove workload directory: %w", pathless(err))
 		}
 	}
 
 	if err = os.RemoveAll(path); err != nil {
-		return fmt.Errorf("failed to remove workload directory: %w", err)
+		return fmt.Errorf("failed to remove workload directory: %w", pathless(err))
 	}
 
 	return nil
@@ -714,7 +714,7 @@ func mount(cwd string, volumes []driver.Volume) error {
 
 	root, err := os.OpenRoot(cwd)
 	if err != nil {
-		return fmt.Errorf("failed to open workload directory: %w", err)
+		return fmt.Errorf("failed to open workload directory: %w", pathless(err))
 	}
 
 	defer root.Close()
@@ -731,7 +731,7 @@ func mount(cwd string, volumes []driver.Volume) error {
 
 		if parent := filepath.Dir(target); parent != "." {
 			if err = root.MkdirAll(parent, 0o700); err != nil {
-				return fmt.Errorf("%w: volume %q: %w", ErrInvalidMount, volume.Name, err)
+				return fmt.Errorf("%w: volume %q: %w", ErrInvalidMount, volume.Name, pathless(err))
 			}
 		}
 
@@ -739,7 +739,7 @@ func mount(cwd string, volumes []driver.Volume) error {
 		// outlives the workload, so it cannot live in a directory that is removed
 		// with it.
 		if err = root.Symlink(volume.Host, target); err != nil {
-			return fmt.Errorf("%w: volume %q: %w", ErrInvalidMount, volume.Name, err)
+			return fmt.Errorf("%w: volume %q: %w", ErrInvalidMount, volume.Name, pathless(err))
 		}
 	}
 
@@ -1080,7 +1080,7 @@ func (d *Driver) subdirectories(path string) ([]string, error) {
 			return nil, nil
 		}
 
-		return nil, fmt.Errorf("failed to read %s: %w", path, err)
+		return nil, fmt.Errorf("failed to read workload directory: %w", pathless(err))
 	}
 
 	names := make([]string, 0, len(entries))
@@ -1164,6 +1164,23 @@ func named(command []string, path string) ([]string, error) {
 	out[0] = path
 
 	return out, nil
+}
+
+// pathless strips the filesystem path from an error, keeping the cause.
+//
+// The driver's errors reach the API, and a path inside the data directory is a
+// detail of the host that a caller has no business seeing. The wrap above each
+// call already names the operation, so the path adds nothing the cause does not.
+func pathless(err error) error {
+	if pathErr, ok := errors.AsType[*os.PathError](err); ok {
+		return pathErr.Err
+	}
+
+	if linkErr, ok := errors.AsType[*os.LinkError](err); ok {
+		return linkErr.Err
+	}
+
+	return err
 }
 
 // pathOf returns the PATH from a rendered environment, which is what a bare command

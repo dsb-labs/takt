@@ -132,7 +132,7 @@ func (s *MountService) Deliver(ctx context.Context, id string, version int, spec
 	// read what it mounts; this directory is what stops anything else on the host
 	// reaching them at all.
 	if err = os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("failed to create mount directory: %w", err)
+		return nil, fmt.Errorf("failed to create mount directory: %w", pathless(err))
 	}
 
 	record := delivered{Digests: make(map[string]string, len(mounts))}
@@ -262,7 +262,7 @@ func (s *MountService) Forget(id string) error {
 		}
 
 		if err = os.RemoveAll(dir); err != nil {
-			return fmt.Errorf("failed to remove mount directory: %w", err)
+			return fmt.Errorf("failed to remove mount directory: %w", pathless(err))
 		}
 	}
 
@@ -290,7 +290,7 @@ func (s *MountService) Prune(keep []string) error {
 				continue
 			}
 
-			return fmt.Errorf("failed to read mount directory: %w", err)
+			return fmt.Errorf("failed to read mount directory: %w", pathless(err))
 		}
 
 		for _, entry := range entries {
@@ -303,7 +303,7 @@ func (s *MountService) Prune(keep []string) error {
 			}
 
 			if err = os.RemoveAll(filepath.Join(tree, entry.Name())); err != nil {
-				return fmt.Errorf("failed to remove mount directory: %w", err)
+				return fmt.Errorf("failed to remove mount directory: %w", pathless(err))
 			}
 
 			s.logger.With("workload", entry.Name()).Debug("removed the mounted values of a workload that no longer exists")
@@ -343,7 +343,7 @@ func (s *MountService) record(id string, version int, record delivered) error {
 	}
 
 	if err = os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("failed to create mount state directory: %w", err)
+		return fmt.Errorf("failed to create mount state directory: %w", pathless(err))
 	}
 
 	encoded, err := json.Marshal(record)
@@ -354,7 +354,7 @@ func (s *MountService) record(id string, version int, record delivered) error {
 	path := filepath.Join(dir, strconv.Itoa(version)+".json")
 
 	if err = os.WriteFile(path, encoded, 0o600); err != nil {
-		return fmt.Errorf("failed to record delivered mounts: %w", err)
+		return fmt.Errorf("failed to record delivered mounts: %w", pathless(err))
 	}
 
 	return nil
@@ -376,7 +376,7 @@ func (s *MountService) delivered(id string, version int) (delivered, error) {
 			return delivered{}, nil
 		}
 
-		return delivered{}, fmt.Errorf("failed to read delivered mounts: %w", err)
+		return delivered{}, fmt.Errorf("failed to read delivered mounts: %w", pathless(err))
 	}
 
 	var record delivered
@@ -436,20 +436,37 @@ func write(path, value string) error {
 	// before it is ever rewritten. Anything else is reported here rather than left to
 	// fail the write below, which would name the write when the mode is what stopped it.
 	if err := os.Chmod(path, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("failed to make mounted value writable: %w", err)
+		return fmt.Errorf("failed to make mounted value writable: %w", pathless(err))
 	}
 
 	if err := os.WriteFile(path, []byte(value), 0o444); err != nil {
-		return fmt.Errorf("failed to write mounted value: %w", err)
+		return fmt.Errorf("failed to write mounted value: %w", pathless(err))
 	}
 
 	// WriteFile applies the mode only when it creates the file, so one that already
 	// existed still carries what it was widened to.
 	if err := os.Chmod(path, 0o444); err != nil {
-		return fmt.Errorf("failed to set mounted value permissions: %w", err)
+		return fmt.Errorf("failed to set mounted value permissions: %w", pathless(err))
 	}
 
 	return nil
+}
+
+// pathless strips the filesystem path from an error, keeping the cause.
+//
+// The service's errors reach the API, and a path inside the data directory is a
+// detail of the host that a caller has no business seeing. The wrap above each
+// call already names the operation, so the path adds nothing the cause does not.
+func pathless(err error) error {
+	if pathErr, ok := errors.AsType[*os.PathError](err); ok {
+		return pathErr.Err
+	}
+
+	if linkErr, ok := errors.AsType[*os.LinkError](err); ok {
+		return linkErr.Err
+	}
+
+	return err
 }
 
 // fileName returns what a mounted value's file is called.

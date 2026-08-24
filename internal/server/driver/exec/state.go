@@ -48,7 +48,7 @@ type state struct {
 func readState(path string) (state, error) {
 	data, err := os.ReadFile(filepath.Join(path, stateFile))
 	if err != nil {
-		return state{}, fmt.Errorf("failed to read instance state: %w", err)
+		return state{}, fmt.Errorf("failed to read instance state: %w", pathless(err))
 	}
 
 	var s state
@@ -72,11 +72,11 @@ func writeState(path string, s state) error {
 
 	tmp := filepath.Join(path, stateFile+".tmp")
 	if err = os.WriteFile(tmp, data, 0o600); err != nil {
-		return fmt.Errorf("failed to write instance state: %w", err)
+		return fmt.Errorf("failed to write instance state: %w", pathless(err))
 	}
 
 	if err = os.Rename(tmp, filepath.Join(path, stateFile)); err != nil {
-		return fmt.Errorf("failed to replace instance state: %w", err)
+		return fmt.Errorf("failed to replace instance state: %w", pathless(err))
 	}
 
 	return nil
@@ -98,7 +98,7 @@ func retained(path string) bool {
 // retain marks a record as describing an attempt that was kept.
 func retain(path string) error {
 	if err := os.WriteFile(filepath.Join(path, retainedFile), nil, 0o600); err != nil {
-		return fmt.Errorf("failed to mark instance state as retained: %w", err)
+		return fmt.Errorf("failed to mark instance state as retained: %w", pathless(err))
 	}
 
 	return nil
@@ -111,7 +111,7 @@ func retain(path string) error {
 // than the one about to run. Left in place it would report a running process as kept.
 func unretain(path string) error {
 	if err := os.Remove(filepath.Join(path, retainedFile)); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to clear the retained mark: %w", err)
+		return fmt.Errorf("failed to clear the retained mark: %w", pathless(err))
 	}
 
 	return nil
