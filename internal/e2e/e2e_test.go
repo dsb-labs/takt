@@ -253,6 +253,131 @@ func (s *Suite) TestWorkloadRestartedAfterItDies() {
 	s.awaitInstanceOtherThan(name, original)
 }
 
+// TestStoppedWorkloadStaysDown covers the lifecycle commands: a stop holds the
+// workload down across passes and a server restart, and a start resumes the same
+// version.
+func (s *Suite) TestStoppedWorkloadStaysDown() {
+	name := s.workloadName()
+
+	// The first server's data has to outlive it, so the restarted one below reads
+	// the same desired state.
+	directory := s.T().TempDir()
+	s.restart(withDataDirectory(directory))
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	applied, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, manifest.Port{To: 80, From: 8186}))
+	s.Require().NoError(err)
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	stopped, err := s.client.Stop(s.ctx(), name, client.WithWait())
+	s.Require().NoError(err)
+	s.True(stopped.Suspended)
+	s.Equal(client.WorkloadStateSuspended, stopped.State)
+
+	// The stopped instance is still reported so its output stays readable, but
+	// nothing is up any more.
+	for _, instance := range stopped.Instances {
+		s.NotEqual(client.InstanceStateRunning, instance.State)
+	}
+
+	// A stop that merely killed the container would be undone within one reconcile
+	// interval. Outlasting several passes is what proves the suspension is desired
+	// state rather than a one-shot kill.
+	s.Never(func() bool {
+		workload, err := s.client.Get(s.ctx(), name)
+		if err != nil || workload.State != client.WorkloadStateSuspended {
+			return true
+		}
+
+		for _, instance := range workload.Instances {
+			if instance.State == client.InstanceStateRunning {
+				return true
+			}
+		}
+
+		return false
+	}, 3*time.Second, 500*time.Millisecond, "a stopped workload came back up")
+
+	// The instance is stopped rather than discarded, so what the workload last did
+	// stays readable while it is down.
+	var logs strings.Builder
+	s.Require().NoError(s.client.Logs(s.ctx(), &logs, name, client.WithTail(50)))
+	s.NotEmpty(logs.String())
+
+	// A workload stopped before an upgrade must still be stopped after it, or the
+	// mark is useless for the case it exists for.
+	s.restart(withDataDirectory(directory))
+	s.awaitState(name, client.WorkloadStateSuspended)
+
+	started, err := s.client.Start(s.ctx(), name, client.WithWait())
+	s.Require().NoError(err)
+	s.False(started.Suspended)
+
+	// The specification never changed, so the resume runs the same version rather
+	// than a replacement.
+	s.Equal(client.WorkloadStateRunning, started.State)
+	s.Equal(applied.Version, started.Version)
+}
+
+// TestRestartReplacesTheInstance covers the operator-requested restart, which
+// replaces the instances without the specification moving.
+func (s *Suite) TestRestartReplacesTheInstance() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	applied, _, err := s.client.Apply(s.ctx(), s.containerSpec(name, manifest.Port{To: 80, From: 8187}))
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+	original := s.instanceID(name)
+
+	restarted, err := s.client.Restart(s.ctx(), name, client.WithWait())
+	s.Require().NoError(err)
+
+	// The waiting restart returns once an instance the request never saw is up.
+	s.Require().Len(restarted.Instances, 1)
+	s.NotEqual(original, restarted.Instances[0].ID)
+
+	// The specification never changed, so the version does not move.
+	s.Equal(applied.Version, restarted.Version)
+}
+
+// TestStopRemovesMountedValues covers what suspension does to the disk: a stopped
+// workload has no reader for the values it mounted, so their plaintext is removed
+// rather than sitting there for the life of the suspension.
+func (s *Suite) TestStopRemovesMountedValues() {
+	name, secret := s.workloadName(), s.secretName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupSecret(secret) })
+
+	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("plaintext"))
+	s.Require().NoError(err)
+
+	spec := s.containerSpec(name)
+	spec.Volumes = []manifest.VolumeMount{{Secret: secret, To: "/var/secret"}}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	// The value is on the disk while the workload runs — that is what a mount is.
+	mounted, err := filepath.Glob(filepath.Join(s.directory, "mounts", "files", "*"))
+	s.Require().NoError(err)
+	s.Require().NotEmpty(mounted)
+
+	_, err = s.client.Stop(s.ctx(), name, client.WithWait())
+	s.Require().NoError(err)
+
+	// The wait returns when nothing is running, and the removal happens on the pass
+	// that observes that, so the files may be a pass behind the stop.
+	s.Require().Eventuallyf(func() bool {
+		remaining, err := filepath.Glob(filepath.Join(s.directory, "mounts", "files", "*"))
+
+		return err == nil && len(remaining) == 0
+	}, convergeTimeout, 500*time.Millisecond, "stopping a workload left its mounted values on the disk")
+}
+
 // TestWorkloadAdoptedAfterServerRestart covers a server restart, which the
 // desired-state-only database makes possible without duplicating work.
 func (s *Suite) TestWorkloadAdoptedAfterServerRestart() {
