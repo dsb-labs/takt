@@ -190,6 +190,15 @@ type (
 
 	// The Port type describes a port to publish.
 	Port struct {
+		// What the port is called, so that the rest of the manifest refers to it
+		// rather than restating its number. A health check names one this way, and
+		// so does another workload reaching this one.
+		//
+		// Optional, and only worth setting for a workload publishing more than one
+		// port. Two ports may share a name only when they publish the same port on
+		// different protocols, since that is one service named once rather than two
+		// ports with nothing to tell them apart.
+		Name string
 		// The port the workload listens on inside its runtime.
 		To int
 		// The host port that reaches it. Left unset to have one allocated, which is
@@ -456,6 +465,9 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 		out.Ports = make([]Port, 0, len(*spec.Ports))
 		for _, mapping := range *spec.Ports {
 			port := Port{To: mapping.To}
+			if mapping.Name != nil {
+				port.Name = *mapping.Name
+			}
 			if mapping.From != nil {
 				port.From = *mapping.From
 			}

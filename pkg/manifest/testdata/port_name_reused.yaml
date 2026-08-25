@@ -1,0 +1,9 @@
+version: v1
+name: example
+ports:
+  - name: http
+    to: 8080
+  - name: http
+    to: 9090
+container:
+  image: example/example:latest

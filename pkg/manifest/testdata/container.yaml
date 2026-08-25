@@ -12,7 +12,8 @@ restart:
 labels:
   some-key: some-value
 ports:
-  - to: 8080
+  - name: http
+    to: 8080
     from: 4141
   - to: 9090
 env:

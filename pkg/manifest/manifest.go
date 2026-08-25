@@ -14,6 +14,7 @@ import (
 	"path"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -691,9 +692,14 @@ func validPorts(ports []Port) error {
 
 	seenTo := make(map[key]struct{}, len(ports))
 	seenFrom := make(map[key]struct{}, len(ports))
+	named := make(map[string]int, len(ports))
 
 	for _, port := range ports {
 		if err := validProtocol(port.Protocol); err != nil {
+			return err
+		}
+
+		if err := validPortName(port, named); err != nil {
 			return err
 		}
 
@@ -723,6 +729,48 @@ func validPorts(ports []Port) error {
 	}
 
 	return nil
+}
+
+// validPortName checks the name a port was given against the names already taken,
+// recording it as taken when it holds.
+//
+// A name is held to the rules a workload name is, with one addition: it may not read
+// as a number. A health check and a workload reference both accept either a name or
+// the port itself, so a port called "8080" would be two different things written the
+// same way.
+//
+// Two entries may share a name only when they publish the same port. That is one
+// service published over TCP and UDP, which an operator names once and selects by
+// that name whichever protocol they meant. Two different ports sharing a name would
+// leave the name pointing at neither.
+func validPortName(port Port, named map[string]int) error {
+	if port.Name == "" {
+		return nil
+	}
+
+	switch {
+	case !namePattern.MatchString(port.Name) || len(port.Name) > maxLabelKeyLength:
+		return fmt.Errorf("port name %q must be lowercase alphanumeric, optionally separated by dashes, "+
+			"up to %d characters", port.Name, maxLabelKeyLength)
+	case isNumber(port.Name):
+		return fmt.Errorf("port name %q must not be a number, since a port is also named by the port itself",
+			port.Name)
+	}
+
+	if to, ok := named[port.Name]; ok && to != port.To {
+		return fmt.Errorf("port name %q is used by both %d and %d, so it names neither", port.Name, to, port.To)
+	}
+
+	named[port.Name] = port.To
+
+	return nil
+}
+
+// isNumber reports whether a name reads as a port number rather than as a name.
+func isNumber(name string) bool {
+	_, err := strconv.Atoi(name)
+
+	return err == nil
 }
 
 // validProtocol reports whether a port names a protocol orca can publish it on.

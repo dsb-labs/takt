@@ -42,7 +42,7 @@ func TestParse(t *testing.T) {
 				assert.Equal(t, "example/example:latest", spec.Container.Image)
 				assert.Equal(t, map[string]string{"EXAMPLE": "EXAMPLE"}, spec.Env)
 				assert.Equal(t, []manifest.Port{
-					{To: 8080, From: 4141, Protocol: manifest.ProtocolTCP},
+					{Name: "http", To: 8080, From: 4141, Protocol: manifest.ProtocolTCP},
 					{To: 9090, Protocol: manifest.ProtocolTCP},
 				}, spec.Ports)
 				assert.Equal(t, []manifest.VolumeMount{{Name: "example-data", To: "/var/lib/example"}}, spec.Volumes)
@@ -327,6 +327,34 @@ func TestParse(t *testing.T) {
 				// An unset host port is what asks the server to allocate one.
 				assert.Zero(t, spec.Ports[0].From)
 			},
+		},
+		{
+			Name: "a manifest naming its ports",
+			File: "named_ports.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, []manifest.Port{
+					{Name: "http", To: 8080, Protocol: manifest.ProtocolTCP},
+					{Name: "dns", To: 53, Protocol: manifest.ProtocolTCP},
+					{Name: "dns", To: 53, Protocol: manifest.ProtocolUDP},
+				}, spec.Ports)
+			},
+		},
+		{
+			Name:         "rejects a port name that is not a usable name",
+			File:         "bad_port_name.yaml",
+			ExpectsError: true,
+		},
+		{
+			// A port is also named by the port itself, so a name that reads as a
+			// number would be two different ports written the same way.
+			Name:         "rejects a port named as a number",
+			File:         "port_name_numeric.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects one name given to two different ports",
+			File:         "port_name_reused.yaml",
+			ExpectsError: true,
 		},
 		{
 			Name:         "rejects a port outside the usable range",
@@ -1050,5 +1078,6 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	assert.NotEmpty(t, spec.Container.CapDrop)
 	assert.NotEmpty(t, spec.Env)
 	assert.NotEmpty(t, spec.Ports)
+	assert.Equal(t, "http", spec.Ports[0].Name)
 	assert.NotEmpty(t, spec.Volumes)
 }

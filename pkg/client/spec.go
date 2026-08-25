@@ -38,6 +38,13 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 
 			mapping := api.PortMapping{To: port.To, Protocol: new(api.Protocol(protocol))}
 
+			// An unnamed port is sent as absent rather than as an empty string, so
+			// that a specification which names none encodes as it did before ports
+			// could be named.
+			if port.Name != "" {
+				mapping.Name = new(port.Name)
+			}
+
 			// An unset host port is sent as absent rather than as zero, which is how
 			// the server is asked to allocate one.
 			if port.From != 0 {

@@ -1,0 +1,7 @@
+version: v1
+name: example
+ports:
+  - name: "8080"
+    to: 8080
+container:
+  image: example/example:latest

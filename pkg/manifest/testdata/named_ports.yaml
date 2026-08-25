@@ -1,0 +1,12 @@
+version: v1
+name: example
+ports:
+  - name: http
+    to: 8080
+  - name: dns
+    to: 53
+  - name: dns
+    to: 53
+    protocol: udp
+container:
+  image: example/example:latest
