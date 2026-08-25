@@ -353,10 +353,15 @@ Set `otlp-endpoint` under [telemetry](configuration.md#telemetry) to export trac
 and logs over OTLP. Without it, both are inert and `/metrics` still works.
 
 Each reconciliation pass is a trace: a root span for the pass, a span per workload
-converged, a span per driver observation, and a span per image pull. The Docker
-client's own requests parent underneath, so "why did this pass take ninety
-seconds" reads down to the daemon call that cost the time. The server's log
-records travel the same pipeline with trace correlation attached.
+converged, a span per driver observation, a span per image pull, and a span per
+database query. The Docker client's own requests parent underneath, so "why did
+this pass take ninety seconds" reads down to the daemon call or the contended
+write that cost the time. The server's log records travel the same pipeline with
+trace correlation attached.
+
+The scrape also carries the standard `db.client.*` connection pool metrics. The
+wait time series is the one to watch: it is the time writes spend queueing on
+SQLite's write lock.
 
 ## Host ports
 
