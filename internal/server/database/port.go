@@ -27,6 +27,10 @@ type (
 		Container int
 		// The host port that reaches it.
 		Host int
+		// The transport protocol the port is published on. TCP and UDP are separate
+		// address spaces, so it is part of the allocation's identity rather than a
+		// detail of it.
+		Protocol string
 		// Whether the host port was allocated by the server rather than pinned by
 		// the specification. A dynamic port may be reallocated if it proves
 		// unusable; a pinned one may not.
@@ -49,10 +53,10 @@ func NewPortRepository(db *sql.DB) *PortRepository {
 // ordered by the port inside the workload so that the result is stable.
 func (r *PortRepository) List(ctx context.Context, workloadID string) ([]Port, error) {
 	const q = `
-		SELECT workload_id, container_port, host_port, is_dynamic
+		SELECT workload_id, container_port, host_port, protocol, is_dynamic
 		FROM workload_port
 		WHERE workload_id = ?
-		ORDER BY container_port ASC
+		ORDER BY container_port ASC, protocol ASC
 	`
 
 	rows, err := r.db.QueryContext(ctx, q, workloadID)
@@ -65,7 +69,7 @@ func (r *PortRepository) List(ctx context.Context, workloadID string) ([]Port, e
 
 	for rows.Next() {
 		var port Port
-		if err = rows.Scan(&port.WorkloadID, &port.Container, &port.Host, &port.Dynamic); err != nil {
+		if err = rows.Scan(&port.WorkloadID, &port.Container, &port.Host, &port.Protocol, &port.Dynamic); err != nil {
 			return nil, fmt.Errorf("failed to scan workload port: %w", err)
 		}
 
@@ -83,9 +87,9 @@ func (r *PortRepository) List(ctx context.Context, workloadID string) ([]Port, e
 // hundred workloads into two hundred round trips.
 func (r *PortRepository) ListAll(ctx context.Context) (map[string][]Port, error) {
 	const q = `
-		SELECT workload_id, container_port, host_port, is_dynamic
+		SELECT workload_id, container_port, host_port, protocol, is_dynamic
 		FROM workload_port
-		ORDER BY workload_id ASC, container_port ASC
+		ORDER BY workload_id ASC, container_port ASC, protocol ASC
 	`
 
 	rows, err := r.db.QueryContext(ctx, q)
@@ -98,7 +102,7 @@ func (r *PortRepository) ListAll(ctx context.Context) (map[string][]Port, error)
 
 	for rows.Next() {
 		var port Port
-		if err = rows.Scan(&port.WorkloadID, &port.Container, &port.Host, &port.Dynamic); err != nil {
+		if err = rows.Scan(&port.WorkloadID, &port.Container, &port.Host, &port.Protocol, &port.Dynamic); err != nil {
 			return nil, fmt.Errorf("failed to scan workload port: %w", err)
 		}
 
@@ -131,8 +135,8 @@ func claim(ctx context.Context, tx *sql.Tx, workloadID string, ports []Port) err
 	const (
 		clear  = `DELETE FROM workload_port WHERE workload_id = ?`
 		insert = `
-			INSERT INTO workload_port (workload_id, container_port, host_port, is_dynamic)
-			VALUES (?, ?, ?, ?)
+			INSERT INTO workload_port (workload_id, container_port, host_port, protocol, is_dynamic)
+			VALUES (?, ?, ?, ?, ?)
 		`
 	)
 
@@ -141,10 +145,10 @@ func claim(ctx context.Context, tx *sql.Tx, workloadID string, ports []Port) err
 	}
 
 	for _, port := range ports {
-		_, err := tx.ExecContext(ctx, insert, workloadID, port.Container, port.Host, port.Dynamic)
+		_, err := tx.ExecContext(ctx, insert, workloadID, port.Container, port.Host, port.Protocol, port.Dynamic)
 		switch {
 		case IsUniqueError(err):
-			return fmt.Errorf("%w: %d", ErrHostPortTaken, port.Host)
+			return fmt.Errorf("%w: %d/%s", ErrHostPortTaken, port.Host, port.Protocol)
 		case err != nil:
 			return fmt.Errorf("failed to claim workload port: %w", err)
 		}
@@ -175,17 +179,17 @@ func (r *PortRepository) Release(ctx context.Context, workloadID string) error {
 //
 // This is what lets a pinned host port be rejected while the request is still in
 // flight, rather than the workload being accepted and then failing to start.
-func (r *PortRepository) HolderOf(ctx context.Context, host int) (string, bool, error) {
+func (r *PortRepository) HolderOf(ctx context.Context, host int, protocol string) (string, bool, error) {
 	const q = `
 		SELECT w.name
 		FROM workload_port AS p
 		INNER JOIN workload AS w ON w.id = p.workload_id
-		WHERE p.host_port = ?
+		WHERE p.host_port = ? AND p.protocol = ?
 	`
 
 	var workload string
 
-	err := r.db.QueryRowContext(ctx, q, host).Scan(&workload)
+	err := r.db.QueryRowContext(ctx, q, host, protocol).Scan(&workload)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return "", false, nil
@@ -196,26 +200,35 @@ func (r *PortRepository) HolderOf(ctx context.Context, host int) (string, bool, 
 	return workload, true, nil
 }
 
-// Allocated returns every host port currently allocated to any workload, which the
-// allocator uses to avoid handing out a port orca already promised.
-func (r *PortRepository) Allocated(ctx context.Context) ([]int, error) {
-	const q = `SELECT host_port FROM workload_port ORDER BY host_port ASC`
+// Allocated returns every host port currently allocated to any workload, keyed by
+// the protocol it is allocated on, which the allocator uses to avoid handing out a
+// port orca already promised.
+//
+// Keyed rather than flat, because the two protocols are separate address spaces: a
+// single list would have 20000/tcp rule out 20000/udp, and orca would refuse a port
+// that is genuinely free.
+func (r *PortRepository) Allocated(ctx context.Context) (map[string][]int, error) {
+	const q = `SELECT protocol, host_port FROM workload_port ORDER BY protocol ASC, host_port ASC`
 
 	rows, err := r.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query allocated ports: %w", err)
 	}
 
-	var ports []int
+	ports := make(map[string][]int)
 	defer rows.Close()
 
 	for rows.Next() {
-		var port int
-		if err = rows.Scan(&port); err != nil {
+		var (
+			protocol string
+			port     int
+		)
+
+		if err = rows.Scan(&protocol, &port); err != nil {
 			return nil, fmt.Errorf("failed to scan allocated port: %w", err)
 		}
 
-		ports = append(ports, port)
+		ports[protocol] = append(ports[protocol], port)
 	}
 
 	return ports, rows.Err()

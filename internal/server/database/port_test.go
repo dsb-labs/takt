@@ -19,8 +19,8 @@ func TestPortRepository_Claim(t *testing.T) {
 		ctx := t.Context()
 
 		require.NoError(t, ports.Claim(ctx, example, []database.Port{
-			{WorkloadID: example, Container: 8080, Host: 20000, Dynamic: true},
-			{WorkloadID: example, Container: 9090, Host: 4141},
+			{WorkloadID: example, Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true},
+			{WorkloadID: example, Container: 9090, Host: 4141, Protocol: "tcp"},
 		}))
 
 		got, err := ports.List(ctx, example)
@@ -36,19 +36,40 @@ func TestPortRepository_Claim(t *testing.T) {
 		assert.False(t, got[1].Dynamic)
 	})
 
+	t.Run("stores one port on both protocols", func(t *testing.T) {
+		// A workload speaking DNS publishes 53 over both, which is two allocations of
+		// the same number rather than one allocation named twice.
+		ports, example, _ := newTestPorts(t)
+		ctx := t.Context()
+
+		require.NoError(t, ports.Claim(ctx, example, []database.Port{
+			{WorkloadID: example, Container: 53, Host: 20000, Protocol: "tcp", Dynamic: true},
+			{WorkloadID: example, Container: 53, Host: 20000, Protocol: "udp", Dynamic: true},
+		}))
+
+		got, err := ports.List(ctx, example)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+
+		assert.Equal(t, "tcp", got[0].Protocol)
+		assert.Equal(t, "udp", got[1].Protocol)
+		assert.Equal(t, 20000, got[0].Host)
+		assert.Equal(t, 20000, got[1].Host)
+	})
+
 	t.Run("replaces the previous allocation wholesale", func(t *testing.T) {
 		ports, example, _ := newTestPorts(t)
 		ctx := t.Context()
 
 		require.NoError(t, ports.Claim(ctx, example, []database.Port{
-			{WorkloadID: example, Container: 8080, Host: 20000, Dynamic: true},
-			{WorkloadID: example, Container: 9090, Host: 20001, Dynamic: true},
+			{WorkloadID: example, Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true},
+			{WorkloadID: example, Container: 9090, Host: 20001, Protocol: "tcp", Dynamic: true},
 		}))
 
 		// Re-claiming with one port has to release the other, which is how a port
 		// removed from a specification gives its host port back.
 		require.NoError(t, ports.Claim(ctx, example, []database.Port{
-			{WorkloadID: example, Container: 8080, Host: 20000, Dynamic: true},
+			{WorkloadID: example, Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true},
 		}))
 
 		got, err := ports.List(ctx, example)
@@ -56,7 +77,7 @@ func TestPortRepository_Claim(t *testing.T) {
 		require.Len(t, got, 1)
 		assert.Equal(t, 8080, got[0].Container)
 
-		_, held, err := ports.HolderOf(ctx, 20001)
+		_, held, err := ports.HolderOf(ctx, 20001, "tcp")
 		require.NoError(t, err)
 		assert.False(t, held)
 	})
@@ -66,11 +87,11 @@ func TestPortRepository_Claim(t *testing.T) {
 		ctx := t.Context()
 
 		require.NoError(t, ports.Claim(ctx, other, []database.Port{
-			{WorkloadID: other, Container: 8080, Host: 4141},
+			{WorkloadID: other, Container: 8080, Host: 4141, Protocol: "tcp"},
 		}))
 
 		err := ports.Claim(ctx, example, []database.Port{
-			{WorkloadID: example, Container: 8080, Host: 4141},
+			{WorkloadID: example, Container: 8080, Host: 4141, Protocol: "tcp"},
 		})
 		assert.ErrorIs(t, err, database.ErrHostPortTaken)
 
@@ -86,17 +107,17 @@ func TestPortRepository_Claim(t *testing.T) {
 		ctx := t.Context()
 
 		require.NoError(t, ports.Claim(ctx, other, []database.Port{
-			{WorkloadID: other, Container: 8080, Host: 4141},
+			{WorkloadID: other, Container: 8080, Host: 4141, Protocol: "tcp"},
 		}))
 		require.NoError(t, ports.Claim(ctx, example, []database.Port{
-			{WorkloadID: example, Container: 8080, Host: 20000, Dynamic: true},
+			{WorkloadID: example, Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true},
 		}))
 
 		// The second port collides, so the whole claim has to roll back rather than
 		// leaving the workload holding only the first.
 		err := ports.Claim(ctx, example, []database.Port{
-			{WorkloadID: example, Container: 8080, Host: 20002, Dynamic: true},
-			{WorkloadID: example, Container: 9090, Host: 4141},
+			{WorkloadID: example, Container: 8080, Host: 20002, Protocol: "tcp", Dynamic: true},
+			{WorkloadID: example, Container: 9090, Host: 4141, Protocol: "tcp"},
 		})
 		assert.ErrorIs(t, err, database.ErrHostPortTaken)
 
@@ -115,11 +136,11 @@ func TestPortRepository_ListAll(t *testing.T) {
 		ctx := t.Context()
 
 		require.NoError(t, ports.Claim(ctx, example, []database.Port{
-			{WorkloadID: example, Container: 8080, Host: 20000, Dynamic: true},
-			{WorkloadID: example, Container: 9090, Host: 20001, Dynamic: true},
+			{WorkloadID: example, Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true},
+			{WorkloadID: example, Container: 9090, Host: 20001, Protocol: "tcp", Dynamic: true},
 		}))
 		require.NoError(t, ports.Claim(ctx, other, []database.Port{
-			{WorkloadID: other, Container: 8080, Host: 4141},
+			{WorkloadID: other, Container: 8080, Host: 4141, Protocol: "tcp"},
 		}))
 
 		// Listing workloads reads this once rather than once per workload, which is
@@ -153,10 +174,10 @@ func TestPortRepository_HolderOf(t *testing.T) {
 		ctx := t.Context()
 
 		require.NoError(t, ports.Claim(ctx, example, []database.Port{
-			{WorkloadID: example, Container: 8080, Host: 4141},
+			{WorkloadID: example, Container: 8080, Host: 4141, Protocol: "tcp"},
 		}))
 
-		holder, held, err := ports.HolderOf(ctx, 4141)
+		holder, held, err := ports.HolderOf(ctx, 4141, "tcp")
 		require.NoError(t, err)
 
 		assert.True(t, held)
@@ -166,7 +187,7 @@ func TestPortRepository_HolderOf(t *testing.T) {
 	t.Run("reports an unheld port", func(t *testing.T) {
 		ports, _, _ := newTestPorts(t)
 
-		_, held, err := ports.HolderOf(t.Context(), 4141)
+		_, held, err := ports.HolderOf(t.Context(), 4141, "tcp")
 		require.NoError(t, err)
 		assert.False(t, held)
 	})
@@ -180,15 +201,33 @@ func TestPortRepository_Allocated(t *testing.T) {
 		ctx := t.Context()
 
 		require.NoError(t, ports.Claim(ctx, example, []database.Port{
-			{WorkloadID: example, Container: 8080, Host: 20001, Dynamic: true},
+			{WorkloadID: example, Container: 8080, Host: 20001, Protocol: "tcp", Dynamic: true},
 		}))
 		require.NoError(t, ports.Claim(ctx, other, []database.Port{
-			{WorkloadID: other, Container: 8080, Host: 20000, Dynamic: true},
+			{WorkloadID: other, Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true},
 		}))
 
 		got, err := ports.Allocated(ctx)
 		require.NoError(t, err)
-		assert.Equal(t, []int{20000, 20001}, got)
+		assert.Equal(t, map[string][]int{"tcp": {20000, 20001}}, got)
+	})
+
+	t.Run("keys the allocations by protocol", func(t *testing.T) {
+		// The two are separate address spaces, so a flat list would have 20000/tcp
+		// rule out 20000/udp and the allocator would refuse a port that is free.
+		ports, example, other := newTestPorts(t)
+		ctx := t.Context()
+
+		require.NoError(t, ports.Claim(ctx, example, []database.Port{
+			{WorkloadID: example, Container: 53, Host: 20000, Protocol: "tcp", Dynamic: true},
+		}))
+		require.NoError(t, ports.Claim(ctx, other, []database.Port{
+			{WorkloadID: other, Container: 53, Host: 20000, Protocol: "udp", Dynamic: true},
+		}))
+
+		got, err := ports.Allocated(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]int{"tcp": {20000}, "udp": {20000}}, got)
 	})
 }
 
@@ -200,7 +239,7 @@ func TestPortRepository_Release(t *testing.T) {
 		ctx := t.Context()
 
 		require.NoError(t, ports.Claim(ctx, example, []database.Port{
-			{WorkloadID: example, Container: 8080, Host: 20000, Dynamic: true},
+			{WorkloadID: example, Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true},
 		}))
 
 		require.NoError(t, ports.Release(ctx, example))
@@ -230,7 +269,7 @@ func TestWorkloadRepository_Delete_ReleasesPorts(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, ports.Claim(ctx, stored.ID, []database.Port{
-		{WorkloadID: stored.ID, Container: 8080, Host: 20000, Dynamic: true},
+		{WorkloadID: stored.ID, Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true},
 	}))
 
 	require.NoError(t, workloads.Delete(ctx, "example"))

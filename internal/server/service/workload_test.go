@@ -849,7 +849,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 			Return(database.Workload{}, false, database.ErrHostPortTaken)
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
-		ports.EXPECT().HolderOf(mock.Anything, 4141).Return("", false, nil)
+		ports.EXPECT().HolderOf(mock.Anything, 4141, mock.Anything).Return("", false, nil)
 
 		svc := newTestService(t, d, repo, ports, nil)
 
@@ -2147,7 +2147,7 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
 		ports.EXPECT().List(mock.Anything, row.ID).Return(held, nil).Once()
-		ports.EXPECT().Allocated(mock.Anything).Return([]int{20005}, nil).Once()
+		ports.EXPECT().Allocated(mock.Anything).Return(map[string][]int{"tcp": {20005}}, nil).Once()
 
 		// The write has to carry the allocation. Upsert replaces a workload's ports
 		// with whatever it is handed, so one given none would clear the rows and
@@ -2276,7 +2276,7 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
-	ports.EXPECT().HolderOf(mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
 
 	config := service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
@@ -2311,7 +2311,7 @@ func newTestImageAwareService(
 	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
-	ports.EXPECT().HolderOf(mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
 
 	config := service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
@@ -2357,7 +2357,7 @@ func newTestReferenceAwareService(
 	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
-	ports.EXPECT().HolderOf(mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
 
 	config := service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
@@ -2579,7 +2579,7 @@ type (
 	}
 )
 
-func (b blindPorts) Allocated(context.Context) ([]int, error) {
+func (b blindPorts) Allocated(context.Context) (map[string][]int, error) {
 	return nil, nil
 }
 

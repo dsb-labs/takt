@@ -2179,23 +2179,23 @@ func (_m *MockPortRepository) EXPECT() *MockPortRepository_Expecter {
 }
 
 // Allocated provides a mock function for the type MockPortRepository
-func (_mock *MockPortRepository) Allocated(ctx context.Context) ([]int, error) {
+func (_mock *MockPortRepository) Allocated(ctx context.Context) (map[string][]int, error) {
 	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Allocated")
 	}
 
-	var r0 []int
+	var r0 map[string][]int
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]int, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (map[string][]int, error)); ok {
 		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []int); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context) map[string][]int); ok {
 		r0 = returnFunc(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]int)
+			r0 = ret.Get(0).(map[string][]int)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
@@ -2230,19 +2230,19 @@ func (_c *MockPortRepository_Allocated_Call) Run(run func(ctx context.Context)) 
 	return _c
 }
 
-func (_c *MockPortRepository_Allocated_Call) Return(ints []int, err error) *MockPortRepository_Allocated_Call {
-	_c.Call.Return(ints, err)
+func (_c *MockPortRepository_Allocated_Call) Return(stringToInts map[string][]int, err error) *MockPortRepository_Allocated_Call {
+	_c.Call.Return(stringToInts, err)
 	return _c
 }
 
-func (_c *MockPortRepository_Allocated_Call) RunAndReturn(run func(ctx context.Context) ([]int, error)) *MockPortRepository_Allocated_Call {
+func (_c *MockPortRepository_Allocated_Call) RunAndReturn(run func(ctx context.Context) (map[string][]int, error)) *MockPortRepository_Allocated_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // HolderOf provides a mock function for the type MockPortRepository
-func (_mock *MockPortRepository) HolderOf(ctx context.Context, host int) (string, bool, error) {
-	ret := _mock.Called(ctx, host)
+func (_mock *MockPortRepository) HolderOf(ctx context.Context, host int, protocol string) (string, bool, error) {
+	ret := _mock.Called(ctx, host, protocol)
 
 	if len(ret) == 0 {
 		panic("no return value specified for HolderOf")
@@ -2251,21 +2251,21 @@ func (_mock *MockPortRepository) HolderOf(ctx context.Context, host int) (string
 	var r0 string
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, int) (string, bool, error)); ok {
-		return returnFunc(ctx, host)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, string) (string, bool, error)); ok {
+		return returnFunc(ctx, host, protocol)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, int) string); ok {
-		r0 = returnFunc(ctx, host)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, int, string) string); ok {
+		r0 = returnFunc(ctx, host, protocol)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, int) bool); ok {
-		r1 = returnFunc(ctx, host)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, int, string) bool); ok {
+		r1 = returnFunc(ctx, host, protocol)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, int) error); ok {
-		r2 = returnFunc(ctx, host)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, int, string) error); ok {
+		r2 = returnFunc(ctx, host, protocol)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -2280,11 +2280,12 @@ type MockPortRepository_HolderOf_Call struct {
 // HolderOf is a helper method to define mock.On call
 //   - ctx context.Context
 //   - host int
-func (_e *MockPortRepository_Expecter) HolderOf(ctx any, host any) *MockPortRepository_HolderOf_Call {
-	return &MockPortRepository_HolderOf_Call{Call: _e.mock.On("HolderOf", ctx, host)}
+//   - protocol string
+func (_e *MockPortRepository_Expecter) HolderOf(ctx any, host any, protocol any) *MockPortRepository_HolderOf_Call {
+	return &MockPortRepository_HolderOf_Call{Call: _e.mock.On("HolderOf", ctx, host, protocol)}
 }
 
-func (_c *MockPortRepository_HolderOf_Call) Run(run func(ctx context.Context, host int)) *MockPortRepository_HolderOf_Call {
+func (_c *MockPortRepository_HolderOf_Call) Run(run func(ctx context.Context, host int, protocol string)) *MockPortRepository_HolderOf_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -2294,9 +2295,14 @@ func (_c *MockPortRepository_HolderOf_Call) Run(run func(ctx context.Context, ho
 		if args[1] != nil {
 			arg1 = args[1].(int)
 		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -2307,7 +2313,7 @@ func (_c *MockPortRepository_HolderOf_Call) Return(s string, b bool, err error) 
 	return _c
 }
 
-func (_c *MockPortRepository_HolderOf_Call) RunAndReturn(run func(ctx context.Context, host int) (string, bool, error)) *MockPortRepository_HolderOf_Call {
+func (_c *MockPortRepository_HolderOf_Call) RunAndReturn(run func(ctx context.Context, host int, protocol string) (string, bool, error)) *MockPortRepository_HolderOf_Call {
 	_c.Call.Return(run)
 	return _c
 }

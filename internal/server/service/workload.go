@@ -128,12 +128,13 @@ type (
 		List(ctx context.Context, workloadID string) ([]database.Port, error)
 		// HolderOf should name the workload the given host port is allocated to,
 		// reporting false when no workload holds it.
-		HolderOf(ctx context.Context, host int) (string, bool, error)
+		HolderOf(ctx context.Context, host int, protocol string) (string, bool, error)
 		// ListAll should return the ports allocated to every workload, keyed by
 		// workload identifier.
 		ListAll(ctx context.Context) (map[string][]database.Port, error)
-		// Allocated should return every host port allocated to any workload.
-		Allocated(ctx context.Context) ([]int, error)
+		// Allocated should return every host port allocated to any workload, keyed
+		// by the protocol it is allocated on.
+		Allocated(ctx context.Context) (map[string][]int, error)
 	}
 
 	// The VolumeLocator interface describes how the service finds out where a
@@ -968,7 +969,7 @@ func (s *WorkloadService) resolvePorts(ctx context.Context, name string, existin
 	}
 
 	taken := make([]int, 0, len(allocated)+len(mappings))
-	taken = append(taken, allocated...)
+	taken = append(taken, allocated[string(port.ProtocolTCP)]...)
 
 	resolved := make([]database.Port, 0, len(mappings))
 	for _, mapping := range mappings {
@@ -988,7 +989,7 @@ func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map
 	// A pinned host port is a decision orca must not quietly override, so it is
 	// used as given once nothing else holds it.
 	if mapping.From != nil {
-		holder, isHeld, err := s.ports.HolderOf(ctx, *mapping.From)
+		holder, isHeld, err := s.ports.HolderOf(ctx, *mapping.From, string(port.ProtocolTCP))
 		switch {
 		case err != nil:
 			return database.Port{}, fmt.Errorf("failed to look up host port: %w", err)
@@ -996,7 +997,7 @@ func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map
 			return database.Port{}, fmt.Errorf("%w: %d is used by workload %q", ErrHostPortTaken, *mapping.From, holder)
 		}
 
-		return database.Port{Container: mapping.To, Host: *mapping.From}, nil
+		return database.Port{Container: mapping.To, Host: *mapping.From, Protocol: string(port.ProtocolTCP)}, nil
 	}
 
 	// An existing allocation is kept so that the workload's address doesn't move
@@ -1019,7 +1020,7 @@ func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map
 		return database.Port{}, fmt.Errorf("failed to allocate host port for %d: %w", mapping.To, err)
 	}
 
-	return database.Port{Container: mapping.To, Host: host, Dynamic: true}, nil
+	return database.Port{Container: mapping.To, Host: host, Protocol: string(port.ProtocolTCP), Dynamic: true}, nil
 }
 
 // resolveVolumes fills in where each mounted volume lives on the host, rejecting a
