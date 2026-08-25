@@ -380,6 +380,11 @@ func TestDriver_Signal(t *testing.T) {
 			`trap 'echo reloaded > reloaded.txt' HUP; touch trapped.txt; while true; do sleep 0.05; done`))
 		require.NoError(t, err)
 
+		// The process loops until something stops it, and nothing here does. Without
+		// this the test leaves it running after the test binary has gone, and every run
+		// leaves another.
+		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
+
 		cwd := filepath.Join(root, "workloads", testID, "1", "cwd")
 
 		require.Eventually(t, func() bool {
@@ -417,6 +422,10 @@ func TestDriver_Signal(t *testing.T) {
 			`trap 'echo reloaded > reloaded.txt' HUP; sleep 300 & echo $! > child.pid; `+
 				`touch trapped.txt; while true; do sleep 0.05; done`))
 		require.NoError(t, err)
+
+		// Discarding signals the group, so the child this test starts goes with the
+		// parent. Both outlive the test binary otherwise.
+		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
 
 		cwd := filepath.Join(root, "workloads", testID, "1", "cwd")
 		child := awaitChildPID(t, root, "example", 1)
