@@ -73,6 +73,10 @@ type (
 		To int
 		// The host port that reaches it.
 		From int
+		// The transport protocol the port is published on, which is either tcp or
+		// udp. The two are separate address spaces, so it is part of the address
+		// rather than a detail of it.
+		Protocol string
 		// Whether the host port was allocated by the server rather than pinned by
 		// the specification.
 		Dynamic bool
@@ -701,9 +705,10 @@ func newWorkload(w api.Workload) Workload {
 		workload.Ports = make([]ResolvedPort, 0, len(*w.Ports))
 		for _, port := range *w.Ports {
 			workload.Ports = append(workload.Ports, ResolvedPort{
-				To:      port.To,
-				From:    port.From,
-				Dynamic: port.Dynamic,
+				To:       port.To,
+				From:     port.From,
+				Protocol: string(port.Protocol),
+				Dynamic:  port.Dynamic,
 			})
 		}
 	}
