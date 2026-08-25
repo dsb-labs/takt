@@ -313,6 +313,124 @@ func TestWorkloadRepository_MarkDeleting(t *testing.T) {
 	})
 }
 
+func TestWorkloadRepository_Suspend(t *testing.T) {
+	t.Parallel()
+
+	t.Run("records the suspension without touching the specification", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := t.Context()
+
+		created, _, err := repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{}`),
+			SpecHash: "hash-one",
+		})
+		require.NoError(t, err)
+
+		suspended, err := repo.Suspend(ctx, "example")
+		require.NoError(t, err)
+		assert.False(t, suspended.SuspendedAt.IsZero())
+
+		// Suspension must not read as a specification change, or resuming would
+		// replace the instances for no reason the operator asked for.
+		stored, err := repo.Get(ctx, "example")
+		require.NoError(t, err)
+		assert.False(t, stored.SuspendedAt.IsZero())
+		assert.Equal(t, created.Version, stored.Version)
+		assert.Equal(t, created.SpecHash, stored.SpecHash)
+		assert.Equal(t, created.UpdatedAt, stored.UpdatedAt)
+	})
+
+	t.Run("is idempotent", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := t.Context()
+
+		_, _, err := repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{}`),
+			SpecHash: "hash-one",
+		})
+		require.NoError(t, err)
+
+		first, err := repo.Suspend(ctx, "example")
+		require.NoError(t, err)
+
+		second, err := repo.Suspend(ctx, "example")
+		require.NoError(t, err)
+
+		assert.Equal(t, first.SuspendedAt, second.SuspendedAt)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		repo := newTestRepository(t)
+
+		_, err := repo.Suspend(t.Context(), "nope")
+		assert.ErrorIs(t, err, database.ErrWorkloadNotFound)
+	})
+}
+
+func TestWorkloadRepository_Resume(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clears the suspension and moves updated_at", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := t.Context()
+
+		created, _, err := repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{}`),
+			SpecHash: "hash-one",
+		})
+		require.NoError(t, err)
+
+		_, err = repo.Suspend(ctx, "example")
+		require.NoError(t, err)
+
+		resumed, err := repo.Resume(ctx, "example")
+		require.NoError(t, err)
+		assert.True(t, resumed.SuspendedAt.IsZero())
+
+		// A schedule counts its next occurrence from updated_at when nothing has
+		// run yet, so the resume has to move it or a suspended cron workload would
+		// run its last missed occurrence immediately.
+		stored, err := repo.Get(ctx, "example")
+		require.NoError(t, err)
+		assert.True(t, stored.SuspendedAt.IsZero())
+		assert.Equal(t, created.Version, stored.Version)
+		assert.False(t, stored.UpdatedAt.Before(created.UpdatedAt))
+		assert.Equal(t, resumed.UpdatedAt, stored.UpdatedAt)
+	})
+
+	t.Run("leaves a workload that is not suspended unchanged", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := t.Context()
+
+		created, _, err := repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{}`),
+			SpecHash: "hash-one",
+		})
+		require.NoError(t, err)
+
+		resumed, err := repo.Resume(ctx, "example")
+		require.NoError(t, err)
+
+		assert.True(t, resumed.SuspendedAt.IsZero())
+		assert.Equal(t, created.UpdatedAt, resumed.UpdatedAt)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		repo := newTestRepository(t)
+
+		_, err := repo.Resume(t.Context(), "nope")
+		assert.ErrorIs(t, err, database.ErrWorkloadNotFound)
+	})
+}
+
 func TestWorkloadRepository_Delete(t *testing.T) {
 	t.Parallel()
 
