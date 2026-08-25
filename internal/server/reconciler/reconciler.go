@@ -640,6 +640,13 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		return r.teardown(ctx, row, instances)
 	}
 
+	// A suspended workload is held down rather than converged. Checked ahead of
+	// everything else a pass would enforce, because every branch below exists to
+	// keep the workload running and suspension asks for exactly the opposite.
+	if !row.SuspendedAt.IsZero() {
+		return r.suspend(ctx, row, instances)
+	}
+
 	// A workload whose runtime nothing runs is stored and left alone, so it starts
 	// working when its driver arrives rather than being reported as broken.
 	if _, ok := r.driverFor(row); !ok {
@@ -823,12 +830,14 @@ func (r *Reconciler) register(ctx context.Context, rows []database.Workload, obs
 			// cannot be resolved now means the two have diverged rather than that the
 			// operator made a mistake.
 			r.logger.With("workload", row.Name, "error", err).Error("failed to resolve health check")
-		case ok && row.DeletedAt.IsZero() && !retired(restartPolicy(row), observed[row.Name]):
+		case ok && row.DeletedAt.IsZero() && row.SuspendedAt.IsZero() && !retired(restartPolicy(row), observed[row.Name]):
 			r.checker.Set(row.Name, check)
 		default:
-			// The workload declares no check, or is on its way out, or has ended and
-			// will not be restarted. None is worth probing, and probing the last would
-			// report a finished workload as unhealthy for no longer answering.
+			// The workload declares no check, or is on its way out, or is suspended,
+			// or has ended and will not be restarted. None is worth probing, and
+			// probing the last would report a finished workload as unhealthy for no
+			// longer answering — or a deliberately stopped one as broken for being
+			// exactly as down as it was asked to be.
 			r.checker.Forget(row.Name)
 		}
 	}
@@ -1164,6 +1173,49 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 	r.settle(row.Name)
 
 	r.logger.With("workload", row.Name).Info("workload deleted")
+
+	return nil
+}
+
+// suspend holds a workload down while it is marked as suspended.
+//
+// This mirrors teardown without the removal of desired state. The instances are
+// stopped, and once the driver reports nothing running the values the workload
+// mounted are removed — they have no reader left, and a suspended workload
+// leaving secret plaintext on the disk is the condition prune exists to clean
+// up. The row, the retained instance and its output all stay, so what the
+// workload last did remains readable while it is down.
+func (r *Reconciler) suspend(ctx context.Context, row database.Workload, instances []driver.Instance) error {
+	if len(instances) > 0 {
+		// Already on its way out from an earlier pass; stopping it again would just
+		// race the runtime finishing the job.
+		if slices.ContainsFunc(instances, terminating) {
+			r.logger.With("workload", row.Name).Debug("waiting for suspended workload to finish terminating")
+
+			return nil
+		}
+
+		r.logger.With("workload", row.Name).Debug("stopping suspended workload")
+
+		// Stopped rather than discarded: unlike a deletion the workload comes back,
+		// and the instance the driver retains is what keeps its last output
+		// readable while it is down.
+		return r.stop(ctx, row)
+	}
+
+	// Nothing is running, so the values the workload mounted have no reader left.
+	// Forgetting is idempotent, so a pass repeating this while the workload stays
+	// suspended removes nothing twice.
+	if r.mounts != nil {
+		if err := r.mounts.Forget(row.ID); err != nil {
+			return fmt.Errorf("failed to remove mounted values: %w", err)
+		}
+	}
+
+	// Backoff and the last error describe attempts to run the workload, which is
+	// exactly what suspension asks to stop. Clearing them means a resume starts
+	// from a clean slate rather than inside a backoff window.
+	r.settle(row.Name)
 
 	return nil
 }
