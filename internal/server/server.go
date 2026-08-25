@@ -69,8 +69,10 @@ func Run(ctx context.Context, config Config) error {
 	}
 
 	db, err := database.Open(ctx, database.Config{
-		Logger: logger,
-		Path:   filepath.Join(config.Data.Directory, "state.db"),
+		Logger:         logger,
+		Path:           filepath.Join(config.Data.Directory, "state.db"),
+		MeterProvider:  tel.MeterProvider(),
+		TracerProvider: tel.TracerProvider(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
