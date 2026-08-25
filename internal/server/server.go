@@ -284,6 +284,10 @@ func Run(ctx context.Context, config Config) error {
 		// WriteTimeout is deliberately generous: reading a workload's logs streams
 		// its output, and a large tail from a chatty container legitimately takes
 		// longer than answering an ordinary request.
+		//
+		// A followed read clears it altogether, from the handler rather than here.
+		// That response is open for as long as the workload runs, which no deadline
+		// set for every request could allow for.
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      5 * time.Minute,

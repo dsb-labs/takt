@@ -837,6 +837,29 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs", nil)
 		assert.Equal(t, http.StatusOK, resp.Code)
 	})
+
+	t.Run("follows the current attempt from an instant", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", generated.WorkloadStateRunning), nil).Once()
+
+		since := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
+
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 100, Follow: true, Since: since}).
+			Return(nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?follow=true&since=2026-08-25T12:00:00Z", nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("refuses to follow the attempt that was replaced", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+
+		// A retained instance has already ended, so there is nothing for a follow of it
+		// to wait on. Saying so beats answering with an ordinary read that the caller
+		// would sit watching forever.
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?follow=true&previous=true", nil)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
 }
 
 func do(t *testing.T, svc *MockWorkloadService, method, target string, body io.Reader) *httptest.ResponseRecorder {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
@@ -340,6 +341,25 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 		options.Previous = *request.Params.Previous
 	}
 
+	if request.Params.Follow != nil {
+		options.Follow = *request.Params.Follow
+	}
+
+	if request.Params.Since != nil {
+		options.Since = *request.Params.Since
+	}
+
+	// A retained instance has already ended, so there is nothing for a follow of it to
+	// wait on. Refused rather than answered as an ordinary read, because a caller who
+	// asked to watch something should be told that it cannot be watched.
+	if options.Follow && options.Previous {
+		return api.GetWorkloadLogs400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{
+				Error: "cannot follow the previous instance, which has already ended",
+			},
+		}, nil
+	}
+
 	// A missing workload is established before anything is written, because once the
 	// first byte of a 200 has been sent there is no way to report a failure. Reading
 	// the logs can still fail midway through; nothing can be done about that but stop
@@ -362,6 +382,7 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 	}
 
 	return logsResponse{
+		follow: options.Follow,
 		write: func(w io.Writer) error {
 			return a.workloads.Logs(ctx, w, request.Name, options)
 		},
@@ -375,15 +396,72 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 // straight to the response instead, so the server's memory use doesn't scale with how
 // much a container has to say.
 type logsResponse struct {
-	write func(w io.Writer) error
+	// Whether the response stays open for as long as the workload keeps writing.
+	follow bool
+	write  func(w io.Writer) error
 }
 
 // VisitGetWorkloadLogsResponse writes the logs to w as plain text.
+//
+// A followed read is exempt from the server's write timeout and is flushed as it goes.
+// Both are needed for the same reason: the response is open for as long as the workload
+// runs, which is longer than any deadline a request should have and longer than a
+// caller can wait for a buffer to fill.
 func (r logsResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "text/plain")
+
+	out := io.Writer(w)
+
+	if r.follow {
+		control := http.NewResponseController(w)
+
+		// The zero time removes the deadline rather than extending it. A follow that
+		// hit one would end as a truncated stream at exactly the timeout, which reads
+		// as a workload that stopped talking rather than as a server that hung up.
+		//
+		// Nothing is left unbounded by this. The request's context ends the read when
+		// the caller disconnects, which is what actually limits how long a stream
+		// occupies the server.
+		//
+		// A writer that has no deadline to clear says so, and there is nothing to do
+		// about that but carry on. The stream then lives as long as the writer allows,
+		// which is more than refusing to serve the request at all would give anybody.
+		if err := control.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return fmt.Errorf("failed to clear the write deadline: %w", err)
+		}
+
+		out = &flushWriter{inner: w, control: control}
+	}
+
 	w.WriteHeader(http.StatusOK)
 
-	return r.write(w)
+	return r.write(out)
+}
+
+// The flushWriter type pushes each write out to the client rather than letting it sit
+// in a buffer.
+//
+// Without this a followed read arrives in chunks whenever the buffer happens to fill,
+// which for a quiet workload may be a long time after the line was written. Watching a
+// workload start is the whole point of following it, so a line held back is a line that
+// did not arrive.
+type flushWriter struct {
+	inner   io.Writer
+	control *http.ResponseController
+}
+
+func (w *flushWriter) Write(p []byte) (int, error) {
+	n, err := w.inner.Write(p)
+	if err != nil {
+		return n, err
+	}
+
+	// A response that cannot be flushed is still a response. The output reaches the
+	// caller when the buffer fills, which is worse than immediately and better than
+	// failing the read over it.
+	_ = w.control.Flush()
+
+	return n, nil
 }
 
 // instanceHealth maps what orca established about a workload's health onto the wire
