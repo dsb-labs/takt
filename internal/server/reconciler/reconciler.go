@@ -1019,24 +1019,32 @@ func probeHost(bind string) string {
 }
 
 // healthPort finds the host port that reaches the port the check names.
+//
+// Only a TCP port is considered, as validation only accepts a check against one: both
+// probes connect, and a connection to a UDP port succeeds whatever is behind it. A
+// workload publishing 53 on both protocols is probed on its TCP side.
 func healthPort(check manifest.Health, ports []database.Port) (int, error) {
-	if len(ports) == 0 {
-		return 0, fmt.Errorf("workload publishes no ports to check")
+	checkable := slices.DeleteFunc(slices.Clone(ports), func(port database.Port) bool {
+		return port.Protocol == string(manifest.ProtocolUDP)
+	})
+
+	if len(checkable) == 0 {
+		return 0, fmt.Errorf("workload publishes no %s port to check", manifest.ProtocolTCP)
 	}
 
 	// Validation requires the port to be named when several are published, so an
 	// unnamed one can only mean the single port the workload has.
 	if check.Port == 0 {
-		return ports[0].Host, nil
+		return checkable[0].Host, nil
 	}
 
-	for _, port := range ports {
+	for _, port := range checkable {
 		if port.Container == check.Port {
 			return port.Host, nil
 		}
 	}
 
-	return 0, fmt.Errorf("port %d is not published by the workload", check.Port)
+	return 0, fmt.Errorf("port %d/%s is not published by the workload", check.Port, manifest.ProtocolTCP)
 }
 
 // checked folds what orca's health check established into an instance's state, so

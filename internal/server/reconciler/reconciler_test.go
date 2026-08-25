@@ -634,25 +634,42 @@ func TestReconciler_Run_ProbesThePublishedAddress(t *testing.T) {
 	// publish somewhere specific has to be checked there too. Probing loopback
 	// regardless would report every checked workload as unhealthy and have the
 	// reconciler restart work that was answering perfectly well.
+	tcp := []database.Port{{WorkloadID: "workload-one", Container: 80, Host: 20080, Protocol: "tcp"}}
+
 	tt := []struct {
 		Name           string
 		Bind           string
+		Ports          []database.Port
 		ExpectedProbed string
 	}{
 		{
 			Name:           "probes the interface a workload is published on",
 			Bind:           "10.0.0.5",
+			Ports:          tcp,
 			ExpectedProbed: "10.0.0.5:20080",
 		},
 		{
 			// Every interface includes loopback, so the check stays on the host.
 			Name:           "probes loopback when published on every interface",
 			Bind:           "0.0.0.0",
+			Ports:          tcp,
 			ExpectedProbed: "127.0.0.1:20080",
 		},
 		{
 			Name:           "probes loopback when told nothing",
 			Bind:           "",
+			Ports:          tcp,
+			ExpectedProbed: "127.0.0.1:20080",
+		},
+		{
+			// A connection to a UDP port succeeds whatever is behind it, so probing
+			// the UDP side would report every workload as healthy.
+			Name: "probes the tcp side of a workload publishing both",
+			Bind: "",
+			Ports: []database.Port{
+				{WorkloadID: "workload-one", Container: 53, Host: 20053, Protocol: "udp"},
+				{WorkloadID: "workload-one", Container: 80, Host: 20080, Protocol: "tcp"},
+			},
 			ExpectedProbed: "127.0.0.1:20080",
 		},
 	}
@@ -671,7 +688,7 @@ func TestReconciler_Run_ProbesThePublishedAddress(t *testing.T) {
 			repo.EXPECT().List(mock.Anything).Return([]database.Workload{checked}, nil)
 
 			ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
-				"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+				"workload-one": tc.Ports,
 			}, nil)
 
 			registered := make(chan health.Check, 1)
