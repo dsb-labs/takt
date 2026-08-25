@@ -1267,7 +1267,7 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 	// reopen the question of whether it is working.
 	for i := range instances {
 		instances[i].State = healthState(instances[i].State, reported)
-		instances[i].State = completionState(instances[i], policy)
+		instances[i].State = CompletionState(instances[i], policy)
 	}
 
 	return Workload{
@@ -1279,7 +1279,7 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 		Instances:   instances,
 		Ports:       newResolvedPorts(ports),
 		Health:      reported,
-		State:       stateOf(instances, deleting),
+		State:       StateOf(instances, deleting),
 		Deleting:    deleting,
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,
@@ -1322,7 +1322,7 @@ func nextRun(schedule *manifest.Schedule, instances []driver.Instance, applied t
 	return parsed.Next(last)
 }
 
-// completionState reports the state an ended instance reads as once its workload's
+// CompletionState reports the state an ended instance reads as once its workload's
 // restart policy has had its say.
 //
 // Only a clean exit the policy retires becomes completed. An instance that exited
@@ -1332,7 +1332,7 @@ func nextRun(schedule *manifest.Schedule, instances []driver.Instance, applied t
 //
 // An instance still running is untouched. The policy describes what happens when work
 // ends, and this one has not ended.
-func completionState(instance driver.Instance, restart *manifest.Restart) driver.State {
+func CompletionState(instance driver.Instance, restart *manifest.Restart) driver.State {
 	if instance.State != driver.StateExited {
 		return instance.State
 	}
@@ -1347,7 +1347,7 @@ func completionState(instance driver.Instance, restart *manifest.Restart) driver
 	return driver.StateCompleted
 }
 
-// stateOf derives a workload's overall state from its instances and whether it is
+// StateOf derives a workload's overall state from its instances and whether it is
 // being deleted.
 //
 // A workload marked for deletion is terminating whatever its instances are doing,
@@ -1361,7 +1361,7 @@ func completionState(instance driver.Instance, restart *manifest.Restart) driver
 // a consequence of the teardown rather than news in its own right. Failure outranks
 // a clean exit, and a workload with no instances at all is pending, because the
 // reconciler has yet to start it.
-func stateOf(instances []driver.Instance, deleting bool) api.WorkloadState {
+func StateOf(instances []driver.Instance, deleting bool) api.WorkloadState {
 	if deleting {
 		return api.WorkloadStateTerminating
 	}
