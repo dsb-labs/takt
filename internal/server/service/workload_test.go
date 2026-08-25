@@ -936,6 +936,78 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		assert.Equal(t, claimed[0].Host, claimed[1].Host)
 	})
 
+	t.Run("claims a port under the name the specification gave it", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+		var claimed []database.Port
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+				claimed = p
+				w.ID, w.Version = "id-one", 1
+				return w, true, nil
+			})
+
+		ports.EXPECT().List(mock.Anything, "id-one").
+			RunAndReturn(func(context.Context, string) ([]database.Port, error) { return claimed, nil })
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = &[]api.PortMapping{{Name: new("http"), To: 8080}, {To: 9090}}
+
+		workload, _, err := svc.Apply(t.Context(), spec)
+		require.NoError(t, err)
+
+		require.Len(t, claimed, 2)
+		assert.Equal(t, "http", claimed[0].Name)
+		assert.Empty(t, claimed[1].Name)
+
+		// Reported back as well, since the name is how a caller tells one of a
+		// workload's addresses from another.
+		require.Len(t, workload.Ports, 2)
+		require.NotNil(t, workload.Ports[0].Name)
+		assert.Equal(t, "http", *workload.Ports[0].Name)
+		assert.Nil(t, workload.Ports[1].Name)
+	})
+
+	t.Run("keeps the host port when a port is renamed", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{ID: "id-one", Name: "example", Version: 1}, nil)
+		ports.EXPECT().List(mock.Anything, "id-one").
+			Return([]database.Port{{Name: "http", Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true}}, nil)
+		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+		var claimed []database.Port
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+				claimed = p
+				w.ID, w.Version = "id-one", 2
+				return w, false, nil
+			})
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		// Renaming a port says what the specification calls it, not where it is
+		// reached, so the address the workload already had must not move.
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = &[]api.PortMapping{{Name: new("api"), To: 8080}}
+
+		_, _, err := svc.Apply(t.Context(), spec)
+		require.NoError(t, err)
+
+		require.Len(t, claimed, 1)
+		assert.Equal(t, "api", claimed[0].Name)
+		assert.Equal(t, 20000, claimed[0].Host)
+	})
+
 	t.Run("looks a pinned port up on the protocol it is pinned to", func(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 

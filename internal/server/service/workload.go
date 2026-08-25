@@ -953,7 +953,7 @@ func requestedMappings(spec api.WorkloadSpec, held []database.Port) []api.PortMa
 
 	for _, mapping := range mappings {
 		if _, ok := allocated[portKey{mapping.To, protocolOf(mapping)}]; ok {
-			requested = append(requested, api.PortMapping{To: mapping.To, Protocol: mapping.Protocol})
+			requested = append(requested, api.PortMapping{Name: mapping.Name, To: mapping.To, Protocol: mapping.Protocol})
 			continue
 		}
 
@@ -1096,21 +1096,41 @@ func (s *WorkloadService) resolvePort(
 				ErrHostPortTaken, *mapping.From, protocol, holder)
 		}
 
-		return database.Port{Container: mapping.To, Host: *mapping.From, Protocol: string(protocol)}, nil
+		return database.Port{
+			Name:      nameOf(mapping),
+			Container: mapping.To,
+			Host:      *mapping.From,
+			Protocol:  string(protocol),
+		}, nil
 	}
 
 	// An existing allocation is kept so that the workload's address doesn't move
-	// every time something unrelated about it changes.
+	// every time something unrelated about it changes. Only the host port is kept:
+	// renaming a port is a change to what the specification calls it rather than a
+	// reason to move where it is reached.
 	if previous, ok := held[portKey{mapping.To, protocol}]; ok && previous.Dynamic {
+		previous.Name = nameOf(mapping)
+
 		return previous, nil
 	}
 
 	return database.Port{
+		Name:      nameOf(mapping),
 		Container: mapping.To,
 		Host:      allocations[portKey{mapping.To, protocol}],
 		Protocol:  string(protocol),
 		Dynamic:   true,
 	}, nil
+}
+
+// nameOf reports what a mapping calls its port, which is empty for one the
+// specification did not name.
+func nameOf(mapping api.PortMapping) string {
+	if mapping.Name == nil {
+		return ""
+	}
+
+	return *mapping.Name
 }
 
 // protocolOf reports which protocol a mapping publishes on.
@@ -1302,6 +1322,7 @@ func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.Workloa
 		}
 
 		mappings = append(mappings, api.PortMapping{
+			Name:     mapping.Name,
 			To:       mapping.To,
 			From:     new(resolved.Host),
 			Protocol: new(api.Protocol(protocol)),
@@ -1323,12 +1344,20 @@ func newResolvedPorts(ports []database.Port) []api.ResolvedPort {
 
 	resolved := make([]api.ResolvedPort, 0, len(ports))
 	for _, port := range ports {
-		resolved = append(resolved, api.ResolvedPort{
+		entry := api.ResolvedPort{
 			To:       port.Container,
 			From:     port.Host,
 			Protocol: api.Protocol(port.Protocol),
 			Dynamic:  port.Dynamic,
-		})
+		}
+
+		// Reported as absent rather than as an empty string for a port the
+		// specification did not name, which is how the field is sent everywhere else.
+		if port.Name != "" {
+			entry.Name = new(port.Name)
+		}
+
+		resolved = append(resolved, entry)
 	}
 
 	return resolved
