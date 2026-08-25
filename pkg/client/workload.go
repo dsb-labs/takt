@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
@@ -42,6 +43,8 @@ type (
 		State WorkloadState
 		// Whether the workload is being torn down and will shortly disappear.
 		Deleting bool
+		// Whether the workload has been stopped and is intentionally not running.
+		Suspended bool
 		// The specification that was submitted.
 		Spec manifest.Spec
 		// The port mappings the server settled on, including any it allocated. These
@@ -126,6 +129,10 @@ const (
 	// WorkloadStateFailed indicates the workload is not working, whether because an
 	// instance failed or because it is not passing its health check.
 	WorkloadStateFailed WorkloadState = "failed"
+	// WorkloadStateSuspended indicates the workload was stopped by an operator and
+	// stays down until it is started again. Unlike stopped, the server does not
+	// intend to fix it.
+	WorkloadStateSuspended WorkloadState = "suspended"
 )
 
 const (
@@ -242,35 +249,37 @@ func (c *Client) List(ctx context.Context, queries ...string) ([]Workload, error
 }
 
 type (
-	// The DeleteOption type is a function that modifies how a delete is performed.
-	DeleteOption func(*deleteConfig)
+	// The WaitOption type is a function that modifies whether a lifecycle
+	// operation blocks until the server has acted on it.
+	WaitOption func(*waitConfig)
 
-	deleteConfig struct {
+	waitConfig struct {
 		wait     bool
 		interval time.Duration
 	}
 )
 
-func defaultDeleteConfig() *deleteConfig {
-	return &deleteConfig{
+func defaultWaitConfig() *waitConfig {
+	return &waitConfig{
 		interval: 500 * time.Millisecond,
 	}
 }
 
-// WithWait modifies a delete to block until the server has finished tearing the
-// workload down and it has disappeared, rather than returning as soon as it has
-// been marked for deletion.
+// WithWait modifies a lifecycle operation to block until the server has finished
+// acting on it: a delete until the workload has disappeared, a stop until
+// nothing is running for it, a start until something is, and a restart until a
+// replacement instance has appeared.
 //
-// Waiting is polling, so the call returns once the workload is gone, the context is
+// Waiting is polling, so the call returns once that has happened, the context is
 // cancelled, or the server reports an error.
-func WithWait() DeleteOption {
-	return func(c *deleteConfig) { c.wait = true }
+func WithWait() WaitOption {
+	return func(c *waitConfig) { c.wait = true }
 }
 
-// WithWaitInterval modifies how often a waiting delete polls the server, and
+// WithWaitInterval modifies how often a waiting operation polls the server, and
 // implies WithWait.
-func WithWaitInterval(interval time.Duration) DeleteOption {
-	return func(c *deleteConfig) {
+func WithWaitInterval(interval time.Duration) WaitOption {
+	return func(c *waitConfig) {
 		c.wait = true
 		c.interval = interval
 	}
@@ -282,8 +291,8 @@ func WithWaitInterval(interval time.Duration) DeleteOption {
 // Deletion is asynchronous: the returned workload is reported as terminating, and
 // disappears once the server has stopped everything running for it. Pass WithWait
 // to block until that has happened.
-func (c *Client) Delete(ctx context.Context, name string, options ...DeleteOption) (Workload, error) {
-	config := defaultDeleteConfig()
+func (c *Client) Delete(ctx context.Context, name string, options ...WaitOption) (Workload, error) {
+	config := defaultWaitConfig()
 	for _, option := range options {
 		option(config)
 	}
@@ -335,6 +344,177 @@ func (c *Client) waitForTeardown(ctx context.Context, name string, interval time
 				return nil
 			case err != nil:
 				return fmt.Errorf("failed to wait for workload deletion: %w", err)
+			}
+		}
+	}
+}
+
+// Stop marks the workload with the given name as suspended and returns it as it
+// stood when marked. Returns ErrWorkloadNotFound when no such workload exists,
+// and IsConflict reports true of the error for a workload that is being deleted.
+//
+// Stopping is asynchronous: the mark holds the workload down and the server
+// stops its instances afterwards. Pass WithWait to block until nothing is
+// running for it. The specification and its version are untouched, so Start
+// resumes the workload rather than replacing it. Suspension survives a server
+// restart and holds until Start clears it.
+func (c *Client) Stop(ctx context.Context, name string, options ...WaitOption) (Workload, error) {
+	config := defaultWaitConfig()
+	for _, option := range options {
+		option(config)
+	}
+
+	resp, err := c.api.StopWorkloadWithResponse(ctx, name, api.StopWorkloadJSONRequestBody{})
+	if err != nil {
+		return Workload{}, fmt.Errorf("failed to stop workload: %w", err)
+	}
+
+	var workload Workload
+	switch {
+	case resp.JSON202 != nil:
+		workload = newWorkload(resp.JSON202.Workload)
+	case resp.JSON404 != nil:
+		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
+	case resp.JSON409 != nil:
+		return Workload{}, newError(http.StatusConflict, resp.JSON409)
+	case resp.JSON500 != nil:
+		return Workload{}, newError(http.StatusInternalServerError, resp.JSON500)
+	default:
+		return Workload{}, newError(resp.StatusCode(), nil)
+	}
+
+	if !config.wait {
+		return workload, nil
+	}
+
+	return c.waitFor(ctx, name, config.interval, func(w Workload) bool {
+		return w.Suspended && len(w.Instances) == 0
+	})
+}
+
+// Start clears the suspension of the workload with the given name and returns it
+// as it stood when cleared. Returns ErrWorkloadNotFound when no such workload
+// exists, and IsConflict reports true of the error for a workload that is being
+// deleted.
+//
+// Starting is asynchronous: the server starts the workload's instances on its
+// next pass. Pass WithWait to block until the workload has left pending — for a
+// scheduled workload that is its next occurrence, so waiting on one blocks until
+// the schedule next fires. Starting a workload that is not suspended changes
+// nothing.
+func (c *Client) Start(ctx context.Context, name string, options ...WaitOption) (Workload, error) {
+	config := defaultWaitConfig()
+	for _, option := range options {
+		option(config)
+	}
+
+	resp, err := c.api.StartWorkloadWithResponse(ctx, name, api.StartWorkloadJSONRequestBody{})
+	if err != nil {
+		return Workload{}, fmt.Errorf("failed to start workload: %w", err)
+	}
+
+	var workload Workload
+	switch {
+	case resp.JSON202 != nil:
+		workload = newWorkload(resp.JSON202.Workload)
+	case resp.JSON404 != nil:
+		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
+	case resp.JSON409 != nil:
+		return Workload{}, newError(http.StatusConflict, resp.JSON409)
+	case resp.JSON500 != nil:
+		return Workload{}, newError(http.StatusInternalServerError, resp.JSON500)
+	default:
+		return Workload{}, newError(resp.StatusCode(), nil)
+	}
+
+	if !config.wait {
+		return workload, nil
+	}
+
+	return c.waitFor(ctx, name, config.interval, func(w Workload) bool {
+		return !w.Suspended && w.State != WorkloadStatePending
+	})
+}
+
+// Restart asks the server to replace the workload's running instances and
+// returns the workload as it stood when the request was recorded. Returns
+// ErrWorkloadNotFound when no such workload exists, and IsConflict reports true
+// of the error for a workload that is being deleted or is suspended.
+//
+// The replacement happens on the server's next pass, from the unchanged
+// specification, so the version does not move. Pass WithWait to block until an
+// instance that did not exist before the request has appeared.
+func (c *Client) Restart(ctx context.Context, name string, options ...WaitOption) (Workload, error) {
+	config := defaultWaitConfig()
+	for _, option := range options {
+		option(config)
+	}
+
+	// The instances are read before the request, because "the restart happened" is
+	// only observable as an instance that was not there before it.
+	var before map[string]struct{}
+	if config.wait {
+		current, err := c.Get(ctx, name)
+		if err != nil {
+			return Workload{}, err
+		}
+
+		before = make(map[string]struct{}, len(current.Instances))
+		for _, instance := range current.Instances {
+			before[instance.ID] = struct{}{}
+		}
+	}
+
+	resp, err := c.api.RestartWorkloadWithResponse(ctx, name, api.RestartWorkloadJSONRequestBody{})
+	if err != nil {
+		return Workload{}, fmt.Errorf("failed to restart workload: %w", err)
+	}
+
+	var workload Workload
+	switch {
+	case resp.JSON202 != nil:
+		workload = newWorkload(resp.JSON202.Workload)
+	case resp.JSON404 != nil:
+		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
+	case resp.JSON409 != nil:
+		return Workload{}, newError(http.StatusConflict, resp.JSON409)
+	case resp.JSON500 != nil:
+		return Workload{}, newError(http.StatusInternalServerError, resp.JSON500)
+	default:
+		return Workload{}, newError(resp.StatusCode(), nil)
+	}
+
+	if !config.wait {
+		return workload, nil
+	}
+
+	return c.waitFor(ctx, name, config.interval, func(w Workload) bool {
+		return slices.ContainsFunc(w.Instances, func(instance Instance) bool {
+			_, existed := before[instance.ID]
+
+			return !existed
+		})
+	})
+}
+
+// waitFor polls the workload until it satisfies the given condition, returning it
+// as it then stands.
+func (c *Client) waitFor(ctx context.Context, name string, interval time.Duration, settled func(Workload) bool) (Workload, error) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return Workload{}, ctx.Err()
+		case <-ticker.C:
+			workload, err := c.Get(ctx, name)
+			if err != nil {
+				return Workload{}, fmt.Errorf("failed to wait for workload: %w", err)
+			}
+
+			if settled(workload) {
+				return workload, nil
 			}
 		}
 	}
@@ -443,6 +623,9 @@ func newWorkload(w api.Workload) Workload {
 	}
 	if w.Deleting != nil {
 		workload.Deleting = *w.Deleting
+	}
+	if w.Suspended != nil {
+		workload.Suspended = *w.Suspended
 	}
 	if w.LastError != nil {
 		workload.LastError = *w.LastError

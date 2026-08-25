@@ -30,7 +30,7 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			var options []client.DeleteOption
+			var options []client.WaitOption
 			if wait {
 				options = append(options, client.WithWait())
 			}
