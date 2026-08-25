@@ -1,0 +1,7 @@
+version: v1
+name: example
+ports:
+  - to: 8080
+    protocol: sctp
+container:
+  image: example/example:latest

@@ -31,7 +31,12 @@ func wireSpec(s manifest.Spec) api.WorkloadSpec {
 	if len(s.Ports) > 0 {
 		mappings := make([]api.PortMapping, 0, len(s.Ports))
 		for _, port := range s.Ports {
-			mapping := api.PortMapping{To: port.To}
+			protocol := port.Protocol
+			if protocol == "" {
+				protocol = manifest.ProtocolTCP
+			}
+
+			mapping := api.PortMapping{To: port.To, Protocol: new(api.Protocol(protocol))}
 
 			// An unset host port is sent as absent rather than as zero, which is how
 			// the server is asked to allocate one.

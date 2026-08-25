@@ -1,0 +1,11 @@
+version: v1
+name: example
+ports:
+  - to: 53
+    protocol: tcp
+  - to: 53
+    protocol: udp
+health:
+  tcp: true
+container:
+  image: example/example:latest

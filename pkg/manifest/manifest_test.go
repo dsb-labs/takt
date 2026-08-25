@@ -41,7 +41,10 @@ func TestParse(t *testing.T) {
 				require.NotNil(t, spec.Container)
 				assert.Equal(t, "example/example:latest", spec.Container.Image)
 				assert.Equal(t, map[string]string{"EXAMPLE": "EXAMPLE"}, spec.Env)
-				assert.Equal(t, []manifest.Port{{To: 8080, From: 4141}, {To: 9090}}, spec.Ports)
+				assert.Equal(t, []manifest.Port{
+					{To: 8080, From: 4141, Protocol: manifest.ProtocolTCP},
+					{To: 9090, Protocol: manifest.ProtocolTCP},
+				}, spec.Ports)
 				assert.Equal(t, []manifest.VolumeMount{{Name: "example-data", To: "/var/lib/example"}}, spec.Volumes)
 
 				assert.Nil(t, spec.Exec)
@@ -111,6 +114,24 @@ func TestParse(t *testing.T) {
 			Name:         "rejects a check on a workload that publishes no ports",
 			File:         "exec_health_no_ports.yaml",
 			ExpectsError: true,
+		},
+		{
+			// A connection to a UDP port always succeeds, so a check against one
+			// would report every workload as healthy.
+			Name:         "rejects a check on a workload publishing only udp",
+			File:         "health_udp_only.yaml",
+			ExpectsError: true,
+		},
+		{
+			// Only the TCP port is checkable, so naming one is not ambiguous even
+			// though two ports are published.
+			Name: "a check on the tcp side of a dual-protocol workload",
+			File: "health_dual_ports.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Health)
+				assert.True(t, spec.Health.TCP)
+				assert.Zero(t, spec.Health.Port)
+			},
 		},
 		{
 			Name: "a health check over http",
@@ -313,8 +334,38 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			Name: "a udp port",
+			File: "ports_udp.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, []manifest.Port{{To: 51820, Protocol: manifest.ProtocolUDP}}, spec.Ports)
+			},
+		},
+		{
+			// TCP and UDP are separate address spaces, so one workload publishing the
+			// same number on both is publishing two different ports, which is what
+			// DNS wants.
+			Name: "the same port published on both protocols",
+			File: "ports_dual.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, []manifest.Port{
+					{To: 53, Protocol: manifest.ProtocolTCP},
+					{To: 53, Protocol: manifest.ProtocolUDP},
+				}, spec.Ports)
+			},
+		},
+		{
+			Name:         "rejects a protocol orca cannot publish",
+			File:         "ports_bad_protocol.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:         "rejects the same container port published twice",
 			File:         "duplicate_ports.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects the same udp port published twice",
+			File:         "duplicate_udp_ports.yaml",
 			ExpectsError: true,
 		},
 		{

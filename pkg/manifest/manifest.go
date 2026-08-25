@@ -96,6 +96,10 @@ func Parse(r io.Reader) (Spec, error) {
 
 	spec.Restart.defaults()
 
+	for i := range spec.Ports {
+		spec.Ports[i].defaults()
+	}
+
 	if spec.Schedule != nil {
 		spec.Schedule.defaults()
 	}
@@ -342,8 +346,8 @@ func validatePorts(spec Spec, runtime Runtime) error {
 		// command.
 		for _, port := range spec.Ports {
 			if port.From == 0 {
-				return fmt.Errorf("invalid ports: port %d must name the host port it binds, "+
-					"which the %s runtime does not allocate", port.To, runtime)
+				return fmt.Errorf("invalid ports: port %d/%s must name the host port it binds, "+
+					"which the %s runtime does not allocate", port.To, port.Protocol, runtime)
 			}
 		}
 
@@ -552,21 +556,32 @@ func validateHealth(spec Spec, runtime Runtime) error {
 
 // validateHealthPort reports whether the check names a port the workload actually
 // publishes, since a probe is performed against a published address.
+//
+// Only a TCP port counts. Both probes connect, and a connection to a UDP port always
+// succeeds whatever is behind it, so a check against one would report every workload
+// as healthy. A workload publishing UDP alone is refused a check for the same reason
+// a runtime that cannot be probed is.
 func validateHealthPort(health Health, ports []Port) error {
-	if len(ports) == 0 {
-		return errors.New("invalid health: the workload publishes no ports to check")
+	checkable := slices.DeleteFunc(slices.Clone(ports), func(port Port) bool {
+		return port.Protocol != ProtocolTCP
+	})
+
+	if len(checkable) == 0 {
+		return fmt.Errorf("invalid health: the workload publishes no %s port to check, "+
+			"and a %s port always accepts a connection", ProtocolTCP, ProtocolUDP)
 	}
 
 	if health.Port == 0 {
-		if len(ports) > 1 {
+		if len(checkable) > 1 {
 			return errors.New("invalid health: port is required when more than one port is published")
 		}
 
 		return nil
 	}
 
-	if !slices.ContainsFunc(ports, func(port Port) bool { return port.To == health.Port }) {
-		return fmt.Errorf("invalid health: port %d is not published by the workload", health.Port)
+	if !slices.ContainsFunc(checkable, func(port Port) bool { return port.To == health.Port }) {
+		return fmt.Errorf("invalid health: port %d/%s is not published by the workload",
+			health.Port, ProtocolTCP)
 	}
 
 	return nil
@@ -660,23 +675,36 @@ func validateExec(spec Exec) error {
 
 // validPorts checks that every published port is usable and that no two entries
 // describe the same port, either inside the workload or on the host.
+//
+// A port's identity includes its protocol, because TCP and UDP are separate address
+// spaces. 53/tcp beside 53/udp is one workload publishing two different ports, which
+// is what DNS wants, where 53/tcp twice is the same port named twice.
 func validPorts(ports []Port) error {
 	if len(ports) == 0 {
 		return nil
 	}
 
-	seenTo := make(map[int]struct{}, len(ports))
-	seenFrom := make(map[int]struct{}, len(ports))
+	type key struct {
+		port     int
+		protocol Protocol
+	}
+
+	seenTo := make(map[key]struct{}, len(ports))
+	seenFrom := make(map[key]struct{}, len(ports))
 
 	for _, port := range ports {
+		if err := validProtocol(port.Protocol); err != nil {
+			return err
+		}
+
 		if err := validPort(port.To, "to"); err != nil {
 			return err
 		}
 
-		if _, ok := seenTo[port.To]; ok {
-			return fmt.Errorf("port %d is published more than once", port.To)
+		if _, ok := seenTo[key{port.To, port.Protocol}]; ok {
+			return fmt.Errorf("port %d/%s is published more than once", port.To, port.Protocol)
 		}
-		seenTo[port.To] = struct{}{}
+		seenTo[key{port.To, port.Protocol}] = struct{}{}
 
 		// An unset host port asks for an allocation, so there is nothing to check
 		// and no duplicate to find: each allocation is distinct by construction.
@@ -688,13 +716,23 @@ func validPorts(ports []Port) error {
 			return err
 		}
 
-		if _, ok := seenFrom[port.From]; ok {
-			return fmt.Errorf("host port %d is used more than once", port.From)
+		if _, ok := seenFrom[key{port.From, port.Protocol}]; ok {
+			return fmt.Errorf("host port %d/%s is used more than once", port.From, port.Protocol)
 		}
-		seenFrom[port.From] = struct{}{}
+		seenFrom[key{port.From, port.Protocol}] = struct{}{}
 	}
 
 	return nil
+}
+
+// validProtocol reports whether a port names a protocol orca can publish it on.
+func validProtocol(protocol Protocol) error {
+	switch protocol {
+	case ProtocolTCP, ProtocolUDP:
+		return nil
+	default:
+		return fmt.Errorf("protocol %q is not one of %s or %s", protocol, ProtocolTCP, ProtocolUDP)
+	}
 }
 
 func validPort(port int, field string) error {

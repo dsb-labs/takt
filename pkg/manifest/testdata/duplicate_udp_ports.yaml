@@ -1,0 +1,9 @@
+version: v1
+name: example
+ports:
+  - to: 53
+    protocol: udp
+  - to: 53
+    protocol: udp
+container:
+  image: example/example:latest

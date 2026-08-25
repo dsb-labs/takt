@@ -25,6 +25,9 @@ type (
 	// the previous run is still going.
 	OverlapPolicy string
 
+	// The Protocol type names the transport protocol a port is published on.
+	Protocol string
+
 	// The MountKind type names what a mount takes its contents from, which
 	// determines which of a mount's source fields is used.
 	MountKind string
@@ -193,6 +196,10 @@ type (
 		// the usual case: the workload keeps a port of its own and callers read the
 		// allocated one back from the workload.
 		From int
+		// The transport protocol the port is published on. Defaults to TCP, and a
+		// workload may publish the same port on both, since the two are separate
+		// address spaces.
+		Protocol Protocol
 	}
 
 	// The Exec type describes the command a workload runs on the host.
@@ -295,6 +302,14 @@ const (
 	// OverlapSkip leaves the running instance alone and misses the occurrence, which
 	// is what a job that must not be interrupted wants.
 	OverlapSkip OverlapPolicy = "skip"
+)
+
+const (
+	// ProtocolTCP publishes a port over TCP. It is the default.
+	ProtocolTCP Protocol = "tcp"
+	// ProtocolUDP publishes a port over UDP, which is a separate address space: a
+	// port published over one protocol says nothing about the other.
+	ProtocolUDP Protocol = "udp"
 )
 
 const (
@@ -444,6 +459,11 @@ func NewSpec(spec api.WorkloadSpec) Spec {
 			if mapping.From != nil {
 				port.From = *mapping.From
 			}
+			if mapping.Protocol != nil {
+				port.Protocol = Protocol(*mapping.Protocol)
+			}
+
+			port.defaults()
 
 			out.Ports = append(out.Ports, port)
 		}
@@ -667,6 +687,17 @@ func newRestart(spec *api.RestartSpec) *Restart {
 func (s *Schedule) defaults() {
 	if s.Overlap == "" {
 		s.Overlap = OverlapReplace
+	}
+}
+
+// defaults fills in what a port left unset.
+//
+// A manifest naming no protocol asks for TCP, which is what a specification written
+// before the protocol existed meant. Resolving it here rather than at every reader
+// keeps a port's protocol something the rest of orca can rely on being set.
+func (p *Port) defaults() {
+	if p.Protocol == "" {
+		p.Protocol = ProtocolTCP
 	}
 }
 
