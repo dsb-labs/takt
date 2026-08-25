@@ -14,6 +14,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
+	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
@@ -68,6 +69,9 @@ type (
 func New(ctx context.Context, config Config) (*Telemetry, error) {
 	res, err := resource.New(ctx,
 		resource.WithTelemetrySDK(),
+		// The host name is what tells one node's telemetry from another's once
+		// several export to the same collector.
+		resource.WithHost(),
 		resource.WithAttributes(
 			semconv.ServiceName("orca"),
 			semconv.ServiceVersion(version()),
@@ -90,6 +94,13 @@ func New(ctx context.Context, config Config) (*Telemetry, error) {
 		sdkmetric.WithReader(reader),
 		sdkmetric.WithResource(res),
 	)
+
+	// The runtime's own metrics — goroutines, memory, garbage collection — are
+	// the failure class nothing measuring workloads can see: the server itself
+	// leaking.
+	if err = otelruntime.Start(otelruntime.WithMeterProvider(meters)); err != nil {
+		return nil, fmt.Errorf("failed to start runtime metrics: %w", err)
+	}
 
 	telemetry := &Telemetry{
 		registry:  registry,
