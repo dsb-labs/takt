@@ -241,15 +241,12 @@ func Run(ctx context.Context, config Config) error {
 		Volumes:   volumeSvc,
 		// The repositories rather than the services: hashing a workload needs what
 		// each thing currently holds and nothing else.
-		Secrets:   secrets,
-		Variables: variables,
-		Images:    dockerDriver,
-		Allocator: allocator,
-		Checker:   checker,
-		// The reconciler itself, because a converge error is only observable during
-		// the pass that hits it: the reconciler is the one component that has it.
-		Errors: reconcile,
-		Notify: reconcile.Notify,
+		Secrets:    secrets,
+		Variables:  variables,
+		Images:     dockerDriver,
+		Allocator:  allocator,
+		Checker:    checker,
+		Reconciler: reconcile,
 	})
 
 	mux := http.NewServeMux()

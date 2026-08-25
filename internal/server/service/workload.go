@@ -18,6 +18,7 @@ import (
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -41,6 +42,9 @@ var (
 	// ErrWorkloadDeleting is returned when applying a workload that is currently
 	// being torn down.
 	ErrWorkloadDeleting = errors.New("workload is being deleted")
+	// ErrWorkloadSuspended is returned when restarting a workload that is
+	// suspended, since nothing would start until it is started again.
+	ErrWorkloadSuspended = errors.New("workload is suspended")
 	// ErrHostPortTaken is returned when a specification pins a host port that
 	// another workload already holds.
 	ErrHostPortTaken = errors.New("host port already in use")
@@ -87,6 +91,33 @@ type (
 		// MarkDeleting should record that the workload with the given name is to be
 		// deleted, returning it as it now stands.
 		MarkDeleting(ctx context.Context, name string) (database.Workload, error)
+		// Suspend should record that the workload with the given name is not to
+		// run, returning it as it now stands.
+		Suspend(ctx context.Context, name string) (database.Workload, error)
+		// Resume should clear the workload's suspension, returning it as it now
+		// stands.
+		Resume(ctx context.Context, name string) (database.Workload, error)
+	}
+
+	// The Reconciler interface describes what the service asks of the loop that
+	// owns the runtime.
+	//
+	// The service records what is wanted and never touches running work, so
+	// everything here crosses that one boundary: waking the loop when desired
+	// state changes, recording a restart request for it to act on, and reading
+	// why its last pass over a workload failed — which is only observable during
+	// the pass that hits it, so the reconciler is the one component that has it.
+	Reconciler interface {
+		// Notify should ask for a reconciliation pass to run as soon as possible,
+		// and never block.
+		Notify()
+		// Restart should record that the workload's instances are to be replaced
+		// on the next pass over it.
+		Restart(workload string)
+		// LastError should report why the last converge pass over a workload
+		// failed and when, reporting false when the workload's last pass
+		// succeeded or none has run.
+		LastError(workload string) (string, time.Time, bool)
 	}
 
 	// The PortRepository interface describes the port allocation operations the
@@ -121,6 +152,28 @@ type (
 	Allocator interface {
 		// Allocate should return a free host port, avoiding those in taken.
 		Allocate(taken []int) (int, error)
+	}
+
+	// The Checker interface describes how the service reads the health of
+	// workloads.
+	//
+	// Registering the checks is the reconciler's job rather than this one's: a
+	// check has to be kept in step with what is actually running, and the
+	// reconciler is what runs continuously. Registering on read would mean a
+	// restarted server checked nothing until somebody happened to look.
+	Checker interface {
+		// Result should return the most recent outcome for a workload, reporting
+		// false when it has no check registered.
+		Result(workload string) (health.Result, bool)
+	}
+
+	// The Health type reports what orca established about a workload's health,
+	// and whether it checks the workload at all.
+	Health struct {
+		// Whether the workload declares a check orca performs.
+		Checked bool
+		// The most recent outcome, meaningful only when Checked.
+		Result health.Result
 	}
 
 	// The hashedSpec type is what a workload's specification hash is computed over
@@ -220,18 +273,17 @@ type (
 	// The WorkloadService type orchestrates the persistence layer and the driver
 	// that runs workloads.
 	WorkloadService struct {
-		logger    *slog.Logger
-		drivers   map[string]Driver
-		workloads WorkloadRepository
-		ports     PortRepository
-		volumes   VolumeLocator
-		secrets   SecretRevisions
-		variables VariableValues
-		images    ImageResolver
-		allocator Allocator
-		checker   Checker
-		errors    Errors
-		notify    func()
+		logger     *slog.Logger
+		drivers    map[string]Driver
+		workloads  WorkloadRepository
+		ports      PortRepository
+		volumes    VolumeLocator
+		secrets    SecretRevisions
+		variables  VariableValues
+		images     ImageResolver
+		allocator  Allocator
+		checker    Checker
+		reconciler Reconciler
 	}
 )
 
@@ -263,30 +315,27 @@ type WorkloadServiceConfig struct {
 	// The checker that establishes whether workloads are working. May be nil, in
 	// which case no workload is checked and none reports health.
 	Checker Checker
-	// Where the last converge error of each workload is read from. May be nil, in
-	// which case no workload reports one.
-	Errors Errors
-	// Called whenever desired state changes, so that the reconciler can converge
-	// immediately rather than waiting for its next tick. May be nil when no
-	// reconciler is running, as in tests.
-	Notify func()
+	// The loop that owns the runtime: woken whenever desired state changes,
+	// handed restart requests to act on, and read for the last converge error of
+	// each workload. May be nil when no reconciler is running, as in tests, in
+	// which case nothing is woken and no workload reports an error.
+	Reconciler Reconciler
 }
 
 // NewWorkloadService returns a WorkloadService built from the given configuration.
 func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 	return &WorkloadService{
-		logger:    config.Logger.With("component", "service"),
-		drivers:   config.Drivers,
-		workloads: config.Workloads,
-		ports:     config.Ports,
-		volumes:   config.Volumes,
-		secrets:   config.Secrets,
-		variables: config.Variables,
-		images:    config.Images,
-		allocator: config.Allocator,
-		checker:   config.Checker,
-		errors:    config.Errors,
-		notify:    config.Notify,
+		logger:     config.Logger.With("component", "service"),
+		drivers:    config.Drivers,
+		workloads:  config.Workloads,
+		ports:      config.Ports,
+		volumes:    config.Volumes,
+		secrets:    config.Secrets,
+		variables:  config.Variables,
+		images:     config.Images,
+		allocator:  config.Allocator,
+		checker:    config.Checker,
+		reconciler: config.Reconciler,
 	}
 }
 
@@ -548,6 +597,105 @@ func (s *WorkloadService) Delete(ctx context.Context, name string) (Workload, er
 	s.wake()
 
 	return s.hydrate(ctx, marked)
+}
+
+// Stop marks the workload with the given name as suspended and returns it as it
+// now stands. Returns ErrWorkloadNotFound when no such workload exists, or
+// ErrWorkloadDeleting when it is being torn down, since there is nothing left to
+// hold down.
+//
+// Stopping is asynchronous, on the same reasoning as Delete: the workload is
+// marked and the reconciler stops its work, so nothing here races the loop that
+// owns the runtime. Suspension is desired state — it survives a server restart
+// and holds until Start clears it — and it leaves the specification and version
+// untouched, so starting the workload again resumes it rather than replacing it.
+func (s *WorkloadService) Stop(ctx context.Context, name string) (Workload, error) {
+	existing, err := s.workloads.Get(ctx, name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return Workload{}, ErrWorkloadNotFound
+	case err != nil:
+		return Workload{}, fmt.Errorf("failed to load workload: %w", err)
+	case !existing.DeletedAt.IsZero():
+		return Workload{}, ErrWorkloadDeleting
+	}
+
+	marked, err := s.workloads.Suspend(ctx, name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return Workload{}, ErrWorkloadNotFound
+	case err != nil:
+		return Workload{}, fmt.Errorf("failed to suspend workload: %w", err)
+	}
+
+	s.logger.With("workload", name).Debug("workload suspended")
+	s.wake()
+
+	return s.hydrate(ctx, marked)
+}
+
+// Start clears the suspension of the workload with the given name and returns it
+// as it now stands. Returns ErrWorkloadNotFound when no such workload exists, or
+// ErrWorkloadDeleting when it is being torn down, since it can never run again.
+//
+// Starting is asynchronous: the mark is cleared and the next reconcile pass
+// starts the workload from whatever specification is stored, including one
+// applied while it was suspended. Starting a workload that is not suspended
+// changes nothing.
+func (s *WorkloadService) Start(ctx context.Context, name string) (Workload, error) {
+	existing, err := s.workloads.Get(ctx, name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return Workload{}, ErrWorkloadNotFound
+	case err != nil:
+		return Workload{}, fmt.Errorf("failed to load workload: %w", err)
+	case !existing.DeletedAt.IsZero():
+		return Workload{}, ErrWorkloadDeleting
+	}
+
+	resumed, err := s.workloads.Resume(ctx, name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return Workload{}, ErrWorkloadNotFound
+	case err != nil:
+		return Workload{}, fmt.Errorf("failed to resume workload: %w", err)
+	}
+
+	s.logger.With("workload", name).Debug("workload resumed")
+	s.wake()
+
+	return s.hydrate(ctx, resumed)
+}
+
+// Restart asks the reconciler to replace the workload's running instances and
+// returns the workload as it now stands. Returns ErrWorkloadNotFound when no
+// such workload exists, ErrWorkloadDeleting when it is being torn down, and
+// ErrWorkloadSuspended when it is suspended, since nothing would start.
+//
+// The request is recorded in memory rather than stored: one the server loses to
+// a crash can simply be made again. The specification and its version are
+// untouched, so the new instances run exactly what the old ones did.
+func (s *WorkloadService) Restart(ctx context.Context, name string) (Workload, error) {
+	existing, err := s.workloads.Get(ctx, name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return Workload{}, ErrWorkloadNotFound
+	case err != nil:
+		return Workload{}, fmt.Errorf("failed to load workload: %w", err)
+	case !existing.DeletedAt.IsZero():
+		return Workload{}, ErrWorkloadDeleting
+	case !existing.SuspendedAt.IsZero():
+		return Workload{}, ErrWorkloadSuspended
+	}
+
+	if s.reconciler != nil {
+		s.reconciler.Restart(name)
+	}
+
+	s.logger.With("workload", name).Debug("workload restart requested")
+	s.wake()
+
+	return s.hydrate(ctx, existing)
 }
 
 // Logs writes the recent output of the named workload to out, as the options describe.
@@ -1129,9 +1277,60 @@ func (s *WorkloadService) observe(ctx context.Context) map[string][]driver.Insta
 	return byWorkload
 }
 
+// wake asks for a reconciliation pass, so that a change to desired state is acted
+// on immediately rather than on the next tick.
 func (s *WorkloadService) wake() {
-	if s.notify != nil {
-		s.notify()
+	if s.reconciler != nil {
+		s.reconciler.Notify()
+	}
+}
+
+// lastError returns why a workload's last converge pass failed, reporting zero values
+// for one that is converging.
+func (s *WorkloadService) lastError(workload string) (string, time.Time) {
+	if s.reconciler == nil {
+		return "", time.Time{}
+	}
+
+	message, at, ok := s.reconciler.LastError(workload)
+	if !ok {
+		return "", time.Time{}
+	}
+
+	return message, at
+}
+
+// health returns what orca knows about a workload's health.
+func (s *WorkloadService) health(workload string) Health {
+	if s.checker == nil {
+		return Health{}
+	}
+
+	result, checked := s.checker.Result(workload)
+
+	return Health{Checked: checked, Result: result}
+}
+
+// healthState reports the instance state a workload's health implies, so that a
+// workload which is running but not working converges rather than being left alone.
+//
+// A failing check makes an instance failed, which routes it into the same paced
+// restart a crashed container takes — the reaction to "not working" is the same
+// whether the process died or merely stopped answering. A check that has not yet
+// passed makes the instance pending, which the reconciler treats as up: a workload
+// still starting must not be replaced for not having answered yet.
+func healthState(state driver.State, reported Health) driver.State {
+	if !reported.Checked || state != driver.StateRunning {
+		return state
+	}
+
+	switch reported.Result.Status {
+	case health.StatusUnhealthy:
+		return driver.StateFailed
+	case health.StatusStarting:
+		return driver.StatePending
+	default:
+		return state
 	}
 }
 
