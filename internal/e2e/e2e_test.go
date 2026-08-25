@@ -56,8 +56,11 @@ func TestMain(m *testing.M) {
 }
 
 func TestEndToEnd(t *testing.T) {
+	// The suite needs a docker daemon and takes minutes rather than seconds, so the
+	// main CI workflow leaves it out and the e2e workflow runs it. Saying so here is
+	// what tells somebody reading a log that the suite was left out on purpose.
 	if testing.Short() {
-		t.Skip()
+		t.Skip("end-to-end tests need a docker daemon: run without -short")
 	}
 
 	suite.Run(t, new(Suite))
