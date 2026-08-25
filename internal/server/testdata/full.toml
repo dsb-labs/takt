@@ -23,5 +23,8 @@ allow-paths = ["/opt/runtime", "/nix/store"]
 [secrets]
 key-file = "/etc/orca/secret.key"
 
+[telemetry]
+otlp-endpoint = "http://collector.example.com:4318"
+
 [logging]
 level = "debug"

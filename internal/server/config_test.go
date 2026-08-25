@@ -38,6 +38,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "/etc/orca/secret.key", config.Secrets.KeyFile)
 				assert.Equal(t, "/etc/orca/secret.key", config.KeyPath())
 				assert.Equal(t, []string{"/opt/runtime", "/nix/store"}, config.Exec.AllowPaths)
+				assert.Equal(t, "http://collector.example.com:4318", config.Telemetry.OTLPEndpoint)
 				assert.Equal(t, "debug", config.Logging.Level)
 			},
 		},
@@ -179,6 +180,23 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			Name:         "an unknown log level",
 			Mutate:       func(c *server.Config) { c.Logging.Level = "chatty" },
+			ExpectsError: true,
+		},
+		{
+			Name:   "a valid otlp endpoint",
+			Mutate: func(c *server.Config) { c.Telemetry.OTLPEndpoint = "https://collector.example.com:4318" },
+		},
+		{
+			Name:         "an otlp endpoint that is not a url",
+			Mutate:       func(c *server.Config) { c.Telemetry.OTLPEndpoint = "://collector" },
+			ExpectsError: true,
+		},
+		{
+			// The exporters speak OTLP over HTTP, so a scheme they cannot use —
+			// or a bare host that parses as one — is refused at startup rather
+			// than failing quietly on the first export.
+			Name:         "an otlp endpoint without an http scheme",
+			Mutate:       func(c *server.Config) { c.Telemetry.OTLPEndpoint = "collector.example.com:4318" },
 			ExpectsError: true,
 		},
 		{

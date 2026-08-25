@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/dsb-labs/orca/internal/server/port"
 )
@@ -32,6 +35,8 @@ type (
 		Workload WorkloadConfig `toml:"workload"`
 		// Secret storage settings.
 		Secrets SecretsConfig `toml:"secrets"`
+		// Trace and log export settings.
+		Telemetry TelemetryConfig `toml:"telemetry"`
 		// Logging settings.
 		Logging LoggingConfig `toml:"logging"`
 	}
@@ -135,6 +140,30 @@ type (
 		MaxPort int `toml:"max-port"`
 	}
 
+	// The TelemetryConfig type contains configuration for exporting traces and
+	// logs.
+	//
+	// Metrics need none of this: they are always collected and served by the
+	// /metrics endpoint.
+	TelemetryConfig struct {
+		// The OTLP endpoint traces and logs are exported to over HTTP, as a URL
+		// such as "http://collector.internal:4318". The scheme decides whether
+		// the connection uses TLS. Empty exports neither, which is the default.
+		//
+		// Everything beyond the endpoint — headers, timeouts, sampling, resource
+		// attributes — is read from the standard OTEL_* environment variables
+		// the SDK already honours, rather than repeated here.
+		OTLPEndpoint string `toml:"otlp-endpoint"`
+
+		// Replaces the OTLP span exporter when set. Never read from the
+		// configuration file; tests use it to write spans somewhere they can
+		// read.
+		SpanExporter sdktrace.SpanExporter `toml:"-"`
+		// Replaces the OTLP log exporter when set, under the same rules as
+		// SpanExporter.
+		LogExporter sdklog.Exporter `toml:"-"`
+	}
+
 	// The LoggingConfig type contains configuration for application logging.
 	LoggingConfig struct {
 		// The minimum level to emit. One of "debug", "info", "warn", "error".
@@ -222,6 +251,7 @@ func (c *Config) Validate() error {
 		c.Workload.validate(),
 		c.Docker.validate(),
 		c.Exec.validate(),
+		c.Telemetry.validate(),
 		c.Logging.validate(),
 	)
 }
@@ -289,6 +319,27 @@ func (c ExecConfig) validate() error {
 		if !filepath.IsAbs(path) {
 			return fmt.Errorf("exec allowed path must be absolute, got %q", path)
 		}
+	}
+
+	return nil
+}
+
+func (c TelemetryConfig) validate() error {
+	if c.OTLPEndpoint == "" {
+		return nil
+	}
+
+	// Parseable with a scheme and a host, and nothing more. Whether anything
+	// answers there is deliberately not checked, matching the docker config file:
+	// a collector that is down at startup is not a configuration error.
+	endpoint, err := url.Parse(c.OTLPEndpoint)
+	switch {
+	case err != nil:
+		return fmt.Errorf("telemetry otlp endpoint is not a valid url: %q", c.OTLPEndpoint)
+	case endpoint.Scheme != "http" && endpoint.Scheme != "https":
+		return fmt.Errorf("telemetry otlp endpoint must use http or https, got %q", c.OTLPEndpoint)
+	case endpoint.Host == "":
+		return fmt.Errorf("telemetry otlp endpoint must name a host, got %q", c.OTLPEndpoint)
 	}
 
 	return nil
