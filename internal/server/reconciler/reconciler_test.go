@@ -2533,6 +2533,104 @@ func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
 	})
 }
 
+func TestReconciler_Observations(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+
+	t.Run("reports a zero observation before the first pass", func(t *testing.T) {
+		r := reconciler.New(reconciler.Config{
+			Logger:  newTestLogger(t),
+			Drivers: map[string]reconciler.Driver{docker.Name: NewMockDriver(t)},
+		})
+
+		// A driver that has never been asked must still be reported, or a
+		// reader could not tell "not observed yet" from "no such driver".
+		observations := r.Observations()
+		require.Contains(t, observations, docker.Name)
+		assert.True(t, observations[docker.Name].At.IsZero())
+		assert.Empty(t, observations[docker.Name].Error)
+	})
+
+	t.Run("records a driver that answered", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+		repo.EXPECT().List(mock.Anything).Return(nil, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).
+			RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+				passes.inc()
+
+				return nil, nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Interval:  time.Hour,
+			Now:       func() time.Time { return now },
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+		awaitPasses(t, r, 1)
+
+		cancel()
+		require.NoError(t, <-done)
+
+		observation := r.Observations()[docker.Name]
+		assert.True(t, observation.At.Equal(now))
+		assert.Empty(t, observation.Error)
+	})
+
+	t.Run("records a driver that failed to answer", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+		// The pass abandons the observation on the failure, so the workloads
+		// may or may not be listed first — either order is fine here.
+		repo.EXPECT().List(mock.Anything).Return(nil, nil).Maybe()
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).
+			RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+				passes.inc()
+
+				return nil, errors.New("daemon gone")
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Interval:  time.Hour,
+			Now:       func() time.Time { return now },
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+		awaitPasses(t, r, 1)
+
+		cancel()
+		require.NoError(t, <-done)
+
+		observation := r.Observations()[docker.Name]
+		assert.True(t, observation.At.Equal(now))
+		assert.Equal(t, "daemon gone", observation.Error)
+	})
+}
+
 // The counter type counts reconciliation passes as the loop drives them, so that
 // tests can wait on the pass itself rather than polling the mock's call log —
 // which the loop is concurrently writing to.

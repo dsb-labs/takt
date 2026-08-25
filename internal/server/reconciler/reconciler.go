@@ -131,9 +131,10 @@ type (
 	//
 	// Reconciliation is level-triggered: every pass reads the full desired state,
 	// asks the driver what is actually running, and acts on the difference. Nothing
-	// is remembered between passes except restart backoff and the last converge
-	// error, so a missed event, a failed pass, or a server restart all recover on
-	// the next pass rather than leaving the node permanently wrong.
+	// is remembered between passes except restart backoff, the last converge error
+	// and how each driver last answered, so a missed event, a failed pass, or a
+	// server restart all recover on the next pass rather than leaving the node
+	// permanently wrong.
 	Reconciler struct {
 		logger     *slog.Logger
 		drivers    map[string]Driver
@@ -162,6 +163,14 @@ type (
 		// Counts completed passes, so that a caller can tell a pass has finished
 		// rather than inferring it from something a pass happens to do first.
 		passes atomic.Uint64
+
+		// Guards observations, separately from mux so a caller polling readiness
+		// never contends with a pass's backoff bookkeeping.
+		obsMux sync.Mutex
+		// How the most recent observation of each driver ended, keyed by runtime
+		// name. Seeded with a zero value per driver so a driver that has never
+		// answered reads as not ready rather than as absent.
+		observations map[string]Observation
 	}
 
 	// The Config type contains fields used to construct a Reconciler.
@@ -204,6 +213,15 @@ type (
 		// A test names the times it wants rather than waiting for them, which matters
 		// most for a schedule: the finest cron expression names one time a minute.
 		Now func() time.Time
+	}
+
+	// The Observation type records how the most recent attempt to observe one
+	// driver ended, which is what the readiness endpoint reports.
+	Observation struct {
+		// When the driver was last asked. Zero when it has not been asked yet.
+		At time.Time
+		// What the driver answered. Empty when it succeeded.
+		Error string
 	}
 
 	// The backoff type paces restarts of a workload that keeps failing, so that a
@@ -267,20 +285,26 @@ func clock(now func() time.Time) func() time.Time {
 // New returns a Reconciler that converges the drivers in config onto the desired
 // state in its repository.
 func New(config Config) *Reconciler {
+	observations := make(map[string]Observation, len(config.Drivers))
+	for name := range config.Drivers {
+		observations[name] = Observation{}
+	}
+
 	return &Reconciler{
-		logger:     config.Logger.With("component", "reconciler"),
-		drivers:    config.Drivers,
-		workloads:  config.Workloads,
-		ports:      config.Ports,
-		env:        config.Env,
-		mounts:     config.Mounts,
-		checker:    config.Checker,
-		bind:       config.Bind,
-		reallocate: config.Reallocate,
-		now:        clock(config.Now),
-		interval:   config.Interval,
-		backoff:    make(map[string]backoff),
-		lastError:  make(map[string]lastError),
+		logger:       config.Logger.With("component", "reconciler"),
+		drivers:      config.Drivers,
+		workloads:    config.Workloads,
+		ports:        config.Ports,
+		env:          config.Env,
+		mounts:       config.Mounts,
+		checker:      config.Checker,
+		bind:         config.Bind,
+		reallocate:   config.Reallocate,
+		now:          clock(config.Now),
+		interval:     config.Interval,
+		backoff:      make(map[string]backoff),
+		lastError:    make(map[string]lastError),
+		observations: observations,
 		// Buffered so that a caller signalling a change never blocks: a pass is
 		// already pending, which is all the signal conveys.
 		nudge: make(chan struct{}, 1),
@@ -347,6 +371,20 @@ func (r *Reconciler) Run(ctx context.Context) error {
 // to know.
 func (r *Reconciler) Passes() uint64 {
 	return r.passes.Load()
+}
+
+// Observations reports how the most recent attempt to observe each driver ended,
+// keyed by runtime name. A driver that has never been asked reports a zero
+// Observation.
+//
+// This is what the readiness endpoint reads. It is recorded as a pass observes,
+// so answering costs nothing and is at most one interval plus the driver timeout
+// stale — a cached recent answer rather than a live round-trip per poll.
+func (r *Reconciler) Observations() map[string]Observation {
+	r.obsMux.Lock()
+	defer r.obsMux.Unlock()
+
+	return maps.Clone(r.observations)
 }
 
 // reconcile runs a single pass. Errors affecting one workload are logged and the
@@ -1254,19 +1292,38 @@ func (r *Reconciler) driverFor(row database.Workload) (Driver, bool) {
 // A pass has to see everything, because a workload it cannot see reads as absent and
 // would be started again. One driver failing therefore fails the whole observation
 // rather than yielding a partial picture that would be acted on as though complete.
+//
+// How each driver answered is recorded per driver, inside the loop, so a failure
+// that abandons the observation still leaves an earlier driver's success on
+// record — readiness reports each driver on its own answer, not on the pass.
 func (r *Reconciler) observe(ctx context.Context) ([]driver.Instance, error) {
 	var instances []driver.Instance
 
-	for _, d := range r.drivers {
+	for name, d := range r.drivers {
 		observed, err := d.Observe(ctx)
+		r.recordObservation(name, err)
 		if err != nil {
-			return nil, fmt.Errorf("failed to observe the %s runtime: %w", d.Name(), err)
+			return nil, fmt.Errorf("failed to observe the %s runtime: %w", name, err)
 		}
 
 		instances = append(instances, observed...)
 	}
 
 	return instances, nil
+}
+
+// recordObservation remembers how observing one driver ended, which Observations
+// reports.
+func (r *Reconciler) recordObservation(name string, err error) {
+	observation := Observation{At: r.now()}
+	if err != nil {
+		observation.Error = err.Error()
+	}
+
+	r.obsMux.Lock()
+	defer r.obsMux.Unlock()
+
+	r.observations[name] = observation
 }
 
 // watch merges every driver's events into one channel, so the loop selects on a single
