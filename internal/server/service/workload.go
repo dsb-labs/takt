@@ -1247,6 +1247,7 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 	}
 
 	deleting := !row.DeletedAt.IsZero()
+	suspended := !row.SuspendedAt.IsZero()
 	policy := manifest.NewSpec(spec).Restart
 
 	// An instance a driver keeps only so that its output can still be read is left out
@@ -1270,6 +1271,14 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 		instances[i].State = CompletionState(instances[i], policy)
 	}
 
+	// A suspended workload's occurrences will not happen, so none is reported: a
+	// time a caller could wait for that the server has no intention of honouring
+	// would be worse than no answer.
+	var next time.Time
+	if !suspended {
+		next = nextRun(manifest.NewSpec(spec).Schedule, instances, row.UpdatedAt)
+	}
+
 	return Workload{
 		Name:        row.Name,
 		Version:     row.Version,
@@ -1279,11 +1288,12 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 		Instances:   instances,
 		Ports:       newResolvedPorts(ports),
 		Health:      reported,
-		State:       StateOf(instances, deleting),
+		State:       StateOf(instances, deleting, suspended),
 		Deleting:    deleting,
+		Suspended:   suspended,
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,
-		NextRun:     nextRun(manifest.NewSpec(spec).Schedule, instances, row.UpdatedAt),
+		NextRun:     next,
 		LastError:   lastError,
 		LastErrorAt: lastErrorAt,
 	}, nil
@@ -1348,12 +1358,17 @@ func CompletionState(instance driver.Instance, restart *manifest.Restart) driver
 }
 
 // StateOf derives a workload's overall state from its instances and whether it is
-// being deleted.
+// being deleted or suspended.
 //
 // A workload marked for deletion is terminating whatever its instances are doing,
 // because that is the only thing that will happen to it from here — reporting it as
 // running while it is on its way out would invite a caller to wait for something
 // that is never coming back.
+//
+// A suspended workload reads as suspended on the same reasoning: an instance still
+// up is mid-stop, and nothing will run until the workload is started again. Neither
+// stopped nor completed would be true — the server does not intend to fix it, and
+// its restart policy did not ask for the end.
 //
 // Otherwise running wins: a workload whose replacement is already up while its
 // predecessor is still going away is running, not terminating. Then teardown in
@@ -1361,9 +1376,13 @@ func CompletionState(instance driver.Instance, restart *manifest.Restart) driver
 // a consequence of the teardown rather than news in its own right. Failure outranks
 // a clean exit, and a workload with no instances at all is pending, because the
 // reconciler has yet to start it.
-func StateOf(instances []driver.Instance, deleting bool) api.WorkloadState {
+func StateOf(instances []driver.Instance, deleting, suspended bool) api.WorkloadState {
 	if deleting {
 		return api.WorkloadStateTerminating
+	}
+
+	if suspended {
+		return api.WorkloadStateSuspended
 	}
 
 	if len(instances) == 0 {
@@ -1423,13 +1442,16 @@ type Workload struct {
 	// What orca established about whether the workload is working.
 	Health Health
 	// The workload's overall state, derived from its instances and whether it is
-	// being deleted.
+	// being deleted or suspended.
 	State api.WorkloadState
 	// Whether the workload has been marked for deletion and is being torn down.
 	Deleting bool
+	// Whether the workload has been stopped and is intentionally not running.
+	Suspended bool
 	// The time the workload was first applied.
 	CreatedAt time.Time
-	// The time the workload's specification last changed.
+	// The time the workload's specification last changed, or a suspended
+	// workload was last resumed.
 	UpdatedAt time.Time
 	// When the workload next runs, for one that names a schedule. Zero for a workload
 	// that runs continuously, and for a scheduled one that has not run yet.

@@ -574,6 +574,7 @@ var workloadStates = []api.WorkloadState{
 	api.WorkloadStatePending,
 	api.WorkloadStateRunning,
 	api.WorkloadStateStopped,
+	api.WorkloadStateSuspended,
 	api.WorkloadStateTerminating,
 }
 
@@ -593,7 +594,7 @@ func (r *Reconciler) measure(ctx context.Context, rows []database.Workload, obse
 			instances[i].State = service.CompletionState(instances[i], policy)
 		}
 
-		counts[service.StateOf(instances, !row.DeletedAt.IsZero())]++
+		counts[service.StateOf(instances, !row.DeletedAt.IsZero(), !row.SuspendedAt.IsZero())]++
 	}
 
 	for _, state := range workloadStates {

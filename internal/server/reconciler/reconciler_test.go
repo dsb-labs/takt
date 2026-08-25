@@ -2740,9 +2740,10 @@ func TestReconciler_Metrics(t *testing.T) {
 
 		// Every state is recorded, so a state nothing is in reads as zero
 		// rather than being absent from the scrape.
-		assert.Len(t, counts, 6)
+		assert.Len(t, counts, 7)
 		assert.EqualValues(t, 1, counts["running"])
 		assert.EqualValues(t, 0, counts["pending"])
+		assert.EqualValues(t, 0, counts["suspended"])
 	})
 }
 
