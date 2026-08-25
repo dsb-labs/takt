@@ -169,6 +169,14 @@ type (
 		Result(workload string) (health.Result, bool)
 	}
 
+	// The portKey type identifies one of a workload's ports, which takes both the
+	// port inside the workload and the protocol it is published on: TCP and UDP are
+	// separate address spaces, so 53/tcp and 53/udp are different ports.
+	portKey struct {
+		container int
+		protocol  port.Protocol
+	}
+
 	// The Health type reports what orca established about a workload's health,
 	// and whether it checks the workload at all.
 	Health struct {
@@ -933,10 +941,10 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 // was allocated is returned without it, so resolution allocates afresh; a pinned one
 // keeps it.
 func requestedMappings(spec api.WorkloadSpec, held []database.Port) []api.PortMapping {
-	allocated := make(map[int]struct{}, len(held))
-	for _, port := range held {
-		if port.Dynamic {
-			allocated[port.Container] = struct{}{}
+	allocated := make(map[portKey]struct{}, len(held))
+	for _, allocation := range held {
+		if allocation.Dynamic {
+			allocated[portKey{allocation.Container, port.Protocol(allocation.Protocol)}] = struct{}{}
 		}
 	}
 
@@ -944,8 +952,8 @@ func requestedMappings(spec api.WorkloadSpec, held []database.Port) []api.PortMa
 	requested := make([]api.PortMapping, 0, len(mappings))
 
 	for _, mapping := range mappings {
-		if _, ok := allocated[mapping.To]; ok {
-			requested = append(requested, api.PortMapping{To: mapping.To})
+		if _, ok := allocated[portKey{mapping.To, protocolOf(mapping)}]; ok {
+			requested = append(requested, api.PortMapping{To: mapping.To, Protocol: mapping.Protocol})
 			continue
 		}
 
@@ -955,10 +963,16 @@ func requestedMappings(spec api.WorkloadSpec, held []database.Port) []api.PortMa
 	return requested
 }
 
+// resolvePorts settles every mapping in a specification on a host port, keeping the
+// allocations the workload already holds.
+//
+// A port's protocol is part of its identity here as it is in the schema, since TCP
+// and UDP are separate address spaces: what is taken on one says nothing about the
+// other, and resolving them against a single set would refuse ports that are free.
 func (s *WorkloadService) resolvePorts(ctx context.Context, name string, existing []database.Port, mappings []api.PortMapping) ([]database.Port, error) {
-	held := make(map[int]database.Port, len(existing))
-	for _, port := range existing {
-		held[port.Container] = port
+	held := make(map[portKey]database.Port, len(existing))
+	for _, allocation := range existing {
+		held[portKey{allocation.Container, port.Protocol(allocation.Protocol)}] = allocation
 	}
 
 	// Ports already promised to any workload are off limits, along with the ones
@@ -968,59 +982,147 @@ func (s *WorkloadService) resolvePorts(ctx context.Context, name string, existin
 		return nil, fmt.Errorf("failed to read allocated ports: %w", err)
 	}
 
-	taken := make([]int, 0, len(allocated)+len(mappings))
-	taken = append(taken, allocated[string(port.ProtocolTCP)]...)
+	taken := make(map[port.Protocol][]int, len(allocated))
+	for protocol, ports := range allocated {
+		taken[port.Protocol(protocol)] = ports
+	}
+
+	// A pinned port is taken by this specification whatever else it asks for, so it
+	// is off limits before anything is allocated around it.
+	for _, mapping := range mappings {
+		if mapping.From != nil {
+			protocol := protocolOf(mapping)
+			taken[protocol] = append(taken[protocol], *mapping.From)
+		}
+	}
+
+	allocations, err := s.allocate(held, taken, mappings)
+	if err != nil {
+		return nil, err
+	}
 
 	resolved := make([]database.Port, 0, len(mappings))
 	for _, mapping := range mappings {
-		port, err := s.resolvePort(ctx, name, held, taken, mapping)
+		port, err := s.resolvePort(ctx, name, held, allocations, mapping)
 		if err != nil {
 			return nil, err
 		}
 
 		resolved = append(resolved, port)
-		taken = append(taken, port.Host)
 	}
 
 	return resolved, nil
 }
 
-func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map[int]database.Port, taken []int, mapping api.PortMapping) (database.Port, error) {
+// allocate chooses a host port for every mapping that needs one, reporting them by
+// the port and protocol they belong to.
+//
+// The mappings of one container port are allocated together, so a workload publishing
+// 53 over both protocols is reached at the same number on each rather than at two
+// unrelated ones. Allocating them separately would work — the address spaces are
+// independent — but a DNS server answering on 20000/udp and 20014/tcp reads as an
+// accident.
+func (s *WorkloadService) allocate(held map[portKey]database.Port, taken map[port.Protocol][]int, mappings []api.PortMapping) (map[portKey]int, error) {
+	var order []int
+
+	groups := make(map[int][]port.Protocol)
+
+	for _, mapping := range mappings {
+		// A pinned port was chosen by the caller, and one the workload already holds
+		// stays where it is so that its address doesn't move every time something
+		// unrelated about the workload changes.
+		if mapping.From != nil {
+			continue
+		}
+
+		protocol := protocolOf(mapping)
+		if previous, ok := held[portKey{mapping.To, protocol}]; ok && previous.Dynamic {
+			continue
+		}
+
+		if _, ok := groups[mapping.To]; !ok {
+			order = append(order, mapping.To)
+		}
+
+		groups[mapping.To] = append(groups[mapping.To], protocol)
+	}
+
+	allocations := make(map[portKey]int, len(order))
+
+	for _, container := range order {
+		protocols := groups[container]
+
+		host, err := s.allocator.Allocate(protocols, taken)
+		if err != nil {
+			if errors.Is(err, port.ErrRangeExhausted) {
+				// Every port orca may allocate is in use. The request was valid and
+				// will become servable when a workload is deleted or the range
+				// widened, so it is reported as a capacity problem rather than a
+				// fault or a bad request.
+				return nil, fmt.Errorf("%w for %d: %v", ErrNoPortsAvailable, container, err)
+			}
+
+			return nil, fmt.Errorf("failed to allocate host port for %d: %w", container, err)
+		}
+
+		for _, protocol := range protocols {
+			allocations[portKey{container, protocol}] = host
+			taken[protocol] = append(taken[protocol], host)
+		}
+	}
+
+	return allocations, nil
+}
+
+// resolvePort settles one mapping on the host port it will be reached at.
+func (s *WorkloadService) resolvePort(
+	ctx context.Context,
+	name string,
+	held map[portKey]database.Port,
+	allocations map[portKey]int,
+	mapping api.PortMapping,
+) (database.Port, error) {
+	protocol := protocolOf(mapping)
+
 	// A pinned host port is a decision orca must not quietly override, so it is
 	// used as given once nothing else holds it.
 	if mapping.From != nil {
-		holder, isHeld, err := s.ports.HolderOf(ctx, *mapping.From, string(port.ProtocolTCP))
+		holder, isHeld, err := s.ports.HolderOf(ctx, *mapping.From, string(protocol))
 		switch {
 		case err != nil:
 			return database.Port{}, fmt.Errorf("failed to look up host port: %w", err)
 		case isHeld && holder != name:
-			return database.Port{}, fmt.Errorf("%w: %d is used by workload %q", ErrHostPortTaken, *mapping.From, holder)
+			return database.Port{}, fmt.Errorf("%w: %d/%s is used by workload %q",
+				ErrHostPortTaken, *mapping.From, protocol, holder)
 		}
 
-		return database.Port{Container: mapping.To, Host: *mapping.From, Protocol: string(port.ProtocolTCP)}, nil
+		return database.Port{Container: mapping.To, Host: *mapping.From, Protocol: string(protocol)}, nil
 	}
 
 	// An existing allocation is kept so that the workload's address doesn't move
 	// every time something unrelated about it changes.
-	if previous, ok := held[mapping.To]; ok && previous.Dynamic {
+	if previous, ok := held[portKey{mapping.To, protocol}]; ok && previous.Dynamic {
 		return previous, nil
 	}
 
-	host, err := s.allocator.Allocate([]port.Protocol{port.ProtocolTCP}, map[port.Protocol][]int{
-		port.ProtocolTCP: taken,
-	})
-	if err != nil {
-		if errors.Is(err, port.ErrRangeExhausted) {
-			// Every port orca may allocate is in use. The request was valid and will
-			// become servable when a workload is deleted or the range widened, so it
-			// is reported as a capacity problem rather than a fault or a bad request.
-			return database.Port{}, fmt.Errorf("%w for %d: %v", ErrNoPortsAvailable, mapping.To, err)
-		}
+	return database.Port{
+		Container: mapping.To,
+		Host:      allocations[portKey{mapping.To, protocol}],
+		Protocol:  string(protocol),
+		Dynamic:   true,
+	}, nil
+}
 
-		return database.Port{}, fmt.Errorf("failed to allocate host port for %d: %w", mapping.To, err)
+// protocolOf reports which protocol a mapping publishes on.
+//
+// A mapping naming none asks for TCP, which is what every specification stored before
+// the protocol existed described.
+func protocolOf(mapping api.PortMapping) port.Protocol {
+	if mapping.Protocol == nil {
+		return port.ProtocolTCP
 	}
 
-	return database.Port{Container: mapping.To, Host: host, Protocol: string(port.ProtocolTCP), Dynamic: true}, nil
+	return port.Protocol(*mapping.Protocol)
 }
 
 // resolveVolumes fills in where each mounted volume lives on the host, rejecting a
@@ -1185,19 +1287,25 @@ func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.Workloa
 		return spec
 	}
 
-	byPort := make(map[int]database.Port, len(ports))
-	for _, port := range ports {
-		byPort[port.Container] = port
+	byPort := make(map[portKey]database.Port, len(ports))
+	for _, allocation := range ports {
+		byPort[portKey{allocation.Container, port.Protocol(allocation.Protocol)}] = allocation
 	}
 
 	mappings := make([]api.PortMapping, 0, len(ports))
 	for _, mapping := range *spec.Ports {
-		resolved, ok := byPort[mapping.To]
+		protocol := protocolOf(mapping)
+
+		resolved, ok := byPort[portKey{mapping.To, protocol}]
 		if !ok {
 			continue
 		}
 
-		mappings = append(mappings, api.PortMapping{To: mapping.To, From: new(resolved.Host)})
+		mappings = append(mappings, api.PortMapping{
+			To:       mapping.To,
+			From:     new(resolved.Host),
+			Protocol: new(api.Protocol(protocol)),
+		})
 	}
 
 	// The specification is taken by value, so assigning the mappings here replaces
@@ -1216,9 +1324,10 @@ func newResolvedPorts(ports []database.Port) []api.ResolvedPort {
 	resolved := make([]api.ResolvedPort, 0, len(ports))
 	for _, port := range ports {
 		resolved = append(resolved, api.ResolvedPort{
-			To:      port.Container,
-			From:    port.Host,
-			Dynamic: port.Dynamic,
+			To:       port.Container,
+			From:     port.Host,
+			Protocol: api.Protocol(port.Protocol),
+			Dynamic:  port.Dynamic,
 		})
 	}
 

@@ -863,6 +863,108 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 	})
 }
 
+func TestWorkloadService_Apply_Ports(t *testing.T) {
+	t.Parallel()
+
+	t.Run("claims a udp port against the udp address space", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+		// What is taken over TCP says nothing about UDP, so an allocation that read
+		// one set of ports would refuse a port that is genuinely free.
+		ports.EXPECT().Allocated(mock.Anything).Return(map[string][]int{"tcp": {20000, 20001}}, nil)
+
+		var claimed []database.Port
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+				claimed = p
+				w.ID, w.Version = "id-one", 1
+				return w, true, nil
+			})
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = &[]api.PortMapping{{To: 53, Protocol: new(api.UDP)}}
+
+		_, _, err := svc.Apply(t.Context(), spec)
+		require.NoError(t, err)
+
+		require.Len(t, claimed, 1)
+		assert.Equal(t, 53, claimed[0].Container)
+		assert.Equal(t, string(api.UDP), claimed[0].Protocol)
+		assert.Equal(t, 20000, claimed[0].Host)
+	})
+
+	t.Run("gives one port published on both protocols the same host port", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+		var claimed []database.Port
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+				claimed = p
+				w.ID, w.Version = "id-one", 1
+				return w, true, nil
+			})
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		// A DNS server answering on 20000/udp and 20014/tcp reads as an accident, so
+		// the two allocations are made together.
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = &[]api.PortMapping{
+			{To: 53, Protocol: new(api.TCP)},
+			{To: 53, Protocol: new(api.UDP)},
+		}
+
+		_, _, err := svc.Apply(t.Context(), spec)
+		require.NoError(t, err)
+
+		require.Len(t, claimed, 2)
+		assert.Equal(t, string(api.TCP), claimed[0].Protocol)
+		assert.Equal(t, string(api.UDP), claimed[1].Protocol)
+		assert.Equal(t, claimed[0].Host, claimed[1].Host)
+	})
+
+	t.Run("looks a pinned port up on the protocol it is pinned to", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+		// A workload holding 5353/tcp does not hold 5353/udp, so asking about the
+		// wrong space would report a port as taken that nothing has.
+		ports.EXPECT().HolderOf(mock.Anything, 5353, string(api.UDP)).Return("", false, nil).Once()
+
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				w.ID, w.Version = "id-one", 1
+				return w, true, nil
+			})
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = &[]api.PortMapping{{To: 53, From: new(5353), Protocol: new(api.UDP)}}
+
+		_, _, err := svc.Apply(t.Context(), spec)
+		require.NoError(t, err)
+	})
+}
+
 func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 	t.Parallel()
 
@@ -1674,7 +1776,7 @@ func TestWorkloadService_Rehash(t *testing.T) {
 		require.NoError(t, err)
 
 		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(api.Container), Spec: encoded, SpecHash: "stale"}
-		held := []database.Port{{WorkloadID: row.ID, Container: 80, Host: 20001, Dynamic: true}}
+		held := []database.Port{{WorkloadID: row.ID, Container: 80, Host: 20001, Protocol: "tcp", Dynamic: true}}
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
 		secrets.EXPECT().Revisions(mock.Anything, []string{"db-password"}).
@@ -2143,7 +2245,7 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 		require.NoError(t, err)
 
 		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(api.Container), Spec: encoded, SpecHash: "hash-one"}
-		held := []database.Port{{WorkloadID: row.ID, Container: 80, Host: 20005, Dynamic: true}}
+		held := []database.Port{{WorkloadID: row.ID, Container: 80, Host: 20005, Protocol: "tcp", Dynamic: true}}
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
 		ports.EXPECT().List(mock.Anything, row.ID).Return(held, nil).Once()
@@ -2180,7 +2282,7 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
 		ports.EXPECT().List(mock.Anything, row.ID).
-			Return([]database.Port{{WorkloadID: row.ID, Container: 80, Host: 8080}}, nil).Once()
+			Return([]database.Port{{WorkloadID: row.ID, Container: 80, Host: 8080, Protocol: "tcp"}}, nil).Once()
 
 		svc := newTestService(t, d, repo, ports, nil)
 
