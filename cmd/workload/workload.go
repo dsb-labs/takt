@@ -10,6 +10,9 @@ import (
 	"github.com/dsb-labs/orca/cmd/workload/get"
 	"github.com/dsb-labs/orca/cmd/workload/list"
 	"github.com/dsb-labs/orca/cmd/workload/logs"
+	"github.com/dsb-labs/orca/cmd/workload/restart"
+	"github.com/dsb-labs/orca/cmd/workload/start"
+	"github.com/dsb-labs/orca/cmd/workload/stop"
 )
 
 // Command returns the "workload" command, which does nothing on its own and holds the
@@ -26,6 +29,9 @@ func Command() *cobra.Command {
 		get.Command(),
 		delcmd.Command(),
 		logs.Command(),
+		stop.Command(),
+		start.Command(),
+		restart.Command(),
 	)
 
 	return cmd
