@@ -125,6 +125,24 @@ func (e OverlapPolicy) Valid() bool {
 	}
 }
 
+// Defines values for Protocol.
+const (
+	TCP Protocol = "tcp"
+	UDP Protocol = "udp"
+)
+
+// Valid indicates whether the value is a known member of the Protocol enum.
+func (e Protocol) Valid() bool {
+	switch e {
+	case TCP:
+		return true
+	case UDP:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PullPolicy.
 const (
 	PullPolicyAlways  PullPolicy = "always"
@@ -607,11 +625,35 @@ type PortMapping struct {
 	// Examples: 4141
 	From *int `json:"from,omitempty"`
 
+	// Protocol The transport protocol a port is published on.
+	//
+	// The two are separate address spaces. 20000/tcp and 20000/udp are unrelated
+	// ports, so a workload may publish the same port on both, and the server
+	// allocates each of them independently. A workload publishing one port on both
+	// protocols is given the same host port for each when it allocates them.
+	//
+	// Only a TCP port can be checked. A connection to a UDP port always succeeds,
+	// so it reports nothing about the workload, and a specification whose health
+	// check has no TCP port to name is rejected.
+	Protocol *Protocol `json:"protocol,omitempty"`
+
 	// To The port the workload listens on inside its runtime.
 	//
 	// Examples: 8080
 	To int `json:"to"`
 }
+
+// Protocol The transport protocol a port is published on.
+//
+// The two are separate address spaces. 20000/tcp and 20000/udp are unrelated
+// ports, so a workload may publish the same port on both, and the server
+// allocates each of them independently. A workload publishing one port on both
+// protocols is given the same host port for each when it allocates them.
+//
+// Only a TCP port can be checked. A connection to a UDP port always succeeds,
+// so it reports nothing about the workload, and a specification whose health
+// check has no TCP port to name is rejected.
+type Protocol string
 
 // PullPolicy When the docker driver pulls the workload's image.
 //
@@ -640,6 +682,18 @@ type ResolvedPort struct {
 
 	// From The host port that reaches it.
 	From int `json:"from"`
+
+	// Protocol The transport protocol a port is published on.
+	//
+	// The two are separate address spaces. 20000/tcp and 20000/udp are unrelated
+	// ports, so a workload may publish the same port on both, and the server
+	// allocates each of them independently. A workload publishing one port on both
+	// protocols is given the same host port for each when it allocates them.
+	//
+	// Only a TCP port can be checked. A connection to a UDP port always succeeds,
+	// so it reports nothing about the workload, and a specification whose health
+	// check has no TCP port to name is rejected.
+	Protocol Protocol `json:"protocol"`
 
 	// To The port the workload listens on inside its runtime.
 	To int `json:"to"`

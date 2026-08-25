@@ -1325,13 +1325,33 @@ components:
           minimum: 1
           maximum: 65535
           examples: [4141]
+        protocol:
+          $ref: "#/components/schemas/Protocol"
+
+    Protocol:
+      type: string
+      description: |
+        The transport protocol a port is published on.
+
+        The two are separate address spaces. 20000/tcp and 20000/udp are unrelated
+        ports, so a workload may publish the same port on both, and the server
+        allocates each of them independently. A workload publishing one port on both
+        protocols is given the same host port for each when it allocates them.
+
+        Only a TCP port can be checked. A connection to a UDP port always succeeds,
+        so it reports nothing about the workload, and a specification whose health
+        check has no TCP port to name is rejected.
+      enum:
+        - tcp
+        - udp
+      default: tcp
 
     ResolvedPort:
       type: object
       description: |
         A port mapping as it was actually applied, with the host port the server
         settled on. This is what a caller uses to reach a workload.
-      required: [to, from, dynamic]
+      required: [to, from, protocol, dynamic]
       properties:
         to:
           type: integer
@@ -1343,6 +1363,8 @@ components:
           description: The host port that reaches it.
           minimum: 1
           maximum: 65535
+        protocol:
+          $ref: "#/components/schemas/Protocol"
         dynamic:
           type: boolean
           description: |
