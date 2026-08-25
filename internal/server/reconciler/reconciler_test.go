@@ -209,6 +209,67 @@ func TestReconciler_Run(t *testing.T) {
 			},
 		},
 		{
+			Name: "stops the work of a suspended workload",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning},
+			},
+			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
+				row := storedWorkload("example", "hash-one")
+				row.SuspendedAt = time.Now().UTC()
+
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// Stopped rather than discarded: unlike a deletion the workload comes
+				// back, and the instance the driver retains keeps its last output
+				// readable while it is down.
+				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
+			},
+		},
+		{
+			Name: "leaves a suspended workload with nothing running alone",
+			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
+				row := storedWorkload("example", "hash-one")
+				row.SuspendedAt = time.Now().UTC()
+
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// Suspension holds the workload down, so no Start is expected however
+				// many passes run while the mark is set.
+			},
+		},
+		{
+			Name: "waits for a suspended workload that is still terminating",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateTerminating},
+			},
+			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
+				row := storedWorkload("example", "hash-one")
+				row.SuspendedAt = time.Now().UTC()
+
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// The stop from an earlier pass is still in flight, so stopping it
+				// again would race the runtime finishing the job.
+			},
+		},
+		{
+			Name: "tears down a workload that is both suspended and deleted",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning},
+			},
+			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository) {
+				row := storedWorkload("example", "hash-one")
+				row.SuspendedAt = time.Now().UTC()
+				row.DeletedAt = time.Now().UTC()
+
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// Deletion outranks suspension: a suspended workload that is deleted
+				// must still be discarded, or it could never disappear.
+				d.EXPECT().Discard(mock.Anything, mock.Anything, "example").Return(nil)
+			},
+		},
+		{
 			Name: "stops work nothing asked for",
 			Observed: []driver.Instance{
 				{ID: "container-one", Workload: "orphan", SpecHash: "hash-one", State: driver.StateRunning},
@@ -320,6 +381,62 @@ func TestReconciler_Run(t *testing.T) {
 			require.NoError(t, <-done)
 		})
 	}
+}
+
+func TestReconciler_Run_RestartsOnRequest(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+		storedWorkload("example", "hash-one"),
+	}, nil)
+
+	// The instance is current and running, so nothing but the request explains a
+	// stop. Both calls are expected exactly once: the pass that acts on the
+	// request consumes it, so the passes that follow leave the replacement alone.
+	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
+	d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
+		return w.Name == "example" && w.SpecHash == "hash-one"
+	})).Return("container-two", nil).Once()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning},
+			}, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	r.Restart("example")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
+
+	// A second pass over the same state must not act on the request again.
+	r.Notify()
+	passes.wait(t, 2)
+	awaitPasses(t, r, 2)
+
+	cancel()
+	require.NoError(t, <-done)
 }
 
 func TestReconciler_Run_Health(t *testing.T) {
@@ -724,6 +841,66 @@ func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 	// The check being forgotten happens during the pass, so the row being removed may
 	// still be in flight. Waiting for the pass to finish is what makes that expectation
 	// deterministic.
+	awaitPasses(t, r, 1)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
+func TestReconciler_Run_ForgetsChecksOfASuspendedWorkload(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+
+	// A suspended workload is deliberately down. Probing it would accrue failures
+	// against something that is exactly as down as it was asked to be, and report
+	// it unhealthy.
+	suspended := storedWorkload("example", "hash-one")
+	suspended.ID = "workload-one"
+	suspended.Spec = specWithHealth("example")
+	suspended.SuspendedAt = time.Now()
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{suspended}, nil)
+
+	ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+		"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+	}, nil)
+
+	forgotten := make(chan struct{}, 1)
+	checker.EXPECT().Forget("example").Run(func(string) {
+		select {
+		case forgotten <- struct{}{}:
+		default:
+		}
+	}).Return()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+			return nil, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Checker:   checker,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	<-forgotten
 	awaitPasses(t, r, 1)
 
 	cancel()
@@ -1225,6 +1402,61 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 			require.NoError(t, <-done)
 		})
 	}
+}
+
+func TestReconciler_Run_SuspendedScheduleMissesOccurrences(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	applied := time.Date(2026, 3, 1, 2, 0, 0, 0, time.UTC)
+
+	// Several occurrences are due by the time the pass runs, and the workload is
+	// suspended: none of them run, on any pass. They are missed rather than
+	// accumulated, and the resume decides when the schedule counts again — it
+	// moves updated_at, so the first run after a resume is the next natural
+	// occurrence rather than the last one missed.
+	row := storedWorkload("example", "hash-one")
+	row.Spec = specWithSchedule("example", "0 2 * * *", "")
+	row.UpdatedAt = applied
+	row.SuspendedAt = applied.Add(time.Hour)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+			return nil, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+		Now:       func() time.Time { return applied.Add(5 * 24 * time.Hour) },
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	// The mock has no Start expectation, so an occurrence firing on any of these
+	// passes fails the test.
+	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
+
+	r.Notify()
+	passes.wait(t, 2)
+	awaitPasses(t, r, 2)
+
+	cancel()
+	require.NoError(t, <-done)
 }
 
 func TestReconciler_Run_GivesUpAfterTheAttemptsAllowed(t *testing.T) {
@@ -2313,6 +2545,59 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 
 		assert.Equal(t, []string{"workload-id"}, keep)
 	})
+}
+
+func TestReconciler_Run_RemovesMountedValuesWhenSuspended(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+	mounts := NewMockMounts(t)
+
+	row := storedWorkload("example", "hash-one")
+	row.ID = "workload-id"
+	row.SuspendedAt = time.Now().UTC()
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+	d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+	mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+
+	// Nothing is running, so the values the workload mounted have no reader left.
+	// This is what takes a mounted secret's plaintext off the disk while the
+	// workload is held down.
+	forgotten := make(chan struct{}, 1)
+	mounts.EXPECT().Forget("workload-id").Run(func(string) {
+		select {
+		case forgotten <- struct{}{}:
+		default:
+		}
+	}).Return(nil)
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+			return nil, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Mounts:    mounts,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	<-forgotten
+	awaitPasses(t, r, 1)
+
+	cancel()
+	require.NoError(t, <-done)
 }
 
 func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
