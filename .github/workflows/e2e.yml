@@ -37,3 +37,14 @@ jobs:
       - name: Report leftover containers
         if: failure()
         run: docker ps --all --filter label=orca.workload
+
+      # Every test writes a debug bundle of the server's spans, logs and a final
+      # metrics scrape. Uploading them turns a red nightly run into something
+      # that can be diagnosed without reproducing it. The action packages the
+      # directory as a zip artifact itself.
+      - name: Upload debug bundles
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-debug-bundles
+          path: internal/e2e/artifacts/
