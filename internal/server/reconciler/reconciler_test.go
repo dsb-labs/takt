@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
@@ -2629,6 +2631,140 @@ func TestReconciler_Observations(t *testing.T) {
 		assert.True(t, observation.At.Equal(now))
 		assert.Equal(t, "daemon gone", observation.Error)
 	})
+}
+
+func TestReconciler_Metrics(t *testing.T) {
+	t.Parallel()
+
+	t.Run("counts a pass that could not observe", func(t *testing.T) {
+		reader := sdkmetric.NewManualReader()
+		meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+		repo.EXPECT().List(mock.Anything).Return(nil, nil).Maybe()
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).
+			RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+				passes.inc()
+
+				return nil, errors.New("daemon gone")
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Interval:  time.Hour,
+			Meter:     meter,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+		awaitPasses(t, r, 1)
+
+		cancel()
+		require.NoError(t, <-done)
+
+		recorded := metricByName(t, reader, "orca.reconcile.passes")
+
+		sum, ok := recorded.Data.(metricdata.Sum[int64])
+		require.True(t, ok)
+		require.Len(t, sum.DataPoints, 1)
+
+		point := sum.DataPoints[0]
+		outcome, _ := point.Attributes.Value("outcome")
+		assert.Equal(t, "observe_failed", outcome.AsString())
+		assert.EqualValues(t, 1, point.Value)
+	})
+
+	t.Run("gauges workloads by state", func(t *testing.T) {
+		reader := sdkmetric.NewManualReader()
+		meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+			storedWorkload("example", "hash-one"),
+		}, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).
+			RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+				passes.inc()
+
+				return []driver.Instance{{
+					ID:       "container-one",
+					Workload: "example",
+					SpecHash: "hash-one",
+					State:    driver.StateRunning,
+				}}, nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Interval:  time.Hour,
+			Meter:     meter,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+		awaitPasses(t, r, 1)
+
+		cancel()
+		require.NoError(t, <-done)
+
+		recorded := metricByName(t, reader, "orca.workloads")
+
+		gauge, ok := recorded.Data.(metricdata.Gauge[int64])
+		require.True(t, ok)
+
+		counts := make(map[string]int64, len(gauge.DataPoints))
+		for _, point := range gauge.DataPoints {
+			state, _ := point.Attributes.Value("state")
+			counts[state.AsString()] = point.Value
+		}
+
+		// Every state is recorded, so a state nothing is in reads as zero
+		// rather than being absent from the scrape.
+		assert.Len(t, counts, 6)
+		assert.EqualValues(t, 1, counts["running"])
+		assert.EqualValues(t, 0, counts["pending"])
+	})
+}
+
+// metricByName returns the named metric from everything the reader has collected,
+// failing the test when it was never recorded.
+func metricByName(t *testing.T, reader *sdkmetric.ManualReader, name string) metricdata.Metrics {
+	t.Helper()
+
+	var collected metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(t.Context(), &collected))
+
+	for _, scope := range collected.ScopeMetrics {
+		for _, recorded := range scope.Metrics {
+			if recorded.Name == name {
+				return recorded
+			}
+		}
+	}
+
+	t.Fatalf("no metric named %s was recorded", name)
+
+	return metricdata.Metrics{}
 }
 
 // The counter type counts reconciliation passes as the loop drives them, so that

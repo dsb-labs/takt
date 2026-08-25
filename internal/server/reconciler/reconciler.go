@@ -18,6 +18,11 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
@@ -136,18 +141,20 @@ type (
 	// server restart all recover on the next pass rather than leaving the node
 	// permanently wrong.
 	Reconciler struct {
-		logger     *slog.Logger
-		drivers    map[string]Driver
-		workloads  WorkloadRepository
-		ports      PortRepository
-		env        Resolver
-		mounts     Mounts
-		checker    Checker
-		bind       string
-		reallocate func(ctx context.Context, workload string) (bool, error)
-		now        func() time.Time
-		interval   time.Duration
-		nudge      chan struct{}
+		logger      *slog.Logger
+		drivers     map[string]Driver
+		workloads   WorkloadRepository
+		ports       PortRepository
+		env         Resolver
+		mounts      Mounts
+		checker     Checker
+		bind        string
+		reallocate  func(ctx context.Context, workload string) (bool, error)
+		now         func() time.Time
+		interval    time.Duration
+		nudge       chan struct{}
+		tracer      trace.Tracer
+		instruments instruments
 
 		// Guards backoff and lastError, which are the only state a pass carries
 		// between workloads and so the only things converging them concurrently can
@@ -212,7 +219,16 @@ type (
 		//
 		// A test names the times it wants rather than waiting for them, which matters
 		// most for a schedule: the finest cron expression names one time a minute.
+		//
+		// Durations recorded as metrics read the wall clock regardless, so a test
+		// that fakes the time does not record garbage.
 		Now func() time.Time
+		// The meter instruments are created from. May be nil, in which case
+		// nothing is recorded.
+		Meter metric.Meter
+		// The tracer spans are created from. May be nil, in which case no spans
+		// are recorded.
+		Tracer trace.Tracer
 	}
 
 	// The Observation type records how the most recent attempt to observe one
@@ -231,6 +247,10 @@ type (
 		attempts int
 		// The earliest time the next restart may be attempted.
 		next time.Time
+		// Whether the workload has been given up on. The decision repeats on
+		// every pass over a workload that stays given up, and this is what lets
+		// it count once.
+		gaveUp bool
 	}
 
 	// The lastError type records why a converge pass over a workload failed, so
@@ -290,8 +310,15 @@ func New(config Config) *Reconciler {
 		observations[name] = Observation{}
 	}
 
+	tracer := config.Tracer
+	if tracer == nil {
+		tracer = tracenoop.NewTracerProvider().Tracer("")
+	}
+
+	logger := config.Logger.With("component", "reconciler")
+
 	return &Reconciler{
-		logger:       config.Logger.With("component", "reconciler"),
+		logger:       logger,
 		drivers:      config.Drivers,
 		workloads:    config.Workloads,
 		ports:        config.Ports,
@@ -305,6 +332,8 @@ func New(config Config) *Reconciler {
 		backoff:      make(map[string]backoff),
 		lastError:    make(map[string]lastError),
 		observations: observations,
+		tracer:       tracer,
+		instruments:  newInstruments(logger, config.Meter),
 		// Buffered so that a caller signalling a change never blocks: a pass is
 		// already pending, which is all the signal conveys.
 		nudge: make(chan struct{}, 1),
@@ -390,11 +419,30 @@ func (r *Reconciler) Observations() map[string]Observation {
 // reconcile runs a single pass. Errors affecting one workload are logged and the
 // pass continues, so one broken workload can't stop the others converging.
 func (r *Reconciler) reconcile(ctx context.Context) {
-	defer r.passes.Add(1)
+	started := time.Now()
+	outcome := "ok"
+
+	ctx, span := r.tracer.Start(ctx, "reconcile")
+
+	defer func() {
+		if outcome != "ok" {
+			span.SetStatus(codes.Error, outcome)
+		}
+
+		span.End()
+
+		set := metric.WithAttributes(attribute.String("outcome", outcome))
+		r.instruments.passes.Add(ctx, 1, set)
+		r.instruments.passDuration.Record(ctx, time.Since(started).Seconds(), set)
+
+		r.passes.Add(1)
+	}()
 
 	rows, err := r.workloads.List(ctx)
 	if err != nil {
+		outcome = "list_failed"
 		r.logger.With("error", err).Error("failed to list workloads")
+
 		return
 	}
 
@@ -403,7 +451,9 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 
 	instances, err := r.observe(observeCtx)
 	if err != nil {
+		outcome = "observe_failed"
 		r.logger.With("error", err).Error("failed to observe driver instances")
+
 		return
 	}
 
@@ -429,6 +479,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 		observed[instance.Workload] = append(observed[instance.Workload], r.checked(instance))
 	}
 
+	r.measure(ctx, rows, observed)
 	r.register(ctx, rows, observed)
 
 	desired := make(map[string]struct{}, len(rows))
@@ -487,6 +538,42 @@ func (r *Reconciler) prune(rows []database.Workload) {
 	}
 }
 
+// Every state a workload can report. Recording all of them each pass means a
+// state nothing is in reads as zero rather than holding whatever it last was.
+var workloadStates = []api.WorkloadState{
+	api.WorkloadStateCompleted,
+	api.WorkloadStateFailed,
+	api.WorkloadStatePending,
+	api.WorkloadStateRunning,
+	api.WorkloadStateStopped,
+	api.WorkloadStateTerminating,
+}
+
+// measure records the number of workloads in each state.
+//
+// Each state is derived by the same rules the API reports it under, so a
+// dashboard and a workload listing never disagree. The instances are cloned
+// before the restart policy is folded in, because the observed map is what the
+// rest of the pass converges from.
+func (r *Reconciler) measure(ctx context.Context, rows []database.Workload, observed map[string][]driver.Instance) {
+	counts := make(map[api.WorkloadState]int, len(workloadStates))
+	for _, row := range rows {
+		policy := restartPolicy(row)
+
+		instances := slices.Clone(observed[row.Name])
+		for i := range instances {
+			instances[i].State = service.CompletionState(instances[i], policy)
+		}
+
+		counts[service.StateOf(instances, !row.DeletedAt.IsZero())]++
+	}
+
+	for _, state := range workloadStates {
+		r.instruments.workloads.Record(ctx, int64(counts[state]),
+			metric.WithAttributes(attribute.String("state", string(state))))
+	}
+}
+
 // convergeAll converges every workload, several at a time.
 //
 // Workloads are independent of one another, and converging them in turn made the
@@ -520,7 +607,17 @@ func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, 
 		wg.Go(func() {
 			defer func() { <-slots }()
 
-			if err := r.converge(ctx, row, observed[row.Name]); err != nil {
+			ctx, span := r.tracer.Start(ctx, "converge",
+				trace.WithAttributes(attribute.String("orca.workload", row.Name)))
+			defer span.End()
+
+			started := time.Now()
+
+			err := r.converge(ctx, row, observed[row.Name])
+			r.instruments.converges.Record(ctx, time.Since(started).Seconds(),
+				metric.WithAttributes(attribute.String("workload", row.Name)))
+			if err != nil {
+				span.SetStatus(codes.Error, err.Error())
 				r.logger.With("workload", row.Name, "error", err).Error("failed to reconcile workload")
 				r.fail(row.Name, err)
 			}
@@ -1092,7 +1189,7 @@ func (r *Reconciler) attempt(ctx context.Context, row database.Workload) error {
 	}
 
 	if err := r.start(ctx, row); err != nil {
-		r.hold(row.Name, restartPolicy(row))
+		r.hold(ctx, row.Name, restartPolicy(row))
 
 		return err
 	}
@@ -1114,6 +1211,11 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, instanc
 	// A workload told to give up gives up. It is left exactly as it ended, so the
 	// outcome stays readable, and changing its specification starts it again.
 	if !policy.Restarts(exitCodeOf(instances), r.attempts(row.Name)) {
+		if r.giveUp(row.Name) {
+			r.instruments.giveups.Add(ctx, 1,
+				metric.WithAttributes(attribute.String("workload", row.Name)))
+		}
+
 		r.logger.With("workload", row.Name, "attempts", r.attempts(row.Name)).
 			Info("giving up on a workload that will not stay up")
 
@@ -1128,12 +1230,12 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, instanc
 	}
 
 	if err := r.start(ctx, row); err != nil {
-		r.hold(row.Name, policy)
+		r.hold(ctx, row.Name, policy)
 
 		return err
 	}
 
-	state := r.hold(row.Name, policy)
+	state := r.hold(ctx, row.Name, policy)
 
 	r.logger.With(
 		"workload", row.Name,
@@ -1156,7 +1258,7 @@ func (r *Reconciler) waiting(workload string) bool {
 
 // hold records another attempt against a workload and pushes out the earliest time
 // the next one may happen.
-func (r *Reconciler) hold(workload string, restart *manifest.Restart) backoff {
+func (r *Reconciler) hold(ctx context.Context, workload string, restart *manifest.Restart) backoff {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
@@ -1166,7 +1268,28 @@ func (r *Reconciler) hold(workload string, restart *manifest.Restart) backoff {
 	state.next = r.now().Add(delay(state.attempts, restart.Delay))
 	r.backoff[workload] = state
 
+	r.instruments.restarts.Add(ctx, 1,
+		metric.WithAttributes(attribute.String("workload", workload)))
+
 	return state
+}
+
+// giveUp marks a workload as given up on, reporting whether it was not already —
+// the decision repeats on every pass over a workload that stays down, and this is
+// what lets it count once.
+func (r *Reconciler) giveUp(workload string) bool {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	state := r.backoff[workload]
+	if state.gaveUp {
+		return false
+	}
+
+	state.gaveUp = true
+	r.backoff[workload] = state
+
+	return true
 }
 
 // attempts reports how many restarts a workload has been given.
@@ -1300,8 +1423,7 @@ func (r *Reconciler) observe(ctx context.Context) ([]driver.Instance, error) {
 	var instances []driver.Instance
 
 	for name, d := range r.drivers {
-		observed, err := d.Observe(ctx)
-		r.recordObservation(name, err)
+		observed, err := r.observeDriver(ctx, name, d)
 		if err != nil {
 			return nil, fmt.Errorf("failed to observe the %s runtime: %w", name, err)
 		}
@@ -1310,6 +1432,32 @@ func (r *Reconciler) observe(ctx context.Context) ([]driver.Instance, error) {
 	}
 
 	return instances, nil
+}
+
+// observeDriver asks one driver what it is running, recording how it answered and
+// how long the answer took.
+func (r *Reconciler) observeDriver(ctx context.Context, name string, d Driver) ([]driver.Instance, error) {
+	ctx, span := r.tracer.Start(ctx, "driver.observe",
+		trace.WithAttributes(attribute.String("orca.driver", name)))
+	defer span.End()
+
+	started := time.Now()
+
+	instances, err := d.Observe(ctx)
+	r.recordObservation(name, err)
+
+	outcome := "ok"
+	if err != nil {
+		outcome = "error"
+		span.SetStatus(codes.Error, err.Error())
+	}
+
+	r.instruments.observes.Record(ctx, time.Since(started).Seconds(), metric.WithAttributes(
+		attribute.String("driver", name),
+		attribute.String("outcome", outcome),
+	))
+
+	return instances, err
 }
 
 // recordObservation remembers how observing one driver ended, which Observations
