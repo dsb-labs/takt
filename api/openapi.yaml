@@ -222,6 +222,38 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: follow
+          in: query
+          required: false
+          description: |
+            Keep the response open and keep writing output as the workload produces
+            it.
+
+            The response ends when the instance ends. A replacement is a new
+            instance, so a workload that restarts while you are watching needs a new
+            request.
+
+            Cannot be combined with `previous`, which reads an instance that has
+            already ended. That request is refused rather than answered as an
+            ordinary read, because there is nothing for it to follow.
+          schema:
+            type: boolean
+            default: false
+        - name: since
+          in: query
+          required: false
+          description: |
+            Return only the output written at or after this instant.
+
+            Applies to container workloads. The runtime holds a timestamp for every
+            line it keeps, so it can do the filtering itself.
+
+            Ignored for exec workloads. Their output is a plain file with no
+            timestamps in it, so a filter would have to run against a time the
+            server invented.
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: The workload's logs.
@@ -229,6 +261,8 @@ paths:
             text/plain:
               schema:
                 type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
         "500":

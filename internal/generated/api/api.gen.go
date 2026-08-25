@@ -1325,6 +1325,28 @@ type GetWorkloadLogsParams struct {
 	// runs spliced together with nothing marking the boundary. A workload that
 	// has only ever run once has no earlier attempt, so the response is empty.
 	Previous *bool `form:"previous,omitempty" json:"previous,omitempty"`
+
+	// Follow Keep the response open and keep writing output as the workload produces
+	// it.
+	//
+	// The response ends when the instance ends. A replacement is a new
+	// instance, so a workload that restarts while you are watching needs a new
+	// request.
+	//
+	// Cannot be combined with `previous`, which reads an instance that has
+	// already ended. That request is refused rather than answered as an
+	// ordinary read, because there is nothing for it to follow.
+	Follow *bool `form:"follow,omitempty" json:"follow,omitempty"`
+
+	// Since Return only the output written at or after this instant.
+	//
+	// Applies to container workloads. The runtime holds a timestamp for every
+	// line it keeps, so it can do the filtering itself.
+	//
+	// Ignored for exec workloads. Their output is a plain file with no
+	// timestamps in it, so a filter would have to run against a time the
+	// server invented.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
 }
 
 // SetSecretJSONRequestBody defines body for SetSecret for application/json ContentType.
@@ -3301,6 +3323,30 @@ func NewGetWorkloadLogsRequest(server string, name WorkloadName, params *GetWork
 
 		}
 
+		if params.Follow != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "follow", *params.Follow, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Since != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "since", *params.Since, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if encoded := queryValues.Encode(); encoded != "" {
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
@@ -4971,10 +5017,17 @@ func (r ApplyWorkloadResponse) ContentType() string {
 type GetWorkloadLogsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *NotFound
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetWorkloadLogsResponse) GetJSON400() *BadRequest {
+	return r.JSON400
 }
 
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
@@ -6686,6 +6739,13 @@ func ParseGetWorkloadLogsResponse(rsp *http.Response) (*GetWorkloadLogsResponse,
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
 		var dest NotFound
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -7490,6 +7550,32 @@ func (siw *ServerInterfaceWrapper) GetWorkloadLogs(w http.ResponseWriter, r *htt
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "previous"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "previous", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "follow" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "follow", r.URL.Query(), &params.Follow, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "follow"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "follow", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "since" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "since", r.URL.Query(), &params.Since, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "since"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "since", Err: err})
 		}
 		return
 	}
@@ -8728,6 +8814,20 @@ func (response GetWorkloadLogs200TextResponse) VisitGetWorkloadLogsResponse(w ht
 	w.WriteHeader(200)
 
 	_, err := w.Write([]byte(fmt.Sprint(response)))
+	return err
+}
+
+type GetWorkloadLogs400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetWorkloadLogs400JSONResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
 	return err
 }
 
