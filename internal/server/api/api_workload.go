@@ -27,6 +27,15 @@ type (
 		// Delete should mark the workload with the given name for deletion,
 		// returning it as it now stands.
 		Delete(ctx context.Context, name string) (service.Workload, error)
+		// Stop should mark the workload with the given name as suspended,
+		// returning it as it now stands.
+		Stop(ctx context.Context, name string) (service.Workload, error)
+		// Start should clear the suspension of the workload with the given name,
+		// returning it as it now stands.
+		Start(ctx context.Context, name string) (service.Workload, error)
+		// Restart should ask for the workload's instances to be replaced,
+		// returning the workload as it now stands.
+		Restart(ctx context.Context, name string) (service.Workload, error)
 		// Logs should write the recent output of the named workload to out, as the
 		// options describe.
 		Logs(ctx context.Context, out io.Writer, name string, options driver.LogOptions) error
@@ -228,6 +237,95 @@ func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWork
 	return api.DeleteWorkload202JSONResponse{Workload: newWorkload(workload)}, nil
 }
 
+// StopWorkload marks the workload with the given name as suspended.
+//
+// The response is 202 for the same reason DeleteWorkload's is: the workload is
+// only marked when the request returns, and the reconciler stops its work
+// afterwards. A caller can watch the instances drain by polling the workload.
+func (a *WorkloadAPI) StopWorkload(ctx context.Context, request api.StopWorkloadRequestObject) (api.StopWorkloadResponseObject, error) {
+	workload, err := a.workloads.Stop(ctx, request.Name)
+	switch {
+	case errors.Is(err, service.ErrWorkloadNotFound):
+		return api.StopWorkload404JSONResponse{
+			NotFoundJSONResponse: api.NotFoundJSONResponse{
+				Error: fmt.Sprintf("workload %q does not exist", request.Name),
+			},
+		}, nil
+	case errors.Is(err, service.ErrWorkloadDeleting):
+		return api.StopWorkload409JSONResponse{
+			Error: fmt.Sprintf("workload %q is being deleted", request.Name),
+		}, nil
+	case err != nil:
+		return api.StopWorkload500JSONResponse{
+			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
+				Error: a.internalError("stop workload", err),
+			},
+		}, nil
+	}
+
+	return api.StopWorkload202JSONResponse{Workload: newWorkload(workload)}, nil
+}
+
+// StartWorkload clears the suspension of the workload with the given name.
+//
+// The response is 202 like StopWorkload's: the mark is cleared when the request
+// returns, and the next reconcile pass starts the workload's instances.
+func (a *WorkloadAPI) StartWorkload(ctx context.Context, request api.StartWorkloadRequestObject) (api.StartWorkloadResponseObject, error) {
+	workload, err := a.workloads.Start(ctx, request.Name)
+	switch {
+	case errors.Is(err, service.ErrWorkloadNotFound):
+		return api.StartWorkload404JSONResponse{
+			NotFoundJSONResponse: api.NotFoundJSONResponse{
+				Error: fmt.Sprintf("workload %q does not exist", request.Name),
+			},
+		}, nil
+	case errors.Is(err, service.ErrWorkloadDeleting):
+		return api.StartWorkload409JSONResponse{
+			Error: fmt.Sprintf("workload %q is being deleted", request.Name),
+		}, nil
+	case err != nil:
+		return api.StartWorkload500JSONResponse{
+			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
+				Error: a.internalError("start workload", err),
+			},
+		}, nil
+	}
+
+	return api.StartWorkload202JSONResponse{Workload: newWorkload(workload)}, nil
+}
+
+// RestartWorkload asks for the named workload's instances to be replaced.
+//
+// The response is 202 like StopWorkload's: the request is only recorded when it
+// returns, and the next reconcile pass performs the replacement.
+func (a *WorkloadAPI) RestartWorkload(ctx context.Context, request api.RestartWorkloadRequestObject) (api.RestartWorkloadResponseObject, error) {
+	workload, err := a.workloads.Restart(ctx, request.Name)
+	switch {
+	case errors.Is(err, service.ErrWorkloadNotFound):
+		return api.RestartWorkload404JSONResponse{
+			NotFoundJSONResponse: api.NotFoundJSONResponse{
+				Error: fmt.Sprintf("workload %q does not exist", request.Name),
+			},
+		}, nil
+	case errors.Is(err, service.ErrWorkloadDeleting):
+		return api.RestartWorkload409JSONResponse{
+			Error: fmt.Sprintf("workload %q is being deleted", request.Name),
+		}, nil
+	case errors.Is(err, service.ErrWorkloadSuspended):
+		return api.RestartWorkload409JSONResponse{
+			Error: fmt.Sprintf("workload %q is suspended and cannot be restarted", request.Name),
+		}, nil
+	case err != nil:
+		return api.RestartWorkload500JSONResponse{
+			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
+				Error: a.internalError("restart workload", err),
+			},
+		}, nil
+	}
+
+	return api.RestartWorkload202JSONResponse{Workload: newWorkload(workload)}, nil
+}
+
 // GetWorkloadLogs returns the recent output of the named workload.
 func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorkloadLogsRequestObject) (api.GetWorkloadLogsResponseObject, error) {
 	// Clamped at both ends. The specification declares the range and the generated
@@ -342,6 +440,10 @@ func newWorkload(w service.Workload) api.Workload {
 
 	if w.Deleting {
 		workload.Deleting = new(true)
+	}
+
+	if w.Suspended {
+		workload.Suspended = new(true)
 	}
 
 	if len(w.Ports) > 0 {

@@ -1672,7 +1672,10 @@ components:
         updatedAt:
           type: string
           format: date-time
-          description: When the workload's specification last changed.
+          description: |
+            When the workload's specification last changed, or a suspended workload
+            was last started. A schedule counts occurrences from this time when
+            nothing has run yet.
         nextRun:
           type: string
           format: date-time

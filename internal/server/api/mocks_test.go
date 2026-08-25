@@ -1418,3 +1418,201 @@ func (_c *MockWorkloadService_Logs_Call) RunAndReturn(run func(ctx context.Conte
 	_c.Call.Return(run)
 	return _c
 }
+
+// Restart provides a mock function for the type MockWorkloadService
+func (_mock *MockWorkloadService) Restart(ctx context.Context, name string) (service.Workload, error) {
+	ret := _mock.Called(ctx, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Restart")
+	}
+
+	var r0 service.Workload
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (service.Workload, error)); ok {
+		return returnFunc(ctx, name)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) service.Workload); ok {
+		r0 = returnFunc(ctx, name)
+	} else {
+		r0 = ret.Get(0).(service.Workload)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockWorkloadService_Restart_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Restart'
+type MockWorkloadService_Restart_Call struct {
+	*mock.Call
+}
+
+// Restart is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+func (_e *MockWorkloadService_Expecter) Restart(ctx any, name any) *MockWorkloadService_Restart_Call {
+	return &MockWorkloadService_Restart_Call{Call: _e.mock.On("Restart", ctx, name)}
+}
+
+func (_c *MockWorkloadService_Restart_Call) Run(run func(ctx context.Context, name string)) *MockWorkloadService_Restart_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWorkloadService_Restart_Call) Return(workload service.Workload, err error) *MockWorkloadService_Restart_Call {
+	_c.Call.Return(workload, err)
+	return _c
+}
+
+func (_c *MockWorkloadService_Restart_Call) RunAndReturn(run func(ctx context.Context, name string) (service.Workload, error)) *MockWorkloadService_Restart_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Start provides a mock function for the type MockWorkloadService
+func (_mock *MockWorkloadService) Start(ctx context.Context, name string) (service.Workload, error) {
+	ret := _mock.Called(ctx, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Start")
+	}
+
+	var r0 service.Workload
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (service.Workload, error)); ok {
+		return returnFunc(ctx, name)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) service.Workload); ok {
+		r0 = returnFunc(ctx, name)
+	} else {
+		r0 = ret.Get(0).(service.Workload)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockWorkloadService_Start_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Start'
+type MockWorkloadService_Start_Call struct {
+	*mock.Call
+}
+
+// Start is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+func (_e *MockWorkloadService_Expecter) Start(ctx any, name any) *MockWorkloadService_Start_Call {
+	return &MockWorkloadService_Start_Call{Call: _e.mock.On("Start", ctx, name)}
+}
+
+func (_c *MockWorkloadService_Start_Call) Run(run func(ctx context.Context, name string)) *MockWorkloadService_Start_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWorkloadService_Start_Call) Return(workload service.Workload, err error) *MockWorkloadService_Start_Call {
+	_c.Call.Return(workload, err)
+	return _c
+}
+
+func (_c *MockWorkloadService_Start_Call) RunAndReturn(run func(ctx context.Context, name string) (service.Workload, error)) *MockWorkloadService_Start_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Stop provides a mock function for the type MockWorkloadService
+func (_mock *MockWorkloadService) Stop(ctx context.Context, name string) (service.Workload, error) {
+	ret := _mock.Called(ctx, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stop")
+	}
+
+	var r0 service.Workload
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (service.Workload, error)); ok {
+		return returnFunc(ctx, name)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) service.Workload); ok {
+		r0 = returnFunc(ctx, name)
+	} else {
+		r0 = ret.Get(0).(service.Workload)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockWorkloadService_Stop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stop'
+type MockWorkloadService_Stop_Call struct {
+	*mock.Call
+}
+
+// Stop is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+func (_e *MockWorkloadService_Expecter) Stop(ctx any, name any) *MockWorkloadService_Stop_Call {
+	return &MockWorkloadService_Stop_Call{Call: _e.mock.On("Stop", ctx, name)}
+}
+
+func (_c *MockWorkloadService_Stop_Call) Run(run func(ctx context.Context, name string)) *MockWorkloadService_Stop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWorkloadService_Stop_Call) Return(workload service.Workload, err error) *MockWorkloadService_Stop_Call {
+	_c.Call.Return(workload, err)
+	return _c
+}
+
+func (_c *MockWorkloadService_Stop_Call) RunAndReturn(run func(ctx context.Context, name string) (service.Workload, error)) *MockWorkloadService_Stop_Call {
+	_c.Call.Return(run)
+	return _c
+}

@@ -1112,7 +1112,9 @@ type Workload struct {
 	// workload is started again.
 	Suspended *bool `json:"suspended,omitempty"`
 
-	// UpdatedAt When the workload's specification last changed.
+	// UpdatedAt When the workload's specification last changed, or a suspended workload
+	// was last started. A schedule counts occurrences from this time when
+	// nothing has run yet.
 	UpdatedAt time.Time `json:"updatedAt"`
 
 	// Version Incremented every time the workload's specification changes. Applying an
