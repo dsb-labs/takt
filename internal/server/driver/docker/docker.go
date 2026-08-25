@@ -22,6 +22,12 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/docker/go-connections/nat"
 	"github.com/docker/go-units"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
+	"go.opentelemetry.io/otel/trace"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
@@ -69,6 +75,9 @@ type (
 		client     Client
 		bind       string
 		configFile string
+		tracer     trace.Tracer
+		// How long each image pull took.
+		pulls metric.Float64Histogram
 	}
 
 	// The Config type contains fields used to construct a Driver.
@@ -84,6 +93,12 @@ type (
 		// reads docker's own default location, decided when a pull happens rather
 		// than here.
 		ConfigFile string
+		// The meter the driver's instruments are created from. May be nil, in
+		// which case nothing is recorded.
+		Meter metric.Meter
+		// The tracer spans are created from. May be nil, in which case no spans
+		// are recorded.
+		Tracer trace.Tracer
 	}
 )
 
@@ -107,11 +122,32 @@ func New(config Config) *Driver {
 		bind = defaultBind
 	}
 
+	meter := config.Meter
+	if meter == nil {
+		meter = metricnoop.Meter{}
+	}
+
+	pulls, err := meter.Float64Histogram("orca.image.pull.duration",
+		metric.WithDescription("How long each image pull took."),
+		metric.WithUnit("s"))
+	if err != nil {
+		// Only a bad instrument name can fail here, so failing costs the metric
+		// rather than the driver.
+		pulls, _ = metricnoop.Meter{}.Float64Histogram("")
+	}
+
+	tracer := config.Tracer
+	if tracer == nil {
+		tracer = tracenoop.NewTracerProvider().Tracer("")
+	}
+
 	return &Driver{
 		logger:     config.Logger.With("component", "driver", "driver", "docker"),
 		client:     config.Client,
 		bind:       bind,
 		configFile: config.ConfigFile,
+		tracer:     tracer,
+		pulls:      pulls,
 	}
 }
 
@@ -581,8 +617,22 @@ func (d *Driver) ensureImage(ctx context.Context, ref string, policy api.PullPol
 
 	d.logger.With("image", ref).Debug("pulling image")
 
+	// The measurement covers the drain below as well as the request: the pull is
+	// only complete once its progress stream has been read to the end.
+	ctx, span := d.tracer.Start(ctx, "image.pull",
+		trace.WithAttributes(attribute.String("orca.image", ref)))
+	defer span.End()
+
+	started := time.Now()
+	defer func() {
+		d.pulls.Record(ctx, time.Since(started).Seconds(),
+			metric.WithAttributes(attribute.String("image", ref)))
+	}()
+
 	pull, err := d.client.ImagePull(ctx, ref, image.PullOptions{RegistryAuth: auth})
 	if err != nil {
+		span.SetStatus(codes.Error, err.Error())
+
 		return fmt.Errorf("failed to pull image: %w", err)
 	}
 	defer pull.Close()
@@ -590,6 +640,8 @@ func (d *Driver) ensureImage(ctx context.Context, ref string, policy api.PullPol
 	// The pull only runs to completion while its progress stream is being read,
 	// so the body has to be drained even though nothing here reports progress.
 	if _, err = io.Copy(io.Discard, pull); err != nil {
+		span.SetStatus(codes.Error, err.Error())
+
 		return fmt.Errorf("failed to pull image: %w", err)
 	}
 
