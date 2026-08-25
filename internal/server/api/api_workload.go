@@ -383,6 +383,10 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 
 	return logsResponse{
 		follow: options.Follow,
+		// The connection's own writer, which is the only one that can be given a
+		// deadline. Nil when nothing put it there, and the read then lives under
+		// whatever deadline the server set for every request.
+		conn: Connection(ctx),
 		write: func(w io.Writer) error {
 			return a.workloads.Logs(ctx, w, request.Name, options)
 		},
@@ -398,7 +402,9 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 type logsResponse struct {
 	// Whether the response stays open for as long as the workload keeps writing.
 	follow bool
-	write  func(w io.Writer) error
+	// The connection's own writer, for the deadline the wrappers cannot carry.
+	conn  http.ResponseWriter
+	write func(w io.Writer) error
 }
 
 // VisitGetWorkloadLogsResponse writes the logs to w as plain text.
@@ -413,7 +419,13 @@ func (r logsResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error 
 	out := io.Writer(w)
 
 	if r.follow {
-		control := http.NewResponseController(w)
+		// The deadline is set on the connection's own writer and the flushing is done
+		// through the handler's. Only the first can carry a deadline, and only the
+		// second counts what was written for the telemetry wrapped around it.
+		deadline := r.conn
+		if deadline == nil {
+			deadline = w
+		}
 
 		// The zero time removes the deadline rather than extending it. A follow that
 		// hit one would end as a truncated stream at exactly the timeout, which reads
@@ -423,14 +435,15 @@ func (r logsResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error 
 		// the caller disconnects, which is what actually limits how long a stream
 		// occupies the server.
 		//
-		// A writer that has no deadline to clear says so, and there is nothing to do
-		// about that but carry on. The stream then lives as long as the writer allows,
-		// which is more than refusing to serve the request at all would give anybody.
-		if err := control.SetWriteDeadline(time.Time{}); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		// A writer with no deadline to clear says so, and there is nothing to do about
+		// that but carry on. The stream then lives as long as that writer allows, which
+		// is more than refusing to serve the request at all would give anybody.
+		err := http.NewResponseController(deadline).SetWriteDeadline(time.Time{})
+		if err != nil && !errors.Is(err, http.ErrNotSupported) {
 			return fmt.Errorf("failed to clear the write deadline: %w", err)
 		}
 
-		out = &flushWriter{inner: w, control: control}
+		out = &flushWriter{inner: w, control: http.NewResponseController(w)}
 	}
 
 	w.WriteHeader(http.StatusOK)

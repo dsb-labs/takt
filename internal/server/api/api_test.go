@@ -1,12 +1,14 @@
 package api_test
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -160,6 +162,72 @@ func TestWrap(t *testing.T) {
 			assert.Equal(t, tc.ExpectStatus, resp.Code)
 		})
 	}
+}
+
+// TestWrap_LetsAHandlerFlush covers the capability a streaming response needs from the
+// middleware chain, which the chain used to hide.
+//
+// The logging middleware wraps the writer to record a status. Embedding the interface
+// promotes three methods and no more, so a handler asking to flush was told the writer
+// could not, and a followed log read then arrived in whatever chunks the connection's
+// buffer produced rather than as it was written.
+func TestWrap_LetsAHandlerFlush(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	var flushed error
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("a line"))
+		flushed = http.NewResponseController(w).Flush()
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/workloads/example/logs", nil)
+	req.Host = "127.0.0.1:7373"
+
+	api.Wrap(handler, logger, nil).ServeHTTP(httptest.NewRecorder(), req)
+
+	require.NoError(t, flushed)
+}
+
+// TestStream_LetsAHandlerClearTheWriteDeadline covers what the outermost middleware
+// exists for.
+//
+// A followed log read is open for as long as its workload runs, which is longer than
+// the deadline the server sets for a request that answers and stops. Unlike a flush,
+// there is no reaching past the wrappers for this: http.ResponseController stops at the
+// first one that cannot unwrap, so the writer has to be kept aside before any of them
+// take it.
+//
+// A real server rather than a recorder, since a recorder has no deadline to clear and
+// would pass whether the middleware worked or not.
+func TestStream_LetsAHandlerClearTheWriteDeadline(t *testing.T) {
+	t.Parallel()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	cleared := make(chan error, 1)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn := api.Connection(r.Context())
+		if conn == nil {
+			cleared <- errors.New("the connection's own writer never reached the handler")
+
+			return
+		}
+
+		cleared <- http.NewResponseController(conn).SetWriteDeadline(time.Time{})
+	})
+
+	server := httptest.NewServer(api.Stream(api.Wrap(handler, logger, nil)))
+	t.Cleanup(server.Close)
+
+	resp, err := server.Client().Get(server.URL + "/api/v1/workloads/example/logs")
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	require.NoError(t, <-cleared)
 }
 
 func TestWrap_RecoveryIsLogged(t *testing.T) {
