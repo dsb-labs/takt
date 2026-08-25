@@ -722,6 +722,7 @@ func instancePorts(ports []container.Port) []driver.Port {
 		published = append(published, driver.Port{
 			Container: int(port.PrivatePort),
 			Host:      int(port.PublicPort),
+			Protocol:  port.Type,
 		})
 	}
 
@@ -767,9 +768,16 @@ func portBindings(bind string, ports []driver.Port) (nat.PortSet, nat.PortMap) {
 	bindings := make(nat.PortMap, len(ports))
 
 	for _, port := range ports {
-		// Only TCP is published today; a specification has no way to ask for UDP,
-		// and inventing one here would be guessing at the eventual shape.
-		key := nat.Port(strconv.Itoa(port.Container) + "/tcp")
+		// A port that names no protocol is a TCP one, which is what every port was
+		// before a specification could ask for the other. Publishing it under an
+		// empty protocol would leave the workload unreachable at an address the
+		// server reports.
+		protocol := port.Protocol
+		if protocol == "" {
+			protocol = "tcp"
+		}
+
+		key := nat.Port(strconv.Itoa(port.Container) + "/" + protocol)
 
 		exposed[key] = struct{}{}
 		bindings[key] = []nat.PortBinding{{

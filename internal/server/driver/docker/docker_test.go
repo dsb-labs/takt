@@ -40,6 +40,38 @@ func TestDriver_Start(t *testing.T) {
 		ExpectErr  error
 	}{
 		{
+			Name: "publishes a port on the protocol it names",
+			Workload: workload("example", 1, "hash", containerSpec("example/example:latest", nil),
+				[]driver.Port{{Container: 53, Host: 20000, Protocol: "udp"}}, nil),
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything,
+					mock.MatchedBy(func(config *dockercontainer.Config) bool {
+						_, exposed := config.ExposedPorts["53/udp"]
+						return exposed
+					}),
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						// Publishing 53/tcp instead would leave the workload
+						// unreachable at the address orca reports for it.
+						bindings := host.PortBindings["53/udp"]
+
+						return len(bindings) == 1 && bindings[0].HostPort == "20000" &&
+							len(host.PortBindings) == 1
+					}),
+					mock.Anything, mock.Anything, "orca-example-1-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
 			Name:     "starts a container with orca's ownership labels",
 			Workload: withEnv(workload("example", 2, "hash-two", containerSpec("example/example:latest", nil), ports(8080, 4141), map[string]string{"some-key": "some-value"}), map[string]string{"EXAMPLE": "EXAMPLE"}),
 			SetupMocks: func(c *MockClient) {
@@ -1353,7 +1385,7 @@ func hardenedSpec(image string) api.ContainerSpec {
 	}
 }
 
-// ports builds a single published port, which is all any of these tests needs.
+// ports builds a single published TCP port, which is all most of these tests needs.
 func ports(container, host int) []driver.Port {
-	return []driver.Port{{Container: container, Host: host}}
+	return []driver.Port{{Container: container, Host: host, Protocol: "tcp"}}
 }

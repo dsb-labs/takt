@@ -178,6 +178,10 @@ type (
 		Container int
 		// The host port that reaches it.
 		Host int
+		// The transport protocol the port is published on, which is either tcp or
+		// udp. The two are separate address spaces, so a driver publishing the wrong
+		// one leaves the workload unreachable at an address orca reports.
+		Protocol string
 	}
 
 	// The Volume type describes a volume a workload mounts, with the path it lives
@@ -244,7 +248,12 @@ func NewWorkload(row database.Workload) (Workload, error) {
 				continue
 			}
 
-			w.Ports = append(w.Ports, Port{Container: mapping.To, Host: *mapping.From})
+			protocol := string(api.TCP)
+			if mapping.Protocol != nil {
+				protocol = string(*mapping.Protocol)
+			}
+
+			w.Ports = append(w.Ports, Port{Container: mapping.To, Host: *mapping.From, Protocol: protocol})
 		}
 	}
 
