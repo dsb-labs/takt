@@ -370,7 +370,8 @@ The metrics to alert on first:
 - `orca_workloads{state="failed"}` counts workloads in the failed state, derived
   by the same rules `orca workload get` reports.
 - `orca_ports_used` against `orca_ports_capacity` warns before an apply fails
-  with no free port.
+  with no free port. Usage carries a `protocol` label, because the range holds as
+  many UDP ports as TCP ones.
 
 Alongside orca's own instruments, the scrape carries the standard OpenTelemetry
 HTTP server metrics, with request counts and durations per route and status, and
@@ -398,6 +399,9 @@ SQLite's write lock.
 orca allocates a host port for a container port that names none, from the range in the
 configuration. An allocation is sticky: it survives restarts and specification changes,
 so anything pointing at it keeps working.
+
+The range covers each protocol separately, since TCP and UDP are unrelated address
+spaces. A workload holding 20000/tcp leaves 20000/udp free for another.
 
 A port orca chose is revised if the workload fails to start on it, since something
 outside orca may hold it. A port a manifest pinned is never moved, because it was asked

@@ -173,16 +173,19 @@ ports:
   - to: 80          # the port the workload listens on
   - to: 443
     from: 8443      # the host port that reaches it
+  - to: 51820
+    protocol: udp   # tcp when left out
 ```
 
 `to` is the port the workload listens on. `from` is the host port that reaches it.
+`protocol` is `tcp` or `udp`, and defaults to `tcp`.
 
 For a container, leaving `from` out is the usual case. orca allocates a host port and
 reports it back, so you never have to invent unique numbers by hand.
 
 ```sh
 orca workload get example | jq '.Ports'
-[ { "To": 80, "From": 20000, "Dynamic": true } ]
+[ { "To": 80, "From": 20000, "Protocol": "tcp", "Dynamic": true } ]
 ```
 
 An allocated port is sticky. It stays the same across restarts and image changes, so
@@ -201,6 +204,34 @@ and allocates nothing.
 Ports sit beside the runtime blocks rather than inside one, because reaching a
 workload is a question about the workload. A runtime that publishes nothing rejects
 them rather than ignoring them.
+
+### Publishing on both protocols
+
+TCP and UDP are separate address spaces. 20000/tcp and 20000/udp are unrelated ports,
+so a workload may publish the same number on both. DNS is the usual case.
+
+```yaml
+ports:
+  - to: 53
+    protocol: tcp
+  - to: 53
+    protocol: udp
+```
+
+When both host ports are allocated, orca gives them the same number, so the workload is
+reached at one address whichever protocol a caller uses.
+
+```sh
+orca workload get dns | jq '.Ports'
+[
+  { "To": 53, "From": 20000, "Protocol": "tcp", "Dynamic": true },
+  { "To": 53, "From": 20000, "Protocol": "udp", "Dynamic": true }
+]
+```
+
+Pin the two separately if you need to. A pinned port is only checked against the
+protocol it names, so one workload holding 5353/tcp does not stop another taking
+5353/udp.
 
 ## Environment
 
@@ -516,7 +547,11 @@ going to pass yet, and passing one check ends the grace early.
 checks would overlap itself, and the failure count would stop meaning consecutive
 failures.
 
-A health check needs a published port, whatever the runtime.
+A health check needs a published TCP port, whatever the runtime. Both probes connect,
+and a connection to a UDP port succeeds whatever is behind it, so a check against one
+would report the workload as healthy however broken it is. A workload publishing only
+UDP is rejected when you apply the manifest. One publishing both is checked on its TCP
+side.
 
 ## Resources
 
