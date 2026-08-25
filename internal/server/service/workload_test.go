@@ -502,21 +502,21 @@ func TestWorkloadService_Get_LastError(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
 			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
-			errs := NewMockErrors(t)
+			rec := NewMockReconciler(t)
 
 			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 			ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
 			d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
 
-			errs.EXPECT().LastError("example").Return(tc.Message, tc.At, tc.Recorded)
+			rec.EXPECT().LastError("example").Return(tc.Message, tc.At, tc.Recorded)
 
 			svc := service.NewWorkloadService(service.WorkloadServiceConfig{
-				Logger:    newTestLogger(t),
-				Drivers:   map[string]service.Driver{docker.Name: d},
-				Workloads: repo,
-				Ports:     ports,
-				Allocator: allocatorStub{},
-				Errors:    errs,
+				Logger:     newTestLogger(t),
+				Drivers:    map[string]service.Driver{docker.Name: d},
+				Workloads:  repo,
+				Ports:      ports,
+				Allocator:  allocatorStub{},
+				Reconciler: rec,
 			})
 
 			got, err := svc.Get(t.Context(), "example")
@@ -1041,6 +1041,227 @@ func TestWorkloadService_Delete(t *testing.T) {
 		svc := newTestService(t, d, repo, ports, nil)
 
 		_, err := svc.Delete(t.Context(), "nope")
+		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
+	})
+}
+
+func TestWorkloadService_Stop(t *testing.T) {
+	t.Parallel()
+
+	t.Run("suspends the workload without touching the runtime", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		suspended := storedWorkload("example")
+		suspended.SuspendedAt = time.Now().UTC()
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		repo.EXPECT().Suspend(mock.Anything, "example").Return(suspended, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+			{ID: "container-one", Workload: "example", State: driver.StateRunning},
+		}, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		got, err := svc.Stop(t.Context(), "example")
+		require.NoError(t, err)
+
+		// The reconciler owns stopping the work, so the service records the intent
+		// and reports the workload as held down. A running instance does not make
+		// it read as running any more.
+		assert.True(t, got.Suspended)
+		assert.Equal(t, api.WorkloadStateSuspended, got.State)
+	})
+
+	t.Run("notifies the reconciler", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		repo.EXPECT().Suspend(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		var notified bool
+		svc := newTestService(t, d, repo, ports, func() { notified = true })
+
+		_, err := svc.Stop(t.Context(), "example")
+		require.NoError(t, err)
+
+		// Nothing stops until the reconciler runs, so it has to be woken.
+		assert.True(t, notified)
+	})
+
+	t.Run("refuses a workload that is being deleted", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		deleting := storedWorkload("example")
+		deleting.DeletedAt = time.Now().UTC()
+
+		// No Suspend is expected: there is nothing left to hold down.
+		repo.EXPECT().Get(mock.Anything, "example").Return(deleting, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Stop(t.Context(), "example")
+		assert.ErrorIs(t, err, service.ErrWorkloadDeleting)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "nope").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Stop(t.Context(), "nope")
+		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
+	})
+}
+
+func TestWorkloadService_Start(t *testing.T) {
+	t.Parallel()
+
+	t.Run("clears the suspension", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		suspended := storedWorkload("example")
+		suspended.SuspendedAt = time.Now().UTC()
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(suspended, nil).Once()
+		repo.EXPECT().Resume(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		got, err := svc.Start(t.Context(), "example")
+		require.NoError(t, err)
+
+		// Nothing has started yet, so the workload reads as pending: the mark is
+		// cleared and the reconciler brings the instances back.
+		assert.False(t, got.Suspended)
+		assert.Equal(t, api.WorkloadStatePending, got.State)
+	})
+
+	t.Run("notifies the reconciler", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		repo.EXPECT().Resume(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		var notified bool
+		svc := newTestService(t, d, repo, ports, func() { notified = true })
+
+		_, err := svc.Start(t.Context(), "example")
+		require.NoError(t, err)
+
+		// Nothing starts until the reconciler runs, so it has to be woken.
+		assert.True(t, notified)
+	})
+
+	t.Run("refuses a workload that is being deleted", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		deleting := storedWorkload("example")
+		deleting.DeletedAt = time.Now().UTC()
+
+		// No Resume is expected: the workload can never run again.
+		repo.EXPECT().Get(mock.Anything, "example").Return(deleting, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Start(t.Context(), "example")
+		assert.ErrorIs(t, err, service.ErrWorkloadDeleting)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "nope").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Start(t.Context(), "nope")
+		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
+	})
+}
+
+func TestWorkloadService_Restart(t *testing.T) {
+	t.Parallel()
+
+	t.Run("records the request and wakes the reconciler", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		rec := NewMockReconciler(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+			{ID: "container-one", Workload: "example", SpecHash: "hash", State: driver.StateRunning},
+		}, nil).Once()
+
+		// The service records the request and the reconciler replaces the
+		// instances, so the runtime is never touched from here.
+		rec.EXPECT().Restart("example").Return().Once()
+		rec.EXPECT().Notify().Return().Once()
+		rec.EXPECT().LastError(mock.Anything).Return("", time.Time{}, false).Maybe()
+
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:     newTestLogger(t),
+			Drivers:    map[string]service.Driver{docker.Name: d},
+			Workloads:  repo,
+			Ports:      ports,
+			Allocator:  allocatorStub{},
+			Reconciler: rec,
+		})
+
+		got, err := svc.Restart(t.Context(), "example")
+		require.NoError(t, err)
+
+		// The specification and version are untouched, so the workload reads
+		// exactly as it did: a restart is not a change of desired state.
+		assert.Equal(t, api.WorkloadStateRunning, got.State)
+	})
+
+	t.Run("refuses a suspended workload", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		suspended := storedWorkload("example")
+		suspended.SuspendedAt = time.Now().UTC()
+
+		// The mock reconciler is deliberately absent: recording a request for a
+		// workload that is held down would leave it lying in wait for the resume.
+		repo.EXPECT().Get(mock.Anything, "example").Return(suspended, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Restart(t.Context(), "example")
+		assert.ErrorIs(t, err, service.ErrWorkloadSuspended)
+	})
+
+	t.Run("refuses a workload that is being deleted", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		deleting := storedWorkload("example")
+		deleting.DeletedAt = time.Now().UTC()
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(deleting, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Restart(t.Context(), "example")
+		assert.ErrorIs(t, err, service.ErrWorkloadDeleting)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "nope").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Restart(t.Context(), "nope")
 		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
 	})
 }
@@ -2047,7 +2268,8 @@ func TestWorkloadService_Get_LeavesOutARetainedInstance(t *testing.T) {
 }
 
 // newTestService builds a service whose port repository answers the reads every path
-// makes, so that a test only has to set up the behaviour it is actually about.
+// makes, so that a test only has to set up the behaviour it is actually about. A
+// non-nil notify is called whenever the service wakes the reconciler.
 func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, ports *MockPortRepository, notify func()) *service.WorkloadService {
 	t.Helper()
 
@@ -2056,14 +2278,23 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().HolderOf(mock.Anything, mock.Anything).Return("", false, nil).Maybe()
 
-	return service.NewWorkloadService(service.WorkloadServiceConfig{
+	config := service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
 		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
 		Allocator: allocatorStub{},
-		Notify:    notify,
-	})
+	}
+
+	if notify != nil {
+		rec := NewMockReconciler(t)
+		rec.EXPECT().Notify().Run(notify).Return().Maybe()
+		rec.EXPECT().LastError(mock.Anything).Return("", time.Time{}, false).Maybe()
+
+		config.Reconciler = rec
+	}
+
+	return service.NewWorkloadService(config)
 }
 
 // newTestImageAwareService builds a service that can resolve image digests, for the
