@@ -61,7 +61,7 @@ func TestWireSpec(t *testing.T) {
 			// Resolved rather than empty, because a round trip runs the value
 			// through NewSpec, which applies the defaults.
 			Restart:   &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay},
-			Ports:     []manifest.Port{{To: 8080, From: 4141, Protocol: manifest.ProtocolTCP}},
+			Ports:     []manifest.Port{{Name: "http", To: 8080, From: 4141, Protocol: manifest.ProtocolTCP}},
 			Env:       map[string]string{"EXAMPLE": "EXAMPLE"},
 			Resources: &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 100},
 			Container: &manifest.Container{

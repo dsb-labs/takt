@@ -69,6 +69,9 @@ type (
 
 	// The ResolvedPort type is a port mapping as the server applied it.
 	ResolvedPort struct {
+		// What the specification called the port, which is how the rest of a
+		// manifest refers to it. Empty for a port the specification did not name.
+		Name string
 		// The port the workload listens on inside its runtime.
 		To int
 		// The host port that reaches it.
@@ -704,12 +707,18 @@ func newWorkload(w api.Workload) Workload {
 	if w.Ports != nil {
 		workload.Ports = make([]ResolvedPort, 0, len(*w.Ports))
 		for _, port := range *w.Ports {
-			workload.Ports = append(workload.Ports, ResolvedPort{
+			resolved := ResolvedPort{
 				To:       port.To,
 				From:     port.From,
 				Protocol: string(port.Protocol),
 				Dynamic:  port.Dynamic,
-			})
+			}
+
+			if port.Name != nil {
+				resolved.Name = *port.Name
+			}
+
+			workload.Ports = append(workload.Ports, resolved)
 		}
 	}
 
