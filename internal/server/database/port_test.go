@@ -36,6 +36,23 @@ func TestPortRepository_Claim(t *testing.T) {
 		assert.False(t, got[1].Dynamic)
 	})
 
+	t.Run("stores the name a port was given", func(t *testing.T) {
+		ports, example, _ := newTestPorts(t)
+		ctx := t.Context()
+
+		require.NoError(t, ports.Claim(ctx, example, []database.Port{
+			{WorkloadID: example, Name: "http", Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true},
+			{WorkloadID: example, Container: 9090, Host: 4141, Protocol: "tcp"},
+		}))
+
+		got, err := ports.List(ctx, example)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+
+		assert.Equal(t, "http", got[0].Name)
+		assert.Empty(t, got[1].Name)
+	})
+
 	t.Run("stores one port on both protocols", func(t *testing.T) {
 		// A workload speaking DNS publishes 53 over both, which is two allocations of
 		// the same number rather than one allocation named twice.

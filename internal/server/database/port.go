@@ -23,6 +23,9 @@ type (
 	Port struct {
 		// The identifier of the workload the port belongs to.
 		WorkloadID string
+		// What the specification called the port, which is how the rest of a
+		// manifest refers to it. Empty for a port the specification did not name.
+		Name string
 		// The port the workload listens on inside its runtime.
 		Container int
 		// The host port that reaches it.
@@ -53,7 +56,7 @@ func NewPortRepository(db *sql.DB) *PortRepository {
 // ordered by the port inside the workload so that the result is stable.
 func (r *PortRepository) List(ctx context.Context, workloadID string) ([]Port, error) {
 	const q = `
-		SELECT workload_id, container_port, host_port, protocol, is_dynamic
+		SELECT workload_id, name, container_port, host_port, protocol, is_dynamic
 		FROM workload_port
 		WHERE workload_id = ?
 		ORDER BY container_port ASC, protocol ASC
@@ -69,7 +72,7 @@ func (r *PortRepository) List(ctx context.Context, workloadID string) ([]Port, e
 
 	for rows.Next() {
 		var port Port
-		if err = rows.Scan(&port.WorkloadID, &port.Container, &port.Host, &port.Protocol, &port.Dynamic); err != nil {
+		if err = rows.Scan(&port.WorkloadID, &port.Name, &port.Container, &port.Host, &port.Protocol, &port.Dynamic); err != nil {
 			return nil, fmt.Errorf("failed to scan workload port: %w", err)
 		}
 
@@ -87,7 +90,7 @@ func (r *PortRepository) List(ctx context.Context, workloadID string) ([]Port, e
 // hundred workloads into two hundred round trips.
 func (r *PortRepository) ListAll(ctx context.Context) (map[string][]Port, error) {
 	const q = `
-		SELECT workload_id, container_port, host_port, protocol, is_dynamic
+		SELECT workload_id, name, container_port, host_port, protocol, is_dynamic
 		FROM workload_port
 		ORDER BY workload_id ASC, container_port ASC, protocol ASC
 	`
@@ -102,7 +105,7 @@ func (r *PortRepository) ListAll(ctx context.Context) (map[string][]Port, error)
 
 	for rows.Next() {
 		var port Port
-		if err = rows.Scan(&port.WorkloadID, &port.Container, &port.Host, &port.Protocol, &port.Dynamic); err != nil {
+		if err = rows.Scan(&port.WorkloadID, &port.Name, &port.Container, &port.Host, &port.Protocol, &port.Dynamic); err != nil {
 			return nil, fmt.Errorf("failed to scan workload port: %w", err)
 		}
 
@@ -135,8 +138,8 @@ func claim(ctx context.Context, tx *sql.Tx, workloadID string, ports []Port) err
 	const (
 		clear  = `DELETE FROM workload_port WHERE workload_id = ?`
 		insert = `
-			INSERT INTO workload_port (workload_id, container_port, host_port, protocol, is_dynamic)
-			VALUES (?, ?, ?, ?, ?)
+			INSERT INTO workload_port (workload_id, name, container_port, host_port, protocol, is_dynamic)
+			VALUES (?, ?, ?, ?, ?, ?)
 		`
 	)
 
@@ -145,7 +148,7 @@ func claim(ctx context.Context, tx *sql.Tx, workloadID string, ports []Port) err
 	}
 
 	for _, port := range ports {
-		_, err := tx.ExecContext(ctx, insert, workloadID, port.Container, port.Host, port.Protocol, port.Dynamic)
+		_, err := tx.ExecContext(ctx, insert, workloadID, port.Name, port.Container, port.Host, port.Protocol, port.Dynamic)
 		switch {
 		case IsUniqueError(err):
 			return fmt.Errorf("%w: %d/%s", ErrHostPortTaken, port.Host, port.Protocol)
