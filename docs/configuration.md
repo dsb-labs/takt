@@ -30,6 +30,9 @@ allow-paths = []
 [secrets]
 key-file = ""
 
+[telemetry]
+otlp-endpoint = ""
+
 [logging]
 level = "info"
 ```
@@ -188,6 +191,26 @@ The file needs a backup, and the backup should not sit beside the database. A va
 sealed under a key that is gone cannot be recovered, and anything that can read the
 key can read every secret orca holds. See [Secrets](secrets.md#the-encryption-key).
 
+## telemetry
+
+| Key | Default | Description |
+|---|---|---|
+| `otlp-endpoint` | empty | The OTLP endpoint traces and logs are exported to. |
+
+Empty exports nothing, which is the default. Metrics need no configuration at all:
+the server always collects them and serves them at `/metrics`. See
+[Operating](operating.md#observability).
+
+Set this to a URL such as `http://collector.internal:4318` to export traces and
+logs over OTLP/HTTP. The scheme decides whether the connection uses TLS. The value
+names where to send the telemetry and nothing else — orca does not know or care
+what consumes it.
+
+Everything beyond the endpoint is read from the standard `OTEL_*` environment
+variables the OpenTelemetry SDK honours. Use `OTEL_EXPORTER_OTLP_HEADERS` for
+credentials, `OTEL_TRACES_SAMPLER` for sampling, and `OTEL_RESOURCE_ATTRIBUTES`
+for extra resource attributes, rather than looking for keys here.
+
 ## logging
 
 | Key | Default | Description |
@@ -197,3 +220,7 @@ key can read every secret orca holds. See [Secrets](secrets.md#the-encryption-ke
 At `info` the server is quiet unless something is wrong. `debug` reports each
 reconciliation decision, which is what to turn on when a workload is not behaving as
 the manifest says it should.
+
+The level applies to what reaches stderr. A log exporter configured under
+[telemetry](#telemetry) receives every record regardless, so a quiet terminal does
+not mean a thin trail at the collector.

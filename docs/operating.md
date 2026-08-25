@@ -24,6 +24,11 @@ Variables are not protected at all. Anything that can reach the API can read eve
 variable and its value, which is what they are for. Put anything that would be
 damaging to report in a secret instead. See [Variables](variables.md).
 
+The `/metrics` endpoint reports workload names as label values. Anything that can
+reach the port can already run arbitrary workloads, so the names disclose nothing
+new — but they are disclosed, and a scraper is one more thing with reach to
+account for.
+
 ### Loopback is not a boundary against a browser
 
 A loopback bind stops another machine reaching orca. It does not stop a web page.
@@ -301,6 +306,57 @@ level = "debug"
 
 Every log line carries the workload it concerns, so filtering by name shows one
 workload's history.
+
+## Observability
+
+The server describes itself on three endpoints, served from the same listener as
+everything else and declared in the same OpenAPI document:
+
+- `/health` answers as long as the process serves requests. It suits a supervisor
+  deciding whether to restart the process.
+- `/ready` reports whether the server can do its job: the database answers, and
+  every configured driver answered the most recent attempt to observe it. A server
+  whose Docker daemon has gone away is alive but not ready, and the two need
+  different answers. A not-ready response is a 503 carrying the reasons.
+- `/metrics` serves everything the server measures in the Prometheus text format,
+  ready to scrape with no collector in between.
+
+Driver answers on `/ready` are cached from the reconciler's own passes rather than
+fetched per request, so polling costs nothing. The answer is at most one reconcile
+interval plus the driver timeout old. Before the first pass completes, the server
+reports not ready. Note that the exec driver reads local state and so almost
+always answers — in practice the driver half of readiness is about the Docker
+daemon.
+
+### Scraping
+
+Point a Prometheus at `/metrics`. A scrape target that names the server by address
+always passes the host check. One that names it by hostname must have that
+hostname in `hosts`, or every scrape fails with a 421. See
+[Configuration](configuration.md#http).
+
+The metrics to alert on first:
+
+- `orca_reconcile_passes_total` stops increasing when the reconciler has stopped
+  converging, which is exactly the failure a log does not surface.
+- `orca_workloads{state="failed"}` counts workloads in the failed state, derived
+  by the same rules `orca workload get` reports.
+- `orca_ports_used` against `orca_ports_capacity` warns before an apply fails
+  with no free port.
+
+Alongside orca's own instruments, the scrape carries the standard OpenTelemetry
+HTTP server metrics, with request counts and durations per route and status.
+
+### Traces and logs
+
+Set `otlp-endpoint` under [telemetry](configuration.md#telemetry) to export traces
+and logs over OTLP. Without it, both are inert and `/metrics` still works.
+
+Each reconciliation pass is a trace: a root span for the pass, a span per workload
+converged, a span per driver observation, and a span per image pull. The Docker
+client's own requests parent underneath, so "why did this pass take ninety
+seconds" reads down to the daemon call that cost the time. The server's log
+records travel the same pipeline with trace correlation attached.
 
 ## Host ports
 
