@@ -224,7 +224,14 @@ func Run(ctx context.Context, config Config) error {
 	// rather than the server.
 	err = allocator.RegisterMetrics(
 		tel.MeterProvider().Meter("github.com/dsb-labs/orca/internal/server/port"),
-		ports.Allocated,
+		func(ctx context.Context) (map[port.Protocol]int, error) {
+			allocated, err := ports.Allocated(ctx)
+			if err != nil {
+				return nil, err
+			}
+
+			return map[port.Protocol]int{port.ProtocolTCP: len(allocated)}, nil
+		},
 	)
 	if err != nil {
 		logger.With("error", err).Warn("failed to register port pool gauges")

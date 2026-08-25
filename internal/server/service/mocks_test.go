@@ -12,6 +12,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
+	"github.com/dsb-labs/orca/internal/server/port"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -2562,8 +2563,8 @@ func (_m *MockAllocator) EXPECT() *MockAllocator_Expecter {
 }
 
 // Allocate provides a mock function for the type MockAllocator
-func (_mock *MockAllocator) Allocate(taken []int) (int, error) {
-	ret := _mock.Called(taken)
+func (_mock *MockAllocator) Allocate(protocols []port.Protocol, taken map[port.Protocol][]int) (int, error) {
+	ret := _mock.Called(protocols, taken)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Allocate")
@@ -2571,16 +2572,16 @@ func (_mock *MockAllocator) Allocate(taken []int) (int, error) {
 
 	var r0 int
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func([]int) (int, error)); ok {
-		return returnFunc(taken)
+	if returnFunc, ok := ret.Get(0).(func([]port.Protocol, map[port.Protocol][]int) (int, error)); ok {
+		return returnFunc(protocols, taken)
 	}
-	if returnFunc, ok := ret.Get(0).(func([]int) int); ok {
-		r0 = returnFunc(taken)
+	if returnFunc, ok := ret.Get(0).(func([]port.Protocol, map[port.Protocol][]int) int); ok {
+		r0 = returnFunc(protocols, taken)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
-	if returnFunc, ok := ret.Get(1).(func([]int) error); ok {
-		r1 = returnFunc(taken)
+	if returnFunc, ok := ret.Get(1).(func([]port.Protocol, map[port.Protocol][]int) error); ok {
+		r1 = returnFunc(protocols, taken)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2593,19 +2594,25 @@ type MockAllocator_Allocate_Call struct {
 }
 
 // Allocate is a helper method to define mock.On call
-//   - taken []int
-func (_e *MockAllocator_Expecter) Allocate(taken any) *MockAllocator_Allocate_Call {
-	return &MockAllocator_Allocate_Call{Call: _e.mock.On("Allocate", taken)}
+//   - protocols []port.Protocol
+//   - taken map[port.Protocol][]int
+func (_e *MockAllocator_Expecter) Allocate(protocols any, taken any) *MockAllocator_Allocate_Call {
+	return &MockAllocator_Allocate_Call{Call: _e.mock.On("Allocate", protocols, taken)}
 }
 
-func (_c *MockAllocator_Allocate_Call) Run(run func(taken []int)) *MockAllocator_Allocate_Call {
+func (_c *MockAllocator_Allocate_Call) Run(run func(protocols []port.Protocol, taken map[port.Protocol][]int)) *MockAllocator_Allocate_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 []int
+		var arg0 []port.Protocol
 		if args[0] != nil {
-			arg0 = args[0].([]int)
+			arg0 = args[0].([]port.Protocol)
+		}
+		var arg1 map[port.Protocol][]int
+		if args[1] != nil {
+			arg1 = args[1].(map[port.Protocol][]int)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -2616,7 +2623,7 @@ func (_c *MockAllocator_Allocate_Call) Return(n int, err error) *MockAllocator_A
 	return _c
 }
 
-func (_c *MockAllocator_Allocate_Call) RunAndReturn(run func(taken []int) (int, error)) *MockAllocator_Allocate_Call {
+func (_c *MockAllocator_Allocate_Call) RunAndReturn(run func(protocols []port.Protocol, taken map[port.Protocol][]int) (int, error)) *MockAllocator_Allocate_Call {
 	_c.Call.Return(run)
 	return _c
 }

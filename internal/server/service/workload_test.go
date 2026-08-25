@@ -2385,12 +2385,17 @@ type allocatorStub struct {
 	err error
 }
 
-func (a allocatorStub) Allocate(taken []int) (int, error) {
+func (a allocatorStub) Allocate(protocols []port.Protocol, taken map[port.Protocol][]int) (int, error) {
 	if a.err != nil {
 		return 0, a.err
 	}
 
-	return 20000 + len(taken), nil
+	var claimed int
+	for _, protocol := range protocols {
+		claimed += len(taken[protocol])
+	}
+
+	return 20000 + claimed, nil
 }
 
 func containerSpec(name, image string) api.WorkloadSpec {

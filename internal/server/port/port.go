@@ -21,6 +21,12 @@ var (
 )
 
 type (
+	// The Protocol type names the transport protocol a host port is taken on.
+	//
+	// The two are separate address spaces, so an allocation is only ever a claim on
+	// one of them: 20000/tcp says nothing about whether 20000/udp is free.
+	Protocol string
+
 	// The Allocator type hands out host ports from a configured range.
 	Allocator struct {
 		min, max int
@@ -33,6 +39,15 @@ type (
 		// The highest host port that may be allocated.
 		Max int
 	}
+)
+
+const (
+	// ProtocolTCP is the protocol a port is published on unless the workload asks
+	// for the other.
+	ProtocolTCP Protocol = "tcp"
+	// ProtocolUDP is the other address space, which a workload speaking DNS,
+	// WireGuard, syslog, NTP or a game protocol publishes on.
+	ProtocolUDP Protocol = "udp"
 )
 
 const (
@@ -51,8 +66,14 @@ func New(config Config) *Allocator {
 	return &Allocator{min: config.Min, max: config.Max}
 }
 
-// Allocate returns a free host port, avoiding both the ports in taken and any port
-// something on the host is already listening on.
+// Allocate returns a host port that is free on every protocol named, avoiding both
+// the ports already taken on those protocols and any port something on the host is
+// already listening on.
+//
+// More than one protocol is asked for when a workload publishes the same port over
+// both, which DNS does. The two allocations are independent as far as the address
+// spaces are concerned, but landing them on one host port is what makes 53/tcp and
+// 53/udp reachable at the same number rather than at two unrelated ones.
 //
 // The search starts at a random point in the range and wraps, rather than scanning
 // from the bottom every time. Scanning from the bottom made concurrent allocations
@@ -66,10 +87,13 @@ func New(config Config) *Allocator {
 // nothing outside orca is holding it in the meantime. The check makes that race
 // unlikely rather than impossible, and the caller is expected to cope with a bind
 // that fails anyway.
-func (a *Allocator) Allocate(taken []int) (int, error) {
-	claimed := make(map[int]struct{}, len(taken))
-	for _, port := range taken {
-		claimed[port] = struct{}{}
+func (a *Allocator) Allocate(protocols []Protocol, taken map[Protocol][]int) (int, error) {
+	claimed := make(map[Protocol]map[int]struct{}, len(protocols))
+	for _, protocol := range protocols {
+		claimed[protocol] = make(map[int]struct{}, len(taken[protocol]))
+		for _, port := range taken[protocol] {
+			claimed[protocol][port] = struct{}{}
+		}
 	}
 
 	size := a.max - a.min + 1
@@ -78,29 +102,54 @@ func (a *Allocator) Allocate(taken []int) (int, error) {
 	for i := range size {
 		candidate := a.min + (offset+i)%size
 
-		if _, ok := claimed[candidate]; ok {
-			continue
+		if usable(protocols, claimed, candidate) {
+			return candidate, nil
 		}
-
-		if !Available(candidate) {
-			continue
-		}
-
-		return candidate, nil
 	}
 
 	return 0, fmt.Errorf("%w: %d-%d", ErrRangeExhausted, a.min, a.max)
 }
 
+// usable reports whether a candidate port is free on every protocol asked for, both
+// as far as orca's own allocations go and on the host itself.
+func usable(protocols []Protocol, claimed map[Protocol]map[int]struct{}, candidate int) bool {
+	for _, protocol := range protocols {
+		if _, ok := claimed[protocol][candidate]; ok {
+			return false
+		}
+
+		if !Available(protocol, candidate) {
+			return false
+		}
+	}
+
+	return true
+}
+
 // Available reports whether nothing on the host is currently listening on the given
-// port.
+// port over the given protocol.
 //
 // The check is a real bind rather than a lookup, because that is the only thing that
 // accounts for every listener: processes orca knows nothing about, containers other
 // tooling started, and sockets held by the system. The port is released immediately,
 // so this establishes that the port was free a moment ago rather than reserving it.
-func Available(port int) bool {
-	listener, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(port)))
+//
+// Each protocol is probed on its own socket type. Probing UDP with a TCP listen would
+// report a free port as taken and a taken one as free, since the two spaces are
+// unrelated.
+func Available(protocol Protocol, port int) bool {
+	address := net.JoinHostPort("", strconv.Itoa(port))
+
+	if protocol == ProtocolUDP {
+		conn, err := net.ListenPacket("udp", address)
+		if err != nil {
+			return false
+		}
+
+		return conn.Close() == nil
+	}
+
+	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return false
 	}

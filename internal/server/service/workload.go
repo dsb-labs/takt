@@ -150,8 +150,9 @@ type (
 	// The Allocator interface describes how the service obtains a host port for a
 	// workload that didn't ask for a particular one.
 	Allocator interface {
-		// Allocate should return a free host port, avoiding those in taken.
-		Allocate(taken []int) (int, error)
+		// Allocate should return a host port that is free on every protocol named,
+		// avoiding the ports already taken on each of them.
+		Allocate(protocols []port.Protocol, taken map[port.Protocol][]int) (int, error)
 	}
 
 	// The Checker interface describes how the service reads the health of
@@ -1004,7 +1005,9 @@ func (s *WorkloadService) resolvePort(ctx context.Context, name string, held map
 		return previous, nil
 	}
 
-	host, err := s.allocator.Allocate(taken)
+	host, err := s.allocator.Allocate([]port.Protocol{port.ProtocolTCP}, map[port.Protocol][]int{
+		port.ProtocolTCP: taken,
+	})
 	if err != nil {
 		if errors.Is(err, port.ErrRangeExhausted) {
 			// Every port orca may allocate is in use. The request was valid and will
