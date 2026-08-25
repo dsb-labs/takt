@@ -541,6 +541,8 @@ type (
 	logConfig struct {
 		tail     int
 		previous bool
+		follow   bool
+		since    time.Time
 	}
 )
 
@@ -565,10 +567,35 @@ func WithPrevious() LogOption {
 	return func(c *logConfig) { c.previous = true }
 }
 
+// WithFollow modifies a read to keep writing output as the workload produces it.
+//
+// The read ends when the instance ends, which is what somebody watching a workload
+// start is waiting for either way. A replacement is a new instance, so a workload that
+// restarts while you watch needs another read.
+//
+// Cancelling the context is how a caller ends a follow early, and it ends the read
+// rather than failing it. This cannot be combined with WithPrevious, which reads an
+// instance that has already ended.
+func WithFollow() LogOption {
+	return func(c *logConfig) { c.follow = true }
+}
+
+// WithSince modifies a read to return only the output written at or after an instant.
+//
+// This reaches container workloads only. An exec workload's output is a plain file with
+// no timestamps in it, so the server ignores this rather than filtering on times it
+// would have to invent.
+func WithSince(t time.Time) LogOption {
+	return func(c *logConfig) { c.since = t }
+}
+
 // Logs writes the recent output of the named workload to out, as the options describe.
 //
 // Passing no options reads the current instance with the server deciding how much of it
 // to return.
+//
+// A followed read does not return until the instance ends or the context is cancelled.
+// Cancellation is not reported as a failure: it is how a caller ends a follow.
 //
 // The output is copied as it arrives rather than returned, so a workload with a lot
 // of output doesn't have to fit in the caller's memory before any of it is usable.
@@ -587,7 +614,22 @@ func (c *Client) Logs(ctx context.Context, out io.Writer, name string, options .
 		params.Previous = new(true)
 	}
 
-	resp, err := c.api.GetWorkloadLogs(ctx, name, &params)
+	if config.follow {
+		params.Follow = new(true)
+	}
+
+	if !config.since.IsZero() {
+		params.Since = &config.since
+	}
+
+	// A follow is the one request that legitimately outlives the client's timeout, so
+	// it goes out over the client that has none. What ends it is the caller's context.
+	inner := c.api
+	if config.follow {
+		inner = c.stream
+	}
+
+	resp, err := inner.GetWorkloadLogs(ctx, name, &params)
 	if err != nil {
 		return fmt.Errorf("failed to read workload logs: %w", err)
 	}
@@ -598,6 +640,13 @@ func (c *Client) Logs(ctx context.Context, out io.Writer, name string, options .
 	}
 
 	if _, err = io.Copy(out, resp.Body); err != nil {
+		// A caller who cancelled a follow already knows why the output stopped, and
+		// the copy fails in whatever way the transport noticed first. Reporting that
+		// would turn an ordinary Ctrl-C into an error.
+		if ctx.Err() != nil {
+			return nil
+		}
+
 		return fmt.Errorf("failed to read workload logs: %w", err)
 	}
 

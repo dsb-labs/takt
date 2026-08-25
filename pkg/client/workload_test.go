@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -791,6 +792,77 @@ func TestClient_Logs(t *testing.T) {
 
 		require.NoError(t, c.Logs(t.Context(), io.Discard, "example", client.WithTail(20)))
 	})
+
+	t.Run("asks to follow from an instant", func(t *testing.T) {
+		since := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "true", r.URL.Query().Get("follow"))
+			assert.Equal(t, since.Format(time.RFC3339), r.URL.Query().Get("since"))
+
+			_, _ = w.Write([]byte("still going\n"))
+		})
+
+		var logs strings.Builder
+		require.NoError(t, c.Logs(t.Context(), &logs, "example", client.WithFollow(), client.WithSince(since)))
+		assert.Equal(t, "still going\n", logs.String())
+	})
+
+	t.Run("ends a follow the caller cancelled without reporting it", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte("first line\n"))
+			w.(http.Flusher).Flush()
+
+			// The server still has the workload to watch. What ends this read is the
+			// caller going away, not the output running out.
+			<-r.Context().Done()
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+
+		var logs syncBuffer
+		done := make(chan error, 1)
+
+		go func() {
+			done <- c.Logs(ctx, &logs, "example", client.WithFollow())
+		}()
+
+		require.Eventually(t, func() bool {
+			return logs.String() == "first line\n"
+		}, 10*time.Second, 10*time.Millisecond, "the followed output never arrived")
+
+		cancel()
+
+		// A caller pressing Ctrl-C is the ordinary way to end a follow, so it comes
+		// back as the end of the output rather than as a failed request.
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("the follow outlived the caller that asked for it")
+		}
+	})
+}
+
+// The syncBuffer type collects what a follow writes while the test reads it, since the
+// two happen on different goroutines.
+type syncBuffer struct {
+	mux sync.Mutex
+	buf strings.Builder
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mux.Lock()
+	defer b.mux.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mux.Lock()
+	defer b.mux.Unlock()
+
+	return b.buf.String()
 }
 
 func newTestClient(t *testing.T, handler http.HandlerFunc) *client.Client {

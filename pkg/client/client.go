@@ -50,6 +50,9 @@ type (
 	// The Client type talks to an orca server over HTTP.
 	Client struct {
 		api *api.ClientWithResponses
+		// The same server, reached without a request timeout, for the one call that
+		// legitimately outlives one.
+		stream *api.ClientWithResponses
 	}
 
 	// The Error type describes an unsuccessful response from the server.
@@ -78,7 +81,16 @@ func New(address string) (*Client, error) {
 		return nil, fmt.Errorf("failed to construct client: %w", err)
 	}
 
-	return &Client{api: inner}, nil
+	// A followed log read is open for as long as the workload runs, and the timeout
+	// above covers reading the body as well as sending the request. One client cannot
+	// serve both, so following gets its own and the caller's context is what ends it.
+	// Every other request keeps the timeout.
+	streaming, err := api.NewClientWithResponses(address, api.WithHTTPClient(&http.Client{}))
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct client: %w", err)
+	}
+
+	return &Client{api: inner, stream: streaming}, nil
 }
 
 // Error returns the message the server reported.
