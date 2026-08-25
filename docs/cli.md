@@ -106,12 +106,16 @@ without is merely slow.
 orca workload logs example
 orca workload logs example --tail 20
 orca workload logs example --previous
+orca workload logs example --follow
+orca workload logs example --since 10m
 ```
 
 | Flag | Default | Description |
 |---|---|---|
 | `--tail`, `-n` | `100` | Lines to read from the end of the logs. |
 | `--previous`, `-p` | `false` | Read the instance that was replaced rather than the one running now. |
+| `--follow`, `-f` | `false` | Keep reading output until the instance ends. |
+| `--since` | empty | Read only the output written since a duration ago or an RFC 3339 time. |
 
 Prints a workload's recent output. Both output streams are combined in the order they
 were written.
@@ -120,6 +124,16 @@ were written.
 that keeps restarting needs: the current attempt has not failed yet, so its output does
 not say why the workload is failing. A workload that has only ever run once has no
 earlier attempt, and the output is empty.
+
+`--follow` keeps the command running and prints output as the workload produces it.
+It ends when the instance ends, or when you press Ctrl-C. A replacement is a new
+instance, so a workload that restarts while you watch needs the command again. This
+cannot be combined with `--previous`, which reads an instance that has already ended.
+
+`--since` takes either a duration such as `10m` or an RFC 3339 time such as
+`2026-08-25T12:00:00Z`. It applies to container workloads, whose runtime holds a
+timestamp for every line it keeps. It is ignored for exec workloads, whose output is a
+plain file with no timestamps in it.
 
 ## workload delete
 

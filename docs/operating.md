@@ -255,6 +255,34 @@ For a container, orca reads the logs from the Docker daemon. For an exec workloa
 reads `output.log`. Either way both output streams come back combined in the order
 they were written.
 
+### Watching output as it arrives
+
+```sh
+orca workload logs example --follow
+```
+
+This keeps the connection open and prints each line as the workload writes it, which is
+what watching a workload start needs. It ends when the instance ends, or when you press
+Ctrl-C.
+
+A replacement is a new instance. A workload that restarts while you are watching ends
+the command, and reading the next attempt means running it again.
+
+### Output since a moment
+
+```sh
+orca workload logs example --since 10m
+orca workload logs example --since 2026-08-25T12:00:00Z
+```
+
+A duration says how long ago, and an RFC 3339 time names the moment itself. Use the
+second when correlating a workload's output with another record.
+
+This applies to container workloads. The Docker daemon holds a timestamp for every line
+it keeps, so it does the filtering itself. An exec workload's output is a plain file
+with no timestamps in it, so orca ignores `--since` for one rather than filtering on
+times it would have to invent.
+
 ### The attempt before this one
 
 orca replaces a workload by stopping it and starting it again, so the output an
