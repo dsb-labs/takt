@@ -345,7 +345,9 @@ The metrics to alert on first:
   with no free port.
 
 Alongside orca's own instruments, the scrape carries the standard OpenTelemetry
-HTTP server metrics, with request counts and durations per route and status.
+HTTP server metrics, with request counts and durations per route and status, and
+the Go runtime's own metrics — goroutine count, memory use and garbage collection
+timings — which is where a leak in orca itself shows.
 
 ### Traces and logs
 
