@@ -124,7 +124,7 @@ type (
 		// Reports that a supervised process has ended, so the reconciler converges
 		// without waiting for its next tick.
 		events chan driver.Event
-		// Waits for supervising goroutines at shutdown, so none outlives the driver.
+		// Counts the supervising goroutines, so that a caller can wait for them.
 		waits sync.WaitGroup
 	}
 
@@ -1041,6 +1041,20 @@ func (d *Driver) following(id string) (string, string, error) {
 	// The two trees name a version's directory the same way, so the record found in one
 	// says which directory to read in the other.
 	return record, filepath.Join(root, filepath.Base(record)), nil
+}
+
+// Wait blocks until every supervising goroutine has finished.
+//
+// A supervising goroutine outlives the call that started it: it waits on a process,
+// records how that process ended, and logs it. Nothing about the driver's own methods
+// says when that has happened, so anything tearing down what those goroutines write
+// to — a logger, a directory — has to wait for them first.
+//
+// This does not stop anything. A process still running keeps its supervisor waiting, so
+// stop or release the work before calling this or it waits for as long as the workload
+// runs.
+func (d *Driver) Wait() {
+	d.waits.Wait()
 }
 
 // Release lets every supervised process outlive the driver.

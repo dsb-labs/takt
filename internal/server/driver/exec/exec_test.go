@@ -868,7 +868,35 @@ func newDriver(t *testing.T, options ...option) (*exec.Driver, string) {
 		option(&config)
 	}
 
-	return exec.New(config), root
+	d := exec.New(config)
+
+	// Registered before any test's own cleanup, so it runs after them: a test that
+	// stops its workload has done so by the time this waits.
+	//
+	// A supervising goroutine records how its process ended and logs it. Both outlive
+	// the call that started the process, and both touch things the end of a test takes
+	// away — the logger writes to t.Output(), which panics once the test has finished,
+	// and the record is written into the temp directory cleanup is removing. Either one
+	// fails the test that happens to be running rather than the one that leaked.
+	t.Cleanup(func() {
+		settled := make(chan struct{})
+
+		go func() {
+			d.Wait()
+			close(settled)
+		}()
+
+		select {
+		case <-settled:
+		case <-time.After(30 * time.Second):
+			// A process the test left running, which nothing here can stop without
+			// guessing at what the test meant. Named rather than waited out, since the
+			// alternative is a suite that hangs.
+			t.Error("the driver's supervising goroutines outlived the test")
+		}
+	})
+
+	return d, root
 }
 
 // The option type modifies how a test's driver is configured.
