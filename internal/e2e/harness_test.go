@@ -373,6 +373,31 @@ func (s *Suite) containers(workload string) []string {
 	return strings.Fields(string(out))
 }
 
+// publishedPorts returns the port mappings docker reports for the named workload's
+// container, as "<port>/<protocol>" strings.
+//
+// Asked of docker rather than of orca, since what the server recorded and what the
+// runtime published are the two things a test about protocols has to see agree.
+func (s *Suite) publishedPorts(workload string) []string {
+	ids := s.containers(workload)
+	s.Require().NotEmpty(ids)
+
+	out, err := exec.Command("docker", "port", ids[0]).Output()
+	s.Require().NoError(err)
+
+	published := make([]string, 0, 2)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		mapping, _, ok := strings.Cut(line, " -> ")
+		if !ok {
+			continue
+		}
+
+		published = append(published, strings.TrimSpace(mapping))
+	}
+
+	return published
+}
+
 // cleanup removes a workload and anything docker still holds for it, so that a test
 // failing part-way through doesn't leave containers behind for the next run.
 func (s *Suite) cleanup(name string) {

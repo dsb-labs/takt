@@ -215,6 +215,39 @@ func (s *Suite) TestFixedPortConflictIsRejected() {
 	s.True(client.IsConflict(err), "expected a conflict error, got %v", err)
 }
 
+// TestPortProtocols covers publishing one port over both protocols, which is what a
+// workload speaking DNS needs and what nothing before could ask for.
+func (s *Suite) TestPortProtocols() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// The same host port on both protocols is one workload holding two unrelated
+	// ports, which only a schema keying an allocation by protocol accepts.
+	applied, _, err := s.client.Apply(s.ctx(), s.containerSpec(name,
+		manifest.Port{To: 80, From: 8188, Protocol: manifest.ProtocolTCP},
+		manifest.Port{To: 80, From: 8188, Protocol: manifest.ProtocolUDP},
+	))
+	s.Require().NoError(err)
+
+	s.Require().Len(applied.Ports, 2)
+	s.Equal("tcp", applied.Ports[0].Protocol)
+	s.Equal("udp", applied.Ports[1].Protocol)
+	s.Equal(8188, applied.Ports[0].From)
+	s.Equal(8188, applied.Ports[1].From)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	// Reading the publication back from docker is what proves the driver asked for
+	// the protocol rather than publishing TCP twice.
+	published := s.publishedPorts(name)
+	s.Contains(published, "80/tcp")
+	s.Contains(published, "80/udp")
+
+	// The container really is reachable over TCP, which the UDP mapping must not
+	// have displaced.
+	s.awaitListening("127.0.0.1:8188")
+}
+
 // TestWorkloadReplacedWhenSpecChanges covers a specification change, which docker
 // cannot apply to a running container and so has to be a replacement.
 func (s *Suite) TestWorkloadReplacedWhenSpecChanges() {
