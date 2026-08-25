@@ -387,9 +387,23 @@ func (c *Client) Stop(ctx context.Context, name string, options ...WaitOption) (
 		return workload, nil
 	}
 
+	// The instance a stop leaves behind is still reported — it is what keeps the
+	// workload's last output readable — so "nothing is running" means no instance
+	// still up, not no instances at all.
 	return c.waitFor(ctx, name, config.interval, func(w Workload) bool {
-		return w.Suspended && len(w.Instances) == 0
+		return w.Suspended && !slices.ContainsFunc(w.Instances, instanceUp)
 	})
+}
+
+// instanceUp reports whether an instance is still up or on its way in or out, as
+// opposed to having ended.
+func instanceUp(instance Instance) bool {
+	switch instance.State {
+	case InstanceStatePending, InstanceStateRunning, InstanceStateTerminating:
+		return true
+	default:
+		return false
+	}
 }
 
 // Start clears the suspension of the workload with the given name and returns it

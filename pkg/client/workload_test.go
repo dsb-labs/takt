@@ -516,14 +516,19 @@ func TestClient_Stop(t *testing.T) {
 			}
 
 			// The mark lands before the instances stop, so waiting has to keep
-			// polling while something is still running and stop once nothing is.
+			// polling while something is still running — and settle for an
+			// instance that has ended, since the stopped instance stays reported
+			// so its output is readable.
 			gets++
 			if gets < 3 {
 				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: suspended})
 				return
 			}
 
-			suspended.Instances = nil
+			suspended.Instances = &[]api.Instance{
+				{ID: "container-one", State: api.InstanceStateExited, SpecHash: "hash-one"},
+			}
+
 			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: suspended})
 		})
 
@@ -531,7 +536,8 @@ func TestClient_Stop(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, 3, gets)
-		assert.Empty(t, got.Instances)
+		require.Len(t, got.Instances, 1)
+		assert.Equal(t, client.InstanceStateExited, got.Instances[0].State)
 	})
 
 	t.Run("gives up waiting when the context is cancelled", func(t *testing.T) {
