@@ -286,6 +286,33 @@ func TestWorkloadAPI_HidesInternalFailures(t *testing.T) {
 				svc.EXPECT().Get(mock.Anything, "example").Return(service.Workload{}, internal).Once()
 			},
 		},
+		{
+			Name:   "stop",
+			Method: http.MethodPost,
+			Target: "/api/v1/workloads/example/stop",
+			Body:   struct{}{},
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Stop(mock.Anything, "example").Return(service.Workload{}, internal).Once()
+			},
+		},
+		{
+			Name:   "start",
+			Method: http.MethodPost,
+			Target: "/api/v1/workloads/example/start",
+			Body:   struct{}{},
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Start(mock.Anything, "example").Return(service.Workload{}, internal).Once()
+			},
+		},
+		{
+			Name:   "restart",
+			Method: http.MethodPost,
+			Target: "/api/v1/workloads/example/restart",
+			Body:   struct{}{},
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Restart(mock.Anything, "example").Return(service.Workload{}, internal).Once()
+			},
+		},
 	}
 
 	for _, tc := range tt {
@@ -585,6 +612,140 @@ func TestWorkloadAPI_DeleteWorkload(t *testing.T) {
 			Return(service.Workload{}, service.ErrWorkloadNotFound).Once()
 
 		resp := do(t, svc, http.MethodDelete, "/api/v1/workloads/nope", nil)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
+	})
+}
+
+func TestWorkloadAPI_StopWorkload(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepts the stop and returns the suspended workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+
+		suspended := workload("example", generated.WorkloadStateSuspended)
+		suspended.Suspended = true
+
+		svc.EXPECT().Stop(mock.Anything, "example").Return(suspended, nil).Once()
+
+		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/example/stop", bytes.NewReader([]byte("{}")))
+
+		// 202 rather than 200: the workload is only marked when the request
+		// returns, and the reconciler stops its work afterwards.
+		require.Equal(t, http.StatusAccepted, resp.Code)
+
+		var result generated.StopWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		got := result.Workload
+
+		assert.Equal(t, generated.WorkloadStateSuspended, got.State)
+		require.NotNil(t, got.Suspended)
+		assert.True(t, *got.Suspended)
+	})
+
+	t.Run("refuses a workload that is being deleted", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Stop(mock.Anything, "example").
+			Return(service.Workload{}, service.ErrWorkloadDeleting).Once()
+
+		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/example/stop", bytes.NewReader([]byte("{}")))
+		assert.Equal(t, http.StatusConflict, resp.Code)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Stop(mock.Anything, "nope").
+			Return(service.Workload{}, service.ErrWorkloadNotFound).Once()
+
+		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/nope/stop", bytes.NewReader([]byte("{}")))
+		assert.Equal(t, http.StatusNotFound, resp.Code)
+	})
+}
+
+func TestWorkloadAPI_StartWorkload(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepts the start and returns the workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Start(mock.Anything, "example").
+			Return(workload("example", generated.WorkloadStatePending), nil).Once()
+
+		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/example/start", bytes.NewReader([]byte("{}")))
+		require.Equal(t, http.StatusAccepted, resp.Code)
+
+		var result generated.StartWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		got := result.Workload
+
+		// The mark is cleared and nothing has started yet, so the workload reads
+		// as pending rather than suspended.
+		assert.Equal(t, generated.WorkloadStatePending, got.State)
+		assert.Nil(t, got.Suspended)
+	})
+
+	t.Run("refuses a workload that is being deleted", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Start(mock.Anything, "example").
+			Return(service.Workload{}, service.ErrWorkloadDeleting).Once()
+
+		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/example/start", bytes.NewReader([]byte("{}")))
+		assert.Equal(t, http.StatusConflict, resp.Code)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Start(mock.Anything, "nope").
+			Return(service.Workload{}, service.ErrWorkloadNotFound).Once()
+
+		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/nope/start", bytes.NewReader([]byte("{}")))
+		assert.Equal(t, http.StatusNotFound, resp.Code)
+	})
+}
+
+func TestWorkloadAPI_RestartWorkload(t *testing.T) {
+	t.Parallel()
+
+	t.Run("accepts the restart and returns the workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Restart(mock.Anything, "example").
+			Return(workload("example", generated.WorkloadStateRunning), nil).Once()
+
+		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/example/restart", bytes.NewReader([]byte("{}")))
+		require.Equal(t, http.StatusAccepted, resp.Code)
+
+		var result generated.RestartWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		// The request is recorded rather than acted on, so the workload reads
+		// exactly as it did.
+		assert.Equal(t, generated.WorkloadStateRunning, result.Workload.State)
+	})
+
+	t.Run("refuses a suspended workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Restart(mock.Anything, "example").
+			Return(service.Workload{}, service.ErrWorkloadSuspended).Once()
+
+		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/example/restart", bytes.NewReader([]byte("{}")))
+		assert.Equal(t, http.StatusConflict, resp.Code)
+	})
+
+	t.Run("refuses a workload that is being deleted", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Restart(mock.Anything, "example").
+			Return(service.Workload{}, service.ErrWorkloadDeleting).Once()
+
+		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/example/restart", bytes.NewReader([]byte("{}")))
+		assert.Equal(t, http.StatusConflict, resp.Code)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Restart(mock.Anything, "nope").
+			Return(service.Workload{}, service.ErrWorkloadNotFound).Once()
+
+		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/nope/restart", bytes.NewReader([]byte("{}")))
 		assert.Equal(t, http.StatusNotFound, resp.Code)
 	})
 }
