@@ -1241,20 +1241,22 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 // up. The row, the retained instance and its output all stay, so what the
 // workload last did remains readable while it is down.
 func (r *Reconciler) suspend(ctx context.Context, row database.Workload, instances []driver.Instance) error {
-	if len(instances) > 0 {
-		// Already on its way out from an earlier pass; stopping it again would just
-		// race the runtime finishing the job.
-		if slices.ContainsFunc(instances, terminating) {
-			r.logger.With("workload", row.Name).Debug("waiting for suspended workload to finish terminating")
+	// Already on its way out from an earlier pass; stopping it again would just
+	// race the runtime finishing the job.
+	if slices.ContainsFunc(instances, terminating) {
+		r.logger.With("workload", row.Name).Debug("waiting for suspended workload to finish terminating")
 
-			return nil
-		}
+		return nil
+	}
 
+	// Only what is up is stopped. An instance that has already ended stays exactly
+	// as it is — it is what keeps the workload's last output readable while it is
+	// down, and it remains the workload's current instance in the driver's eyes, so
+	// stopping it again would repeat the stop on every pass forever.
+	if slices.ContainsFunc(instances, running) {
 		r.logger.With("workload", row.Name).Debug("stopping suspended workload")
 
-		// Stopped rather than discarded: unlike a deletion the workload comes back,
-		// and the instance the driver retains is what keeps its last output
-		// readable while it is down.
+		// Stopped rather than discarded: unlike a deletion the workload comes back.
 		return r.stop(ctx, row)
 	}
 

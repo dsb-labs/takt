@@ -238,6 +238,23 @@ func TestReconciler_Run(t *testing.T) {
 			},
 		},
 		{
+			Name: "leaves a suspended workload's ended instance alone",
+			Observed: []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateExited},
+			},
+			SetupMocks: func(_ *MockDriver, repo *MockWorkloadRepository) {
+				row := storedWorkload("example", "hash-one")
+				row.SuspendedAt = time.Now().UTC()
+
+				repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+				// The ended instance remains the workload's current one in the
+				// driver's eyes, so a Stop here would repeat on every pass forever.
+				// It stays as it is, keeping the last output readable, and no Stop
+				// or Start is expected at all.
+			},
+		},
+		{
 			Name: "waits for a suspended workload that is still terminating",
 			Observed: []driver.Instance{
 				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateTerminating},
@@ -2572,11 +2589,17 @@ func TestReconciler_Run_RemovesMountedValuesWhenSuspended(t *testing.T) {
 		}
 	}).Return(nil)
 
+	// The stopped instance is still reported: it is the workload's most recent
+	// attempt, kept so its output stays readable. It has no reader for the mounted
+	// values, so it must not stop them being removed.
 	passes := newCounter()
 	d.EXPECT().Observe(mock.Anything).
 		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
 			passes.inc()
-			return nil, nil
+
+			return []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateExited},
+			}, nil
 		})
 
 	r := reconciler.New(reconciler.Config{
