@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/dsb-labs/orca/internal/server/api"
@@ -22,6 +24,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 	"github.com/dsb-labs/orca/internal/server/secret"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/server/telemetry"
 )
 
 // Run starts the orca server using the given configuration and blocks until the
@@ -31,8 +34,32 @@ func Run(ctx context.Context, config Config) error {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	logger := newLogger(config.Logging)
+	// Before the logger, because when log export is configured the logger fans
+	// out into the telemetry pipeline — and everything below builds from the
+	// logger, so this is what puts every component's records on the wire.
+	tel, err := telemetry.New(ctx, telemetry.Config{
+		Endpoint:     config.Telemetry.OTLPEndpoint,
+		SpanExporter: config.Telemetry.SpanExporter,
+		LogExporter:  config.Telemetry.LogExporter,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to construct telemetry: %w", err)
+	}
+
+	logger := newLogger(config.Logging, tel.LogHandler())
 	logger.With("address", config.HTTP.Address).Debug("starting orca server")
+
+	defer func() {
+		// Exported signals are batched, so this flush is what makes the last
+		// spans and logs of a run reach their exporter. Bounded so a collector
+		// that stopped answering cannot hold up shutdown.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		if err := tel.Shutdown(shutdownCtx); err != nil {
+			logger.With("error", err).Warn("failed to shut down telemetry")
+		}
+	}()
 
 	// Only the owner: the database holds every workload's specification, and a
 	// specification carries whatever the operator put in its environment. A
@@ -73,7 +100,9 @@ func Run(ctx context.Context, config Config) error {
 	volumes := database.NewVolumeRepository(db)
 	secrets := database.NewSecretRepository(db)
 	variables := database.NewVariableRepository(db)
-	checker := health.New(health.Config{})
+	checker := health.New(health.Config{
+		Meter: tel.MeterProvider().Meter("github.com/dsb-labs/orca/internal/server/health"),
+	})
 
 	// A host that cannot confine an exec workload is reported here rather than when the
 	// first one is started, so an operator learns at startup instead of from a workload
@@ -100,6 +129,8 @@ func Run(ctx context.Context, config Config) error {
 		Client:     dockerClient,
 		Bind:       config.Workload.Bind,
 		ConfigFile: config.Docker.ConfigFile,
+		Meter:      tel.MeterProvider().Meter("github.com/dsb-labs/orca/internal/server/driver/docker"),
+		Tracer:     tel.TracerProvider().Tracer("github.com/dsb-labs/orca/internal/server/driver/docker"),
 	})
 
 	// The service and the reconciler each need something from the other: the service
@@ -174,6 +205,8 @@ func Run(ctx context.Context, config Config) error {
 			return svc.Reallocate(ctx, workload)
 		},
 		Interval: config.Reconcile.Interval,
+		Meter:    tel.MeterProvider().Meter("github.com/dsb-labs/orca/internal/server/reconciler"),
+		Tracer:   tel.TracerProvider().Tracer("github.com/dsb-labs/orca/internal/server/reconciler"),
 	})
 
 	volumeSvc := service.NewVolumeService(service.VolumeServiceConfig{
@@ -181,6 +214,19 @@ func Run(ctx context.Context, config Config) error {
 		Volumes:   volumes,
 		Directory: config.Data.Directory,
 	})
+
+	allocator := port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort})
+
+	// The count of allocations is read from the repository once per scrape, so a
+	// pass never pays for it. A gauge that cannot be registered costs the metric
+	// rather than the server.
+	err = allocator.RegisterMetrics(
+		tel.MeterProvider().Meter("github.com/dsb-labs/orca/internal/server/port"),
+		ports.Allocated,
+	)
+	if err != nil {
+		logger.With("error", err).Warn("failed to register port pool gauges")
+	}
 
 	svc = service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger: logger,
@@ -196,7 +242,7 @@ func Run(ctx context.Context, config Config) error {
 		Secrets:   secrets,
 		Variables: variables,
 		Images:    dockerDriver,
-		Allocator: port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort}),
+		Allocator: allocator,
 		Checker:   checker,
 		// The reconciler itself, because a converge error is only observable during
 		// the pass that hits it: the reconciler is the one component that has it.
@@ -210,11 +256,28 @@ func Run(ctx context.Context, config Config) error {
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: volumeSvc}),
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: secretSvc}),
 		Variables: api.NewVariableAPI(api.VariableAPIConfig{Logger: logger, Variables: variableSvc}),
+		System: api.NewSystemAPI(api.SystemAPIConfig{
+			Logger: logger,
+			DB:     db,
+			// The reconciler itself, because a cached view of how each driver
+			// last answered is something only the passes asking them can hold.
+			Observer: reconcile,
+			Metrics:  tel.Gatherer(),
+		}),
 	}).Register(mux)
 
 	server := &http.Server{
-		Addr:    config.HTTP.Address,
-		Handler: api.Wrap(mux, logger, config.HTTP.Hosts),
+		Addr: config.HTTP.Address,
+		// Outermost on purpose, outside even the middleware: a request the
+		// middleware refuses — an unpermitted host, an oversized body — is
+		// still a request the server answered, and one worth measuring.
+		Handler: otelhttp.NewHandler(api.Wrap(mux, logger, config.HTTP.Hosts), "orca",
+			otelhttp.WithMeterProvider(tel.MeterProvider()),
+			otelhttp.WithTracerProvider(tel.TracerProvider()),
+			otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(
+				propagation.TraceContext{}, propagation.Baggage{},
+			)),
+		),
 		// A client that opens a connection and then stalls — mid-header, mid-body, or
 		// while reading a response — otherwise holds it indefinitely. These bound how
 		// long any one request may occupy the server.
@@ -264,7 +327,12 @@ func Run(ctx context.Context, config Config) error {
 	return err
 }
 
-func newLogger(config LoggingConfig) *slog.Logger {
+// newLogger returns the server's logger: a text handler on stderr at the
+// configured level, fanned out to the extra handler when one is given.
+//
+// The fanout dispatches on each handler's own level, so a quiet stderr does not
+// censor what an exporting handler carries.
+func newLogger(config LoggingConfig, extra slog.Handler) *slog.Logger {
 	var level slog.Level
 	switch strings.ToLower(config.Level) {
 	case "debug":
@@ -277,5 +345,10 @@ func newLogger(config LoggingConfig) *slog.Logger {
 		level = slog.LevelInfo
 	}
 
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	var handler slog.Handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
+	if extra != nil {
+		handler = telemetry.Fanout(handler, extra)
+	}
+
+	return slog.New(handler)
 }
