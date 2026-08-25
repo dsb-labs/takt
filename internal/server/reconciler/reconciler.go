@@ -136,10 +136,10 @@ type (
 	//
 	// Reconciliation is level-triggered: every pass reads the full desired state,
 	// asks the driver what is actually running, and acts on the difference. Nothing
-	// is remembered between passes except restart backoff, the last converge error
-	// and how each driver last answered, so a missed event, a failed pass, or a
-	// server restart all recover on the next pass rather than leaving the node
-	// permanently wrong.
+	// is remembered between passes except restart backoff, pending restart
+	// requests, the last converge error and how each driver last answered, so a
+	// missed event, a failed pass, or a server restart all recover on the next
+	// pass rather than leaving the node permanently wrong.
 	Reconciler struct {
 		logger      *slog.Logger
 		drivers     map[string]Driver
@@ -156,12 +156,16 @@ type (
 		tracer      trace.Tracer
 		instruments instruments
 
-		// Guards backoff and lastError, which are the only state a pass carries
-		// between workloads and so the only things converging them concurrently can
-		// contend on.
+		// Guards backoff, lastError and restarts, which are the only state a pass
+		// carries between workloads and so the only things converging them
+		// concurrently can contend on.
 		mux sync.Mutex
 		// How long to wait before restarting each workload that keeps failing.
 		backoff map[string]backoff
+		// The workloads whose instances an operator asked to have replaced,
+		// consumed by the next pass over each. In memory rather than stored,
+		// because a request the server loses can simply be made again.
+		restarts map[string]struct{}
 		// Why the last converge pass over each workload failed. In memory rather
 		// than stored, because a converge error has no live source to re-derive
 		// from once the pass has ended: after a restart the next pass either fails
@@ -323,6 +327,7 @@ func New(config Config) *Reconciler {
 		now:          clock(config.Now),
 		interval:     config.Interval,
 		backoff:      make(map[string]backoff),
+		restarts:     make(map[string]struct{}),
 		lastError:    make(map[string]lastError),
 		observations: observations,
 		tracer:       telemetry.Tracer(config.Tracer),
@@ -331,6 +336,36 @@ func New(config Config) *Reconciler {
 		// already pending, which is all the signal conveys.
 		nudge: make(chan struct{}, 1),
 	}
+}
+
+// Restart records that a workload's instances should be replaced on the next
+// pass over it. This is how an operator's restart request reaches the loop,
+// since the reconciler is the only component that touches the runtime.
+//
+// Held in memory rather than stored. A request the server loses to a crash can
+// simply be made again, where a stored one would lie in wait for whoever starts
+// the server next.
+func (r *Reconciler) Restart(workload string) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	r.restarts[workload] = struct{}{}
+}
+
+// restartRequested consumes any pending restart request for a workload,
+// reporting whether one was present.
+//
+// Consumed on sight rather than on success: a replacement that fails to start
+// is retried and paced by the ordinary paths on later passes, so acting on the
+// request again would repeat work those paths already own.
+func (r *Reconciler) restartRequested(workload string) bool {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	_, ok := r.restarts[workload]
+	delete(r.restarts, workload)
+
+	return ok
 }
 
 // Notify asks for a reconciliation pass to run as soon as possible, and is how a
@@ -663,6 +698,20 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		r.logger.With("workload", row.Name).Debug("waiting for workload to finish terminating")
 
 		return nil
+	}
+
+	// An operator asked for the instances to be replaced. They get the same
+	// stop-then-start a stale instance gets, from the unchanged specification:
+	// container names derive from the workload and version, so the corpses have
+	// to be cleared before replacements can take their place.
+	if r.restartRequested(row.Name) {
+		r.logger.With("workload", row.Name).Info("restarting workload on request")
+
+		if err := r.stop(ctx, row); err != nil {
+			return fmt.Errorf("failed to stop workload for restart: %w", err)
+		}
+
+		return r.start(ctx, row)
 	}
 
 	// A scheduled workload runs when its expression says to and waits in between, so
@@ -1172,6 +1221,11 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 	// reporting a failure it never had.
 	r.settle(row.Name)
 
+	// A restart asked for before the deletion landed dies with the workload, for
+	// the same reason: it would otherwise lie in wait for a later workload that
+	// reuses the name.
+	r.restartRequested(row.Name)
+
 	r.logger.With("workload", row.Name).Info("workload deleted")
 
 	return nil
@@ -1216,6 +1270,10 @@ func (r *Reconciler) suspend(ctx context.Context, row database.Workload, instanc
 	// exactly what suspension asks to stop. Clearing them means a resume starts
 	// from a clean slate rather than inside a backoff window.
 	r.settle(row.Name)
+
+	// A restart asked for before the suspension landed is superseded by it. What
+	// was running is stopped either way, and a resume should not replay it.
+	r.restartRequested(row.Name)
 
 	return nil
 }
