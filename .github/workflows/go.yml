@@ -47,5 +47,8 @@ jobs:
           git add .
           git diff --staged --exit-code
 
+      # Short mode leaves out the end-to-end suite, which the e2e workflow runs on
+      # the same events. Without this it would run twice for every push, and the
+      # slower of the two runs would decide how long CI takes.
       - name: Run tests
-        run: go test -race ./...
+        run: go test -short -race ./...

@@ -4,9 +4,34 @@ concurrency:
   group: ${{ github.workflow }}/${{ github.ref_name }}
 
 on:
+  # Every change to the code, because this suite is the only place the layers are
+  # exercised together against a real daemon. A mistake it catches is one the unit
+  # tests are built not to see, so finding it a day later is finding it too late.
+  push:
+    branches:
+      - main
+    paths:
+      - '**.go'
+      - '**.mod'
+      - '**.sum'
+      - 'api/openapi.yaml'
+      - 'api/oapi-codegen.yaml'
+      - '.mockery.yml'
+      - '.github/workflows/e2e.yml'
+  pull_request:
+    paths:
+      - '**.go'
+      - '**.mod'
+      - '**.sum'
+      - 'api/openapi.yaml'
+      - 'api/oapi-codegen.yaml'
+      - '.mockery.yml'
+      - '.github/workflows/e2e.yml'
   schedule:
     # Early morning UTC, so a failure is waiting at the start of the day rather
-    # than landing mid-afternoon.
+    # than landing mid-afternoon. Kept alongside the triggers above because these
+    # tests can fail without the code changing: a base image moves, a daemon
+    # behaves differently, or a race only loses occasionally.
     - cron: '17 4 * * *'
   workflow_dispatch:
 
@@ -39,9 +64,10 @@ jobs:
         run: docker ps --all --filter label=orca.workload
 
       # Every test writes a debug bundle of the server's spans, logs and a final
-      # metrics scrape. Uploading them turns a red nightly run into something
-      # that can be diagnosed without reproducing it. The action packages the
-      # directory as a zip artifact itself.
+      # metrics scrape. Uploading them turns a red run into something that can be
+      # diagnosed without reproducing it, which matters most for the failure that
+      # does not reproduce. The action packages the directory as a zip artifact
+      # itself.
       - name: Upload debug bundles
         if: failure()
         uses: actions/upload-artifact@v7
