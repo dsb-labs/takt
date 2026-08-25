@@ -1,15 +1,62 @@
 package port_test
 
 import (
+	"context"
 	"net"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/dsb-labs/orca/internal/server/port"
 )
+
+func TestAllocator_RegisterMetrics(t *testing.T) {
+	t.Parallel()
+
+	reader := sdkmetric.NewManualReader()
+	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+
+	allocator := port.New(port.Config{Min: 20000, Max: 20009})
+
+	err := allocator.RegisterMetrics(meter, func(context.Context) ([]int, error) {
+		return []int{20001, 20004, 20007}, nil
+	})
+	require.NoError(t, err)
+
+	var collected metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(t.Context(), &collected))
+
+	assert.EqualValues(t, 10, gaugeValue(t, collected, "orca.ports.capacity"))
+	assert.EqualValues(t, 3, gaugeValue(t, collected, "orca.ports.used"))
+}
+
+// gaugeValue returns the single data point of the named gauge, failing the test
+// when it was never recorded.
+func gaugeValue(t *testing.T, collected metricdata.ResourceMetrics, name string) int64 {
+	t.Helper()
+
+	for _, scope := range collected.ScopeMetrics {
+		for _, recorded := range scope.Metrics {
+			if recorded.Name != name {
+				continue
+			}
+
+			gauge, ok := recorded.Data.(metricdata.Gauge[int64])
+			require.True(t, ok)
+			require.Len(t, gauge.DataPoints, 1)
+
+			return gauge.DataPoints[0].Value
+		}
+	}
+
+	t.Fatalf("no metric named %s was recorded", name)
+
+	return 0
+}
 
 func TestAllocator_Allocate(t *testing.T) {
 	t.Parallel()
