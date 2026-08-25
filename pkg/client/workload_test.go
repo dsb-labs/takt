@@ -65,6 +65,7 @@ func TestStatesCoverTheWireFormat(t *testing.T) {
 			client.WorkloadStateStopped,
 			client.WorkloadStateCompleted,
 			client.WorkloadStateFailed,
+			client.WorkloadStateSuspended,
 		}
 
 		for _, state := range states {
@@ -126,6 +127,7 @@ func countValid(t *testing.T, valid func(string) bool) int {
 		"pending", "running", "terminating", "stopped", "completed", "exited",
 		"failed", "starting", "healthy", "unhealthy", "created", "paused",
 		"restarting", "removing", "dead", "succeeded", "cancelled", "unknown",
+		"suspended",
 	}
 
 	var count int
@@ -472,6 +474,242 @@ func TestClient_Delete(t *testing.T) {
 		})
 
 		_, err := c.Delete(t.Context(), "nope")
+		assert.ErrorIs(t, err, client.ErrWorkloadNotFound)
+	})
+}
+
+func TestClient_Stop(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the suspended workload", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/api/v1/workloads/example/stop", r.URL.Path)
+
+			// The body is an empty object rather than nothing, so the server's
+			// insistence on JSON writes holds for this endpoint too.
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			suspended := workload("example", api.WorkloadStateSuspended)
+			suspended.Suspended = new(true)
+
+			writeJSON(t, w, http.StatusAccepted, api.StopWorkloadResult{Workload: suspended})
+		})
+
+		got, err := c.Stop(t.Context(), "example")
+		require.NoError(t, err)
+
+		assert.True(t, got.Suspended)
+		assert.Equal(t, client.WorkloadStateSuspended, got.State)
+	})
+
+	t.Run("waits for the instances to drain", func(t *testing.T) {
+		var gets int
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			suspended := workload("example", api.WorkloadStateSuspended)
+			suspended.Suspended = new(true)
+
+			if r.Method == http.MethodPost {
+				writeJSON(t, w, http.StatusAccepted, api.StopWorkloadResult{Workload: suspended})
+				return
+			}
+
+			// The mark lands before the instances stop, so waiting has to keep
+			// polling while something is still running and stop once nothing is.
+			gets++
+			if gets < 3 {
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: suspended})
+				return
+			}
+
+			suspended.Instances = nil
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: suspended})
+		})
+
+		got, err := c.Stop(t.Context(), "example", client.WithWaitInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, gets)
+		assert.Empty(t, got.Instances)
+	})
+
+	t.Run("gives up waiting when the context is cancelled", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			suspended := workload("example", api.WorkloadStateSuspended)
+			suspended.Suspended = new(true)
+
+			if r.Method == http.MethodPost {
+				writeJSON(t, w, http.StatusAccepted, api.StopWorkloadResult{Workload: suspended})
+				return
+			}
+
+			// The instance never drains, so the wait can only end by cancellation.
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: suspended})
+		})
+
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancel()
+
+		_, err := c.Stop(ctx, "example", client.WithWaitInterval(time.Millisecond))
+		assert.Error(t, err)
+	})
+
+	t.Run("reports a conflict for a deleting workload", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusConflict, api.ErrorResponse{Error: `workload "example" is being deleted`})
+		})
+
+		_, err := c.Stop(t.Context(), "example")
+		assert.True(t, client.IsConflict(err))
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})
+		})
+
+		_, err := c.Stop(t.Context(), "nope")
+		assert.ErrorIs(t, err, client.ErrWorkloadNotFound)
+	})
+}
+
+func TestClient_Start(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the workload with its suspension cleared", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/api/v1/workloads/example/start", r.URL.Path)
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			pending := workload("example", api.WorkloadStatePending)
+			pending.Instances = nil
+
+			writeJSON(t, w, http.StatusAccepted, api.StartWorkloadResult{Workload: pending})
+		})
+
+		got, err := c.Start(t.Context(), "example")
+		require.NoError(t, err)
+
+		assert.False(t, got.Suspended)
+		assert.Equal(t, client.WorkloadStatePending, got.State)
+	})
+
+	t.Run("waits for the workload to leave pending", func(t *testing.T) {
+		var gets int
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				writeJSON(t, w, http.StatusAccepted, api.StartWorkloadResult{Workload: workload("example", api.WorkloadStatePending)})
+				return
+			}
+
+			// Nothing has started the moment the mark clears, so waiting has to
+			// keep polling through pending and stop once something is up.
+			gets++
+			if gets < 3 {
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStatePending)})
+				return
+			}
+
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+		})
+
+		got, err := c.Start(t.Context(), "example", client.WithWaitInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, gets)
+		assert.Equal(t, client.WorkloadStateRunning, got.State)
+	})
+
+	t.Run("reports a conflict for a deleting workload", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusConflict, api.ErrorResponse{Error: `workload "example" is being deleted`})
+		})
+
+		_, err := c.Start(t.Context(), "example")
+		assert.True(t, client.IsConflict(err))
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})
+		})
+
+		_, err := c.Start(t.Context(), "nope")
+		assert.ErrorIs(t, err, client.ErrWorkloadNotFound)
+	})
+}
+
+func TestClient_Restart(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns the workload as it stood", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/api/v1/workloads/example/restart", r.URL.Path)
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+
+			writeJSON(t, w, http.StatusAccepted, api.RestartWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+		})
+
+		got, err := c.Restart(t.Context(), "example")
+		require.NoError(t, err)
+
+		assert.Equal(t, client.WorkloadStateRunning, got.State)
+	})
+
+	t.Run("waits for a replacement instance", func(t *testing.T) {
+		var gets int
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				writeJSON(t, w, http.StatusAccepted, api.RestartWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+				return
+			}
+
+			// The first read is the client's snapshot of what exists before the
+			// request. The old instance is still up on the read after it, so the
+			// wait has to keep polling until an instance the snapshot never saw
+			// appears.
+			gets++
+			if gets < 3 {
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+				return
+			}
+
+			replaced := workload("example", api.WorkloadStateRunning)
+			replaced.Instances = &[]api.Instance{
+				{ID: "container-two", State: api.InstanceStateRunning, SpecHash: "hash-one"},
+			}
+
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: replaced})
+		})
+
+		got, err := c.Restart(t.Context(), "example", client.WithWaitInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, gets)
+		require.Len(t, got.Instances, 1)
+		assert.Equal(t, "container-two", got.Instances[0].ID)
+	})
+
+	t.Run("reports a conflict for a suspended workload", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusConflict, api.ErrorResponse{Error: `workload "example" is suspended and cannot be restarted`})
+		})
+
+		_, err := c.Restart(t.Context(), "example")
+		assert.True(t, client.IsConflict(err))
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})
+		})
+
+		_, err := c.Restart(t.Context(), "nope")
 		assert.ErrorIs(t, err, client.ErrWorkloadNotFound)
 	})
 }
