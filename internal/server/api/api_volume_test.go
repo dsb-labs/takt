@@ -422,6 +422,7 @@ func doVolume(t *testing.T, svc *MockVolumeService, method, target string, body 
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: svc}),
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: NewMockSecretService(t)}),
 		Variables: api.NewVariableAPI(api.VariableAPIConfig{Logger: logger, Variables: NewMockVariableService(t)}),
+		System:    api.NewSystemAPI(api.SystemAPIConfig{Logger: logger, DB: NewMockPinger(t), Observer: NewMockObserver(t)}),
 	}).Register(mux)
 
 	req := httptest.NewRequest(method, target, body)

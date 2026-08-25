@@ -321,6 +321,7 @@ func doVariable(t *testing.T, svc *MockVariableService, method, target string, b
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: NewMockVolumeService(t)}),
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: NewMockSecretService(t)}),
 		Variables: api.NewVariableAPI(api.VariableAPIConfig{Logger: logger, Variables: svc}),
+		System:    api.NewSystemAPI(api.SystemAPIConfig{Logger: logger, DB: NewMockPinger(t), Observer: NewMockObserver(t)}),
 	}).Register(mux)
 
 	req := httptest.NewRequest(method, target, body)

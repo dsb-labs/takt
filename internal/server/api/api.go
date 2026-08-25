@@ -41,6 +41,7 @@ type (
 		*VolumeAPI
 		*SecretAPI
 		*VariableAPI
+		*SystemAPI
 	}
 
 	// The Config type contains fields used to construct an API.
@@ -53,6 +54,8 @@ type (
 		Secrets *SecretAPI
 		// The endpoints serving variables.
 		Variables *VariableAPI
+		// The endpoints describing the server itself.
+		System *SystemAPI
 	}
 )
 
@@ -68,6 +71,7 @@ func New(config Config) *API {
 		VolumeAPI:   config.Volumes,
 		SecretAPI:   config.Secrets,
 		VariableAPI: config.Variables,
+		SystemAPI:   config.System,
 	}
 }
 

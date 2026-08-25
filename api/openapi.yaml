@@ -30,6 +30,8 @@ tags:
     description: Values a workload can read and an operator cannot.
   - name: variables
     description: Values both a workload and an operator can read.
+  - name: system
+    description: Liveness, readiness and metrics for the server itself.
 
 paths:
   /api/v1/workloads:
@@ -616,6 +618,82 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /health:
+    get:
+      operationId: getHealth
+      tags: [system]
+      summary: Report that the server is alive
+      description: |
+        Answers as long as the process is serving requests. It says nothing about
+        whether the server can do its job — that is what `/ready` reports — so it
+        suits a supervisor deciding whether to restart the process.
+      responses:
+        "200":
+          description: The server is alive.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetHealthResult"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /ready:
+    get:
+      operationId: getReadiness
+      tags: [system]
+      summary: Report whether the server can do its job
+      description: |
+        Reports whether the database answers and every configured driver answered
+        the most recent attempt to observe it. This is distinct from `/health`: a
+        server whose Docker daemon has gone away is alive but cannot converge
+        container workloads, and the two need different answers.
+
+        Driver answers are cached from the reconciler's own passes rather than
+        fetched per request, so polling costs nothing and the answer is at most
+        one reconcile interval plus the driver timeout old. Before the first pass
+        completes, the server reports not ready.
+      responses:
+        "200":
+          description: The server is ready.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetReadinessResult"
+        "503":
+          description: The server cannot currently do its job. The reasons say why.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetReadinessResult"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /metrics:
+    get:
+      operationId: getMetrics
+      tags: [system]
+      summary: Read the server's metrics
+      description: |
+        Returns the server's metrics in the Prometheus text format, ready to be
+        scraped with no collector in between.
+
+        Workload names appear as label values. Anything that can reach this port
+        can already run arbitrary workloads, so the names disclose nothing new —
+        but they are disclosed.
+
+        A scraper that addresses the server by hostname must have that hostname
+        in the server's `hosts` configuration, or the request is refused with a
+        421. Address literals are always accepted.
+      responses:
+        "200":
+          description: The server's metrics in Prometheus text format.
+          content:
+            text/plain:
+              schema:
+                type: string
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1761,3 +1839,29 @@ components:
       description: |
         The body returned when a variable is deleted, which has nothing in it yet, for
         the same reason deleting a secret returns one.
+
+    GetHealthResult:
+      type: object
+      description: The body returned when the server is alive.
+      required: [status]
+      properties:
+        status:
+          type: string
+          description: Always "ok". The response arriving is the answer.
+          enum: [ok]
+
+    GetReadinessResult:
+      type: object
+      description: |
+        Whether the server can do its job, with the reasons it cannot when it
+        cannot.
+      required: [ready]
+      properties:
+        ready:
+          type: boolean
+          description: Whether the database and every configured driver answered.
+        reasons:
+          type: array
+          description: Why the server is not ready. Absent when it is.
+          items:
+            type: string

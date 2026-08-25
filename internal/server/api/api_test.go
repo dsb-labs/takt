@@ -194,6 +194,7 @@ func TestGuard(t *testing.T) {
 
 	tt := []struct {
 		Name         string
+		Path         string
 		Host         string
 		Origin       string
 		Permitted    []string
@@ -247,6 +248,16 @@ func TestGuard(t *testing.T) {
 			ExpectStatus: http.StatusMisdirectedRequest,
 		},
 		{
+			Name: "refuses a scrape addressed by an unpermitted hostname",
+			// The guard covers /metrics like everything else: a scraper that
+			// targets orca by hostname needs the name in the configuration,
+			// while one targeting an address always passes. Pinned here because
+			// a scrape failing with a 421 is otherwise confusing to debug.
+			Path:         "/metrics",
+			Host:         "orca.internal:7373",
+			ExpectStatus: http.StatusMisdirectedRequest,
+		},
+		{
 			Name: "refuses a cross-origin request",
 			// No page legitimately speaks to this API, so an Origin naming somewhere
 			// else is a page acting on its own behalf.
@@ -271,7 +282,12 @@ func TestGuard(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/workloads", nil)
+			path := tc.Path
+			if path == "" {
+				path = "/api/v1/workloads"
+			}
+
+			req := httptest.NewRequest(http.MethodGet, path, nil)
 			req.Host = tc.Host
 
 			if tc.Origin != "" {
