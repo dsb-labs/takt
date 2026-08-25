@@ -946,7 +946,15 @@ func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 // Both streams were written to one file, so they come back interleaved in the order
 // the process wrote them. A workload the driver has nothing for writes nothing, since
 // the caller does not know which runtime holds it.
-func (d *Driver) Logs(_ context.Context, out io.Writer, workload string, options driver.LogOptions) error {
+//
+// Following keeps writing until the process ends or the caller goes away. Only the
+// version now running is followed: an older one holds an attempt that has finished, so
+// waiting on it would wait for output that is never coming.
+//
+// Since is ignored. The output file carries no timestamps, so honouring it would mean
+// giving each line a time the driver made up, and a filter over invented times answers
+// a question nobody asked.
+func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, options driver.LogOptions) error {
 	id, err := d.identify(workload)
 	if err != nil {
 		if errors.Is(err, ErrUnknownWorkload) {
@@ -971,13 +979,68 @@ func (d *Driver) Logs(_ context.Context, out io.Writer, workload string, options
 		name = previousFile
 	}
 
-	for _, path := range versions {
-		if err = tailFile(out, filepath.Join(path, name), options.Tail); err != nil {
+	// Where a follow carries on from, found before the tail so that nothing written
+	// between the two reads is skipped. Previous is never followed: the attempt it
+	// holds has already ended.
+	var record, current string
+	if options.Follow && !options.Previous {
+		record, current, err = d.following(id)
+		if err != nil {
 			return err
 		}
 	}
 
-	return nil
+	var offset int64
+
+	for _, path := range versions {
+		read, err := tailFile(out, filepath.Join(path, name), options.Tail)
+		if err != nil {
+			return err
+		}
+
+		if path == current {
+			offset = read
+		}
+	}
+
+	if record == "" {
+		return nil
+	}
+
+	return followFile(ctx, out, filepath.Join(current, name), offset, func() bool {
+		recorded, err := readState(record)
+		if err != nil {
+			// Nothing readable says whether the process is still running. Ending the
+			// follow is the only honest answer: waiting on a file that may never grow
+			// again would hold the caller until it gave up.
+			return true
+		}
+
+		return !recorded.alive()
+	})
+}
+
+// following returns the record and the directory of the version a follow watches, which
+// is the one now running. Both are empty when the driver has no record for the workload.
+func (d *Driver) following(id string) (string, string, error) {
+	records, err := d.versions(d.state, id)
+	if err != nil {
+		return "", "", err
+	}
+
+	record := newest(records)
+	if record == "" {
+		return "", "", nil
+	}
+
+	root, err := d.dir(d.workloads, id)
+	if err != nil {
+		return "", "", err
+	}
+
+	// The two trees name a version's directory the same way, so the record found in one
+	// says which directory to read in the other.
+	return record, filepath.Join(root, filepath.Base(record)), nil
 }
 
 // Release lets every supervised process outlive the driver.

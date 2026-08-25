@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -727,6 +728,63 @@ func TestDriver_Logs(t *testing.T) {
 	})
 }
 
+func TestDriver_Logs_Follow(t *testing.T) {
+	t.Parallel()
+
+	t.Run("writes output the workload produces after the read began", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		// The second line is written a second in, so the tail the follow opens with
+		// cannot hold it. Anything that arrives is proof the follow is doing the work.
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo started; sleep 1; echo later; sleep 300"))
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
+
+		awaitOutput(t, d, "example", "started")
+
+		ctx, cancel := context.WithCancel(t.Context())
+
+		var out syncBuffer
+		done := make(chan error, 1)
+
+		go func() {
+			done <- d.Logs(ctx, &out, "example", driver.LogOptions{Tail: 10, Follow: true})
+		}()
+
+		require.Eventually(t, func() bool {
+			return strings.Contains(out.String(), "later")
+		}, 10*time.Second, 50*time.Millisecond, "the followed output never arrived")
+
+		// A caller pressing Ctrl-C is how most follows end, and it ends the read rather
+		// than failing it: there is nobody left to report a failure to.
+		cancel()
+
+		select {
+		case err = <-done:
+			require.NoError(t, err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("the follow outlived the caller that asked for it")
+		}
+	})
+
+	t.Run("ends the read when the process ends", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo started; sleep 1; echo done"))
+		require.NoError(t, err)
+
+		// Returns of its own accord. What the caller asked to watch has finished, so
+		// there is nothing further for the follow to wait on.
+		var out bytes.Buffer
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 10, Follow: true}))
+
+		// Including the lines written on the way out. The record is read before the
+		// file, so a process that ends mid-poll still has its last output returned.
+		assert.Contains(t, out.String(), "done")
+	})
+}
+
 func TestDriver_Watch(t *testing.T) {
 	t.Parallel()
 
@@ -863,6 +921,27 @@ func awaitOutput(t *testing.T, d *exec.Driver, workload, want string) {
 
 		return strings.Contains(out.String(), want)
 	}, 10*time.Second, 50*time.Millisecond, "workload %q never wrote %q", workload, want)
+}
+
+// The syncBuffer type collects what a follow writes while the test reads it, since the
+// two happen on different goroutines.
+type syncBuffer struct {
+	mux sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mux.Lock()
+	defer b.mux.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mux.Lock()
+	defer b.mux.Unlock()
+
+	return b.buf.String()
 }
 
 // output returns everything a workload has written, which is where a denial from the
