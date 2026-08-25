@@ -47,6 +47,8 @@ the difference:
 4. An instance nothing asked for is stopped.
 5. A workload marked for deletion is torn down, and its row removed once nothing is
    left running for it.
+6. A suspended workload is held down: its instances are stopped, and nothing is
+   started for it until it is started again.
 
 The pass is level-triggered. It re-derives everything each time rather than responding
 to changes, so a missed event costs responsiveness and never correctness. A pass that
@@ -105,6 +107,29 @@ start does not spin the daemon.
 A workload that starts and exits at once is paced the same way. Such a container is
 briefly observed as running, so the backoff clears only once an instance has stayed
 up.
+
+An operator can also ask for one. `workload restart` replaces the instances from the
+unchanged specification on the next pass, and the restart policy has no say: the
+request is explicit, so giving up does not apply to it.
+
+## Stopping without deleting
+
+Desired state can also say "this should not be running". `workload stop` marks the
+workload as suspended, and a pass holds it down instead of converging it: the
+instances are stopped, the values it mounted are removed from the disk, and its
+health check is dropped rather than accruing failures against something that is
+exactly as down as it was asked to be. The instance the driver retains stays, so the
+workload's last output is readable while it is down.
+
+Suspension is not a manifest field. A manifest describes what the workload is, where
+stopping it is something an operator does to it, so applying a manifest neither
+stops nor starts anything. The mark also stays out of the specification hash, for
+the same reason: resuming must adopt the instance that was stopped rather than
+replace it.
+
+A suspended cron workload misses its occurrences. Starting it again counts the
+schedule from the start, so the first run after a resume is the next natural
+occurrence rather than the last one missed.
 
 ## Health is orca's question
 

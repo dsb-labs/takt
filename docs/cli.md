@@ -8,6 +8,9 @@ orca workload list                      List workloads                       (al
 orca workload get <name>                Show a single workload
 orca workload logs <name>               Read a workload's recent output
 orca workload delete <name>             Delete a workload and stop its work  (alias: rm)
+orca workload stop <name>               Stop a workload and hold it down
+orca workload start <name>              Start a stopped workload
+orca workload restart <name>            Replace a workload's running instances
 
 orca volume create <manifest>           Create a volume from a manifest file
 orca volume list                        List volumes                         (alias: ls)
@@ -132,6 +135,62 @@ orca workload delete example --wait
 Deleting is asynchronous. The workload reads as `terminating` while its work is
 stopped, and disappears once nothing is left running for it. A teardown can therefore
 be watched by polling `workload get` until the workload is gone.
+
+## workload stop
+
+```sh
+orca workload stop example
+orca workload stop example --wait
+```
+
+| Flag | Description |
+|---|---|
+| `--wait`, `-w` | Block until nothing is running for the workload. |
+
+Stops the workload and holds it down. The workload reads as `suspended`, its
+instances are stopped, and nothing runs for it until `workload start` clears the
+mark. Suspension survives a server restart, so a workload stopped before an upgrade
+is still stopped afterwards.
+
+The specification and its version are untouched, so a stop and a start resume the
+workload rather than replacing it. Applying a new manifest while it is stopped is
+allowed, and the change takes effect when it is started. Any values the workload
+mounted are removed from the disk once nothing is running, exactly as a deletion
+removes them.
+
+## workload start
+
+```sh
+orca workload start example
+orca workload start example --wait
+```
+
+| Flag | Description |
+|---|---|
+| `--wait`, `-w` | Block until the workload has left `pending`. |
+
+Clears the suspension. The server starts the workload's instances on its next pass,
+from whatever specification is stored. A scheduled workload waits for its next
+occurrence rather than running the ones it missed while stopped. Starting a workload
+that is not stopped changes nothing.
+
+## workload restart
+
+```sh
+orca workload restart example
+orca workload restart example --wait
+```
+
+| Flag | Description |
+|---|---|
+| `--wait`, `-w` | Block until a replacement instance has appeared. |
+
+Replaces the workload's running instances with new ones started from the unchanged
+specification, so the version does not move. A stopped workload is refused, since
+nothing would start until it is started again.
+
+The request is held in memory rather than stored. One the server has not acted on
+yet is lost with the server, and can simply be sent again.
 
 ## volume create
 
@@ -324,3 +383,4 @@ something replaces them. Creating the variable again recovers them. See
 | `stopped` | Nothing is running, and orca intends to fix that. |
 | `completed` | The workload ended, and its restart policy asks for nothing more. |
 | `failed` | An instance exited non-zero, or a health check is failing. |
+| `suspended` | The workload was stopped by an operator, and stays down until it is started again. |
