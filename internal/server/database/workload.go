@@ -51,13 +51,18 @@ type (
 		Variables []string
 		// The time the workload was first applied.
 		CreatedAt time.Time
-		// The time the workload's specification last changed.
+		// The time the workload's specification last changed. Resuming a suspended
+		// workload also moves it, so a schedule counts occurrences from the resume.
 		UpdatedAt time.Time
 		// The time the workload was marked for deletion, or the zero time when it
 		// has not been. A workload being deleted keeps its row until the driver
 		// reports its work is gone, so that the teardown is observable and the
 		// reconciler is the only thing that removes running work.
 		DeletedAt time.Time
+		// The time the workload was suspended, or the zero time when it is not.
+		// A suspended workload keeps its row and its specification; the reconciler
+		// stops its instances and starts nothing until the mark is cleared.
+		SuspendedAt time.Time
 	}
 
 	// The Query type matches workloads whose stored specification has the given
@@ -222,19 +227,19 @@ type querier interface {
 
 func get(ctx context.Context, q querier, name string) (Workload, error) {
 	const query = `
-		SELECT id, name, version, runtime, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at
+		SELECT id, name, version, runtime, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at, suspended_at
 		FROM workload
 		WHERE name = ?
 	`
 
 	var (
-		w                               Workload
-		spec, labels                    string
-		createdAt, updatedAt, deletedAt string
+		w                                            Workload
+		spec, labels                                 string
+		createdAt, updatedAt, deletedAt, suspendedAt string
 	)
 
 	err := q.QueryRowContext(ctx, query, name).Scan(
-		&w.ID, &w.Name, &w.Version, &w.Runtime, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt,
+		&w.ID, &w.Name, &w.Version, &w.Runtime, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt, &suspendedAt,
 	)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -243,7 +248,7 @@ func get(ctx context.Context, q querier, name string) (Workload, error) {
 		return Workload{}, fmt.Errorf("failed to load workload: %w", err)
 	}
 
-	if err = hydrate(&w, spec, labels, createdAt, updatedAt, deletedAt); err != nil {
+	if err = hydrate(&w, spec, labels, createdAt, updatedAt, deletedAt, suspendedAt); err != nil {
 		return Workload{}, err
 	}
 
@@ -258,7 +263,7 @@ func get(ctx context.Context, q querier, name string) (Workload, error) {
 // ErrInvalidQueryPath when a query names a path SQLite cannot parse.
 func (r *WorkloadRepository) List(ctx context.Context, queries ...Query) ([]Workload, error) {
 	const q = `
-		SELECT id, name, version, runtime, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at
+		SELECT id, name, version, runtime, json(spec), spec_hash, json(labels), created_at, updated_at, deleted_at, suspended_at
 		FROM workload
 	`
 
@@ -278,16 +283,16 @@ func (r *WorkloadRepository) List(ctx context.Context, queries ...Query) ([]Work
 
 	for rows.Next() {
 		var (
-			w                               Workload
-			spec, labels                    string
-			createdAt, updatedAt, deletedAt string
+			w                                            Workload
+			spec, labels                                 string
+			createdAt, updatedAt, deletedAt, suspendedAt string
 		)
 
-		if err = rows.Scan(&w.ID, &w.Name, &w.Version, &w.Runtime, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt); err != nil {
+		if err = rows.Scan(&w.ID, &w.Name, &w.Version, &w.Runtime, &spec, &w.SpecHash, &labels, &createdAt, &updatedAt, &deletedAt, &suspendedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan workload: %w", err)
 		}
 
-		if err = hydrate(&w, spec, labels, createdAt, updatedAt, deletedAt); err != nil {
+		if err = hydrate(&w, spec, labels, createdAt, updatedAt, deletedAt, suspendedAt); err != nil {
 			return nil, err
 		}
 
@@ -328,6 +333,78 @@ func (r *WorkloadRepository) MarkDeleting(ctx context.Context, name string) (Wor
 	}
 
 	existing.DeletedAt = now
+
+	return existing, nil
+}
+
+// Suspend records that the workload with the given name should not run,
+// returning the suspended workload.
+//
+// Suspension is desired state: the reconciler stops the workload's instances and
+// starts nothing for it until Resume clears the mark. The specification, version
+// and hash are untouched, so a resumed workload adopts what was running rather
+// than replacing it. Suspending is idempotent — a workload already suspended
+// keeps its original timestamp. Returns ErrWorkloadNotFound when no such
+// workload exists.
+func (r *WorkloadRepository) Suspend(ctx context.Context, name string) (Workload, error) {
+	const q = `
+		UPDATE workload
+		SET suspended_at = ?
+		WHERE name = ? AND suspended_at = ''
+	`
+
+	existing, err := r.Get(ctx, name)
+	if err != nil {
+		return Workload{}, err
+	}
+
+	if !existing.SuspendedAt.IsZero() {
+		return existing, nil
+	}
+
+	now := time.Now().UTC()
+
+	if _, err = r.db.ExecContext(ctx, q, formatTime(now), name); err != nil {
+		return Workload{}, fmt.Errorf("failed to suspend workload: %w", err)
+	}
+
+	existing.SuspendedAt = now
+
+	return existing, nil
+}
+
+// Resume clears the workload's suspension, returning the resumed workload.
+//
+// UpdatedAt moves to the resume time. A schedule counts its next occurrence from
+// that field when nothing has run yet, so moving it makes a resumed workload
+// wait for its next occurrence rather than run the last one it missed. The
+// version and hash stay put, so nothing is replaced. Resuming is idempotent — a
+// workload that is not suspended is returned unchanged. Returns
+// ErrWorkloadNotFound when no such workload exists.
+func (r *WorkloadRepository) Resume(ctx context.Context, name string) (Workload, error) {
+	const q = `
+		UPDATE workload
+		SET suspended_at = '', updated_at = ?
+		WHERE name = ? AND suspended_at != ''
+	`
+
+	existing, err := r.Get(ctx, name)
+	if err != nil {
+		return Workload{}, err
+	}
+
+	if existing.SuspendedAt.IsZero() {
+		return existing, nil
+	}
+
+	now := time.Now().UTC()
+
+	if _, err = r.db.ExecContext(ctx, q, formatTime(now), name); err != nil {
+		return Workload{}, fmt.Errorf("failed to resume workload: %w", err)
+	}
+
+	existing.SuspendedAt = time.Time{}
+	existing.UpdatedAt = now
 
 	return existing, nil
 }
@@ -401,7 +478,7 @@ func (r *WorkloadRepository) validPaths(ctx context.Context, queries []Query) er
 	return nil
 }
 
-func hydrate(w *Workload, spec, labels, createdAt, updatedAt, deletedAt string) error {
+func hydrate(w *Workload, spec, labels, createdAt, updatedAt, deletedAt, suspendedAt string) error {
 	parsedLabels, err := unmarshalLabels(labels)
 	if err != nil {
 		return err
@@ -417,11 +494,17 @@ func hydrate(w *Workload, spec, labels, createdAt, updatedAt, deletedAt string) 
 		return fmt.Errorf("failed to parse deleted_at: %w", err)
 	}
 
+	suspended, err := parseOptionalTime(suspendedAt)
+	if err != nil {
+		return fmt.Errorf("failed to parse suspended_at: %w", err)
+	}
+
 	w.Spec = []byte(spec)
 	w.Labels = parsedLabels
 	w.CreatedAt = created
 	w.UpdatedAt = updated
 	w.DeletedAt = deleted
+	w.SuspendedAt = suspended
 
 	return nil
 }

@@ -1,0 +1,1 @@
+ALTER TABLE workload ADD COLUMN suspended_at TEXT NOT NULL DEFAULT '';
