@@ -1,6 +1,7 @@
 package docker_test
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/iotest"
+	"time"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
@@ -997,6 +1000,50 @@ func TestDriver_Logs(t *testing.T) {
 		var out strings.Builder
 		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 20, Previous: true}))
 		assert.Empty(t, out.String())
+	})
+
+	t.Run("asks the daemon to follow and to skip what came before", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one"},
+		}, nil).Once()
+
+		since := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
+
+		// The daemon timestamps every line it holds, so the filtering happens there
+		// rather than over a stream the driver would have to parse.
+		client.EXPECT().ContainerLogs(mock.Anything, "container-one", mock.MatchedBy(func(options dockercontainer.LogsOptions) bool {
+			return options.Follow && options.Since == since.Format(time.RFC3339Nano)
+		})).Return(io.NopCloser(strings.NewReader(multiplexed("still going\n"))), nil).Once()
+
+		d := testDriver(t, client)
+
+		var out strings.Builder
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 20, Follow: true, Since: since}))
+		assert.Equal(t, "still going\n", out.String())
+	})
+
+	t.Run("ends a followed read without error when the caller goes away", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one"},
+		}, nil).Once()
+
+		client.EXPECT().ContainerLogs(mock.Anything, "container-one", mock.Anything).
+			Return(io.NopCloser(iotest.ErrReader(errors.New("connection closed"))), nil).Once()
+
+		d := testDriver(t, client)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		// A caller who stopped listening is how a follow ends. Whatever the transport
+		// noticed first is the end of the read, not a failure to report back to
+		// somebody who is no longer there.
+		var out strings.Builder
+		require.NoError(t, d.Logs(ctx, &out, "example", driver.LogOptions{Tail: 20, Follow: true}))
 	})
 }
 

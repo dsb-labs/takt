@@ -462,6 +462,10 @@ func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 // the driver holds the attempt now running and the one before it, so writing both would
 // return two runs spliced together with nothing marking the boundary.
 //
+// Following keeps the read open until the container ends or the caller goes away.
+// Cancellation is an ordinary way for that to happen, so a cancelled read reports no
+// error: the caller who stopped listening already knows why the output stopped.
+//
 // The output is written as it is read rather than accumulated and returned. A
 // workload's logs are unbounded in principle — a chatty container plus a generous
 // tail is as much memory as the caller asks for — so holding the whole response
@@ -483,7 +487,7 @@ func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, optio
 			continue
 		}
 
-		if err = d.containerLogs(ctx, out, c.ID, options.Tail); err != nil {
+		if err = d.containerLogs(ctx, out, c.ID, options); err != nil {
 			return err
 		}
 	}
@@ -491,21 +495,39 @@ func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, optio
 	return nil
 }
 
-func (d *Driver) containerLogs(ctx context.Context, out io.Writer, id string, tail int) error {
-	logs, err := d.client.ContainerLogs(ctx, id, container.LogsOptions{
+func (d *Driver) containerLogs(ctx context.Context, out io.Writer, id string, options driver.LogOptions) error {
+	request := container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
-		Tail:       strconv.Itoa(tail),
-	})
+		Tail:       strconv.Itoa(options.Tail),
+		Follow:     options.Follow,
+	}
+
+	// The daemon keeps a timestamp for every line it holds, so it can do the filtering
+	// itself. RFC 3339 is one of the two formats it accepts, and the only one of them
+	// that says what it means when read back out of a request.
+	if !options.Since.IsZero() {
+		request.Since = options.Since.Format(time.RFC3339Nano)
+	}
+
+	logs, err := d.client.ContainerLogs(ctx, id, request)
 	if err != nil {
 		return fmt.Errorf("failed to read container logs: %w", err)
 	}
+	// Closing releases the daemon's end of a followed stream. Without it a caller who
+	// went away leaves the driver reading a container nobody is listening to.
 	defer logs.Close()
 
 	// Docker multiplexes stdout and stderr into a single framed stream for
 	// containers without a TTY, so it has to be demultiplexed rather than
 	// copied straight out.
 	if _, err = stdcopy.StdCopy(out, out, logs); err != nil {
+		// A cancelled read fails in whatever way the transport noticed first. That is
+		// how a follow ends, so it is reported as the end rather than as a failure.
+		if ctx.Err() != nil {
+			return nil
+		}
+
 		return fmt.Errorf("failed to read container logs: %w", err)
 	}
 
