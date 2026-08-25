@@ -20,6 +20,10 @@ func TestParseReferences(t *testing.T) {
 		return manifest.Reference{Kind: manifest.KindVariable, Name: name}
 	}
 
+	workload := func(name string, port manifest.PortRef) manifest.Reference {
+		return manifest.Reference{Kind: manifest.KindWorkload, Name: name, Port: port}
+	}
+
 	tt := []struct {
 		Name      string
 		Value     string
@@ -75,6 +79,56 @@ func TestParseReferences(t *testing.T) {
 			// Two references rather than one. The kinds resolve from different places,
 			// so a name held by both names two different things.
 			Expected: []manifest.Reference{secret("token"), variable("token")},
+		},
+		{
+			Name:     "a whole value referencing a workload",
+			Value:    "${workload:postgres}",
+			Expected: []manifest.Reference{workload("postgres", "")},
+		},
+		{
+			Name:     "a workload reference naming a port",
+			Value:    "${workload:postgres:pg}",
+			Expected: []manifest.Reference{workload("postgres", "pg")},
+		},
+		{
+			Name:     "a workload reference naming a port by number",
+			Value:    "${workload:postgres:5432}",
+			Expected: []manifest.Reference{workload("postgres", "5432")},
+		},
+		{
+			Name:  "one workload referenced at two ports",
+			Value: "${workload:api:http} ${workload:api:grpc}",
+			// Two references rather than one. They resolve to different addresses,
+			// so the port is part of what is being named.
+			Expected: []manifest.Reference{workload("api", "http"), workload("api", "grpc")},
+		},
+		{
+			Name:  "a workload beside a secret",
+			Value: "postgres://app:${secret:db-password}@${workload:postgres:pg}/app",
+			Expected: []manifest.Reference{
+				secret("db-password"),
+				workload("postgres", "pg"),
+			},
+		},
+		{
+			Name:      "a secret naming a port",
+			Value:     "${secret:db-password:pg}",
+			ExpectErr: manifest.ErrInvalidReference,
+		},
+		{
+			Name:      "a variable naming a port",
+			Value:     "${var:db-host:pg}",
+			ExpectErr: manifest.ErrInvalidReference,
+		},
+		{
+			Name:      "a workload reference with an empty port",
+			Value:     "${workload:postgres:}",
+			ExpectErr: manifest.ErrInvalidReference,
+		},
+		{
+			Name:      "a port that is not one a port may be named",
+			Value:     "${workload:postgres:PG}",
+			ExpectErr: manifest.ErrInvalidReference,
 		},
 		{
 			Name:  "a value referencing nothing",
@@ -196,6 +250,7 @@ func TestParseReferences_NamesBothFormsInAnError(t *testing.T) {
 	require.ErrorIs(t, err, manifest.ErrInvalidReference)
 	assert.Contains(t, err.Error(), "${secret:name}")
 	assert.Contains(t, err.Error(), "${var:name}")
+	assert.Contains(t, err.Error(), "${workload:name}")
 }
 
 func TestExpand(t *testing.T) {
@@ -213,9 +268,19 @@ func TestExpand(t *testing.T) {
 		"blank":     "",
 	}
 
+	workloads := map[string]string{
+		"postgres":    "10.0.0.5",
+		"postgres:pg": "10.0.0.5:20432",
+	}
+
 	resolve := func(reference manifest.Reference) (string, bool) {
-		if reference.Kind == manifest.KindVariable {
+		switch reference.Kind {
+		case manifest.KindVariable:
 			value, ok := variables[reference.Name]
+
+			return value, ok
+		case manifest.KindWorkload:
+			value, ok := workloads[reference.String()]
 
 			return value, ok
 		}
@@ -240,6 +305,21 @@ func TestExpand(t *testing.T) {
 			Name:     "a whole value referencing a variable",
 			Value:    "${var:log-level}",
 			Expected: "debug",
+		},
+		{
+			Name:     "a whole value referencing a workload",
+			Value:    "${workload:postgres}",
+			Expected: "10.0.0.5",
+		},
+		{
+			Name:     "a workload reference naming a port",
+			Value:    "postgres://app:${secret:db-password}@${workload:postgres:pg}/app",
+			Expected: "postgres://app:hunter2@10.0.0.5:20432/app",
+		},
+		{
+			Name:      "a workload nothing holds",
+			Value:     "${workload:missing:http}",
+			ExpectErr: manifest.ErrUnknownWorkload,
 		},
 		{
 			Name:     "inside a larger string",
@@ -392,6 +472,23 @@ func TestReferences(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, []manifest.Reference{variable("db-host"), variable("log-level")}, references)
+	})
+
+	t.Run("names every workload the environment references", func(t *testing.T) {
+		references, err := manifest.References(manifest.Spec{
+			Env: map[string]string{
+				"DSN":  "postgres://app@${workload:postgres:pg}/app",
+				"HOST": "${workload:postgres}",
+			},
+		})
+		require.NoError(t, err)
+
+		// Sorted by port within a workload, so that a specification referencing one
+		// workload twice hashes the same however its environment was iterated.
+		assert.Equal(t, []manifest.Reference{
+			{Kind: manifest.KindWorkload, Name: "postgres"},
+			{Kind: manifest.KindWorkload, Name: "postgres", Port: "pg"},
+		}, references)
 	})
 
 	t.Run("groups the kinds together", func(t *testing.T) {
@@ -673,5 +770,50 @@ func TestNames(t *testing.T) {
 
 	t.Run("returns nothing for no references", func(t *testing.T) {
 		assert.Empty(t, manifest.Names(nil, manifest.KindSecret))
+	})
+
+	t.Run("names a workload referenced at two ports once", func(t *testing.T) {
+		// The two are different references, but they reach one workload, and a
+		// caller asking what a specification reads wants the name once.
+		read := []manifest.Reference{
+			{Kind: manifest.KindWorkload, Name: "api", Port: "http"},
+			{Kind: manifest.KindWorkload, Name: "api", Port: "grpc"},
+		}
+
+		assert.Equal(t, []string{"api"}, manifest.Names(read, manifest.KindWorkload))
+	})
+}
+
+func TestOf(t *testing.T) {
+	t.Parallel()
+
+	read := []manifest.Reference{
+		{Kind: manifest.KindSecret, Name: "db-password"},
+		{Kind: manifest.KindWorkload, Name: "api", Port: "http"},
+		{Kind: manifest.KindWorkload, Name: "api", Port: "grpc"},
+	}
+
+	t.Run("returns every reference of the kind, port and all", func(t *testing.T) {
+		assert.Equal(t, []manifest.Reference{
+			{Kind: manifest.KindWorkload, Name: "api", Port: "http"},
+			{Kind: manifest.KindWorkload, Name: "api", Port: "grpc"},
+		}, manifest.Of(read, manifest.KindWorkload))
+	})
+
+	t.Run("returns nothing for a kind that is absent", func(t *testing.T) {
+		assert.Empty(t, manifest.Of(read, manifest.KindVariable))
+	})
+}
+
+func TestReference_String(t *testing.T) {
+	t.Parallel()
+
+	t.Run("writes a reference naming no port as its name", func(t *testing.T) {
+		assert.Equal(t, "postgres", manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres"}.String())
+	})
+
+	t.Run("writes a reference naming a port as both", func(t *testing.T) {
+		reference := manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres", Port: "pg"}
+		assert.Equal(t, "postgres:pg", reference.String())
 	})
 }

@@ -19,6 +19,9 @@ var (
 	// ErrUnknownVariable is returned when expanding a value that references a
 	// variable the caller could not resolve.
 	ErrUnknownVariable = errors.New("unknown variable")
+	// ErrUnknownWorkload is returned when expanding a value that references a
+	// workload the caller could not resolve.
+	ErrUnknownWorkload = errors.New("unknown workload")
 )
 
 const (
@@ -41,8 +44,12 @@ type (
 	Reference struct {
 		// What the reference resolves against.
 		Kind ReferenceKind
-		// The name of the secret or variable being referenced.
+		// The name of the secret, variable or workload being referenced.
 		Name string
+		// Which of the referenced workload's ports is wanted, which resolves the
+		// reference to an address rather than to a host. Empty for a reference of
+		// any other kind, which has no port to name.
+		Port PortRef
 	}
 )
 
@@ -53,6 +60,12 @@ const (
 	// KindVariable is a reference to a value orca holds in the clear, which the API
 	// reports.
 	KindVariable ReferenceKind = "var"
+	// KindWorkload is a reference to the address another workload is reached at.
+	//
+	// Unlike the other two it resolves against something orca settled on rather than
+	// something an operator stored, which is what lets a workload be written down as
+	// the dependency of another without either naming a port orca chose.
+	KindWorkload ReferenceKind = "workload"
 )
 
 // Every kind a reference may name.
@@ -60,7 +73,7 @@ const (
 // A slice rather than a set so that the error naming the accepted forms lists them
 // the same way each time. No kind's opening is a prefix of another's, so the order
 // does not affect what matches.
-var referenceKinds = []ReferenceKind{KindSecret, KindVariable}
+var referenceKinds = []ReferenceKind{KindSecret, KindVariable, KindWorkload}
 
 // opening returns the text that opens a reference of this kind.
 //
@@ -72,11 +85,15 @@ func (k ReferenceKind) opening() string {
 // ParseReferences returns the references value holds, in the order they appear and
 // without repeats.
 //
-// The grammar is whole. A reference is "${secret:name}" or "${var:name}", and "$$"
-// is a literal dollar sign. Anything else following an unescaped dollar sign is
-// reported rather than passed through, so a manifest that meant to reference
-// something is never quietly handed the text it wrote. This is deliberately not a
-// template language: there is nothing to evaluate, so there is no way to ask it to.
+// The grammar is whole. A reference is "${secret:name}", "${var:name}",
+// "${workload:name}" or "${workload:name:port}", and "$$" is a literal dollar sign.
+// Anything else following an unescaped dollar sign is reported rather than passed
+// through, so a manifest that meant to reference something is never quietly handed
+// the text it wrote. This is deliberately not a template language: there is nothing
+// to evaluate, so there is no way to ask it to.
+//
+// Only a workload reference may name a port, since it is the only kind that resolves
+// against something publishing one.
 func ParseReferences(value string) ([]Reference, error) {
 	var references []Reference
 
@@ -105,13 +122,11 @@ func ParseReferences(value string) ([]Reference, error) {
 				ErrInvalidReference, truncate(rest), string(referenceSuffix))
 		}
 
-		name := rest[len(prefix):end]
-		if !namePattern.MatchString(name) || len(name) > 63 {
-			return nil, fmt.Errorf("%w: %s name %q must be lowercase alphanumeric, optionally separated by dashes",
-				ErrInvalidReference, kind, name)
+		reference, err := newReference(kind, rest[len(prefix):end])
+		if err != nil {
+			return nil, err
 		}
 
-		reference := Reference{Kind: kind, Name: name}
 		if !slices.Contains(references, reference) {
 			references = append(references, reference)
 		}
@@ -125,9 +140,10 @@ func ParseReferences(value string) ([]Reference, error) {
 // Expand replaces every reference in value with what resolve returns for it, and
 // unescapes each "$$" to a single dollar sign.
 //
-// Returns ErrUnknownSecret or ErrUnknownVariable naming the reference when resolve
-// reports it holds nothing for one. Leaving the reference text in place would hand a
-// workload the reference as though it were the value, which it would then use.
+// Returns ErrUnknownSecret, ErrUnknownVariable or ErrUnknownWorkload naming the
+// reference when resolve reports it holds nothing for one. Leaving the reference text
+// in place would hand a workload the reference as though it were the value, which it
+// would then use.
 func Expand(value string, resolve func(reference Reference) (string, bool)) (string, error) {
 	// Checked up front so that a malformed reference is reported the same way
 	// wherever expansion happens, rather than only where a scan happened to look.
@@ -155,11 +171,13 @@ func Expand(value string, resolve func(reference Reference) (string, bool)) (str
 		prefix, kind, _ := openingOf(rest)
 		end := strings.IndexByte(rest, referenceSuffix)
 
-		reference := Reference{Kind: kind, Name: rest[len(prefix):end]}
+		// ParseReferences has already rejected anything malformed, so the reference
+		// is well-formed however this value was reached.
+		reference, _ := newReference(kind, rest[len(prefix):end])
 
 		resolved, ok := resolve(reference)
 		if !ok {
-			return "", fmt.Errorf("%w: %s", unknown(kind), reference.Name)
+			return "", fmt.Errorf("%w: %s", unknown(kind), reference)
 		}
 
 		out.WriteString(resolved)
@@ -210,7 +228,7 @@ func References(spec Spec) ([]Reference, error) {
 	}
 
 	slices.SortFunc(references, func(a, b Reference) int {
-		return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Name, b.Name))
+		return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Name, b.Name), cmp.Compare(a.Port, b.Port))
 	})
 
 	return references, nil
@@ -294,20 +312,76 @@ func Refreshed(spec Spec) ([]Reference, error) {
 	return references, nil
 }
 
-// Names returns the names of the references of the given kind, keeping the order
-// they were given in.
+// Names returns the names of the references of the given kind, without repeats and
+// keeping the order they were given in.
 //
 // Filtered here rather than by each caller so that a set of names is collected the
 // same way wherever one kind has to be told from the other.
+//
+// Repeats are dropped because one workload may be referenced more than once, at a
+// different port each time. Those are different references reaching one name, and a
+// caller asking what a specification reads wants the name once.
 func Names(references []Reference, kind ReferenceKind) []string {
 	var names []string
 	for _, reference := range references {
-		if reference.Kind == kind {
+		if reference.Kind == kind && !slices.Contains(names, reference.Name) {
 			names = append(names, reference.Name)
 		}
 	}
 
 	return names
+}
+
+// Of returns the references of the given kind, keeping the order they were given in.
+//
+// This exists for a caller that needs the port a workload reference names as well as
+// the workload it names, which Names cannot report.
+func Of(references []Reference, kind ReferenceKind) []Reference {
+	var found []Reference
+	for _, reference := range references {
+		if reference.Kind == kind {
+			found = append(found, reference)
+		}
+	}
+
+	return found
+}
+
+// String returns the reference as it is written inside its opening and closing
+// braces, which is how one is named by an error and keyed by whatever records what a
+// workload reads.
+func (r Reference) String() string {
+	if r.Port == "" {
+		return r.Name
+	}
+
+	return r.Name + ":" + string(r.Port)
+}
+
+// newReference builds a reference of the given kind from the text between its opening
+// and the brace that closes it.
+func newReference(kind ReferenceKind, body string) (Reference, error) {
+	name, port, qualified := strings.Cut(body, ":")
+
+	switch {
+	case qualified && kind != KindWorkload:
+		return Reference{}, fmt.Errorf("%w: %q names a port, which only a %s reference may do",
+			ErrInvalidReference, body, KindWorkload)
+	case !validReferenceName(name):
+		return Reference{}, fmt.Errorf("%w: %s name %q must be lowercase alphanumeric, optionally separated by dashes",
+			ErrInvalidReference, kind, name)
+	case qualified && !validReferenceName(port):
+		return Reference{}, fmt.Errorf("%w: port %q of %s %q must be a port name or a port number",
+			ErrInvalidReference, port, kind, name)
+	}
+
+	return Reference{Kind: kind, Name: name, Port: PortRef(port)}, nil
+}
+
+// validReferenceName reports whether a reference names something orca could hold
+// under that name.
+func validReferenceName(name string) bool {
+	return namePattern.MatchString(name) && len(name) <= maxLabelKeyLength
 }
 
 // validateEnv reports whether the workload's environment holds usable references.
@@ -350,11 +424,14 @@ func acceptedForms() string {
 // unknown returns the error reporting that a reference of the given kind resolved
 // against nothing.
 func unknown(kind ReferenceKind) error {
-	if kind == KindVariable {
+	switch kind {
+	case KindVariable:
 		return ErrUnknownVariable
+	case KindWorkload:
+		return ErrUnknownWorkload
+	default:
+		return ErrUnknownSecret
 	}
-
-	return ErrUnknownSecret
 }
 
 // truncate shortens a value for an error message, so that a reference opened in a
