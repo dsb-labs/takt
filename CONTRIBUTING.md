@@ -35,6 +35,23 @@ daemon, so it needs one running and is skipped by `-short`. It also runs daily. 
 catches breakage no code change caused, such as a runner upgrading Docker or an image
 tag moving underneath the tests.
 
+## End-to-end tests
+
+```sh
+go test -race ./internal/e2e/...
+```
+
+Each test starts a real server inside the test process and drives it through the
+public client. `-run` narrows the suite to one test in the usual way, and `-v` raises
+the server's log level to debug.
+
+Every test writes a debug bundle to `internal/e2e/artifacts/<test name>/`: the
+server's spans in `trace.json`, its logs in `logs.json`, and a final metrics scrape
+in `metrics.prom`. A failure can be diagnosed from what the server actually did
+rather than reconstructed from assertion messages. A test that restarts its server
+accumulates both runs' output in one bundle. The directory is not tracked, and the
+nightly workflow uploads it when a run fails.
+
 ## Running a server
 
 ```sh
