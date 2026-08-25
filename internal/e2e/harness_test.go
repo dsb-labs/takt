@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -561,4 +562,25 @@ func (s *Suite) cleanupVolume(name string) {
 	if err != nil && !errors.Is(err, client.ErrVolumeNotFound) {
 		s.T().Logf("failed to delete volume %q: %v", name, err)
 	}
+}
+
+// The syncBuffer type collects what a followed log read writes while the test reads it,
+// since the two happen on different goroutines.
+type syncBuffer struct {
+	mux sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mux.Lock()
+	defer b.mux.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mux.Lock()
+	defer b.mux.Unlock()
+
+	return b.buf.String()
 }

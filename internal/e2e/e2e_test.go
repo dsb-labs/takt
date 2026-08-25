@@ -15,6 +15,7 @@ package e2e_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -1025,6 +1026,83 @@ func (s *Suite) TestLogsOfAReplacedContainerSurviveIt() {
 	// the disk leak retention is bounded to avoid, and the count includes the attempt
 	// currently running.
 	s.LessOrEqual(len(s.containers(name)), 2, "more than one stopped container was kept")
+}
+
+// TestFollowingAContainersOutput covers the other half of the log story: retention gives
+// you the attempt that just failed, and following gives you the current one as it
+// happens.
+//
+// Watching a workload start used to mean running the same command over and over. The
+// tail of one is what makes this a test of the stream rather than of the tail: at most
+// one line existed when the read opened, so a second one can only have arrived through
+// the followed connection.
+func (s *Suite) TestFollowingAContainersOutput() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name)
+	spec.Container.Command = []string{"sh", "-c", `i=0; while true; do i=$((i+1)); echo "line $i"; sleep 1; done`}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitInstance(name)
+
+	ctx, cancel := context.WithCancel(s.ctx())
+	s.T().Cleanup(cancel)
+
+	var out syncBuffer
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.client.Logs(ctx, &out, name, client.WithTail(1), client.WithFollow())
+	}()
+
+	s.Require().Eventuallyf(func() bool {
+		return strings.Count(out.String(), "line ") > 1
+	}, convergeTimeout, 500*time.Millisecond, "the followed output never arrived")
+
+	// A caller pressing Ctrl-C is how most follows end, and it ends the read rather
+	// than failing it. This is also what releases the server's end of the stream.
+	cancel()
+
+	select {
+	case err = <-done:
+		s.Require().NoError(err)
+	case <-time.After(convergeTimeout):
+		s.Fail("the follow outlived the caller that asked for it")
+	}
+}
+
+// TestFollowingAProcessEndsWithIt covers the promise a follow makes about when it stops:
+// the read ends when the instance does, so nothing has to be cancelled to get out of it.
+//
+// The exec runtime rather than the container one, because this is where it is not free.
+// Docker closes a followed stream itself, where the exec driver polls a file and has to
+// decide for itself that there is nothing more coming.
+func (s *Suite) TestFollowingAProcessEndsWithIt() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.execSpec(name, "sh", "-c", "echo started; sleep 5; echo finished")
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartNever}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitInstance(name)
+
+	ctx, cancel := context.WithTimeout(s.ctx(), convergeTimeout)
+	s.T().Cleanup(cancel)
+
+	// Returns of its own accord. Nothing cancels this, so a follow that failed to
+	// notice the process ending would hang here until the context gave up.
+	var out bytes.Buffer
+	s.Require().NoError(s.client.Logs(ctx, &out, name, client.WithTail(10), client.WithFollow()))
+
+	// Including what the process wrote on its way out. The driver reads its record
+	// before the file, so the last lines of an instance that ends mid-poll survive.
+	s.Contains(out.String(), "finished")
 }
 
 // TestLogsOfAReplacedProcessSurviveIt is the exec runtime's half of retention, which
