@@ -16,9 +16,13 @@ import (
 	"os"
 	"time"
 
+	"github.com/XSAM/otelsql"
 	"github.com/golang-migrate/migrate/v4"
 	sqlitemigrate "github.com/golang-migrate/migrate/v4/database/sqlite"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
+	"go.opentelemetry.io/otel/metric"
+	semconv "go.opentelemetry.io/otel/semconv/v1.43.0"
+	"go.opentelemetry.io/otel/trace"
 	"modernc.org/sqlite"
 )
 
@@ -36,6 +40,12 @@ type Config struct {
 	Logger *slog.Logger
 	// The filesystem path to the SQLite database file.
 	Path string
+	// The provider connection pool metrics are created from. May be nil, in
+	// which case nothing is recorded.
+	MeterProvider metric.MeterProvider
+	// The provider query spans are created from. May be nil, in which case no
+	// spans are recorded.
+	TracerProvider trace.TracerProvider
 }
 
 // Open opens (or creates) the SQLite database at the path in config and runs any
@@ -71,11 +81,20 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 	// shared lock cannot both upgrade, so rather than queueing on the busy timeout
 	// they fail immediately: thirty-nine of fifty concurrent writes, measured. Taking
 	// the write lock up front makes them queue as intended.
-	db, err := sql.Open("sqlite", config.Path+
+	options := []otelsql.Option{otelsql.WithAttributes(semconv.DBSystemNameSQLite)}
+	if config.MeterProvider != nil {
+		options = append(options, otelsql.WithMeterProvider(config.MeterProvider))
+	}
+
+	if config.TracerProvider != nil {
+		options = append(options, otelsql.WithTracerProvider(config.TracerProvider))
+	}
+
+	db, err := otelsql.Open("sqlite", config.Path+
 		"?_pragma=foreign_keys(1)"+
 		"&_pragma=busy_timeout(5000)"+
 		"&_pragma=journal_mode(wal)"+
-		"&_txlock=immediate")
+		"&_txlock=immediate", options...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -103,6 +122,14 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 
 			return nil, fmt.Errorf("failed to restrict database permissions: %w", err)
 		}
+	}
+
+	// The pool metrics carry the wait timing a contended write burns against the
+	// busy timeout, which is the one latency problem SQLite actually has here.
+	// Registered for the life of the process, so the registration is not kept to
+	// unregister. A failure costs the metrics rather than the database.
+	if _, err = otelsql.RegisterDBStatsMetrics(db, options...); err != nil {
+		logger.With("error", err).Warn("failed to register database pool metrics")
 	}
 
 	logger.With("path", config.Path).Debug("database opened")

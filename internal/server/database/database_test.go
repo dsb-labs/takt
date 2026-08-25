@@ -7,12 +7,18 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	_ "modernc.org/sqlite"
 )
 
@@ -67,6 +73,43 @@ func TestOpen_ConcurrentWrites(t *testing.T) {
 	stored, err := repo.List(t.Context())
 	require.NoError(t, err)
 	assert.Len(t, stored, 50)
+}
+
+// TestOpen_InstrumentsThePool covers the otelsql wiring: a query against a pool
+// opened with providers must surface in their metrics and spans.
+func TestOpen_InstrumentsThePool(t *testing.T) {
+	t.Parallel()
+
+	reader := sdkmetric.NewManualReader()
+	spans := tracetest.NewSpanRecorder()
+
+	db, err := Open(t.Context(), Config{
+		Logger:         slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError})),
+		Path:           filepath.Join(t.TempDir(), "test.db"),
+		MeterProvider:  sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)),
+		TracerProvider: sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans)),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
+
+	var one int
+	require.NoError(t, db.QueryRowContext(t.Context(), "SELECT 1").Scan(&one))
+
+	var collected metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(t.Context(), &collected))
+
+	names := make([]string, 0)
+	for _, scope := range collected.ScopeMetrics {
+		for _, recorded := range scope.Metrics {
+			names = append(names, recorded.Name)
+		}
+	}
+
+	assert.True(t, slices.ContainsFunc(names, func(name string) bool {
+		return strings.HasPrefix(name, "db.client.")
+	}), "expected semantic-convention pool metrics, got %v", names)
+
+	assert.NotEmpty(t, spans.Ended(), "expected a span for the query")
 }
 
 func TestOpen_RestrictsPermissions(t *testing.T) {
