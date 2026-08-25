@@ -2081,3 +2081,57 @@ func (s *Suite) TestExecWorkloadMountsAValue() {
 	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
 	s.Contains(out.String(), "exec-mounted")
 }
+
+// TestObservability covers the surface an operator points a monitor at: liveness,
+// readiness, and the metrics scrape a Prometheus would take.
+func (s *Suite) TestObservability() {
+	s.Require().NoError(s.client.Health(s.ctx()))
+
+	// Readiness needs a completed pass over every driver, so it is awaited
+	// rather than asserted.
+	s.Require().Eventually(func() bool {
+		readiness, err := s.client.Ready(s.ctx())
+
+		return err == nil && readiness.Ready
+	}, convergeTimeout, 100*time.Millisecond, "server never reported ready")
+
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name))
+	s.Require().NoError(err)
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	var metrics bytes.Buffer
+	s.Require().NoError(s.client.Metrics(s.ctx(), &metrics))
+
+	// The pass counter proves orca's own instruments are on the scrape, and the
+	// workload gauge proves per-workload measurement made it through a real
+	// converge.
+	s.Contains(metrics.String(), "orca_reconcile_passes_total")
+	s.Contains(metrics.String(), "orca_workloads")
+}
+
+// TestDebugBundle proves every test leaves the server's spans and logs on disk,
+// which is what a failed run is diagnosed from.
+func (s *Suite) TestDebugBundle() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name))
+	s.Require().NoError(err)
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	// Spans and logs are batched and only flushed by the server shutting down,
+	// so restarting is what makes the bundle readable mid-test — and proves a
+	// restarting test accumulates both servers' output in one bundle.
+	s.restart(withDataDirectory(s.directory))
+
+	trace, err := os.ReadFile(filepath.Join(s.artifacts, "trace.json"))
+	s.Require().NoError(err)
+	s.Contains(string(trace), `"reconcile"`, "the pass's root span is in the bundle")
+
+	logs, err := os.ReadFile(filepath.Join(s.artifacts, "logs.json"))
+	s.Require().NoError(err)
+	s.NotEmpty(logs, "the server's own log records are in the bundle")
+}

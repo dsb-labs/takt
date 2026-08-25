@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/dsb-labs/orca/internal/server"
@@ -40,6 +42,14 @@ type (
 		// Where the running server keeps its state, so that a test can read the
 		// database directly and check what did not reach it.
 		directory string
+		// Where the test's debug bundle is written: the server's spans, logs
+		// and a final metrics scrape, kept per test so a failure can be
+		// diagnosed from what the server actually did.
+		artifacts string
+		// The files the telemetry exporters write to, held open across a
+		// restart so both servers' output lands in one bundle.
+		traceFile *os.File
+		logFile   *os.File
 	}
 
 	// The option type modifies how a test server is started.
@@ -63,9 +73,13 @@ func (s *Suite) SetupTest() {
 	s.start()
 }
 
-// TearDownTest stops the server the test was using.
+// TearDownTest finishes the test's debug bundle with a metrics scrape, then stops
+// the server. Stopping is what flushes the batched spans and logs into the
+// bundle, so the scrape has to come first while the server still answers.
 func (s *Suite) TearDownTest() {
+	s.scrapeMetrics()
 	s.stop()
+	s.closeBundle()
 }
 
 // start runs a server and points the suite's client at it.
@@ -81,6 +95,20 @@ func (s *Suite) start(options ...option) {
 	if testing.Verbose() {
 		config.Logging.Level = "debug"
 	}
+
+	// Every test writes a debug bundle: the server's spans and logs land in
+	// per-test files as it runs, so a failure can be read from what the server
+	// actually did rather than reconstructed from assertion messages.
+	s.openBundle()
+
+	traces, err := stdouttrace.New(stdouttrace.WithWriter(s.traceFile))
+	s.Require().NoError(err)
+
+	logs, err := stdoutlog.New(stdoutlog.WithWriter(s.logFile))
+	s.Require().NoError(err)
+
+	config.Telemetry.SpanExporter = traces
+	config.Telemetry.LogExporter = logs
 
 	for _, option := range options {
 		option(&config)
@@ -121,6 +149,64 @@ func (s *Suite) stop() {
 func (s *Suite) restart(options ...option) {
 	s.stop()
 	s.start(options...)
+}
+
+// openBundle creates the test's debug-bundle directory and opens the files the
+// telemetry exporters write to. The files are truncated once per test and then
+// held open across a restart, so a test that runs two servers accumulates both
+// runs' output in one bundle rather than keeping only the last.
+func (s *Suite) openBundle() {
+	if s.traceFile != nil {
+		return
+	}
+
+	s.artifacts = filepath.Join("artifacts", strings.ReplaceAll(s.T().Name(), "/", "_"))
+	s.Require().NoError(os.MkdirAll(s.artifacts, 0o755))
+
+	open := func(name string) *os.File {
+		file, err := os.OpenFile(filepath.Join(s.artifacts, name), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		s.Require().NoError(err)
+
+		return file
+	}
+
+	s.traceFile, s.logFile = open("trace.json"), open("logs.json")
+}
+
+// scrapeMetrics writes the server's final metrics into the test's debug bundle.
+// Best-effort: a test that already stopped its server still passes, it just has
+// no scrape to keep.
+func (s *Suite) scrapeMetrics() {
+	if s.client == nil || s.artifacts == "" {
+		return
+	}
+
+	file, err := os.Create(filepath.Join(s.artifacts, "metrics.prom"))
+	if err != nil {
+		s.T().Logf("failed to create the metrics file: %v", err)
+
+		return
+	}
+	defer file.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err = s.client.Metrics(ctx, file); err != nil {
+		s.T().Logf("failed to scrape metrics into the debug bundle: %v", err)
+	}
+}
+
+// closeBundle closes the debug-bundle files once the server that wrote to them
+// has stopped.
+func (s *Suite) closeBundle() {
+	for _, file := range []*os.File{s.traceFile, s.logFile} {
+		if file != nil {
+			file.Close()
+		}
+	}
+
+	s.traceFile, s.logFile, s.artifacts = nil, nil, ""
 }
 
 func (s *Suite) ctx() context.Context {
