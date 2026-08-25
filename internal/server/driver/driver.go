@@ -150,6 +150,26 @@ type (
 		// before it, and concatenating them would return two runs spliced together with
 		// nothing marking the boundary.
 		Previous bool
+		// Whether to keep writing output as the instance produces it, rather than
+		// returning once the tail has been written.
+		//
+		// The stream ends when the instance ends. A driver follows the work it is
+		// running now, so a replacement is a new instance and a new read: what the
+		// caller asked to watch has finished.
+		//
+		// Never combined with Previous. A retained instance has already ended, so
+		// there is nothing further for it to say.
+		Follow bool
+		// The instant to read the output from, ignoring anything written before it.
+		//
+		// The zero time reads from as far back as Tail allows, which is what a caller
+		// passing nothing means.
+		//
+		// A driver honours this only when its runtime timestamps the output it keeps.
+		// One that does not ignores this rather than guessing, because a line's time
+		// would have to be invented and a filter built on an invented time is worse
+		// than no filter.
+		Since time.Time
 	}
 
 	// The Port type describes a published port of an instance.
