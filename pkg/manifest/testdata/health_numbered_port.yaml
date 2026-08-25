@@ -1,0 +1,12 @@
+version: v1
+name: example
+health:
+  http: /healthz
+  port: 8080
+ports:
+  - name: http
+    to: 8080
+  - name: metrics
+    to: 9090
+container:
+  image: example/example:latest

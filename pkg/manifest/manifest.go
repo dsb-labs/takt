@@ -572,7 +572,7 @@ func validateHealthPort(health Health, ports []Port) error {
 			"and a %s port always accepts a connection", ProtocolTCP, ProtocolUDP)
 	}
 
-	if health.Port == 0 {
+	if health.Port == "" {
 		if len(checkable) > 1 {
 			return errors.New("invalid health: port is required when more than one port is published")
 		}
@@ -580,8 +580,8 @@ func validateHealthPort(health Health, ports []Port) error {
 		return nil
 	}
 
-	if !slices.ContainsFunc(checkable, func(port Port) bool { return port.To == health.Port }) {
-		return fmt.Errorf("invalid health: port %d/%s is not published by the workload",
+	if !slices.ContainsFunc(checkable, func(port Port) bool { return health.Port.Matches(port.Name, port.To) }) {
+		return fmt.Errorf("invalid health: port %q is not published by the workload over %s",
 			health.Port, ProtocolTCP)
 	}
 

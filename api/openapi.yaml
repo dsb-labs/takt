@@ -1266,12 +1266,18 @@ components:
             Whether to check that the port merely accepts a connection, for a
             workload that speaks something other than HTTP.
         port:
-          type: integer
+          type: string
           description: |
-            Which of the workload's ports to check, named as the port inside the
-            workload. Only needed when it publishes more than one.
-          minimum: 1
-          maximum: 65535
+            Which of the workload's ports to check, written either as the name the
+            specification gave it or as the port inside the workload. Only needed
+            when the workload publishes more than one.
+
+            A string rather than a number so that both forms are one field. A port
+            name may not read as a number, so the two can never describe the same
+            port.
+          pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          maxLength: 63
+          examples: ["http"]
         interval:
           type: string
           description: How often to perform the check.

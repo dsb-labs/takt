@@ -456,9 +456,17 @@ type HealthSpec struct {
 	// Examples: 10s
 	Interval *string `json:"interval,omitempty"`
 
-	// Port Which of the workload's ports to check, named as the port inside the
-	// workload. Only needed when it publishes more than one.
-	Port *int `json:"port,omitempty"`
+	// Port Which of the workload's ports to check, written either as the name the
+	// specification gave it or as the port inside the workload. Only needed
+	// when the workload publishes more than one.
+	//
+	// A string rather than a number so that both forms are one field. A port
+	// name may not read as a number, so the two can never describe the same
+	// port.
+	//
+	//
+	// Examples: http
+	Port *string `json:"port,omitempty"`
 
 	// Retries How many consecutive failures mark the workload as failed. Until that
 	// many have accumulated the workload is reported as pending rather than

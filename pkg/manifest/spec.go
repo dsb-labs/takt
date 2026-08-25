@@ -2,10 +2,12 @@ package manifest
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 )
@@ -27,6 +29,15 @@ type (
 
 	// The Protocol type names the transport protocol a port is published on.
 	Protocol string
+
+	// The PortRef type names one of a workload's ports, written either as the name
+	// the specification gave it or as the port inside the workload.
+	//
+	// One type rather than two fields, because both forms answer the same question
+	// and a manifest that could write either would otherwise have to say which it
+	// meant. A port name may not read as a number, so a reference matches at most
+	// one of the two forms.
+	PortRef string
 
 	// The MountKind type names what a mount takes its contents from, which
 	// determines which of a mount's source fields is used.
@@ -115,9 +126,9 @@ type (
 		HTTP string
 		// Whether to check that the port merely accepts a connection.
 		TCP bool
-		// Which of the workload's ports to check, named as the port inside the
-		// workload. Only needed when it publishes more than one.
-		Port int
+		// Which of the workload's ports to check, written as the port's name or as
+		// the port inside the workload. Only needed when it publishes more than one.
+		Port PortRef
 		// How often to perform the check.
 		Interval time.Duration
 		// How long a single check may take before it counts as failed.
@@ -346,6 +357,40 @@ const (
 // the same way each time.
 var signals = []Signal{SignalHUP, SignalUSR1, SignalUSR2}
 
+// Matches reports whether the reference names the port with the given name and
+// number.
+//
+// Both forms are checked, since a reference is written as either. A port name may not
+// read as a number, so at most one of the two can match.
+func (p PortRef) Matches(name string, to int) bool {
+	if p == "" {
+		return false
+	}
+
+	if string(p) == name {
+		return true
+	}
+
+	number, err := strconv.Atoi(string(p))
+
+	return err == nil && number == to
+}
+
+// UnmarshalYAML decodes a port reference from the scalar it was written as.
+//
+// Written by hand because a reference is either a name or a number, and yaml.v3
+// refuses to decode a number into a string. Without this a manifest naming the port
+// itself would have to quote it, which nothing else in a manifest asks for.
+func (p *PortRef) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind != yaml.ScalarNode {
+		return fmt.Errorf("port must be a name or a port number, got %s", node.Tag)
+	}
+
+	*p = PortRef(node.Value)
+
+	return nil
+}
+
 // KindOf reports which source mount names, which is determined by the field it
 // carries rather than by a discriminator.
 //
@@ -571,7 +616,7 @@ func newHealth(spec *api.HealthSpec) *Health {
 		health.TCP = *spec.TCP
 	}
 	if spec.Port != nil {
-		health.Port = *spec.Port
+		health.Port = PortRef(*spec.Port)
 	}
 	if spec.Retries != nil {
 		health.Retries = *spec.Retries
@@ -834,8 +879,8 @@ func WireHealth(health *Health) *api.HealthSpec {
 	if health.TCP {
 		spec.TCP = new(health.TCP)
 	}
-	if health.Port != 0 {
-		spec.Port = new(health.Port)
+	if health.Port != "" {
+		spec.Port = new(string(health.Port))
 	}
 
 	return &spec

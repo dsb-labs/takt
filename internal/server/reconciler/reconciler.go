@@ -1032,19 +1032,19 @@ func healthPort(check manifest.Health, ports []database.Port) (int, error) {
 		return 0, fmt.Errorf("workload publishes no %s port to check", manifest.ProtocolTCP)
 	}
 
-	// Validation requires the port to be named when several are published, so an
-	// unnamed one can only mean the single port the workload has.
-	if check.Port == 0 {
+	// Validation requires the port to be named when several are published, so a
+	// check naming none can only mean the single port the workload has.
+	if check.Port == "" {
 		return checkable[0].Host, nil
 	}
 
 	for _, port := range checkable {
-		if port.Container == check.Port {
+		if check.Port.Matches(port.Name, port.Container) {
 			return port.Host, nil
 		}
 	}
 
-	return 0, fmt.Errorf("port %d/%s is not published by the workload", check.Port, manifest.ProtocolTCP)
+	return 0, fmt.Errorf("port %q is not published by the workload over %s", check.Port, manifest.ProtocolTCP)
 }
 
 // checked folds what orca's health check established into an instance's state, so

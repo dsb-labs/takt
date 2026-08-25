@@ -636,12 +636,32 @@ func TestReconciler_Run_ProbesThePublishedAddress(t *testing.T) {
 	// reconciler restart work that was answering perfectly well.
 	tcp := []database.Port{{WorkloadID: "workload-one", Container: 80, Host: 20080, Protocol: "tcp"}}
 
+	named := []database.Port{
+		{WorkloadID: "workload-one", Name: "http", Container: 80, Host: 20080, Protocol: "tcp"},
+		{WorkloadID: "workload-one", Name: "metrics", Container: 9090, Host: 20090, Protocol: "tcp"},
+	}
+
 	tt := []struct {
 		Name           string
 		Bind           string
+		CheckedPort    string
 		Ports          []database.Port
 		ExpectedProbed string
 	}{
+		{
+			Name:           "probes the port the check names",
+			CheckedPort:    "metrics",
+			Ports:          named,
+			ExpectedProbed: "127.0.0.1:20090",
+		},
+		{
+			// The number is the other way of writing the same thing, so it has to
+			// select the same port.
+			Name:           "probes the port the check numbers",
+			CheckedPort:    "9090",
+			Ports:          named,
+			ExpectedProbed: "127.0.0.1:20090",
+		},
 		{
 			Name:           "probes the interface a workload is published on",
 			Bind:           "10.0.0.5",
@@ -683,7 +703,7 @@ func TestReconciler_Run_ProbesThePublishedAddress(t *testing.T) {
 
 			checked := storedWorkload("example", "hash-one")
 			checked.ID = "workload-one"
-			checked.Spec = specWithHealth("example")
+			checked.Spec = specWithCheckedPort("example", tc.CheckedPort)
 
 			repo.EXPECT().List(mock.Anything).Return([]database.Workload{checked}, nil)
 
@@ -3173,6 +3193,27 @@ func specWithHealth(name string) []byte {
 		Name:      name,
 		Container: &api.ContainerSpec{Image: "example/example:latest"},
 		Health:    &api.HealthSpec{HTTP: new("/healthz")},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return spec
+}
+
+// specWithCheckedPort returns a stored specification whose check names one of the
+// workload's ports, or names none when port is empty.
+func specWithCheckedPort(name, port string) []byte {
+	health := api.HealthSpec{HTTP: new("/healthz")}
+	if port != "" {
+		health.Port = new(port)
+	}
+
+	spec, err := json.Marshal(api.WorkloadSpec{
+		Version:   "v1",
+		Name:      name,
+		Container: &api.ContainerSpec{Image: "example/example:latest"},
+		Health:    &health,
 	})
 	if err != nil {
 		panic(err)

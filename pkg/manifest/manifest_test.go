@@ -178,6 +178,29 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			Name: "a health check naming the port by name",
+			File: "health_named_port.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Health)
+				assert.Equal(t, manifest.PortRef("http"), spec.Health.Port)
+			},
+		},
+		{
+			// The number is the other way of writing the same thing, and a manifest
+			// naming it should not have to quote it.
+			Name: "a health check naming the port by number",
+			File: "health_numbered_port.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Health)
+				assert.Equal(t, manifest.PortRef("8080"), spec.Health.Port)
+			},
+		},
+		{
+			Name:         "rejects a port name the workload does not publish",
+			File:         "health_unknown_name.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name: "rejects an ambiguous port when several are published",
 			File: "health_ambiguous_port.yaml",
 			// Guessing which port to check would make the manifest mean something
