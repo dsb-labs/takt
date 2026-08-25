@@ -14,6 +14,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/dsb-labs/orca/internal/server/health"
 )
@@ -364,11 +366,60 @@ func TestChecker_Forget(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestChecker_Metrics(t *testing.T) {
+	t.Parallel()
+
+	reader := sdkmetric.NewManualReader()
+	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+
+	checker := health.New(health.Config{Meter: meter})
+
+	done := make(chan error, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+
+	go func() { done <- checker.Run(ctx) }()
+
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, <-done)
+	})
+
+	// A probe against an address nothing listens on is refused immediately, which
+	// is the cheapest way to get an outcome on record.
+	checker.Set("example", check(freeAddress(t), ""))
+	awaitStatus(t, checker, "example", health.StatusUnhealthy)
+
+	var collected metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(t.Context(), &collected))
+
+	var found bool
+	for _, scope := range collected.ScopeMetrics {
+		for _, recorded := range scope.Metrics {
+			if recorded.Name != "orca.health.check.duration" {
+				continue
+			}
+
+			histogram, ok := recorded.Data.(metricdata.Histogram[float64])
+			require.True(t, ok)
+
+			for _, point := range histogram.DataPoints {
+				workload, _ := point.Attributes.Value("workload")
+				outcome, _ := point.Attributes.Value("outcome")
+				if workload.AsString() == "example" && outcome.AsString() == "failure" {
+					found = point.Count >= 1
+				}
+			}
+		}
+	}
+
+	assert.True(t, found, "expected a recorded probe duration for the failing workload")
+}
+
 // run returns a Checker whose loop is running for the duration of the test.
 func run(t *testing.T) *health.Checker {
 	t.Helper()
 
-	checker := health.New()
+	checker := health.New(health.Config{})
 
 	done := make(chan error, 1)
 	ctx, cancel := context.WithCancel(t.Context())

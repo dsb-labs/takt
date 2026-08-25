@@ -16,6 +16,10 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 // The Status type describes whether a workload is working.
@@ -78,6 +82,15 @@ type (
 		// Signals that the set of checks has changed, so that the loop recomputes
 		// when it is next needed rather than sleeping on a stale answer.
 		wake chan struct{}
+		// How long each probe took, by workload and outcome.
+		duration metric.Float64Histogram
+	}
+
+	// The Config type contains fields used to construct a Checker.
+	Config struct {
+		// The meter the checker's instruments are created from. May be nil, in
+		// which case nothing is recorded.
+		Meter metric.Meter
 	}
 
 	// The scheduled type is one check as handed to a probe: the specification to
@@ -110,9 +123,24 @@ type (
 )
 
 // New returns a Checker ready to run checks.
-func New() *Checker {
+func New(config Config) *Checker {
+	meter := config.Meter
+	if meter == nil {
+		meter = noop.Meter{}
+	}
+
+	duration, err := meter.Float64Histogram("orca.health.check.duration",
+		metric.WithDescription("How long each health probe took."),
+		metric.WithUnit("s"))
+	if err != nil {
+		// Only a bad instrument name can fail here, so failing costs the metric
+		// rather than the checker.
+		duration, _ = noop.Meter{}.Float64Histogram("")
+	}
+
 	return &Checker{
-		checks: make(map[string]*check),
+		duration: duration,
+		checks:   make(map[string]*check),
 		// Buffered so that registering a check never blocks on the loop: a
 		// recomputation is already pending, which is all the signal conveys.
 		wake: make(chan struct{}, 1),
@@ -291,7 +319,20 @@ func (c *Checker) checkDue(ctx context.Context, probes *sync.WaitGroup) {
 			// cancelled by its check being replaced.
 			defer due.cancel()
 
-			c.record(workload, due.probe, c.probe(due.ctx, due.spec))
+			started := time.Now()
+			err := c.probe(due.ctx, due.spec)
+
+			outcome := "success"
+			if err != nil {
+				outcome = "failure"
+			}
+
+			c.duration.Record(due.ctx, time.Since(started).Seconds(), metric.WithAttributes(
+				attribute.String("workload", workload),
+				attribute.String("outcome", outcome),
+			))
+
+			c.record(workload, due.probe, err)
 		})
 	}
 }
