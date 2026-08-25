@@ -625,6 +625,19 @@ type PortMapping struct {
 	// Examples: 4141
 	From *int `json:"from,omitempty"`
 
+	// Name What this port is called, so that the rest of a manifest can refer to it
+	// rather than restate the number. A health check names one this way, and so
+	// does another workload reaching this one.
+	//
+	// Optional, and only worth setting for a workload publishing more than one
+	// port. Two ports may share a name only when they publish the same `to` on
+	// different protocols, which is how one service published over TCP and UDP
+	// is named once.
+	//
+	//
+	// Examples: http
+	Name *string `json:"name,omitempty"`
+
 	// Protocol The transport protocol a port is published on.
 	//
 	// The two are separate address spaces. 20000/tcp and 20000/udp are unrelated
@@ -682,6 +695,9 @@ type ResolvedPort struct {
 
 	// From The host port that reaches it.
 	From int `json:"from"`
+
+	// Name What the specification called this port. Empty for one it did not name.
+	Name *string `json:"name,omitempty"`
 
 	// Protocol The transport protocol a port is published on.
 	//

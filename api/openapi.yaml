@@ -1312,6 +1312,20 @@ components:
         address in advance.
       required: [to]
       properties:
+        name:
+          type: string
+          description: |
+            What this port is called, so that the rest of a manifest can refer to it
+            rather than restate the number. A health check names one this way, and so
+            does another workload reaching this one.
+
+            Optional, and only worth setting for a workload publishing more than one
+            port. Two ports may share a name only when they publish the same `to` on
+            different protocols, which is how one service published over TCP and UDP
+            is named once.
+          pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+          maxLength: 63
+          examples: ["http"]
         to:
           type: integer
           description: The port the workload listens on inside its runtime.
@@ -1353,6 +1367,11 @@ components:
         settled on. This is what a caller uses to reach a workload.
       required: [to, from, protocol, dynamic]
       properties:
+        name:
+          type: string
+          description: |
+            What the specification called this port. Empty for one it did not name.
+          maxLength: 63
         to:
           type: integer
           description: The port the workload listens on inside its runtime.
