@@ -234,6 +234,137 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v1/workloads/{name}/stop:
+    parameters:
+      - $ref: "#/components/parameters/WorkloadName"
+
+    post:
+      operationId: stopWorkload
+      tags: [workloads]
+      summary: Stop a workload
+      description: |
+        Marks the workload as suspended and returns it as it now stands.
+
+        Stopping is asynchronous. The reconciler stops the workload's instances,
+        removes any values the workload mounted, and then leaves it alone until it
+        is started again. Suspension is desired state, so it survives a server
+        restart. Stopping an already suspended workload changes nothing.
+
+        The specification and its version are untouched, so a later start resumes
+        the same instance rather than replacing it. Applying a new specification
+        while the workload is suspended is allowed, and the replacement it asks for
+        happens when the workload is started.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StopWorkloadRequest"
+      responses:
+        "202":
+          description: The workload was marked as suspended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StopWorkloadResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            The workload is being deleted, so there is nothing left to hold down.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/workloads/{name}/start:
+    parameters:
+      - $ref: "#/components/parameters/WorkloadName"
+
+    post:
+      operationId: startWorkload
+      tags: [workloads]
+      summary: Start a stopped workload
+      description: |
+        Clears the workload's suspension and returns it as it now stands.
+
+        Starting is asynchronous. The next reconcile pass starts the workload's
+        instances again, under whatever specification is stored, which includes one
+        applied while the workload was suspended. Starting a workload that is not
+        suspended changes nothing.
+
+        A scheduled workload counts its next occurrence from when it was started,
+        so occurrences missed while it was suspended do not run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartWorkloadRequest"
+      responses:
+        "202":
+          description: The workload's suspension was cleared.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartWorkloadResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The workload is being deleted and cannot run again.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/workloads/{name}/restart:
+    parameters:
+      - $ref: "#/components/parameters/WorkloadName"
+
+    post:
+      operationId: restartWorkload
+      tags: [workloads]
+      summary: Restart a workload
+      description: |
+        Asks the reconciler to replace the workload's running instances, and
+        returns the workload as it now stands.
+
+        The restart happens on the next reconcile pass. The instances are stopped
+        and new ones are started from the unchanged specification, so the version
+        does not move. The request is held in memory rather than stored: one the
+        reconciler has not acted on yet is lost when the server restarts, and can
+        simply be sent again.
+
+        A suspended workload is refused, since nothing would start. Start it
+        instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RestartWorkloadRequest"
+      responses:
+        "202":
+          description: The restart was recorded for the next reconcile pass.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RestartWorkloadResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The workload is being deleted or is suspended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /api/v1/volumes:
     get:
       operationId: listVolumes
@@ -1513,6 +1644,12 @@ components:
             Whether the workload has been marked for deletion and is being torn
             down. Such a workload is reported as terminating and will disappear
             once nothing is left running for it.
+        suspended:
+          type: boolean
+          description: |
+            Whether the workload has been stopped and is intentionally not
+            running. Suspension survives a server restart and holds until the
+            workload is started again.
         ports:
           type: array
           description: |
@@ -1611,6 +1748,10 @@ components:
         A completed workload has ended and will not be restarted, which its restart
         policy asked for. That is distinct from stopped, where nothing is running and
         the server intends to fix it.
+
+        A suspended workload was stopped by an operator and stays down until it is
+        started again. Neither stopped nor completed fits: the server does not
+        intend to fix it, and its restart policy did not ask for it to end.
       enum:
         - pending
         - running
@@ -1618,6 +1759,7 @@ components:
         - stopped
         - completed
         - failed
+        - suspended
 
     InstanceHealth:
       type: object
@@ -1718,6 +1860,56 @@ components:
       type: object
       description: |
         The body returned when a workload is marked for deletion, holding the
+        workload as it now stands.
+      required: [workload]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
+
+    StopWorkloadRequest:
+      type: object
+      description: |
+        The body sent to stop a workload, which has nothing in it yet.
+
+        It exists so that every write to this API carries a JSON object, and so
+        that a later option is a new field rather than a new kind of request.
+
+    StopWorkloadResult:
+      type: object
+      description: |
+        The body returned when a workload is stopped, holding the workload as it
+        now stands.
+      required: [workload]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
+
+    StartWorkloadRequest:
+      type: object
+      description: |
+        The body sent to start a workload, which has nothing in it yet. It exists
+        for the same reasons the stop body does.
+
+    StartWorkloadResult:
+      type: object
+      description: |
+        The body returned when a workload is started, holding the workload as it
+        now stands.
+      required: [workload]
+      properties:
+        workload:
+          $ref: "#/components/schemas/Workload"
+
+    RestartWorkloadRequest:
+      type: object
+      description: |
+        The body sent to restart a workload, which has nothing in it yet. It
+        exists for the same reasons the stop body does.
+
+    RestartWorkloadResult:
+      type: object
+      description: |
+        The body returned when a workload restart is recorded, holding the
         workload as it now stands.
       required: [workload]
       properties:

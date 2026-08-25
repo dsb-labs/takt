@@ -192,6 +192,7 @@ const (
 	WorkloadStatePending     WorkloadState = "pending"
 	WorkloadStateRunning     WorkloadState = "running"
 	WorkloadStateStopped     WorkloadState = "stopped"
+	WorkloadStateSuspended   WorkloadState = "suspended"
 	WorkloadStateTerminating WorkloadState = "terminating"
 )
 
@@ -207,6 +208,8 @@ func (e WorkloadState) Valid() bool {
 	case WorkloadStateRunning:
 		return true
 	case WorkloadStateStopped:
+		return true
+	case WorkloadStateSuspended:
 		return true
 	case WorkloadStateTerminating:
 		return true
@@ -726,6 +729,18 @@ type RestartSpec struct {
 	Policy *RestartPolicy `json:"policy,omitempty"`
 }
 
+// RestartWorkloadRequest The body sent to restart a workload, which has nothing in it yet. It
+// exists for the same reasons the stop body does.
+type RestartWorkloadRequest = map[string]interface{}
+
+// RestartWorkloadResult The body returned when a workload restart is recorded, holding the
+// workload as it now stands.
+type RestartWorkloadResult struct {
+	// Workload A workload's desired state, together with the state observed from the driver
+	// that runs it.
+	Workload Workload `json:"workload"`
+}
+
 // Runtime Which runtime block the workload's specification names.
 type Runtime string
 
@@ -825,6 +840,32 @@ type SetVariableResult struct {
 	// to hide, so its value serves that purpose directly. That also makes it the
 	// wrong place for anything damaging to report — a secret is what that is for.
 	Variable Variable `json:"variable"`
+}
+
+// StartWorkloadRequest The body sent to start a workload, which has nothing in it yet. It exists
+// for the same reasons the stop body does.
+type StartWorkloadRequest = map[string]interface{}
+
+// StartWorkloadResult The body returned when a workload is started, holding the workload as it
+// now stands.
+type StartWorkloadResult struct {
+	// Workload A workload's desired state, together with the state observed from the driver
+	// that runs it.
+	Workload Workload `json:"workload"`
+}
+
+// StopWorkloadRequest The body sent to stop a workload, which has nothing in it yet.
+//
+// It exists so that every write to this API carries a JSON object, and so
+// that a later option is a new field rather than a new kind of request.
+type StopWorkloadRequest = map[string]interface{}
+
+// StopWorkloadResult The body returned when a workload is stopped, holding the workload as it
+// now stands.
+type StopWorkloadResult struct {
+	// Workload A workload's desired state, together with the state observed from the driver
+	// that runs it.
+	Workload Workload `json:"workload"`
 }
 
 // Variable A variable, together with its value and the workloads currently reading it.
@@ -1060,7 +1101,16 @@ type Workload struct {
 	// A completed workload has ended and will not be restarted, which its restart
 	// policy asked for. That is distinct from stopped, where nothing is running and
 	// the server intends to fix it.
+	//
+	// A suspended workload was stopped by an operator and stays down until it is
+	// started again. Neither stopped nor completed fits: the server does not
+	// intend to fix it, and its restart policy did not ask for it to end.
 	State WorkloadState `json:"state"`
+
+	// Suspended Whether the workload has been stopped and is intentionally not
+	// running. Suspension survives a server restart and holds until the
+	// workload is started again.
+	Suspended *bool `json:"suspended,omitempty"`
 
 	// UpdatedAt When the workload's specification last changed.
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -1197,6 +1247,10 @@ type WorkloadSpec struct {
 // A completed workload has ended and will not be restarted, which its restart
 // policy asked for. That is distinct from stopped, where nothing is running and
 // the server intends to fix it.
+//
+// A suspended workload was stopped by an operator and stays down until it is
+// started again. Neither stopped nor completed fits: the server does not
+// intend to fix it, and its restart policy did not ask for it to end.
 type WorkloadState string
 
 // SecretName defines model for SecretName.
@@ -1282,6 +1336,15 @@ type CreateVolumeJSONRequestBody = VolumeSpec
 
 // ApplyWorkloadJSONRequestBody defines body for ApplyWorkload for application/json ContentType.
 type ApplyWorkloadJSONRequestBody = WorkloadSpec
+
+// RestartWorkloadJSONRequestBody defines body for RestartWorkload for application/json ContentType.
+type RestartWorkloadJSONRequestBody = RestartWorkloadRequest
+
+// StartWorkloadJSONRequestBody defines body for StartWorkload for application/json ContentType.
+type StartWorkloadJSONRequestBody = StartWorkloadRequest
+
+// StopWorkloadJSONRequestBody defines body for StopWorkload for application/json ContentType.
+type StopWorkloadJSONRequestBody = StopWorkloadRequest
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -1631,6 +1694,116 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/workloads/{name}/logs (the `GetWorkloadLogs` operationId).
 	GetWorkloadLogs(ctx context.Context, name WorkloadName, params *GetWorkloadLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RestartWorkloadWithBody Restart a workload
+	//
+	// Asks the reconciler to replace the workload's running instances, and
+	// returns the workload as it now stands.
+	//
+	// The restart happens on the next reconcile pass. The instances are stopped
+	// and new ones are started from the unchanged specification, so the version
+	// does not move. The request is held in memory rather than stored: one the
+	// reconciler has not acted on yet is lost when the server restarts, and can
+	// simply be sent again.
+	//
+	// A suspended workload is refused, since nothing would start. Start it
+	// instead.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/restart (the `RestartWorkload` operationId).
+	RestartWorkloadWithBody(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RestartWorkload Restart a workload
+	//
+	// Asks the reconciler to replace the workload's running instances, and
+	// returns the workload as it now stands.
+	//
+	// The restart happens on the next reconcile pass. The instances are stopped
+	// and new ones are started from the unchanged specification, so the version
+	// does not move. The request is held in memory rather than stored: one the
+	// reconciler has not acted on yet is lost when the server restarts, and can
+	// simply be sent again.
+	//
+	// A suspended workload is refused, since nothing would start. Start it
+	// instead.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/restart (the `RestartWorkload` operationId).
+	RestartWorkload(ctx context.Context, name WorkloadName, body RestartWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartWorkloadWithBody Start a stopped workload
+	//
+	// Clears the workload's suspension and returns it as it now stands.
+	//
+	// Starting is asynchronous. The next reconcile pass starts the workload's
+	// instances again, under whatever specification is stored, which includes one
+	// applied while the workload was suspended. Starting a workload that is not
+	// suspended changes nothing.
+	//
+	// A scheduled workload counts its next occurrence from when it was started,
+	// so occurrences missed while it was suspended do not run.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/start (the `StartWorkload` operationId).
+	StartWorkloadWithBody(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StartWorkload Start a stopped workload
+	//
+	// Clears the workload's suspension and returns it as it now stands.
+	//
+	// Starting is asynchronous. The next reconcile pass starts the workload's
+	// instances again, under whatever specification is stored, which includes one
+	// applied while the workload was suspended. Starting a workload that is not
+	// suspended changes nothing.
+	//
+	// A scheduled workload counts its next occurrence from when it was started,
+	// so occurrences missed while it was suspended do not run.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/start (the `StartWorkload` operationId).
+	StartWorkload(ctx context.Context, name WorkloadName, body StartWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StopWorkloadWithBody Stop a workload
+	//
+	// Marks the workload as suspended and returns it as it now stands.
+	//
+	// Stopping is asynchronous. The reconciler stops the workload's instances,
+	// removes any values the workload mounted, and then leaves it alone until it
+	// is started again. Suspension is desired state, so it survives a server
+	// restart. Stopping an already suspended workload changes nothing.
+	//
+	// The specification and its version are untouched, so a later start resumes
+	// the same instance rather than replacing it. Applying a new specification
+	// while the workload is suspended is allowed, and the replacement it asks for
+	// happens when the workload is started.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/stop (the `StopWorkload` operationId).
+	StopWorkloadWithBody(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StopWorkload Stop a workload
+	//
+	// Marks the workload as suspended and returns it as it now stands.
+	//
+	// Stopping is asynchronous. The reconciler stops the workload's instances,
+	// removes any values the workload mounted, and then leaves it alone until it
+	// is started again. Suspension is desired state, so it survives a server
+	// restart. Stopping an already suspended workload changes nothing.
+	//
+	// The specification and its version are untouched, so a later start resumes
+	// the same instance rather than replacing it. Applying a new specification
+	// while the workload is suspended is allowed, and the replacement it asks for
+	// happens when the workload is started.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/stop (the `StopWorkload` operationId).
+	StopWorkload(ctx context.Context, name WorkloadName, body StopWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetHealth Report that the server is alive
 	//
@@ -2148,6 +2321,176 @@ func (c *Client) ApplyWorkload(ctx context.Context, name WorkloadName, body Appl
 // Corresponds with GET /api/v1/workloads/{name}/logs (the `GetWorkloadLogs` operationId).
 func (c *Client) GetWorkloadLogs(ctx context.Context, name WorkloadName, params *GetWorkloadLogsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetWorkloadLogsRequest(c.Server, name, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RestartWorkloadWithBody Restart a workload
+//
+// Asks the reconciler to replace the workload's running instances, and
+// returns the workload as it now stands.
+//
+// The restart happens on the next reconcile pass. The instances are stopped
+// and new ones are started from the unchanged specification, so the version
+// does not move. The request is held in memory rather than stored: one the
+// reconciler has not acted on yet is lost when the server restarts, and can
+// simply be sent again.
+//
+// A suspended workload is refused, since nothing would start. Start it
+// instead.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/workloads/{name}/restart (the `RestartWorkload` operationId).
+func (c *Client) RestartWorkloadWithBody(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestartWorkloadRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RestartWorkload Restart a workload
+//
+// Asks the reconciler to replace the workload's running instances, and
+// returns the workload as it now stands.
+//
+// The restart happens on the next reconcile pass. The instances are stopped
+// and new ones are started from the unchanged specification, so the version
+// does not move. The request is held in memory rather than stored: one the
+// reconciler has not acted on yet is lost when the server restarts, and can
+// simply be sent again.
+//
+// A suspended workload is refused, since nothing would start. Start it
+// instead.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/workloads/{name}/restart (the `RestartWorkload` operationId).
+func (c *Client) RestartWorkload(ctx context.Context, name WorkloadName, body RestartWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestartWorkloadRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StartWorkloadWithBody Start a stopped workload
+//
+// Clears the workload's suspension and returns it as it now stands.
+//
+// Starting is asynchronous. The next reconcile pass starts the workload's
+// instances again, under whatever specification is stored, which includes one
+// applied while the workload was suspended. Starting a workload that is not
+// suspended changes nothing.
+//
+// A scheduled workload counts its next occurrence from when it was started,
+// so occurrences missed while it was suspended do not run.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/workloads/{name}/start (the `StartWorkload` operationId).
+func (c *Client) StartWorkloadWithBody(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartWorkloadRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StartWorkload Start a stopped workload
+//
+// Clears the workload's suspension and returns it as it now stands.
+//
+// Starting is asynchronous. The next reconcile pass starts the workload's
+// instances again, under whatever specification is stored, which includes one
+// applied while the workload was suspended. Starting a workload that is not
+// suspended changes nothing.
+//
+// A scheduled workload counts its next occurrence from when it was started,
+// so occurrences missed while it was suspended do not run.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/workloads/{name}/start (the `StartWorkload` operationId).
+func (c *Client) StartWorkload(ctx context.Context, name WorkloadName, body StartWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStartWorkloadRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StopWorkloadWithBody Stop a workload
+//
+// Marks the workload as suspended and returns it as it now stands.
+//
+// Stopping is asynchronous. The reconciler stops the workload's instances,
+// removes any values the workload mounted, and then leaves it alone until it
+// is started again. Suspension is desired state, so it survives a server
+// restart. Stopping an already suspended workload changes nothing.
+//
+// The specification and its version are untouched, so a later start resumes
+// the same instance rather than replacing it. Applying a new specification
+// while the workload is suspended is allowed, and the replacement it asks for
+// happens when the workload is started.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/workloads/{name}/stop (the `StopWorkload` operationId).
+func (c *Client) StopWorkloadWithBody(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStopWorkloadRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StopWorkload Stop a workload
+//
+// Marks the workload as suspended and returns it as it now stands.
+//
+// Stopping is asynchronous. The reconciler stops the workload's instances,
+// removes any values the workload mounted, and then leaves it alone until it
+// is started again. Suspension is desired state, so it survives a server
+// restart. Stopping an already suspended workload changes nothing.
+//
+// The specification and its version are untouched, so a later start resumes
+// the same instance rather than replacing it. Applying a new specification
+// while the workload is suspended is allowed, and the replacement it asks for
+// happens when the workload is started.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/workloads/{name}/stop (the `StopWorkload` operationId).
+func (c *Client) StopWorkload(ctx context.Context, name WorkloadName, body StopWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStopWorkloadRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2970,6 +3313,147 @@ func NewGetWorkloadLogsRequest(server string, name WorkloadName, params *GetWork
 	return req, nil
 }
 
+// NewRestartWorkloadRequest calls the generic RestartWorkload builder with application/json body
+func NewRestartWorkloadRequest(server string, name WorkloadName, body RestartWorkloadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRestartWorkloadRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewRestartWorkloadRequestWithBody constructs an http.Request for the RestartWorkload method, with any body, and a specified content type
+func NewRestartWorkloadRequestWithBody(server string, name WorkloadName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/workloads/%s/restart", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewStartWorkloadRequest calls the generic StartWorkload builder with application/json body
+func NewStartWorkloadRequest(server string, name WorkloadName, body StartWorkloadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewStartWorkloadRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewStartWorkloadRequestWithBody constructs an http.Request for the StartWorkload method, with any body, and a specified content type
+func NewStartWorkloadRequestWithBody(server string, name WorkloadName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/workloads/%s/start", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewStopWorkloadRequest calls the generic StopWorkload builder with application/json body
+func NewStopWorkloadRequest(server string, name WorkloadName, body StopWorkloadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewStopWorkloadRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewStopWorkloadRequestWithBody constructs an http.Request for the StopWorkload method, with any body, and a specified content type
+func NewStopWorkloadRequestWithBody(server string, name WorkloadName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/workloads/%s/stop", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetHealthRequest constructs an http.Request for the GetHealth method
 func NewGetHealthRequest(server string) (*http.Request, error) {
 	var err error
@@ -3395,6 +3879,116 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /api/v1/workloads/{name}/logs (the `GetWorkloadLogs` operationId).
 	GetWorkloadLogsWithResponse(ctx context.Context, name WorkloadName, params *GetWorkloadLogsParams, reqEditors ...RequestEditorFn) (*GetWorkloadLogsResponse, error)
+
+	// RestartWorkloadWithBodyWithResponse Restart a workload
+	//
+	// Asks the reconciler to replace the workload's running instances, and
+	// returns the workload as it now stands.
+	//
+	// The restart happens on the next reconcile pass. The instances are stopped
+	// and new ones are started from the unchanged specification, so the version
+	// does not move. The request is held in memory rather than stored: one the
+	// reconciler has not acted on yet is lost when the server restarts, and can
+	// simply be sent again.
+	//
+	// A suspended workload is refused, since nothing would start. Start it
+	// instead.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/restart (the `RestartWorkload` operationId).
+	RestartWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RestartWorkloadResponse, error)
+
+	// RestartWorkloadWithResponse Restart a workload
+	//
+	// Asks the reconciler to replace the workload's running instances, and
+	// returns the workload as it now stands.
+	//
+	// The restart happens on the next reconcile pass. The instances are stopped
+	// and new ones are started from the unchanged specification, so the version
+	// does not move. The request is held in memory rather than stored: one the
+	// reconciler has not acted on yet is lost when the server restarts, and can
+	// simply be sent again.
+	//
+	// A suspended workload is refused, since nothing would start. Start it
+	// instead.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/restart (the `RestartWorkload` operationId).
+	RestartWorkloadWithResponse(ctx context.Context, name WorkloadName, body RestartWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*RestartWorkloadResponse, error)
+
+	// StartWorkloadWithBodyWithResponse Start a stopped workload
+	//
+	// Clears the workload's suspension and returns it as it now stands.
+	//
+	// Starting is asynchronous. The next reconcile pass starts the workload's
+	// instances again, under whatever specification is stored, which includes one
+	// applied while the workload was suspended. Starting a workload that is not
+	// suspended changes nothing.
+	//
+	// A scheduled workload counts its next occurrence from when it was started,
+	// so occurrences missed while it was suspended do not run.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/start (the `StartWorkload` operationId).
+	StartWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartWorkloadResponse, error)
+
+	// StartWorkloadWithResponse Start a stopped workload
+	//
+	// Clears the workload's suspension and returns it as it now stands.
+	//
+	// Starting is asynchronous. The next reconcile pass starts the workload's
+	// instances again, under whatever specification is stored, which includes one
+	// applied while the workload was suspended. Starting a workload that is not
+	// suspended changes nothing.
+	//
+	// A scheduled workload counts its next occurrence from when it was started,
+	// so occurrences missed while it was suspended do not run.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/start (the `StartWorkload` operationId).
+	StartWorkloadWithResponse(ctx context.Context, name WorkloadName, body StartWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*StartWorkloadResponse, error)
+
+	// StopWorkloadWithBodyWithResponse Stop a workload
+	//
+	// Marks the workload as suspended and returns it as it now stands.
+	//
+	// Stopping is asynchronous. The reconciler stops the workload's instances,
+	// removes any values the workload mounted, and then leaves it alone until it
+	// is started again. Suspension is desired state, so it survives a server
+	// restart. Stopping an already suspended workload changes nothing.
+	//
+	// The specification and its version are untouched, so a later start resumes
+	// the same instance rather than replacing it. Applying a new specification
+	// while the workload is suspended is allowed, and the replacement it asks for
+	// happens when the workload is started.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/stop (the `StopWorkload` operationId).
+	StopWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StopWorkloadResponse, error)
+
+	// StopWorkloadWithResponse Stop a workload
+	//
+	// Marks the workload as suspended and returns it as it now stands.
+	//
+	// Stopping is asynchronous. The reconciler stops the workload's instances,
+	// removes any values the workload mounted, and then leaves it alone until it
+	// is started again. Suspension is desired state, so it survives a server
+	// restart. Stopping an already suspended workload changes nothing.
+	//
+	// The specification and its version are untouched, so a later start resumes
+	// the same instance rather than replacing it. Applying a new specification
+	// while the workload is suspended is allowed, and the replacement it asks for
+	// happens when the workload is started.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/stop (the `StopWorkload` operationId).
+	StopWorkloadWithResponse(ctx context.Context, name WorkloadName, body StopWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*StopWorkloadResponse, error)
 
 	// GetHealthWithResponse Report that the server is alive
 	//
@@ -4420,6 +5014,192 @@ func (r GetWorkloadLogsResponse) ContentType() string {
 	return ""
 }
 
+type RestartWorkloadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *RestartWorkloadResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r RestartWorkloadResponse) GetJSON202() *RestartWorkloadResult {
+	return r.JSON202
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r RestartWorkloadResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r RestartWorkloadResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r RestartWorkloadResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r RestartWorkloadResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RestartWorkloadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RestartWorkloadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RestartWorkloadResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type StartWorkloadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *StartWorkloadResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r StartWorkloadResponse) GetJSON202() *StartWorkloadResult {
+	return r.JSON202
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r StartWorkloadResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r StartWorkloadResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r StartWorkloadResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r StartWorkloadResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r StartWorkloadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StartWorkloadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StartWorkloadResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type StopWorkloadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *StopWorkloadResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r StopWorkloadResponse) GetJSON202() *StopWorkloadResult {
+	return r.JSON202
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r StopWorkloadResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r StopWorkloadResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r StopWorkloadResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r StopWorkloadResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r StopWorkloadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StopWorkloadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StopWorkloadResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetHealthResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4989,6 +5769,152 @@ func (c *ClientWithResponses) GetWorkloadLogsWithResponse(ctx context.Context, n
 		return nil, err
 	}
 	return ParseGetWorkloadLogsResponse(rsp)
+}
+
+// RestartWorkloadWithBodyWithResponse Restart a workload
+//
+// Asks the reconciler to replace the workload's running instances, and
+// returns the workload as it now stands.
+//
+// The restart happens on the next reconcile pass. The instances are stopped
+// and new ones are started from the unchanged specification, so the version
+// does not move. The request is held in memory rather than stored: one the
+// reconciler has not acted on yet is lost when the server restarts, and can
+// simply be sent again.
+//
+// A suspended workload is refused, since nothing would start. Start it
+// instead.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/workloads/{name}/restart (the `RestartWorkload` operationId).
+func (c *ClientWithResponses) RestartWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RestartWorkloadResponse, error) {
+	rsp, err := c.RestartWorkloadWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestartWorkloadResponse(rsp)
+}
+
+// RestartWorkloadWithResponse Restart a workload
+//
+// Asks the reconciler to replace the workload's running instances, and
+// returns the workload as it now stands.
+//
+// The restart happens on the next reconcile pass. The instances are stopped
+// and new ones are started from the unchanged specification, so the version
+// does not move. The request is held in memory rather than stored: one the
+// reconciler has not acted on yet is lost when the server restarts, and can
+// simply be sent again.
+//
+// A suspended workload is refused, since nothing would start. Start it
+// instead.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/workloads/{name}/restart (the `RestartWorkload` operationId).
+func (c *ClientWithResponses) RestartWorkloadWithResponse(ctx context.Context, name WorkloadName, body RestartWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*RestartWorkloadResponse, error) {
+	rsp, err := c.RestartWorkload(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestartWorkloadResponse(rsp)
+}
+
+// StartWorkloadWithBodyWithResponse Start a stopped workload
+//
+// Clears the workload's suspension and returns it as it now stands.
+//
+// Starting is asynchronous. The next reconcile pass starts the workload's
+// instances again, under whatever specification is stored, which includes one
+// applied while the workload was suspended. Starting a workload that is not
+// suspended changes nothing.
+//
+// A scheduled workload counts its next occurrence from when it was started,
+// so occurrences missed while it was suspended do not run.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/workloads/{name}/start (the `StartWorkload` operationId).
+func (c *ClientWithResponses) StartWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StartWorkloadResponse, error) {
+	rsp, err := c.StartWorkloadWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartWorkloadResponse(rsp)
+}
+
+// StartWorkloadWithResponse Start a stopped workload
+//
+// Clears the workload's suspension and returns it as it now stands.
+//
+// Starting is asynchronous. The next reconcile pass starts the workload's
+// instances again, under whatever specification is stored, which includes one
+// applied while the workload was suspended. Starting a workload that is not
+// suspended changes nothing.
+//
+// A scheduled workload counts its next occurrence from when it was started,
+// so occurrences missed while it was suspended do not run.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/workloads/{name}/start (the `StartWorkload` operationId).
+func (c *ClientWithResponses) StartWorkloadWithResponse(ctx context.Context, name WorkloadName, body StartWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*StartWorkloadResponse, error) {
+	rsp, err := c.StartWorkload(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStartWorkloadResponse(rsp)
+}
+
+// StopWorkloadWithBodyWithResponse Stop a workload
+//
+// Marks the workload as suspended and returns it as it now stands.
+//
+// Stopping is asynchronous. The reconciler stops the workload's instances,
+// removes any values the workload mounted, and then leaves it alone until it
+// is started again. Suspension is desired state, so it survives a server
+// restart. Stopping an already suspended workload changes nothing.
+//
+// The specification and its version are untouched, so a later start resumes
+// the same instance rather than replacing it. Applying a new specification
+// while the workload is suspended is allowed, and the replacement it asks for
+// happens when the workload is started.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/workloads/{name}/stop (the `StopWorkload` operationId).
+func (c *ClientWithResponses) StopWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*StopWorkloadResponse, error) {
+	rsp, err := c.StopWorkloadWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStopWorkloadResponse(rsp)
+}
+
+// StopWorkloadWithResponse Stop a workload
+//
+// Marks the workload as suspended and returns it as it now stands.
+//
+// Stopping is asynchronous. The reconciler stops the workload's instances,
+// removes any values the workload mounted, and then leaves it alone until it
+// is started again. Suspension is desired state, so it survives a server
+// restart. Stopping an already suspended workload changes nothing.
+//
+// The specification and its version are untouched, so a later start resumes
+// the same instance rather than replacing it. Applying a new specification
+// while the workload is suspended is allowed, and the replacement it asks for
+// happens when the workload is started.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/workloads/{name}/stop (the `StopWorkload` operationId).
+func (c *ClientWithResponses) StopWorkloadWithResponse(ctx context.Context, name WorkloadName, body StopWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*StopWorkloadResponse, error) {
+	rsp, err := c.StopWorkload(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStopWorkloadResponse(rsp)
 }
 
 // GetHealthWithResponse Report that the server is alive
@@ -5777,6 +6703,147 @@ func ParseGetWorkloadLogsResponse(rsp *http.Response) (*GetWorkloadLogsResponse,
 	return response, nil
 }
 
+// ParseRestartWorkloadResponse parses an HTTP response from a RestartWorkloadWithResponse call
+func ParseRestartWorkloadResponse(rsp *http.Response) (*RestartWorkloadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RestartWorkloadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest RestartWorkloadResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStartWorkloadResponse parses an HTTP response from a StartWorkloadWithResponse call
+func ParseStartWorkloadResponse(rsp *http.Response) (*StartWorkloadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StartWorkloadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest StartWorkloadResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStopWorkloadResponse parses an HTTP response from a StopWorkloadWithResponse call
+func ParseStopWorkloadResponse(rsp *http.Response) (*StopWorkloadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StopWorkloadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest StopWorkloadResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetHealthResponse parses an HTTP response from a GetHealthWithResponse call
 func ParseGetHealthResponse(rsp *http.Response) (*GetHealthResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -5929,6 +6996,15 @@ type ServerInterface interface {
 	// GetWorkloadLogs Read a workload's logs
 	// (GET /api/v1/workloads/{name}/logs)
 	GetWorkloadLogs(w http.ResponseWriter, r *http.Request, name WorkloadName, params GetWorkloadLogsParams)
+	// RestartWorkload Restart a workload
+	// (POST /api/v1/workloads/{name}/restart)
+	RestartWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
+	// StartWorkload Start a stopped workload
+	// (POST /api/v1/workloads/{name}/start)
+	StartWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
+	// StopWorkload Stop a workload
+	// (POST /api/v1/workloads/{name}/stop)
+	StopWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
 	// GetHealth Report that the server is alive
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -6427,6 +7503,84 @@ func (siw *ServerInterfaceWrapper) GetWorkloadLogs(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// RestartWorkload operation middleware
+func (siw *ServerInterfaceWrapper) RestartWorkload(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestartWorkload(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartWorkload operation middleware
+func (siw *ServerInterfaceWrapper) StartWorkload(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartWorkload(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StopWorkload operation middleware
+func (siw *ServerInterfaceWrapper) StopWorkload(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopWorkload(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealth operation middleware
 func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
 
@@ -6594,6 +7748,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}", wrapper.GetWorkload)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/workloads/{name}", wrapper.ApplyWorkload)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}/logs", wrapper.GetWorkloadLogs)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/stop", wrapper.StopWorkload)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/start", wrapper.StartWorkload)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/restart", wrapper.RestartWorkload)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/volumes", wrapper.ListVolumes)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/volumes", wrapper.CreateVolume)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.DeleteVolume)
@@ -7602,6 +8759,207 @@ func (response GetWorkloadLogs500JSONResponse) VisitGetWorkloadLogsResponse(w ht
 	return err
 }
 
+type RestartWorkloadRequestObject struct {
+	Name WorkloadName `json:"name"`
+	Body *RestartWorkloadJSONRequestBody
+}
+
+type RestartWorkloadResponseObject interface {
+	VisitRestartWorkloadResponse(w http.ResponseWriter) error
+}
+
+type RestartWorkload202JSONResponse RestartWorkloadResult
+
+func (response RestartWorkload202JSONResponse) VisitRestartWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestartWorkload404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RestartWorkload404JSONResponse) VisitRestartWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestartWorkload409JSONResponse ErrorResponse
+
+func (response RestartWorkload409JSONResponse) VisitRestartWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestartWorkload500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response RestartWorkload500JSONResponse) VisitRestartWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkloadRequestObject struct {
+	Name WorkloadName `json:"name"`
+	Body *StartWorkloadJSONRequestBody
+}
+
+type StartWorkloadResponseObject interface {
+	VisitStartWorkloadResponse(w http.ResponseWriter) error
+}
+
+type StartWorkload202JSONResponse StartWorkloadResult
+
+func (response StartWorkload202JSONResponse) VisitStartWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkload404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response StartWorkload404JSONResponse) VisitStartWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkload409JSONResponse ErrorResponse
+
+func (response StartWorkload409JSONResponse) VisitStartWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StartWorkload500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response StartWorkload500JSONResponse) VisitStartWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StopWorkloadRequestObject struct {
+	Name WorkloadName `json:"name"`
+	Body *StopWorkloadJSONRequestBody
+}
+
+type StopWorkloadResponseObject interface {
+	VisitStopWorkloadResponse(w http.ResponseWriter) error
+}
+
+type StopWorkload202JSONResponse StopWorkloadResult
+
+func (response StopWorkload202JSONResponse) VisitStopWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StopWorkload404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response StopWorkload404JSONResponse) VisitStopWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StopWorkload409JSONResponse ErrorResponse
+
+func (response StopWorkload409JSONResponse) VisitStopWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StopWorkload500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response StopWorkload500JSONResponse) VisitStopWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetHealthRequestObject struct {
 }
 
@@ -7777,6 +9135,15 @@ type StrictServerInterface interface {
 	// GetWorkloadLogs Read a workload's logs
 	// (GET /api/v1/workloads/{name}/logs)
 	GetWorkloadLogs(ctx context.Context, request GetWorkloadLogsRequestObject) (GetWorkloadLogsResponseObject, error)
+	// RestartWorkload Restart a workload
+	// (POST /api/v1/workloads/{name}/restart)
+	RestartWorkload(ctx context.Context, request RestartWorkloadRequestObject) (RestartWorkloadResponseObject, error)
+	// StartWorkload Start a stopped workload
+	// (POST /api/v1/workloads/{name}/start)
+	StartWorkload(ctx context.Context, request StartWorkloadRequestObject) (StartWorkloadResponseObject, error)
+	// StopWorkload Stop a workload
+	// (POST /api/v1/workloads/{name}/stop)
+	StopWorkload(ctx context.Context, request StopWorkloadRequestObject) (StopWorkloadResponseObject, error)
 	// GetHealth Report that the server is alive
 	// (GET /health)
 	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
@@ -8286,6 +9653,105 @@ func (sh *strictHandler) GetWorkloadLogs(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetWorkloadLogsResponseObject); ok {
 		if err := validResponse.VisitGetWorkloadLogsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestartWorkload operation middleware
+func (sh *strictHandler) RestartWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName) {
+	var request RestartWorkloadRequestObject
+
+	request.Name = name
+
+	var body RestartWorkloadJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestartWorkload(ctx, request.(RestartWorkloadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestartWorkload")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestartWorkloadResponseObject); ok {
+		if err := validResponse.VisitRestartWorkloadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StartWorkload operation middleware
+func (sh *strictHandler) StartWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName) {
+	var request StartWorkloadRequestObject
+
+	request.Name = name
+
+	var body StartWorkloadJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StartWorkload(ctx, request.(StartWorkloadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StartWorkload")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StartWorkloadResponseObject); ok {
+		if err := validResponse.VisitStartWorkloadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// StopWorkload operation middleware
+func (sh *strictHandler) StopWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName) {
+	var request StopWorkloadRequestObject
+
+	request.Name = name
+
+	var body StopWorkloadJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.StopWorkload(ctx, request.(StopWorkloadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "StopWorkload")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(StopWorkloadResponseObject); ok {
+		if err := validResponse.VisitStopWorkloadResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
