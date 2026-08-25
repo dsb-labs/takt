@@ -405,7 +405,7 @@ func TestChecker_Metrics(t *testing.T) {
 			for _, point := range histogram.DataPoints {
 				workload, _ := point.Attributes.Value("workload")
 				outcome, _ := point.Attributes.Value("outcome")
-				if workload.AsString() == "example" && outcome.AsString() == "failure" {
+				if workload.AsString() == "example" && outcome.AsString() == "error" {
 					found = point.Count >= 1
 				}
 			}

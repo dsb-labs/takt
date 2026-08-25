@@ -22,13 +22,13 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
-	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/server/telemetry"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -310,15 +310,8 @@ func New(config Config) *Reconciler {
 		observations[name] = Observation{}
 	}
 
-	tracer := config.Tracer
-	if tracer == nil {
-		tracer = tracenoop.NewTracerProvider().Tracer("")
-	}
-
-	logger := config.Logger.With("component", "reconciler")
-
 	return &Reconciler{
-		logger:       logger,
+		logger:       config.Logger.With("component", "reconciler"),
 		drivers:      config.Drivers,
 		workloads:    config.Workloads,
 		ports:        config.Ports,
@@ -332,8 +325,8 @@ func New(config Config) *Reconciler {
 		backoff:      make(map[string]backoff),
 		lastError:    make(map[string]lastError),
 		observations: observations,
-		tracer:       tracer,
-		instruments:  newInstruments(logger, config.Meter),
+		tracer:       telemetry.Tracer(config.Tracer),
+		instruments:  newInstruments(config.Meter),
 		// Buffered so that a caller signalling a change never blocks: a pass is
 		// already pending, which is all the signal conveys.
 		nudge: make(chan struct{}, 1),
@@ -420,18 +413,18 @@ func (r *Reconciler) Observations() map[string]Observation {
 // pass continues, so one broken workload can't stop the others converging.
 func (r *Reconciler) reconcile(ctx context.Context) {
 	started := time.Now()
-	outcome := "ok"
+	outcome := telemetry.OutcomeOK
 
 	ctx, span := r.tracer.Start(ctx, "reconcile")
 
 	defer func() {
-		if outcome != "ok" {
-			span.SetStatus(codes.Error, outcome)
+		if outcome != telemetry.OutcomeOK {
+			span.SetStatus(codes.Error, string(outcome))
 		}
 
 		span.End()
 
-		set := metric.WithAttributes(attribute.String("outcome", outcome))
+		set := metric.WithAttributes(outcome.Attribute())
 		r.instruments.passes.Add(ctx, 1, set)
 		r.instruments.passDuration.Record(ctx, time.Since(started).Seconds(), set)
 
@@ -440,7 +433,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 
 	rows, err := r.workloads.List(ctx)
 	if err != nil {
-		outcome = "list_failed"
+		outcome = outcomeListFailed
 		r.logger.With("error", err).Error("failed to list workloads")
 
 		return
@@ -451,7 +444,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 
 	instances, err := r.observe(observeCtx)
 	if err != nil {
-		outcome = "observe_failed"
+		outcome = outcomeObserveFailed
 		r.logger.With("error", err).Error("failed to observe driver instances")
 
 		return
@@ -1446,15 +1439,13 @@ func (r *Reconciler) observeDriver(ctx context.Context, name string, d Driver) (
 	instances, err := d.Observe(ctx)
 	r.recordObservation(name, err)
 
-	outcome := "ok"
 	if err != nil {
-		outcome = "error"
 		span.SetStatus(codes.Error, err.Error())
 	}
 
 	r.instruments.observes.Record(ctx, time.Since(started).Seconds(), metric.WithAttributes(
 		attribute.String("driver", name),
-		attribute.String("outcome", outcome),
+		telemetry.OutcomeOf(err).Attribute(),
 	))
 
 	return instances, err

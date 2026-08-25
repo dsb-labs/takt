@@ -19,7 +19,8 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
-	"go.opentelemetry.io/otel/metric/noop"
+
+	"github.com/dsb-labs/orca/internal/server/telemetry"
 )
 
 // The Status type describes whether a workload is working.
@@ -82,8 +83,8 @@ type (
 		// Signals that the set of checks has changed, so that the loop recomputes
 		// when it is next needed rather than sleeping on a stale answer.
 		wake chan struct{}
-		// How long each probe took, by workload and outcome.
-		duration metric.Float64Histogram
+		// The meters probe results are recorded into.
+		instruments instruments
 	}
 
 	// The Config type contains fields used to construct a Checker.
@@ -124,23 +125,9 @@ type (
 
 // New returns a Checker ready to run checks.
 func New(config Config) *Checker {
-	meter := config.Meter
-	if meter == nil {
-		meter = noop.Meter{}
-	}
-
-	duration, err := meter.Float64Histogram("orca.health.check.duration",
-		metric.WithDescription("How long each health probe took."),
-		metric.WithUnit("s"))
-	if err != nil {
-		// Only a bad instrument name can fail here, so failing costs the metric
-		// rather than the checker.
-		duration, _ = noop.Meter{}.Float64Histogram("")
-	}
-
 	return &Checker{
-		duration: duration,
-		checks:   make(map[string]*check),
+		instruments: newInstruments(config.Meter),
+		checks:      make(map[string]*check),
 		// Buffered so that registering a check never blocks on the loop: a
 		// recomputation is already pending, which is all the signal conveys.
 		wake: make(chan struct{}, 1),
@@ -322,14 +309,9 @@ func (c *Checker) checkDue(ctx context.Context, probes *sync.WaitGroup) {
 			started := time.Now()
 			err := c.probe(due.ctx, due.spec)
 
-			outcome := "success"
-			if err != nil {
-				outcome = "failure"
-			}
-
-			c.duration.Record(due.ctx, time.Since(started).Seconds(), metric.WithAttributes(
+			c.instruments.duration.Record(due.ctx, time.Since(started).Seconds(), metric.WithAttributes(
 				attribute.String("workload", workload),
-				attribute.String("outcome", outcome),
+				telemetry.OutcomeOf(err).Attribute(),
 			))
 
 			c.record(workload, due.probe, err)

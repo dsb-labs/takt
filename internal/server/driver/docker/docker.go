@@ -25,12 +25,11 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
-	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
-	tracenoop "go.opentelemetry.io/otel/trace/noop"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/telemetry"
 )
 
 // Name is how this driver identifies itself, and is what the server maps a
@@ -71,13 +70,12 @@ var (
 type (
 	// The Driver type runs workloads as Docker containers.
 	Driver struct {
-		logger     *slog.Logger
-		client     Client
-		bind       string
-		configFile string
-		tracer     trace.Tracer
-		// How long each image pull took.
-		pulls metric.Float64Histogram
+		logger      *slog.Logger
+		client      Client
+		bind        string
+		configFile  string
+		tracer      trace.Tracer
+		instruments instruments
 	}
 
 	// The Config type contains fields used to construct a Driver.
@@ -122,32 +120,13 @@ func New(config Config) *Driver {
 		bind = defaultBind
 	}
 
-	meter := config.Meter
-	if meter == nil {
-		meter = metricnoop.Meter{}
-	}
-
-	pulls, err := meter.Float64Histogram("orca.image.pull.duration",
-		metric.WithDescription("How long each image pull took."),
-		metric.WithUnit("s"))
-	if err != nil {
-		// Only a bad instrument name can fail here, so failing costs the metric
-		// rather than the driver.
-		pulls, _ = metricnoop.Meter{}.Float64Histogram("")
-	}
-
-	tracer := config.Tracer
-	if tracer == nil {
-		tracer = tracenoop.NewTracerProvider().Tracer("")
-	}
-
 	return &Driver{
-		logger:     config.Logger.With("component", "driver", "driver", "docker"),
-		client:     config.Client,
-		bind:       bind,
-		configFile: config.ConfigFile,
-		tracer:     tracer,
-		pulls:      pulls,
+		logger:      config.Logger.With("component", "driver", "driver", "docker"),
+		client:      config.Client,
+		bind:        bind,
+		configFile:  config.ConfigFile,
+		tracer:      telemetry.Tracer(config.Tracer),
+		instruments: newInstruments(config.Meter),
 	}
 }
 
@@ -625,7 +604,7 @@ func (d *Driver) ensureImage(ctx context.Context, ref string, policy api.PullPol
 
 	started := time.Now()
 	defer func() {
-		d.pulls.Record(ctx, time.Since(started).Seconds(),
+		d.instruments.pulls.Record(ctx, time.Since(started).Seconds(),
 			metric.WithAttributes(attribute.String("image", ref)))
 	}()
 
