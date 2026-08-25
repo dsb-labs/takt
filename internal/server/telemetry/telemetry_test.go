@@ -96,39 +96,3 @@ func TestNew(t *testing.T) {
 		assert.Error(t, err)
 	})
 }
-
-func TestFanout(t *testing.T) {
-	t.Parallel()
-
-	t.Run("dispatches to every handler that accepts the level", func(t *testing.T) {
-		var chatty, quiet bytes.Buffer
-		handler := telemetry.Fanout(
-			slog.NewTextHandler(&chatty, &slog.HandlerOptions{Level: slog.LevelDebug}),
-			slog.NewTextHandler(&quiet, &slog.HandlerOptions{Level: slog.LevelError}),
-		)
-
-		logger := slog.New(handler)
-		logger.Info("routine")
-		logger.Error("broken")
-
-		assert.Contains(t, chatty.String(), "routine")
-		assert.Contains(t, chatty.String(), "broken")
-		assert.NotContains(t, quiet.String(), "routine")
-		assert.Contains(t, quiet.String(), "broken")
-	})
-
-	t.Run("carries attributes and groups to every handler", func(t *testing.T) {
-		var first, second bytes.Buffer
-		handler := telemetry.Fanout(
-			slog.NewTextHandler(&first, &slog.HandlerOptions{Level: slog.LevelInfo}),
-			slog.NewTextHandler(&second, &slog.HandlerOptions{Level: slog.LevelInfo}),
-		)
-
-		slog.New(handler).With("component", "test").WithGroup("group").Info("grouped", "key", "value")
-
-		for _, output := range []string{first.String(), second.String()} {
-			assert.Contains(t, output, "component=test")
-			assert.Contains(t, output, "group.key=value")
-		}
-	})
-}

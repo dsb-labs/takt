@@ -328,10 +328,10 @@ func Run(ctx context.Context, config Config) error {
 }
 
 // newLogger returns the server's logger: a text handler on stderr at the
-// configured level, fanned out to the extra handler when one is given.
+// configured level, joined with the extra handler when one is given.
 //
-// The fanout dispatches on each handler's own level, so a quiet stderr does not
-// censor what an exporting handler carries.
+// The multi handler dispatches on each handler's own level, so a quiet stderr
+// does not censor what an exporting handler carries.
 func newLogger(config LoggingConfig, extra slog.Handler) *slog.Logger {
 	var level slog.Level
 	switch strings.ToLower(config.Level) {
@@ -347,7 +347,7 @@ func newLogger(config LoggingConfig, extra slog.Handler) *slog.Logger {
 
 	var handler slog.Handler = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})
 	if extra != nil {
-		handler = telemetry.Fanout(handler, extra)
+		handler = slog.NewMultiHandler(handler, extra)
 	}
 
 	return slog.New(handler)
