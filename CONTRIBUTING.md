@@ -35,6 +35,21 @@ daemon, so it needs one running and is skipped by `-short`. It also runs daily. 
 catches breakage no code change caused, such as a runner upgrading Docker or an image
 tag moving underneath the tests.
 
+### Golden files
+
+Expected values that are too long to read inline live in `testdata/*.golden`, asserted
+with `gotest.tools/v3/golden`. Regenerate them with `-update`:
+
+```sh
+go test ./pkg/manifest -update
+```
+
+The golden files under `internal/server/spechash` hold specification hashes, and one
+of those moving replaces every running instance on every node when operators upgrade.
+Read the diff and decide the change is one you meant to make before you regenerate
+them. Refreshing a golden file to make the suite green is how a fleet-wide redeploy
+ships unnoticed.
+
 ## End-to-end tests
 
 ```sh

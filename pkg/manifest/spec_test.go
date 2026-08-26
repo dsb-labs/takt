@@ -2,32 +2,32 @@ package manifest_test
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gotest.tools/v3/golden"
 
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 // TestSpec_JSON pins the JSON encoding of a specification, which is what orca stores
-// a workload as and what its hash covers. A change here replaces every running
-// instance on every node, so a failure means the encoding moved rather than that the
-// fixture is stale.
+// a workload as and what its hash covers.
+//
+// A failure means the encoding moved, which replaces every running instance on every
+// node when operators upgrade. Read the diff before reaching for -update: the golden
+// file is the answer, not a record of what the code happens to do today.
 func TestSpec_JSON(t *testing.T) {
 	t.Parallel()
 
 	tt := []struct {
-		Name string
-		File string
-		Spec manifest.Spec
+		Name   string
+		Golden string
+		Spec   manifest.Spec
 	}{
 		{
-			Name: "every field set",
-			File: "spec_full.json",
+			Name:   "every field set",
+			Golden: "spec_full.golden",
 			Spec: manifest.Spec{
 				Version:  "v1",
 				Name:     "api",
@@ -70,8 +70,8 @@ func TestSpec_JSON(t *testing.T) {
 			// A specification setting nothing optional encodes as the two fields that
 			// identify it and its runtime. That is what keeps a field added later from
 			// re-hashing every workload that does not set it.
-			Name: "nothing optional set",
-			File: "spec_minimal.json",
+			Name:   "nothing optional set",
+			Golden: "spec_minimal.golden",
 			Spec: manifest.Spec{
 				Version:   "v1",
 				Name:      "worker",
@@ -79,8 +79,8 @@ func TestSpec_JSON(t *testing.T) {
 			},
 		},
 		{
-			Name: "exec runtime",
-			File: "spec_exec.json",
+			Name:   "exec runtime",
+			Golden: "spec_exec.golden",
 			Spec: manifest.Spec{
 				Version: "v1",
 				Name:    "backup",
@@ -91,18 +91,13 @@ func TestSpec_JSON(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			expected, err := os.ReadFile(filepath.Join("testdata", tc.File))
-			require.NoError(t, err)
-
 			actual, err := json.Marshal(tc.Spec)
 			require.NoError(t, err)
 
-			assert.JSONEq(t, string(expected), string(actual))
-
-			// The bytes themselves are pinned, not just the object they describe. Two
-			// encodings that differ only in field order hash differently, so JSONEq
-			// alone would let the hash move without failing.
-			assert.Equal(t, string(expected), string(actual))
+			// The bytes are pinned, not the object they describe. Two encodings that
+			// differ only in field order hash differently, so a comparison that
+			// ignored order would let the hash move without failing.
+			golden.Assert(t, string(actual), tc.Golden)
 		})
 	}
 }
