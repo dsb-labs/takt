@@ -13,6 +13,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"github.com/dsb-labs/orca/internal/server/driver/exec"
 )
@@ -194,6 +195,38 @@ func TestConfine(t *testing.T) {
 		assert.Contains(t, result.Output, "Permission denied")
 	})
 
+	t.Run("strips the ambient capabilities the server was granted", func(t *testing.T) {
+		// An operator grants the server CAP_DAC_OVERRIDE so it can delete a volume a
+		// container wrote as another user. An ambient capability survives an exec, and
+		// every ruleset grants the host's own files for reading — so a command that
+		// kept the grant could read past file permissions on all of them.
+		attr := &syscall.SysProcAttr{Setsid: true}
+
+		// The trampoline has to hold an ambient capability before the strip is
+		// observable. One the test process already holds — from pam_cap or setpriv —
+		// is inherited. Without one, the trampoline starts in a user namespace of its
+		// own, where the test may raise one unprivileged: the capability is then
+		// scoped to the namespace, but what the trampoline does with it is not.
+		if !ambient(t) {
+			if !namespaceable() {
+				t.Skip("this host refuses unprivileged user namespaces, and the test process holds no ambient capability — see CONTRIBUTING.md")
+			}
+
+			attr.Cloneflags = syscall.CLONE_NEWUSER
+			attr.UidMappings = []syscall.SysProcIDMap{{ContainerID: nsID, HostID: os.Getuid(), Size: 1}}
+			attr.GidMappings = []syscall.SysProcIDMap{{ContainerID: nsID, HostID: os.Getgid(), Size: 1}}
+			attr.AmbientCaps = []uintptr{unix.CAP_DAC_OVERRIDE}
+		}
+
+		result := trampolineAs(t, ruleset{
+			Command: []string{"/bin/sh", "-c", "grep ^Cap /proc/self/status"},
+		}, attr)
+
+		require.Empty(t, result.Status)
+		assert.Contains(t, result.Output, "CapAmb:\t0000000000000000")
+		assert.Contains(t, result.Output, "CapEff:\t0000000000000000")
+	})
+
 	t.Run("keeps its own process group, so stopping it reaches its children", func(t *testing.T) {
 		// The driver signals the group rather than the process, so that whatever the
 		// command started stops with it. Executing through the trampoline must not
@@ -240,6 +273,46 @@ type (
 	}
 )
 
+// The uid the trampoline holds inside a user namespace of its own. Any value except
+// zero: a process with uid zero regains every capability when it execs, so the strip
+// would be invisible. Not zero also keeps the test meaningful when run as root.
+const nsID = 1000
+
+// namespaceable reports whether this process may create a user namespace it holds
+// capabilities in, which is what lets the test grant an ambient capability without
+// the machine's help. Ubuntu refuses this for unprivileged processes when
+// kernel.apparmor_restrict_unprivileged_userns is set.
+func namespaceable() bool {
+	cmd := osexec.Command("/bin/true")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags:  syscall.CLONE_NEWUSER,
+		UidMappings: []syscall.SysProcIDMap{{ContainerID: nsID, HostID: os.Getuid(), Size: 1}},
+		GidMappings: []syscall.SysProcIDMap{{ContainerID: nsID, HostID: os.Getgid(), Size: 1}},
+	}
+
+	return cmd.Run() == nil
+}
+
+// ambient reports whether this process holds any ambient capability, which is what
+// the trampoline has to be seen stripping.
+func ambient(t *testing.T) bool {
+	t.Helper()
+
+	status, err := os.ReadFile("/proc/self/status")
+	require.NoError(t, err)
+
+	for line := range strings.Lines(string(status)) {
+		if rest, ok := strings.CutPrefix(line, "CapAmb:"); ok {
+			held, err := strconv.ParseUint(strings.TrimSpace(rest), 16, 64)
+			require.NoError(t, err)
+
+			return held != 0
+		}
+	}
+
+	return false
+}
+
 // trampoline runs the test binary as a confinement trampoline against the given
 // ruleset, the same way the driver runs orca itself.
 //
@@ -247,6 +320,14 @@ type (
 // ruleset goes in over a pipe, the reason it failed comes back over another, and
 // everything the command writes lands in a file as it does for a real workload.
 func trampoline(t *testing.T, rs ruleset) confined {
+	t.Helper()
+
+	return trampolineAs(t, rs, &syscall.SysProcAttr{Setsid: true})
+}
+
+// trampolineAs is trampoline with the process attributes the trampoline starts
+// under, for the one test that starts it inside a user namespace.
+func trampolineAs(t *testing.T, rs ruleset, attr *syscall.SysProcAttr) confined {
 	t.Helper()
 
 	self, err := os.Executable()
@@ -269,7 +350,7 @@ func trampoline(t *testing.T, rs ruleset) confined {
 	cmd := osexec.Command(self, "__confine")
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.ExtraFiles = []*os.File{in, status}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = attr
 
 	require.NoError(t, cmd.Start())
 

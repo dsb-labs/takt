@@ -7,11 +7,13 @@ import (
 	"io"
 	"os"
 	osexec "os/exec"
+	"runtime"
 	"strings"
 	"syscall"
 
 	"github.com/landlock-lsm/go-landlock/landlock"
 	ll "github.com/landlock-lsm/go-landlock/landlock/syscall"
+	"golang.org/x/sys/unix"
 
 	"github.com/dsb-labs/orca/internal/server/driver"
 )
@@ -174,6 +176,19 @@ func confine(in *os.File) error {
 
 	if err := restrict(rs); err != nil {
 		return fmt.Errorf("failed to confine the workload: %w", err)
+	}
+
+	// The kernel reads the ambient set of the thread that calls exec, so the drop
+	// below and the exec must stay on one thread.
+	runtime.LockOSThread()
+
+	// Ambient capabilities survive an exec, so without this the command would keep
+	// whatever a service manager granted the server. An operator grants
+	// CAP_DAC_OVERRIDE so orca can delete a volume a container wrote as another
+	// user, and a workload holding it could read past file permissions on every
+	// path its ruleset grants.
+	if err := unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0); err != nil {
+		return fmt.Errorf("failed to drop ambient capabilities: %w", err)
 	}
 
 	// The environment is this process's own, which the server set to the workload's
