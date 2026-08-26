@@ -114,7 +114,7 @@ internal/server/          the server and everything it wires together
     docker/               containers
     exec/                 processes on the host
   health/                 the checks orca performs
-  port/                   host port allocation
+  port/                   host port allocation and claiming
   secret/                 the encryption a secret is stored under
   spechash/               the hash a workload is replaced on
   telemetry/              traces and metrics
