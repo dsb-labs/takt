@@ -263,6 +263,7 @@ type (
 	lifecycleConfig struct {
 		wait     bool
 		interval time.Duration
+		force    bool
 	}
 )
 
@@ -292,19 +293,38 @@ func WithWaitInterval(interval time.Duration) LifecycleOption {
 	}
 }
 
+// WithForceDeleteWorkload deletes a workload even though another workload references
+// its address. Those workloads are redeployed and then report the reference they can
+// no longer resolve, retrying until something holds the name again.
+//
+// Read only by Delete. The other lifecycle calls leave the workload in place, so
+// there is nothing for them to force.
+func WithForceDeleteWorkload() LifecycleOption {
+	return func(c *lifecycleConfig) { c.force = true }
+}
+
 // Delete marks the workload with the given name for deletion and returns it as it
 // stood when marked, returning ErrWorkloadNotFound when no such workload exists.
 //
 // Deletion is asynchronous: the returned workload is reported as terminating, and
 // disappears once the server has stopped everything running for it. Pass WithWait
 // to block until that has happened.
+//
+// A workload another one references is refused with ErrWorkloadInUse, and the error
+// names the workloads reading its address. Pass WithForceDeleteWorkload to delete it
+// anyway.
 func (c *Client) Delete(ctx context.Context, name string, options ...LifecycleOption) (Workload, error) {
 	config := defaultLifecycleConfig()
 	for _, option := range options {
 		option(config)
 	}
 
-	resp, err := c.api.DeleteWorkloadWithResponse(ctx, name)
+	params := api.DeleteWorkloadParams{}
+	if config.force {
+		params.Force = &config.force
+	}
+
+	resp, err := c.api.DeleteWorkloadWithResponse(ctx, name, &params)
 	if err != nil {
 		return Workload{}, fmt.Errorf("failed to delete workload: %w", err)
 	}
@@ -315,6 +335,11 @@ func (c *Client) Delete(ctx context.Context, name string, options ...LifecycleOp
 		workload = newWorkload(resp.JSON202.Workload)
 	case resp.JSON404 != nil:
 		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
+	case resp.JSON409 != nil:
+		// The server's message stands on its own and already says the workload is in
+		// use, naming what references it. The sentinel is joined to it rather than
+		// prefixed onto it, so the reason is not stated twice.
+		return Workload{}, fmt.Errorf("%s: %w", resp.JSON409.Error, ErrWorkloadInUse)
 	case resp.JSON500 != nil:
 		return Workload{}, newError(http.StatusInternalServerError, resp.JSON500)
 	default:

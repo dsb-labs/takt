@@ -168,6 +168,22 @@ paths:
         instances are stopped, and disappears once nothing is left running for it,
         so a caller can watch the teardown by polling the workload until it returns
         404. Applying a workload while it is terminating is rejected.
+
+        A workload another workload references is refused rather than marked, and the
+        response names the workloads reading its address. Applying one that references
+        a workload which does not exist is also refused, so removing it without this
+        check would leave a specification nobody could re-apply.
+      parameters:
+        - name: force
+          in: query
+          required: false
+          description: |
+            Delete the workload even though another references its address. Those
+            workloads are redeployed and then report the reference they can no longer
+            resolve, retrying until something holds the name again.
+          schema:
+            type: boolean
+            default: false
       responses:
         "202":
           description: The workload was marked for deletion.
@@ -177,6 +193,12 @@ paths:
                 $ref: "#/components/schemas/DeleteWorkloadResult"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: Another workload references this one, and force was not set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
 

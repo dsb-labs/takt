@@ -1390,6 +1390,14 @@ type ListWorkloadsParams struct {
 	Query *[]string `form:"query,omitempty" json:"query,omitempty"`
 }
 
+// DeleteWorkloadParams defines parameters for DeleteWorkload.
+type DeleteWorkloadParams struct {
+	// Force Delete the workload even though another references its address. Those
+	// workloads are redeployed and then report the reference they can no longer
+	// resolve, retrying until something holds the name again.
+	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+}
+
 // GetWorkloadLogsParams defines parameters for GetWorkloadLogs.
 type GetWorkloadLogsParams struct {
 	// Tail The number of lines to return from the end of the logs. Capped, because
@@ -1744,8 +1752,13 @@ type ClientInterface interface {
 	// so a caller can watch the teardown by polling the workload until it returns
 	// 404. Applying a workload while it is terminating is rejected.
 	//
+	// A workload another workload references is refused rather than marked, and the
+	// response names the workloads reading its address. Applying one that references
+	// a workload which does not exist is also refused, so removing it without this
+	// check would leave a specification nobody could re-apply.
+	//
 	// Corresponds with DELETE /api/v1/workloads/{name} (the `DeleteWorkload` operationId).
-	DeleteWorkload(ctx context.Context, name WorkloadName, reqEditors ...RequestEditorFn) (*http.Response, error)
+	DeleteWorkload(ctx context.Context, name WorkloadName, params *DeleteWorkloadParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetWorkload Get a single workload
 	//
@@ -2330,9 +2343,14 @@ func (c *Client) ListWorkloads(ctx context.Context, params *ListWorkloadsParams,
 // so a caller can watch the teardown by polling the workload until it returns
 // 404. Applying a workload while it is terminating is rejected.
 //
+// A workload another workload references is refused rather than marked, and the
+// response names the workloads reading its address. Applying one that references
+// a workload which does not exist is also refused, so removing it without this
+// check would leave a specification nobody could re-apply.
+//
 // Corresponds with DELETE /api/v1/workloads/{name} (the `DeleteWorkload` operationId).
-func (c *Client) DeleteWorkload(ctx context.Context, name WorkloadName, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewDeleteWorkloadRequest(c.Server, name)
+func (c *Client) DeleteWorkload(ctx context.Context, name WorkloadName, params *DeleteWorkloadParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteWorkloadRequest(c.Server, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3228,7 +3246,7 @@ func NewListWorkloadsRequest(server string, params *ListWorkloadsParams) (*http.
 }
 
 // NewDeleteWorkloadRequest constructs an http.Request for the DeleteWorkload method
-func NewDeleteWorkloadRequest(server string, name WorkloadName) (*http.Request, error) {
+func NewDeleteWorkloadRequest(server string, name WorkloadName, params *DeleteWorkloadParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -3251,6 +3269,33 @@ func NewDeleteWorkloadRequest(server string, name WorkloadName) (*http.Request, 
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Force != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "force", *params.Force, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
@@ -3947,10 +3992,15 @@ type ClientWithResponsesInterface interface {
 	// so a caller can watch the teardown by polling the workload until it returns
 	// 404. Applying a workload while it is terminating is rejected.
 	//
+	// A workload another workload references is refused rather than marked, and the
+	// response names the workloads reading its address. Applying one that references
+	// a workload which does not exist is also refused, so removing it without this
+	// check would leave a specification nobody could re-apply.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with DELETE /api/v1/workloads/{name} (the `DeleteWorkload` operationId).
-	DeleteWorkloadWithResponse(ctx context.Context, name WorkloadName, reqEditors ...RequestEditorFn) (*DeleteWorkloadResponse, error)
+	DeleteWorkloadWithResponse(ctx context.Context, name WorkloadName, params *DeleteWorkloadParams, reqEditors ...RequestEditorFn) (*DeleteWorkloadResponse, error)
 
 	// GetWorkloadWithResponse Get a single workload
 	//
@@ -4906,6 +4956,8 @@ type DeleteWorkloadResponse struct {
 	JSON202 *DeleteWorkloadResult
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 }
@@ -4918,6 +4970,11 @@ func (r DeleteWorkloadResponse) GetJSON202() *DeleteWorkloadResult {
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
 func (r DeleteWorkloadResponse) GetJSON404() *NotFound {
 	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DeleteWorkloadResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -5815,11 +5872,16 @@ func (c *ClientWithResponses) ListWorkloadsWithResponse(ctx context.Context, par
 // so a caller can watch the teardown by polling the workload until it returns
 // 404. Applying a workload while it is terminating is rejected.
 //
+// A workload another workload references is refused rather than marked, and the
+// response names the workloads reading its address. Applying one that references
+// a workload which does not exist is also refused, so removing it without this
+// check would leave a specification nobody could re-apply.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with DELETE /api/v1/workloads/{name} (the `DeleteWorkload` operationId).
-func (c *ClientWithResponses) DeleteWorkloadWithResponse(ctx context.Context, name WorkloadName, reqEditors ...RequestEditorFn) (*DeleteWorkloadResponse, error) {
-	rsp, err := c.DeleteWorkload(ctx, name, reqEditors...)
+func (c *ClientWithResponses) DeleteWorkloadWithResponse(ctx context.Context, name WorkloadName, params *DeleteWorkloadParams, reqEditors ...RequestEditorFn) (*DeleteWorkloadResponse, error) {
+	rsp, err := c.DeleteWorkload(ctx, name, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -6683,6 +6745,13 @@ func ParseDeleteWorkloadResponse(rsp *http.Response) (*DeleteWorkloadResponse, e
 		}
 		response.JSON404 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -7126,7 +7195,7 @@ type ServerInterface interface {
 	ListWorkloads(w http.ResponseWriter, r *http.Request, params ListWorkloadsParams)
 	// DeleteWorkload Delete a workload
 	// (DELETE /api/v1/workloads/{name})
-	DeleteWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
+	DeleteWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName, params DeleteWorkloadParams)
 	// GetWorkload Get a single workload
 	// (GET /api/v1/workloads/{name})
 	GetWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
@@ -7525,8 +7594,24 @@ func (siw *ServerInterfaceWrapper) DeleteWorkload(w http.ResponseWriter, r *http
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteWorkloadParams
+
+	// ------------- Optional query parameter "force" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "force", r.URL.Query(), &params.Force, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "force"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "force", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteWorkload(w, r, name)
+		siw.Handler.DeleteWorkload(w, r, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8663,7 +8748,8 @@ func (response ListWorkloads500JSONResponse) VisitListWorkloadsResponse(w http.R
 }
 
 type DeleteWorkloadRequestObject struct {
-	Name WorkloadName `json:"name"`
+	Name   WorkloadName `json:"name"`
+	Params DeleteWorkloadParams
 }
 
 type DeleteWorkloadResponseObject interface {
@@ -8694,6 +8780,20 @@ func (response DeleteWorkload404JSONResponse) VisitDeleteWorkloadResponse(w http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteWorkload409JSONResponse ErrorResponse
+
+func (response DeleteWorkload409JSONResponse) VisitDeleteWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -9729,10 +9829,11 @@ func (sh *strictHandler) ListWorkloads(w http.ResponseWriter, r *http.Request, p
 }
 
 // DeleteWorkload operation middleware
-func (sh *strictHandler) DeleteWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName) {
+func (sh *strictHandler) DeleteWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName, params DeleteWorkloadParams) {
 	var request DeleteWorkloadRequestObject
 
 	request.Name = name
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.DeleteWorkload(ctx, request.(DeleteWorkloadRequestObject))

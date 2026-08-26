@@ -273,7 +273,7 @@ func TestWorkloadAPI_HidesInternalFailures(t *testing.T) {
 			Method: http.MethodDelete,
 			Target: "/api/v1/workloads/example",
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Delete(mock.Anything, "example").Return(service.Workload{}, internal).Once()
+				svc.EXPECT().Delete(mock.Anything, "example", false).Return(service.Workload{}, internal).Once()
 			},
 		},
 		{
@@ -588,7 +588,7 @@ func TestWorkloadAPI_DeleteWorkload(t *testing.T) {
 		terminating := workload("example", generated.WorkloadStateTerminating)
 		terminating.Deleting = true
 
-		svc.EXPECT().Delete(mock.Anything, "example").Return(terminating, nil).Once()
+		svc.EXPECT().Delete(mock.Anything, "example", false).Return(terminating, nil).Once()
 
 		resp := do(t, svc, http.MethodDelete, "/api/v1/workloads/example", nil)
 
@@ -606,9 +606,31 @@ func TestWorkloadAPI_DeleteWorkload(t *testing.T) {
 		assert.True(t, *got.Deleting)
 	})
 
+	t.Run("refuses a workload another one references", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Delete(mock.Anything, "postgres", false).
+			Return(service.Workload{}, fmt.Errorf("%w: referenced by api", service.ErrWorkloadInUse)).Once()
+
+		resp := do(t, svc, http.MethodDelete, "/api/v1/workloads/postgres", nil)
+		require.Equal(t, http.StatusConflict, resp.Code)
+
+		// The caller's next question is which workloads, and answering it costs
+		// nothing here.
+		assert.Contains(t, resp.Body.String(), "api")
+	})
+
+	t.Run("deletes a referenced workload when forced", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Delete(mock.Anything, "postgres", true).
+			Return(workload("postgres", generated.WorkloadStateTerminating), nil).Once()
+
+		resp := do(t, svc, http.MethodDelete, "/api/v1/workloads/postgres?force=true", nil)
+		assert.Equal(t, http.StatusAccepted, resp.Code)
+	})
+
 	t.Run("reports a missing workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Delete(mock.Anything, "nope").
+		svc.EXPECT().Delete(mock.Anything, "nope", false).
 			Return(service.Workload{}, service.ErrWorkloadNotFound).Once()
 
 		resp := do(t, svc, http.MethodDelete, "/api/v1/workloads/nope", nil)

@@ -1349,7 +1349,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 
 		svc := newTestService(t, d, repo, ports, nil)
 
-		got, err := svc.Delete(t.Context(), "example")
+		got, err := svc.Delete(t.Context(), "example", false)
 		require.NoError(t, err)
 
 		// The reconciler owns stopping the work, so the service records the intent
@@ -1368,7 +1368,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 		var notified bool
 		svc := newTestService(t, d, repo, ports, func() { notified = true })
 
-		_, err := svc.Delete(t.Context(), "example")
+		_, err := svc.Delete(t.Context(), "example", false)
 		require.NoError(t, err)
 
 		// Nothing happens until the reconciler runs, so it has to be woken.
@@ -1383,8 +1383,71 @@ func TestWorkloadService_Delete(t *testing.T) {
 
 		svc := newTestService(t, d, repo, ports, nil)
 
-		_, err := svc.Delete(t.Context(), "nope")
+		_, err := svc.Delete(t.Context(), "nope", false)
 		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
+	})
+
+	t.Run("refuses a workload another one references", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().ReferencedBy(mock.Anything, "postgres").Return([]string{"api"}, nil).Once()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]service.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Allocator: allocatorStub{},
+		})
+
+		// Applying a workload that references one which does not exist is refused, so
+		// removing this without asking would leave a specification nobody could
+		// re-apply.
+		_, err := svc.Delete(t.Context(), "postgres", false)
+		require.ErrorIs(t, err, service.ErrWorkloadInUse)
+		assert.Contains(t, err.Error(), "api")
+
+		repo.AssertNotCalled(t, "MarkDeleting")
+	})
+
+	t.Run("deletes a referenced workload when forced", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		addresses := NewMockWorkloadAddresses(t)
+
+		consumer := containerSpec("api", "example/example:latest")
+		consumer.Env = &map[string]string{"DSN": "${workload:postgres:pg}"}
+
+		consumerSpec, err := json.Marshal(consumer)
+		require.NoError(t, err)
+
+		repo.EXPECT().ReferencedBy(mock.Anything, "postgres").Return([]string{"api"}, nil).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "postgres").Return(storedWorkload("postgres"), nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		// The consumer is rehashed on the way out, the way a deleted secret rehashes
+		// what read it: what it was started against no longer describes what orca
+		// holds.
+		repo.EXPECT().Get(mock.Anything, "api").
+			Return(database.Workload{ID: "api-id", Name: "api", Spec: consumerSpec, SpecHash: "hash-one"}, nil).Once()
+		addresses.EXPECT().Address(mock.Anything, mock.Anything).
+			Return("", fmt.Errorf("%w: postgres", service.ErrWorkloadNotFound)).Once()
+		repo.EXPECT().ReferencedBy(mock.Anything, "api").Return(nil, nil).Maybe()
+
+		rehashed := make(chan database.Workload, 1)
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				rehashed <- w
+
+				return w, false, nil
+			}).Once()
+
+		_, err = newTestAddressAwareService(t, d, repo, ports, addresses).Delete(t.Context(), "postgres", true)
+		require.NoError(t, err)
+
+		// The reference resolves against nothing now, so the consumer stops recording
+		// an address and reports what it is missing when it next starts.
+		require.Len(t, rehashed, 1)
+		assert.NotEqual(t, "hash-one", (<-rehashed).SpecHash)
 	})
 }
 

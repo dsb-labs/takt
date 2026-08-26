@@ -18,6 +18,9 @@ import (
 var (
 	// ErrWorkloadNotFound is returned when no workload exists with the given name.
 	ErrWorkloadNotFound = errors.New("workload not found")
+	// ErrWorkloadInUse is returned when a workload another one references is deleted
+	// without being forced.
+	ErrWorkloadInUse = errors.New("workload is in use")
 	// ErrVolumeNotFound is returned when no volume exists with the given name.
 	ErrVolumeNotFound = errors.New("volume not found")
 	// ErrVolumeExists is returned when a volume already holds the given name.

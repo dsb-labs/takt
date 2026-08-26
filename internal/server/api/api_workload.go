@@ -27,7 +27,7 @@ type (
 		List(ctx context.Context, queries ...string) ([]service.Workload, error)
 		// Delete should mark the workload with the given name for deletion,
 		// returning it as it now stands.
-		Delete(ctx context.Context, name string) (service.Workload, error)
+		Delete(ctx context.Context, name string, force bool) (service.Workload, error)
 		// Stop should mark the workload with the given name as suspended,
 		// returning it as it now stands.
 		Stop(ctx context.Context, name string) (service.Workload, error)
@@ -219,7 +219,9 @@ func (a *WorkloadAPI) ListWorkloads(ctx context.Context, request api.ListWorkloa
 // request returns: it is reported as terminating until the driver's work for it has
 // actually stopped, at which point it disappears.
 func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWorkloadRequestObject) (api.DeleteWorkloadResponseObject, error) {
-	workload, err := a.workloads.Delete(ctx, request.Name)
+	force := request.Params.Force != nil && *request.Params.Force
+
+	workload, err := a.workloads.Delete(ctx, request.Name, force)
 	switch {
 	case errors.Is(err, service.ErrWorkloadNotFound):
 		return api.DeleteWorkload404JSONResponse{
@@ -227,6 +229,10 @@ func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWork
 				Error: fmt.Sprintf("workload %q does not exist", request.Name),
 			},
 		}, nil
+	case errors.Is(err, service.ErrWorkloadInUse):
+		// The workloads referencing it are named, because the caller's next question
+		// is which ones, and answering it costs nothing here.
+		return api.DeleteWorkload409JSONResponse{Error: err.Error()}, nil
 	case err != nil:
 		return api.DeleteWorkload500JSONResponse{
 			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{

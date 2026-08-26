@@ -56,6 +56,9 @@ var (
 	// ErrInvalidSpec is returned when a specification does not describe a runnable
 	// workload.
 	ErrInvalidSpec = errors.New("invalid specification")
+	// ErrWorkloadInUse is returned when a workload another one references is deleted
+	// without being forced.
+	ErrWorkloadInUse = errors.New("workload is in use")
 )
 
 type (
@@ -658,7 +661,23 @@ func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Worklo
 // teardown is driven from — leaving running work that nothing records. Keeping the
 // row also makes the teardown observable, so a caller can watch the workload reach
 // terminating and then disappear.
-func (s *WorkloadService) Delete(ctx context.Context, name string) (Workload, error) {
+//
+// A workload another one references is refused with ErrWorkloadInUse unless force is
+// set, and the error names the workloads reading its address. An apply naming a
+// workload that does not exist is refused, so removing one without this check would
+// leave a specification nobody could re-apply. Forcing it through redeploys those
+// workloads, which then report the reference they can no longer resolve and retry
+// until something holds the name again.
+func (s *WorkloadService) Delete(ctx context.Context, name string, force bool) (Workload, error) {
+	referencing, err := s.workloads.ReferencedBy(ctx, name)
+	if err != nil {
+		return Workload{}, fmt.Errorf("failed to read the workloads referencing this one: %w", err)
+	}
+
+	if len(referencing) > 0 && !force {
+		return Workload{}, fmt.Errorf("%w: referenced by %s", ErrWorkloadInUse, strings.Join(referencing, ", "))
+	}
+
 	marked, err := s.workloads.MarkDeleting(ctx, name)
 	switch {
 	case errors.Is(err, database.ErrWorkloadNotFound):
@@ -666,6 +685,11 @@ func (s *WorkloadService) Delete(ctx context.Context, name string) (Workload, er
 	case err != nil:
 		return Workload{}, fmt.Errorf("failed to mark workload for deletion: %w", err)
 	}
+
+	// Rehashed once the workload is on its way out, for the reason a deleted secret
+	// rehashes what read it: what those workloads were started against no longer
+	// describes what orca holds, and the hash is how that is reported.
+	s.rehashAll(ctx, name, referencing)
 
 	s.logger.With("workload", name).Debug("workload marked for deletion")
 	s.wake()
@@ -943,8 +967,18 @@ func (s *WorkloadService) redeploy(ctx context.Context, name string) {
 		return
 	}
 
+	s.rehashAll(ctx, name, referencing)
+}
+
+// rehashAll rehashes each of the named workloads, which reference the workload whose
+// address may have moved.
+//
+// Separate from redeploy so that a caller which has already read the referencing
+// workloads — a deletion, which had to read them to refuse one — does not read them a
+// second time to act on them.
+func (s *WorkloadService) rehashAll(ctx context.Context, name string, referencing []string) {
 	for _, workload := range referencing {
-		if _, err = s.Rehash(ctx, workload); err != nil {
+		if _, err := s.Rehash(ctx, workload); err != nil {
 			s.logger.With("workload", workload, "references", name, "error", err).
 				Error("failed to rehash a workload referencing one whose address may have moved")
 		}

@@ -1142,8 +1142,8 @@ func (_c *MockWorkloadService_Apply_Call) RunAndReturn(run func(ctx context.Cont
 }
 
 // Delete provides a mock function for the type MockWorkloadService
-func (_mock *MockWorkloadService) Delete(ctx context.Context, name string) (service.Workload, error) {
-	ret := _mock.Called(ctx, name)
+func (_mock *MockWorkloadService) Delete(ctx context.Context, name string, force bool) (service.Workload, error) {
+	ret := _mock.Called(ctx, name, force)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
@@ -1151,16 +1151,16 @@ func (_mock *MockWorkloadService) Delete(ctx context.Context, name string) (serv
 
 	var r0 service.Workload
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (service.Workload, error)); ok {
-		return returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, bool) (service.Workload, error)); ok {
+		return returnFunc(ctx, name, force)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) service.Workload); ok {
-		r0 = returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, bool) service.Workload); ok {
+		r0 = returnFunc(ctx, name, force)
 	} else {
 		r0 = ret.Get(0).(service.Workload)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, bool) error); ok {
+		r1 = returnFunc(ctx, name, force)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1175,11 +1175,12 @@ type MockWorkloadService_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
-func (_e *MockWorkloadService_Expecter) Delete(ctx any, name any) *MockWorkloadService_Delete_Call {
-	return &MockWorkloadService_Delete_Call{Call: _e.mock.On("Delete", ctx, name)}
+//   - force bool
+func (_e *MockWorkloadService_Expecter) Delete(ctx any, name any, force any) *MockWorkloadService_Delete_Call {
+	return &MockWorkloadService_Delete_Call{Call: _e.mock.On("Delete", ctx, name, force)}
 }
 
-func (_c *MockWorkloadService_Delete_Call) Run(run func(ctx context.Context, name string)) *MockWorkloadService_Delete_Call {
+func (_c *MockWorkloadService_Delete_Call) Run(run func(ctx context.Context, name string, force bool)) *MockWorkloadService_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1189,9 +1190,14 @@ func (_c *MockWorkloadService_Delete_Call) Run(run func(ctx context.Context, nam
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 bool
+		if args[2] != nil {
+			arg2 = args[2].(bool)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -1202,7 +1208,7 @@ func (_c *MockWorkloadService_Delete_Call) Return(workload service.Workload, err
 	return _c
 }
 
-func (_c *MockWorkloadService_Delete_Call) RunAndReturn(run func(ctx context.Context, name string) (service.Workload, error)) *MockWorkloadService_Delete_Call {
+func (_c *MockWorkloadService_Delete_Call) RunAndReturn(run func(ctx context.Context, name string, force bool) (service.Workload, error)) *MockWorkloadService_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }
