@@ -19,9 +19,13 @@ var fuzzedName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 // FuzzParseReferences checks the properties the reference grammar promises, against
 // inputs nobody thought to write down.
 //
-// The grammar is hand-parsed and is about to gain a third kind, so the value here is
-// in the invariants rather than in any particular input: whatever the fuzzer finds,
-// what comes back is either an error or a set of references that expansion can act on.
+// The grammar is hand-parsed and now has three kinds, one of which takes a second
+// segment, so the value here is in the invariants rather than in any particular
+// input: whatever the fuzzer finds, what comes back is either an error or a set of
+// references that expansion can act on.
+//
+// A kind is a literal the fuzzer will not synthesise from an input that does not
+// already hold it, so every kind has to be seeded or its parsing is never reached.
 func FuzzParseReferences(f *testing.F) {
 	for _, seed := range []string{
 		"",
@@ -30,6 +34,16 @@ func FuzzParseReferences(f *testing.F) {
 		"postgres://app:${secret:db-password}@${var:db-host}/app",
 		"${secret:token} ${secret:token}",
 		"${secret:token} ${var:token}",
+		"${workload:postgres}",
+		"${workload:postgres:pg}",
+		"${workload:postgres:5432}",
+		"postgres://app:${secret:db-password}@${workload:postgres:pg}/app",
+		"${workload:api:http} ${workload:api:grpc}",
+		"${workload:postgres:}",
+		"${workload:postgres:PG}",
+		"${workload:postgres:pg:extra}",
+		"${secret:db-password:pg}",
+		"${var:db-host:pg}",
 		"$$notasecret",
 		"$${secret:token}",
 		"$$${secret:token}",
@@ -68,12 +82,35 @@ func FuzzParseReferences(f *testing.F) {
 		require.NoError(t, expandErr)
 
 		for _, reference := range references {
-			assert.Contains(t, []manifest.ReferenceKind{manifest.KindSecret, manifest.KindVariable}, reference.Kind)
+			assert.Contains(t, []manifest.ReferenceKind{
+				manifest.KindSecret,
+				manifest.KindVariable,
+				manifest.KindWorkload,
+			}, reference.Kind)
 
 			// A name that reaches a caller is used to look a value up and to name a
 			// file, so one the pattern does not admit must never be reported as valid.
 			assert.Regexp(t, fuzzedName, reference.Name)
 			assert.LessOrEqual(t, len(reference.Name), 63)
+
+			// Only a workload reference names a port, and a port is held to the same
+			// shape a name is: it selects one of a workload's ports, which are named
+			// under the same rules.
+			if reference.Port != "" {
+				assert.Equal(t, manifest.KindWorkload, reference.Kind)
+				assert.Regexp(t, fuzzedName, string(reference.Port))
+				assert.LessOrEqual(t, len(reference.Port), 63)
+			}
+
+			// What a reference is written as round-trips. The hash of a workload
+			// reading one is keyed on this, so a reference that stringified to
+			// something other than the text it was parsed from would key two
+			// different references the same way.
+			//
+			// The opening is spelled out here rather than read from the package, for
+			// the reason the name pattern is: a change to the syntax has to be made
+			// deliberately in both places.
+			assert.Contains(t, value, "${"+string(reference.Kind)+":"+reference.String()+"}")
 
 			// Nothing is passed through: a reference that was reported was also
 			// substituted, rather than left in the output as the text that wrote it.
