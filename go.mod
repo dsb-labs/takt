@@ -12,7 +12,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/XSAM/otelsql v0.43.0
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v28.5.2+incompatible
+	github.com/docker/cli v29.7.2+incompatible
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.1
 	github.com/docker/go-units v0.5.0
