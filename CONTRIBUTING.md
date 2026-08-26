@@ -90,6 +90,7 @@ main.go                   the root command
 api/openapi.yaml          the wire format, and the source of the generated code
 cmd/                      one directory per subcommand
 internal/generated/       the code generated from the wire format
+internal/wire/            mapping between the wire and canonical specifications
 internal/server/          the server and everything it wires together
   api/                    the HTTP surface
   service/                applying, reading and deleting workloads
@@ -99,15 +100,28 @@ internal/server/          the server and everything it wires together
     exec/                 processes on the host
   health/                 the checks orca performs
   port/                   host port allocation
+  secret/                 the encryption a secret is stored under
+  spechash/               the hash a workload is replaced on
+  telemetry/              traces and metrics
   database/               SQLite, and desired state
 internal/e2e/             the end-to-end suite
-pkg/manifest/             parsing and validating a manifest
+pkg/manifest/             the canonical specification, and parsing one
 pkg/client/               the Go client
 docs/                     documentation
 ```
 
 `pkg/` holds the packages something outside orca would import: the manifest parser and
 the client. Everything else is `internal/`.
+
+## The wire format stops at the API
+
+`manifest.Spec` is the specification orca reasons about. It is what a manifest file
+parses into, what the server stores, and what the hash covers. The generated wire
+types stay in the three packages with business in them: `internal/server/api`,
+`pkg/client`, and `internal/wire`, which maps between the two.
+
+A change below the HTTP API works on `manifest.Spec`. Reaching for
+`internal/generated/api` anywhere else means the conversion is happening too late.
 
 ## Commits
 
