@@ -119,7 +119,7 @@ how quickly orca notices something it was never told about.
 
 | Key | Default | Description |
 |---|---|---|
-| `bind` | `127.0.0.1` | The address a workload's host ports are published on. |
+| `bind` | `0.0.0.0` | The address a workload's host ports are published on. |
 | `min-port` | `20000` | The lowest host port orca will allocate. |
 | `max-port` | `32000` | The highest host port orca will allocate. |
 
@@ -127,18 +127,31 @@ how quickly orca notices something it was never told about.
 names no host port. A port a manifest pins is used as given, whether or not it falls in
 this range.
 
-`bind` is which interfaces a workload can be reached on. Loopback by default, for the
-same reason the API listens there: publishing a port exposes whatever the workload
-serves. Set it to `0.0.0.0` to publish on every interface:
+`bind` is which interfaces a workload can be reached on. Every interface by default,
+unlike the API: a published port exists to be reached, and one of the things reaching
+it is another workload on this host. Name an interface's address to restrict that:
 
 ```toml
 [workload]
-bind = "0.0.0.0"
+bind = "10.0.0.5"
 ```
+
+That is the way to narrow exposure. A Tailscale or WireGuard address reaches only
+what is on that network, which is the usual answer for a workload that should not be
+on the LAN.
+
+Loopback is the one value with a catch. A container dialling a port published on
+loopback reaches its own loopback rather than the host, so a container cannot reach
+another workload at all when `bind` is `127.0.0.1`. Only `exec` workloads reach each
+other there. See [Reaching another workload](manifest.md#reaching-another-workload).
 
 It must be an address rather than a name, and it cannot be left empty. A name would
 have to be resolved, and what it resolved to could change under a workload already
 published on it.
+
+`0.0.0.0` publishes everywhere and names nowhere, so it cannot be dialled. A workload
+referencing another is given the address of the interface carrying the default route
+instead, which is how anything on this host reaches the host.
 
 This applies to a port orca publishes for a workload, which means a container. An
 `exec` workload binds its own port, so what it listens on is the process's business and

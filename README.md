@@ -49,7 +49,8 @@ labels:
   some-key: some-value
 
 ports:
-  - to: 80
+  - name: http
+    to: 80
 
 env:
   EXAMPLE: EXAMPLE
@@ -129,6 +130,28 @@ orca variable set db-host db.internal
 env:
   DSN: postgres://app@${var:db-host}:5432/app
 ```
+
+An `env` value can also read the address of another workload, so one workload can be
+pointed at another without either of them naming a port orca chose:
+
+```yaml
+version: v1
+name: postgres
+ports:
+  - name: pg
+    to: 5432
+container:
+  image: postgres:17-alpine
+```
+
+```yaml
+env:
+  DSN: postgres://app:${secret:db-password}@${workload:postgres:pg}/app
+```
+
+`${workload:postgres:pg}` becomes the address that port is reached at. If orca ever
+moves the port, the workloads reading it are redeployed with the new address, so the
+dependency keeps working without being re-applied.
 
 ## Documentation
 

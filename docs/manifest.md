@@ -170,7 +170,8 @@ not inherit the server's environment.
 
 ```yaml
 ports:
-  - to: 80          # the port the workload listens on
+  - name: http      # what the rest of the manifest calls it
+    to: 80          # the port the workload listens on
   - to: 443
     from: 8443      # the host port that reaches it
   - to: 51820
@@ -178,14 +179,15 @@ ports:
 ```
 
 `to` is the port the workload listens on. `from` is the host port that reaches it.
-`protocol` is `tcp` or `udp`, and defaults to `tcp`.
+`protocol` is `tcp` or `udp`, and defaults to `tcp`. `name` is optional and is what
+the rest of the manifest refers to the port by.
 
 For a container, leaving `from` out is the usual case. orca allocates a host port and
 reports it back, so you never have to invent unique numbers by hand.
 
 ```sh
 orca workload get example | jq '.Ports'
-[ { "To": 80, "From": 20000, "Protocol": "tcp", "Dynamic": true } ]
+[ { "Name": "http", "To": 80, "From": 20000, "Protocol": "tcp", "Dynamic": true } ]
 ```
 
 An allocated port is sticky. It stays the same across restarts and image changes, so
@@ -193,9 +195,47 @@ anything pointing at it keeps working. Pin `from` when something outside orca ha
 know the address up front. Pinning a port another workload holds is rejected when you
 apply the manifest.
 
-A container's port is published on loopback unless the server is configured otherwise,
-so a workload another machine has to reach needs `workload.bind` set. See
+A container's port is published on every interface unless the server is configured
+otherwise, so anything the host is reachable at reaches the workload. See
 [Operating orca](operating.md#workload-ports-are-published-separately).
+
+### Naming a port
+
+A workload publishing one port needs no name. One publishing several does, or the
+things that select a port — a health check, and another workload reaching this one —
+have to restate the number:
+
+```yaml
+ports:
+  - name: http
+    to: 8080
+  - name: metrics
+    to: 9090
+
+health:
+  http: /healthz
+  port: http
+```
+
+A name follows the rules a workload name does: lowercase letters, digits and dashes.
+It may not read as a number, because a port is also selected by the port itself, and
+`8080` would otherwise be two different ports written the same way.
+
+Two ports may share a name only when they publish the same `to` on different
+protocols. That is one service published over TCP and UDP, named once:
+
+```yaml
+ports:
+  - name: dns
+    to: 53
+  - name: dns
+    to: 53
+    protocol: udp
+```
+
+Renaming a port does not move it. The host port a workload holds is kept, so a rename
+is a change to what the manifest calls the port rather than a reason to redeploy the
+workload at a new address.
 
 An exec workload must name `from`. The process binds a port on the host directly, so
 there is no mapping to make. orca records the port to stop another workload taking it,
@@ -270,7 +310,9 @@ Anything else after an unescaped `$` is an error rather than literal text:
 | `$$notasecret` | The literal `$notasecret` |
 | `$${secret:name}` | The literal `${secret:name}` |
 | `${secret:db-password` | Rejected: not closed by `}` |
+| `${workload:postgres:pg}` | The address `postgres` publishes `pg` at |
 | `${env:HOME}` | Rejected: `env` is not a reference type |
+| `${secret:db-password:pg}` | Rejected: only a workload reference names a port |
 | `${secret:DB_PASSWORD}` | Rejected: not a name a secret may have |
 | `$HOME` | Rejected: a bare `$` |
 
@@ -318,6 +360,62 @@ name two different things and one is never substituted for the other.
 The difference between the two is whether the value is readable back. A variable's is
 returned by the API. A secret's is not. See [Variables](variables.md) and
 [Secrets](secrets.md).
+
+### Reaching another workload
+
+An `env` value can reference the address of another workload, with
+`${workload:name}` or `${workload:name:port}`:
+
+```yaml
+env:
+  DSN: postgres://app:${secret:db-password}@${workload:postgres:pg}/app
+  HOST: ${workload:postgres}
+```
+
+`${workload:name:port}` resolves to a host and a port, such as `10.0.0.5:20432`. The
+port is selected the way a health check selects one: by the name it was given, or by
+the port inside the workload. `${workload:name}` resolves to the host alone, for a
+value whose port you already know and would otherwise write twice.
+
+The address is not a URL. orca does not know what the workload speaks, so a bare
+address composes into whatever you are writing.
+
+This exists because a host port orca allocated is not something to write down. It is
+reported rather than chosen, and it is revised if the workload fails to start on it.
+A reference records the dependency instead, and every consumer follows the port
+wherever it goes:
+
+```yaml
+version: v1
+name: postgres
+ports:
+  - name: pg
+    to: 5432
+container:
+  image: postgres:17-alpine
+```
+
+Apply that first. The workload has to exist, and has to publish at least one port,
+before another can reference it — a manifest naming one that does not is rejected the
+way a manifest naming an unknown secret is.
+
+When the referenced port moves, the workloads reading it are redeployed and pick up
+the new address as they start. That is the whole point of writing the reference rather
+than the number: nothing has to be re-applied by hand.
+
+A workload another one references cannot be deleted without `--force`. Forcing it
+leaves those workloads unable to resolve the reference, which they report and retry
+until something holds the name again. This is also what makes ordering unnecessary in
+the other direction: a workload whose dependency has not started yet keeps retrying
+rather than failing for good.
+
+Two workloads may reference each other. Ports are allocated without consulting a
+reference, so there is nothing circular to resolve.
+
+A container reaching another workload depends on `workload.bind` naming an address a
+container can dial. The default publishes on every interface, which one can. Loopback
+is the exception, and only `exec` workloads reach each other there. See
+[Configuration](configuration.md#workload).
 
 ## Volumes
 
@@ -515,7 +613,7 @@ outcome stays readable. Changing its specification starts it again.
 ```yaml
 health:
   http: /healthz
-  port: 80
+  port: http
   interval: 10s
   timeout: 2s
   retries: 3
@@ -526,7 +624,7 @@ health:
 |---|---|---|---|
 | `http` | one of | | The path to request. Any 2xx response passes. |
 | `tcp` | one of | | Check that the port accepts a connection. |
-| `port` | no | | Which published port to check. Needed when more than one is published. |
+| `port` | no | | Which published port to check, by name or by number. Needed when more than one is published. |
 | `interval` | no | `10s` | How often to check. |
 | `timeout` | no | `2s` | How long one check may take. |
 | `retries` | no | `3` | Consecutive failures that mark the workload failed. |
@@ -546,6 +644,11 @@ going to pass yet, and passing one check ends the grace early.
 `timeout` must not exceed `interval`. A check that could outlast the gap between
 checks would overlap itself, and the failure count would stop meaning consecutive
 failures.
+
+`port` takes either the name a port was given or the port itself, so `port: http` and
+`port: 8080` select the same port of a workload publishing `http` on 8080. Naming it
+is worth preferring: the number is restated in two places otherwise, and a manifest
+that changes one and not the other still applies.
 
 A health check needs a published TCP port, whatever the runtime. Both probes connect,
 and a connection to a UDP port succeeds whatever is behind it, so a check against one

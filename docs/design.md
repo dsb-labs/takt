@@ -235,6 +235,37 @@ the behaviour.
 An exec workload names its own host port, because the process binds one directly and
 there is no mapping to make. orca records it so that no other workload is given it.
 
+## A workload's address is referenced, not written down
+
+Two workloads used to talk only through a host port an operator read back and pasted
+into a manifest — a number orca chose, and one it revises if the workload fails to
+start on it. There was no way to write the dependency down.
+
+A reference is that way. `${workload:name:port}` resolves to the address the named
+workload is reached at, and the resolved address is mixed into the hash of the
+workload reading it. A port that moves is then an ordinary specification change: the
+consumers are replaced, and each resolves the new address as it starts.
+
+Templating rather than a shared container network, because the machinery already
+existed and already had the property this needed. A reference reaching the hash is
+what makes a changed value redeploy the instances reading it, and pointing the same
+mechanism at an address gets the redeployment for free. It also works for both
+runtimes, where a network would have been a manifest field that silently meant nothing
+for `exec`.
+
+The reference is resolved twice and stored never. It is hashed when the specification
+is written and expanded again as the workload starts, so a workload never holds an
+address that has since moved.
+
+Ordering falls out of convergence rather than being declared. A workload whose
+reference resolves against nothing fails to start and is retried on the paced
+schedule, so applying a consumer before its dependency is running costs a few restarts
+rather than an error — and it keeps working when the dependency restarts later, which
+a declared dependency would not.
+
+Cycles need no detection. Port allocation does not consult a reference, so there is no
+fixpoint to solve: two workloads referencing each other both resolve and both hash.
+
 ## A secret's revision is hashed, not its value
 
 A workload is replaced when its specification hash changes. A secret a workload reads

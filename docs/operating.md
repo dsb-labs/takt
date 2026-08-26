@@ -63,17 +63,24 @@ This matters most for whoever runs orca on a workstation they also browse from.
 ### Workload ports are published separately
 
 Restricting reach to orca's own port does not restrict reach to its workloads. A
-container's host port is published on the address `workload.bind` names, which starts
-as loopback:
+container's host port is published on the address `workload.bind` names, which is
+every interface by default. Anything a workload serves is reachable wherever the host
+is, so it is worth knowing which workloads that covers.
+
+Name an interface's address to narrow that:
 
 ```toml
 [workload]
-bind = "0.0.0.0"
+bind = "10.0.0.5"
 ```
 
-Set that when something on the network has to reach a workload. Anything a workload
-serves is then reachable wherever the host is, so it is worth knowing which workloads
-that covers.
+A Tailscale or WireGuard address is the usual answer, and reaches only what is on that
+network.
+
+Loopback is not the answer it looks like. A container dialling a port published on
+loopback reaches its own loopback rather than the host, so `bind = "127.0.0.1"` stops
+containers reaching each other as well as stopping the network reaching them. See
+[Configuration](configuration.md#workload).
 
 An `exec` workload is not covered either way. The process binds its own port, so what
 it listens on is decided by the command rather than by orca.

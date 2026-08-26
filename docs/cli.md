@@ -140,15 +140,22 @@ plain file with no timestamps in it.
 ```sh
 orca workload delete example
 orca workload delete example --wait
+orca workload delete postgres --force
 ```
 
 | Flag | Description |
 |---|---|
 | `--wait`, `-w` | Block until the workload has finished terminating. |
+| `--force`, `-f` | Delete the workload even though another references its address. |
 
 Deleting is asynchronous. The workload reads as `terminating` while its work is
 stopped, and disappears once nothing is left running for it. A teardown can therefore
 be watched by polling `workload get` until the workload is gone.
+
+A workload another one references is refused, and the error names the workloads
+reading its address. `--force` deletes it anyway: those workloads are redeployed and
+then report the reference they can no longer resolve, retrying until something holds
+the name again. See [Reaching another workload](manifest.md#reaching-another-workload).
 
 ## workload stop
 
