@@ -55,22 +55,22 @@ type (
 	// The Schedule type describes when a workload runs.
 	Schedule struct {
 		// The cron expression, in the standard five-field form.
-		Cron string
+		Cron string `json:"cron"`
 		// What to do when an occurrence comes due and the previous run has not
 		// finished. Empty means OverlapReplace.
-		Overlap OverlapPolicy
+		Overlap OverlapPolicy `json:"overlap,omitempty"`
 	}
 
 	// The Restart type describes what happens when a workload's instance ends.
 	Restart struct {
 		// Whether to run the workload again. Empty means RestartAlways.
-		Policy RestartPolicy
+		Policy RestartPolicy `json:"policy,omitempty"`
 		// How many consecutive restarts to attempt before giving up. Zero means
 		// orca keeps trying.
-		Attempts int
+		Attempts int `json:"attempts,omitempty"`
 		// How long to wait before the first restart, doubling on each consecutive
 		// failure. Zero means DefaultRestartDelay.
-		Delay time.Duration
+		Delay time.Duration `json:"delay,omitempty"`
 
 		// The delay field as written when it did not parse, reported by validation
 		// so that a typo is an error rather than a silent default.
@@ -83,38 +83,45 @@ type (
 	// Parse produces from a manifest file, and what the client submits. Optional
 	// values are plain zero values rather than pointers, so callers can build one
 	// by hand without ceremony.
+	//
+	// The JSON tags are explicit on every field because this encoding is what orca
+	// stores a workload as, and what its specification hash covers. A hash that moves
+	// replaces every running instance, so the encoding must not follow a Go field
+	// name that somebody is free to rename. A field added later must be omitempty for
+	// the same reason: without it, every workload that leaves the field unset encodes
+	// differently than it did before the field existed.
 	Spec struct {
 		// The manifest schema version. Must be "v1".
-		Version string
+		Version string `json:"version"`
 		// The name that identifies the workload.
-		Name string
+		Name string `json:"name"`
 		// When the workload runs, rather than running continuously. Nil runs it
 		// continuously.
-		Schedule *Schedule
+		Schedule *Schedule `json:"schedule,omitempty"`
 		// Arbitrary key-value pairs attached to the workload.
-		Labels map[string]string
+		Labels map[string]string `json:"labels,omitempty"`
 		// The ports to publish, which is how the workload is reached. A runtime with
 		// nothing to publish rejects them rather than ignoring them.
-		Ports []Port
+		Ports []Port `json:"ports,omitempty"`
 		// The environment variables set for the workload. A workload starts with only
 		// these, rather than inheriting the server's own environment.
-		Env map[string]string
+		Env map[string]string `json:"env,omitempty"`
 		// The volumes to mount, and where the workload finds each one. Each names a
 		// volume that must already exist.
-		Volumes []VolumeMount
+		Volumes []VolumeMount `json:"volumes,omitempty"`
 		// What to do when the workload's instance ends. Never nil once a Spec has
 		// been through Parse or NewSpec, both of which resolve the defaults.
-		Restart *Restart
+		Restart *Restart `json:"restart,omitempty"`
 		// How to tell whether the workload is working, rather than merely started.
-		Health *Health
+		Health *Health `json:"health,omitempty"`
 		// The resource limits the workload runs under. Nil applies none, so an
 		// unlimited workload stays what it is today. A runtime that cannot enforce
 		// them rejects them rather than ignoring them.
-		Resources *Resources
+		Resources *Resources `json:"resources,omitempty"`
 		// The container to run. Exactly one runtime must be set.
-		Container *Container
+		Container *Container `json:"container,omitempty"`
 		// The command to run on the host. Exactly one runtime must be set.
-		Exec *Exec
+		Exec *Exec `json:"exec,omitempty"`
 	}
 
 	// The Health type describes how to tell whether a workload is working.
@@ -123,25 +130,25 @@ type (
 	// and one a runtime cannot perform is rejected rather than ignored.
 	Health struct {
 		// The path to request, when the workload should be checked over HTTP.
-		HTTP string
+		HTTP string `json:"http,omitempty"`
 		// Whether to check that the port merely accepts a connection.
-		TCP bool
+		TCP bool `json:"tcp,omitempty"`
 		// Which of the workload's ports to check, written as the port's name or as
 		// the port inside the workload. Only needed when it publishes more than one.
-		Port PortRef
+		Port PortRef `json:"port,omitempty"`
 		// How often to perform the check.
-		Interval time.Duration
+		Interval time.Duration `json:"interval,omitempty"`
 		// How long a single check may take before it counts as failed.
-		Timeout time.Duration
+		Timeout time.Duration `json:"timeout,omitempty"`
 		// How many consecutive failures mark the workload as failed.
-		Retries int
+		Retries int `json:"retries,omitempty"`
 		// How long after starting to allow before failures are counted.
 		//
 		// The yaml tag is explicit because this is the first multi-word manifest key:
 		// yaml.v3 matches against the lowercased Go field name, so without it the
 		// manifest would have to spell this "startperiod" while the wire format spells
 		// it "startPeriod".
-		StartPeriod time.Duration `yaml:"startPeriod"`
+		StartPeriod time.Duration `yaml:"startPeriod" json:"startPeriod,omitempty"`
 
 		// The timing fields that were present but unparseable, reported by
 		// validation so that a typo is an error rather than a silent default.
@@ -158,12 +165,12 @@ type (
 		// Held as the operator wrote it rather than as a byte count, so that the
 		// stored specification and its hash carry exactly what the manifest said.
 		// Validation proves it parses, and the driver reads the number out.
-		Memory string
+		Memory string `json:"memory,omitempty"`
 		// The most CPU the workload may use, in cores. Fractions are allowed, so
 		// 0.5 is half a core.
-		CPU float64
+		CPU float64 `json:"cpu,omitempty"`
 		// The most processes and threads the workload may create.
-		Pids int
+		Pids int `json:"pids,omitempty"`
 	}
 
 	// The Container type describes the container a workload runs.
@@ -173,30 +180,30 @@ type (
 	// cannot even spell them, so nothing has to reject them for it.
 	Container struct {
 		// The image reference to run.
-		Image string
+		Image string `json:"image"`
 		// When the image is pulled. Empty means PullMissing, and stays empty rather
 		// than being resolved to it: the default is left off the wire so that a
 		// specification written before the field existed hashes as it always did.
-		Pull PullPolicy
+		Pull PullPolicy `json:"pull,omitempty"`
 		// The command to run, replacing the one the image declares. Empty runs what
 		// the image already declares.
-		Command []string
+		Command []string `json:"command,omitempty"`
 		// The user to run as, replacing the one the image declares. Any form docker
 		// accepts: a name, a numeric identifier, or a "user:group" pair. Empty runs
 		// as the user the image declares.
-		User string
+		User string `json:"user,omitempty"`
 		// Whether the root filesystem is read-only. Mounted volumes and values are
 		// separate mounts, so they stay writable and readable whatever this says.
 		//
 		// The yaml tags on this and the fields below are explicit for the reason
 		// Health.StartPeriod's is: yaml.v3 matches against the lowercased Go field
 		// name, and these keys are spelled camelCase on the wire.
-		ReadOnly bool `yaml:"readOnly"`
+		ReadOnly bool `yaml:"readOnly" json:"readOnly,omitempty"`
 		// Kernel capabilities to grant beyond the runtime's default set.
-		CapAdd []string `yaml:"capAdd"`
+		CapAdd []string `yaml:"capAdd" json:"capAdd,omitempty"`
 		// Kernel capabilities to remove from the runtime's default set. Dropping ALL
 		// and adding back what the workload needs is the hardened configuration.
-		CapDrop []string `yaml:"capDrop"`
+		CapDrop []string `yaml:"capDrop" json:"capDrop,omitempty"`
 	}
 
 	// The Port type describes a port to publish.
@@ -209,24 +216,24 @@ type (
 		// port. Two ports may share a name only when they publish the same port on
 		// different protocols, since that is one service named once rather than two
 		// ports with nothing to tell them apart.
-		Name string
+		Name string `json:"name,omitempty"`
 		// The port the workload listens on inside its runtime.
-		To int
+		To int `json:"to"`
 		// The host port that reaches it. Left unset to have one allocated, which is
 		// the usual case: the workload keeps a port of its own and callers read the
 		// allocated one back from the workload.
-		From int
+		From int `json:"from,omitempty"`
 		// The transport protocol the port is published on. Defaults to TCP, and a
 		// workload may publish the same port on both, since the two are separate
 		// address spaces.
-		Protocol Protocol
+		Protocol Protocol `json:"protocol,omitempty"`
 	}
 
 	// The Exec type describes the command a workload runs on the host.
 	Exec struct {
 		// The command to run, and its arguments. No shell is involved unless the
 		// command names one.
-		Command []string
+		Command []string `json:"command"`
 	}
 
 	// The VolumeMount type describes something a workload mounts, and where the
@@ -239,11 +246,11 @@ type (
 	// specification's runtime is.
 	VolumeMount struct {
 		// The volume to mount, which must already exist.
-		Name string
+		Name string `json:"name,omitempty"`
 		// The secret to mount as a file, which must already exist.
-		Secret string
+		Secret string `json:"secret,omitempty"`
 		// The variable to mount as a file, which must already exist.
-		Var string
+		Var string `json:"var,omitempty"`
 		// Where the workload finds what is mounted, written the same way whichever
 		// runtime runs it. Where it resolves to differs, because a container has a
 		// filesystem of its own and a process on the host does not.
@@ -253,23 +260,23 @@ type (
 		// directory, and such a workload reaches it by that relative path: confining
 		// the process so the absolute one resolved there would need privileges orca
 		// does not have.
-		To string
+		To string `json:"to"`
 		// The signal to send the workload when the mounted value changes, rather than
 		// replacing its instance. Empty replaces the instance, which is what a
 		// workload that reads a file once wants.
 		//
 		// Only a mounted secret or variable may name one. A volume holds whatever the
 		// workload puts there, so there is no change orca could report.
-		Signal Signal
+		Signal Signal `json:"signal,omitempty"`
 	}
 
 	// The Volume type describes a volume, which is no more than its name. A volume
 	// holds data and has nothing to configure.
 	Volume struct {
 		// The manifest schema version. Must be "v1".
-		Version string
+		Version string `json:"version"`
 		// The name that identifies the volume.
-		Name string
+		Name string `json:"name"`
 	}
 )
 
