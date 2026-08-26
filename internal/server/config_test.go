@@ -111,18 +111,56 @@ func TestDefaultConfig(t *testing.T) {
 		assert.True(t, address.IsLoopback(), "the default address is reachable off-host: %s", host)
 	})
 
-	t.Run("publishes workload ports on loopback", func(t *testing.T) {
-		// A published port exposes whatever the workload serves, so it is the same
-		// decision as binding the API and gets the same default. An operator who
-		// restricted reach to orca's own port would otherwise still be publishing
-		// every workload to the network.
+	t.Run("publishes workload ports on every interface", func(t *testing.T) {
+		// Unlike the API. A workload's port exists to be reached, and one of the
+		// things reaching it is another workload on this host: a container dialling
+		// a port published on loopback reaches its own loopback rather than the
+		// host, so loopback is the one value that leaves workloads unable to reach
+		// each other.
 		//
 		// Parsed rather than compared, which also pins that the default is not empty:
-		// docker reads an empty host address as every interface.
+		// docker reads an empty host address as every interface, so a reader would
+		// have to know that to see which of the two was meant.
 		bind, err := netip.ParseAddr(server.DefaultConfig().Workload.Bind)
 		require.NoError(t, err, "the default bind address must name an interface explicitly")
 
-		assert.True(t, bind.IsLoopback(), "workload ports are published off-host: %s", bind)
+		assert.True(t, bind.IsUnspecified(), "workload ports are published on one interface: %s", bind)
+	})
+}
+
+func TestWorkloadConfig_Address(t *testing.T) {
+	t.Parallel()
+
+	t.Run("dials the interface the ports are published on", func(t *testing.T) {
+		// An operator who named an interface has already said where the ports are,
+		// so there is nothing to work out.
+		address, err := server.WorkloadConfig{Bind: "10.0.0.5"}.Address()
+		require.NoError(t, err)
+		assert.Equal(t, "10.0.0.5", address)
+	})
+
+	t.Run("dials loopback when the ports are published there", func(t *testing.T) {
+		address, err := server.WorkloadConfig{Bind: "127.0.0.1"}.Address()
+		require.NoError(t, err)
+		assert.Equal(t, "127.0.0.1", address)
+	})
+
+	t.Run("resolves the unspecified address to one that can be dialled", func(t *testing.T) {
+		// The unspecified address publishes everywhere and names nowhere. A workload
+		// told to dial it would reach its own loopback, so it has to be resolved to
+		// an address of this host.
+		address, err := server.WorkloadConfig{Bind: "0.0.0.0"}.Address()
+		if err != nil {
+			// A host with no route out has no address to offer beyond loopback,
+			// which is the documented answer rather than a failure.
+			assert.Equal(t, "127.0.0.1", address)
+
+			return
+		}
+
+		parsed, err := netip.ParseAddr(address)
+		require.NoError(t, err)
+		assert.False(t, parsed.IsUnspecified(), "the resolved address cannot be dialled: %s", address)
 	})
 }
 

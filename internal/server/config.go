@@ -125,10 +125,15 @@ type (
 	WorkloadConfig struct {
 		// The address a workload's host ports are published on.
 		//
-		// Loopback by default, for the same reason the API listens there: publishing
-		// a port is exposing whatever the workload serves, and which interfaces that
-		// reaches should be a decision an operator made rather than one orca made for
-		// them. Set it to "0.0.0.0" to publish on every interface.
+		// Every interface by default. A published port is one something has to
+		// reach, and the things that reach it include the other workloads on this
+		// host: a container cannot dial a port published on loopback, since loopback
+		// inside a container is its own. Name an interface's address to restrict
+		// what a workload is exposed to.
+		//
+		// This is not the API's address, which stays on loopback. Reaching the API
+		// is enough to run code on the host, where reaching a workload's port only
+		// reaches what that workload serves.
 		//
 		// This applies to a port orca publishes on a workload's behalf, which means a
 		// container. An exec workload binds its port itself, so what it listens on is
@@ -171,6 +176,12 @@ type (
 	}
 )
 
+const (
+	// The address anything on this host reaches this host by when there is nothing
+	// better to say.
+	loopback = "127.0.0.1"
+)
+
 // DefaultConfig returns a Config populated with sensible defaults, so that the
 // server runs out of the box with no configuration file at all.
 func DefaultConfig() Config {
@@ -189,14 +200,16 @@ func DefaultConfig() Config {
 			Interval: 10 * time.Second,
 		},
 		Workload: WorkloadConfig{
-			// Loopback, like the API. A workload's port is published for something to
-			// reach, but which interfaces that means is the same decision as binding
-			// the API — so it is one an operator makes rather than a default.
+			// Every interface, unlike the API. A workload's port exists to be
+			// reached, and one of the things reaching it is another workload on this
+			// host: a container dialling a port published on loopback reaches its own
+			// loopback rather than the host's, so loopback is the one value that
+			// leaves workloads unable to reach each other.
 			//
 			// Named explicitly rather than left empty, because empty is what docker
 			// reads as every interface. A reader should not have to know that to see
 			// which of the two this is.
-			Bind:    "127.0.0.1",
+			Bind:    "0.0.0.0",
 			MinPort: port.DefaultMin,
 			MaxPort: port.DefaultMax,
 		},
@@ -278,6 +291,42 @@ func (c ReconcileConfig) validate() error {
 	}
 
 	return nil
+}
+
+// Address returns the address a workload dials to reach another workload's published
+// ports.
+//
+// The bind address answers this whenever it names an interface: that is where the
+// ports are published, and an operator who wrote one has already said which interface
+// they meant. The unspecified address is the exception. It publishes on every
+// interface and names none, and nothing can dial it — a process that tried would
+// reach its own loopback rather than the host.
+//
+// So the unspecified address resolves to the address of the interface carrying the
+// default route, which is the one anything on this host would reach the host by. A
+// host with no route out has no such address, and loopback comes back along with the
+// reason: an exec workload still reaches its neighbours there, and a container was
+// never going to.
+func (c WorkloadConfig) Address() (string, error) {
+	if parsed := net.ParseIP(c.Bind); parsed != nil && !parsed.IsUnspecified() {
+		return c.Bind, nil
+	}
+
+	// RFC-5737 (3): 192.0.2.0/24 is reserved for documentation and is not routed, so
+	// this asks the kernel which local address it would send from without sending
+	// anything. A UDP dial performs no handshake.
+	conn, err := net.Dial("udp", "192.0.2.1:1")
+	if err != nil {
+		return loopback, fmt.Errorf("failed to resolve the address of this host: %w", err)
+	}
+	defer conn.Close()
+
+	address, _, err := net.SplitHostPort(conn.LocalAddr().String())
+	if err != nil {
+		return loopback, fmt.Errorf("failed to read the address of this host: %w", err)
+	}
+
+	return address, nil
 }
 
 func (c WorkloadConfig) validate() error {
