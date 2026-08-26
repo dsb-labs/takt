@@ -276,6 +276,8 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 
 		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
 
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
 		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 			Logger:    newTestLogger(t),
 			Drivers:   map[string]service.Driver{docker.Name: d},
@@ -304,6 +306,8 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 		volumes.EXPECT().Path(mock.Anything, "example-data").
 			Return("", service.ErrVolumeNotFound).Once()
 
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
 		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 			Logger:    newTestLogger(t),
 			Drivers:   map[string]service.Driver{docker.Name: d},
@@ -324,6 +328,8 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 			Logger:    newTestLogger(t),
@@ -463,6 +469,8 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 
 			checker.EXPECT().Result("example").Return(tc.Result, tc.Checked)
 
+			repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
 			svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 				Logger:    newTestLogger(t),
 				Drivers:   map[string]service.Driver{docker.Name: d},
@@ -514,6 +522,8 @@ func TestWorkloadService_Get_LastError(t *testing.T) {
 
 			rec.EXPECT().LastError("example").Return(tc.Message, tc.At, tc.Recorded)
 
+			repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
 			svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 				Logger:     newTestLogger(t),
 				Drivers:    map[string]service.Driver{docker.Name: d},
@@ -537,6 +547,8 @@ func TestWorkloadService_Get_LastError(t *testing.T) {
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
 		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 			Logger:    newTestLogger(t),
@@ -1199,6 +1211,8 @@ func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 		Return(database.Workload{}, database.ErrWorkloadNotFound)
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
 
+	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
 	svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
 		Drivers:   map[string]service.Driver{docker.Name: d},
@@ -1237,6 +1251,8 @@ func TestWorkloadService_Get_DriverHangs(t *testing.T) {
 
 		return nil, ctx.Err()
 	}).Once()
+
+	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
@@ -1532,6 +1548,8 @@ func TestWorkloadService_Restart(t *testing.T) {
 		rec.EXPECT().LastError(mock.Anything).Return("", time.Time{}, false).Maybe()
 
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 			Logger:     newTestLogger(t),
@@ -2499,6 +2517,60 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 		assert.NotEqual(t, 20005, claimed[0].Host)
 	})
 
+	t.Run("rehashes the workloads referencing it", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		addresses := NewMockWorkloadAddresses(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = new([]api.PortMapping{{To: 80, From: new(20005)}})
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(api.Container), Spec: encoded, SpecHash: "hash-one"}
+		held := []database.Port{{WorkloadID: row.ID, Container: 80, Host: 20005, Protocol: "tcp", Dynamic: true}}
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+		ports.EXPECT().List(mock.Anything, row.ID).Return(held, nil)
+		ports.EXPECT().Allocated(mock.Anything).Return(map[string][]int{"tcp": {20005}}, nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				return w, false, nil
+			}).Once()
+
+		// A host port is reallocated by the reconciler rather than by anything going
+		// through the service, so this is the one place a consumer's hash moves for a
+		// reason nobody asked for. Miss it and the reference reads as automatic and
+		// quietly is not.
+		consumer := containerSpec("api", "example/example:latest")
+		consumer.Env = &map[string]string{"DSN": "${workload:example:http}"}
+
+		consumerSpec, err := json.Marshal(consumer)
+		require.NoError(t, err)
+
+		repo.EXPECT().ReferencedBy(mock.Anything, "example").Return([]string{"api"}, nil).Once()
+		repo.EXPECT().Get(mock.Anything, "api").
+			Return(database.Workload{ID: "api-id", Name: "api", Spec: consumerSpec, SpecHash: "hash-two"}, nil).Once()
+		addresses.EXPECT().Address(mock.Anything, mock.Anything).Return("10.0.0.5:20100", nil).Once()
+		repo.EXPECT().ReferencedBy(mock.Anything, "api").Return(nil, nil).Maybe()
+
+		rehashed := make(chan database.Workload, 1)
+		repo.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(w database.Workload) bool {
+			return w.Name == "api"
+		}), mock.Anything).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+			rehashed <- w
+
+			return w, false, nil
+		}).Once()
+
+		changed, err := newTestAddressAwareService(t, d, repo, ports, addresses).Reallocate(t.Context(), "example")
+		require.NoError(t, err)
+		assert.True(t, changed)
+
+		require.Len(t, rehashed, 1)
+		assert.NotEqual(t, "hash-two", (<-rehashed).SpecHash)
+	})
+
 	t.Run("leaves a workload holding only pinned ports alone", func(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
@@ -2605,6 +2677,10 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
 
+	// Nothing references these workloads unless a test says otherwise, so nothing is
+	// rehashed when their addresses move.
+	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
 	config := service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
 		Drivers:   map[string]service.Driver{docker.Name: d},
@@ -2639,6 +2715,10 @@ func newTestImageAwareService(
 	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+
+	// Nothing references these workloads unless a test says otherwise, so nothing is
+	// rehashed when their addresses move.
+	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	config := service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
@@ -2686,6 +2766,10 @@ func newTestReferenceAwareService(
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
 
+	// Nothing references these workloads unless a test says otherwise, so nothing is
+	// rehashed when their addresses move.
+	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
 	config := service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
 		Drivers:   map[string]service.Driver{docker.Name: d},
@@ -2719,6 +2803,12 @@ func newTestAddressAwareService(
 	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
 	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+
+	// Nothing references these workloads unless a test says otherwise, so nothing is
+	// rehashed when their addresses move.
+	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	return service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),

@@ -97,6 +97,9 @@ type (
 		// Resume should clear the workload's suspension, returning it as it now
 		// stands.
 		Resume(ctx context.Context, name string) (database.Workload, error)
+		// ReferencedBy should name the workloads whose specifications reference the
+		// workload with the given name.
+		ReferencedBy(ctx context.Context, name string) ([]string, error)
 	}
 
 	// The Reconciler interface describes what the service asks of the loop that
@@ -497,6 +500,10 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 	if err != nil {
 		return Workload{}, false, err
 	}
+
+	// Whatever reads this workload's address is rehashed after it has landed, since
+	// an apply may have moved the ports it publishes.
+	s.redeploy(ctx, stored.Name)
 
 	s.logger.With("workload", stored.Name, "version", stored.Version, "created", created).Debug("workload applied")
 	s.wake()
@@ -906,9 +913,42 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 		return false, fmt.Errorf("failed to store workload: %w", err)
 	}
 
+	// The whole point of the reallocation is that the workload's address moved, so
+	// everything reading it is now holding one that reaches nothing.
+	s.redeploy(ctx, name)
+
 	s.wake()
 
 	return true, nil
+}
+
+// redeploy rehashes the workloads referencing the named one, so that a host port that
+// moved replaces the instances reading the address it was reached at.
+//
+// This is the one place a hash moves for a reason nothing went through the service
+// for. A secret or a variable changes because somebody set it, where a host port is
+// reallocated by the reconciler when a workload fails to start. Without this the
+// reference reads as automatic and quietly is not.
+//
+// A failure is logged rather than returned. The workload whose ports moved is already
+// stored, and reporting its apply or its reallocation as failed would describe
+// something that did not happen. A consumer left unrehashed is holding an address that
+// may well still reach the workload, and the next thing to touch it recomputes the
+// hash against what orca currently holds.
+func (s *WorkloadService) redeploy(ctx context.Context, name string) {
+	referencing, err := s.workloads.ReferencedBy(ctx, name)
+	if err != nil {
+		s.logger.With("workload", name, "error", err).Error("failed to read the workloads referencing this one")
+
+		return
+	}
+
+	for _, workload := range referencing {
+		if _, err = s.Rehash(ctx, workload); err != nil {
+			s.logger.With("workload", workload, "references", name, "error", err).
+				Error("failed to rehash a workload referencing one whose address may have moved")
+		}
+	}
 }
 
 // Rehash recomputes the named workload's specification hash against the secrets and
