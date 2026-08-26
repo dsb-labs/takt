@@ -3,14 +3,10 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -19,6 +15,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
+	"github.com/dsb-labs/orca/internal/server/spechash"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -209,47 +206,6 @@ type (
 		Checked bool
 		// The most recent outcome, meaningful only when Checked.
 		Result health.Result
-	}
-
-	// The hashedSpec type is what a workload's specification hash is computed over
-	// when the workload reads a secret or a variable.
-	//
-	// It exists so that what a workload reads reaches the hash without being stored:
-	// the specification is written to the database on its own, and this wrapper is
-	// built only to be hashed and discarded. Its shape is therefore part of what a
-	// hash means — changing it re-hashes every workload that reads either and
-	// replaces their instances.
-	//
-	// Both maps are omitted when empty, which is what stopped adding variables from
-	// re-hashing every workload that already read a secret. Such a workload encodes
-	// exactly as it did before variables existed, because the field that would have
-	// been written as null is left out instead.
-	hashedSpec struct {
-		// The stored specification, encoded exactly as it is persisted.
-		Spec json.RawMessage `json:"spec"`
-		// The revision of each secret the workload reads, keyed by name. Go's encoder
-		// sorts map keys, so this contributes the same bytes for a given set of
-		// secrets however they were collected.
-		Secrets map[string]string `json:"secrets,omitempty"`
-		// The value of each variable the workload reads, keyed by name.
-		//
-		// The value rather than a revision, unlike a secret. A secret is held at arm's
-		// length because the hash is reported and one computed over a value would
-		// confirm a guess at it; a variable's value is reported by the API anyway, so
-		// the indirection would protect nothing and cost a column.
-		Variables map[string]string `json:"variables,omitempty"`
-		// The address each workload reference resolved to, keyed by the reference as
-		// it was written. Omitted when the workload references none.
-		//
-		// This is what makes a reallocated host port replace the instances reading
-		// it: the address they were started with is part of what they are, so one
-		// that moved is a specification that changed.
-		Workloads map[string]string `json:"workloads,omitempty"`
-		// The digest the image's registry reports, set only for a workload whose pull
-		// policy is always. It reaches the hash without being stored, the way a
-		// secret's revision does, so a rebuilt tag replaces the instance without the
-		// digest being echoed back as though the operator wrote it.
-		Digest string `json:"digest,omitempty"`
 	}
 
 	// The SecretRevisions interface describes how the service learns what version of
@@ -592,7 +548,7 @@ func (s *WorkloadService) store(
 			return database.Workload{}, false, err
 		}
 
-		encoded, hash, err := canonicalise(withResolvedPorts(spec, ports), read, digest)
+		encoded, hash, err := spechash.Compute(withResolvedPorts(spec, ports), read.hashInputs(digest))
 		if err != nil {
 			return database.Workload{}, false, err
 		}
@@ -964,7 +920,7 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 		return false, err
 	}
 
-	encoded, hash, err := canonicalise(withResolvedPorts(spec, ports), read, digest)
+	encoded, hash, err := spechash.Compute(withResolvedPorts(spec, ports), read.hashInputs(digest))
 	if err != nil {
 		return false, err
 	}
@@ -1072,7 +1028,7 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 		return false, err
 	}
 
-	_, hash, err := canonicalise(spec, read, digest)
+	_, hash, err := spechash.Compute(spec, read.hashInputs(digest))
 	if err != nil {
 		return false, err
 	}
@@ -1650,98 +1606,21 @@ func healthState(state driver.State, reported Health) driver.State {
 	}
 }
 
-// canonicalise encodes spec as JSON and hashes it, mixing in the revision of each
-// secret and the value of each variable the workload reads. Go's encoder writes
-// struct fields in declaration order and map keys in sorted order, so the encoding is
-// stable for a given specification and the hash can be compared to detect drift.
+// hashInputs returns what the specification's hash covers beyond the specification
+// itself.
 //
-// The returned bytes are always the specification alone: what was read reaches the
-// hash without being stored, so nothing about a secret is written to the database or
-// echoed back by the API. Mixing it in is what makes a rotated secret or a changed
-// variable read as an ordinary specification change, so the reconciler replaces the
-// instances holding the old value.
-//
-// A secret contributes its revision and never its value, because the hash is
-// reported and one computed over a value would confirm a guess at it. A variable
-// contributes its value, which the API reports anyway.
-//
-// What the workload reads only through a mount naming a signal contributes nothing.
-// Such a mount asked for the file to be rewritten and the workload signalled, and a
-// hash that moved with the value would replace the instance instead.
-//
-// The address each referenced workload resolved to is mixed in the same way. That is
-// what makes a reallocated host port replace the instances reading it: the address
-// they were started with is part of what they are.
-//
-// A pull-always workload's image digest is mixed in the same way, so a rebuilt tag
-// reads as an ordinary specification change. It is empty for every other workload.
-//
-// A workload reading none of these hashes exactly as it would without this, which is
-// what stops an upgrade replacing every running instance.
-func canonicalise(spec manifest.Spec, read references, digest string) ([]byte, string, error) {
-	encoded, err := json.Marshal(spec)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to encode workload spec: %w", err)
-	}
-
-	revisions, values := read.hashed()
-
-	if len(revisions) == 0 && len(values) == 0 && len(read.addresses) == 0 && digest == "" {
-		sum := sha256.Sum256(encoded)
-
-		return encoded, hex.EncodeToString(sum[:]), nil
-	}
-
-	hashed, err := json.Marshal(hashedSpec{
-		Spec:      encoded,
-		Secrets:   revisions,
-		Variables: values,
-		Workloads: read.addresses,
+// Narrower than the references type it comes from. The names a workload reads are
+// stored so that finding what to redeploy does not depend on parsing every
+// specification, and a reference naming something that has gone is the apply's
+// business. Neither reaches the hash.
+func (r references) hashInputs(digest string) spechash.Inputs {
+	return spechash.Inputs{
+		Revisions: r.revisions,
+		Values:    r.values,
+		Addresses: r.addresses,
+		Refreshed: r.refreshed,
 		Digest:    digest,
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to encode workload spec: %w", err)
 	}
-
-	sum := sha256.Sum256(hashed)
-
-	return encoded, hex.EncodeToString(sum[:]), nil
-}
-
-// hashed returns what reaches the specification's hash: the revision of each secret
-// and the value of each variable, less anything read only through a mount naming a
-// signal.
-//
-// Both maps come back nil when nothing is left, rather than empty. hashedSpec omits an
-// empty map, so a workload whose only reading is refreshed hashes exactly as one that
-// reads nothing at all — which is what keeps adding a signalling mount from being a
-// specification change in its own right.
-func (r references) hashed() (map[string]string, map[string]string) {
-	if len(r.refreshed) == 0 {
-		return r.revisions, r.values
-	}
-
-	revisions := maps.Clone(r.revisions)
-	values := maps.Clone(r.values)
-
-	for _, reference := range r.refreshed {
-		if reference.Kind == manifest.KindVariable {
-			delete(values, reference.Name)
-
-			continue
-		}
-
-		delete(revisions, reference.Name)
-	}
-
-	if len(revisions) == 0 {
-		revisions = nil
-	}
-	if len(values) == 0 {
-		values = nil
-	}
-
-	return revisions, values
 }
 
 func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, reported Health, lastError string, lastErrorAt time.Time) (Workload, error) {
