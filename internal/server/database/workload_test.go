@@ -460,6 +460,77 @@ func TestWorkloadRepository_Delete(t *testing.T) {
 	})
 }
 
+func TestWorkloadRepository_ReferencedBy(t *testing.T) {
+	t.Parallel()
+
+	store := func(t *testing.T, repo *database.WorkloadRepository, name string, references ...string) {
+		t.Helper()
+
+		_, _, err := repo.Upsert(t.Context(), database.Workload{
+			Name:      name,
+			Runtime:   "container",
+			Spec:      []byte(`{}`),
+			SpecHash:  "hash-" + name,
+			Workloads: references,
+		})
+		require.NoError(t, err)
+	}
+
+	t.Run("names the workloads referencing the workload", func(t *testing.T) {
+		repo := newTestRepository(t)
+
+		store(t, repo, "postgres")
+		store(t, repo, "api", "postgres")
+		store(t, repo, "worker", "postgres", "api")
+		store(t, repo, "unrelated")
+
+		referencedBy, err := repo.ReferencedBy(t.Context(), "postgres")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"api", "worker"}, referencedBy)
+	})
+
+	t.Run("returns nothing for a workload nothing references", func(t *testing.T) {
+		repo := newTestRepository(t)
+
+		store(t, repo, "postgres")
+
+		referencedBy, err := repo.ReferencedBy(t.Context(), "postgres")
+		require.NoError(t, err)
+		assert.Empty(t, referencedBy)
+	})
+
+	t.Run("leaves out a workload referencing itself", func(t *testing.T) {
+		// Referencing its own address is fine, but a change to the workload is
+		// already rewriting it, so there is nothing to redeploy on its behalf.
+		repo := newTestRepository(t)
+
+		store(t, repo, "api", "api")
+
+		referencedBy, err := repo.ReferencedBy(t.Context(), "api")
+		require.NoError(t, err)
+		assert.Empty(t, referencedBy)
+	})
+
+	t.Run("forgets a reference the specification no longer makes", func(t *testing.T) {
+		repo := newTestRepository(t)
+
+		store(t, repo, "postgres")
+		store(t, repo, "api", "postgres")
+
+		_, _, err := repo.Upsert(t.Context(), database.Workload{
+			Name:     "api",
+			Runtime:  "container",
+			Spec:     []byte(`{}`),
+			SpecHash: "hash-api-two",
+		})
+		require.NoError(t, err)
+
+		referencedBy, err := repo.ReferencedBy(t.Context(), "postgres")
+		require.NoError(t, err)
+		assert.Empty(t, referencedBy)
+	})
+}
+
 func newTestRepository(t *testing.T) *database.WorkloadRepository {
 	t.Helper()
 

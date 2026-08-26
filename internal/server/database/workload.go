@@ -49,6 +49,13 @@ type (
 		// The names of the variables the workload's specification references, written
 		// and read back on the same terms as Secrets.
 		Variables []string
+		// The names of the other workloads the workload's specification references,
+		// written and read back on the same terms as Secrets.
+		//
+		// The port a reference names is not recorded. What the links answer is which
+		// workloads to rehash when one of them moves, and that question is asked of a
+		// workload rather than of one of its ports.
+		Workloads []string
 		// The time the workload was first applied.
 		CreatedAt time.Time
 		// The time the workload's specification last changed. Resuming a suspended
@@ -109,8 +116,8 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Po
 	var stored Workload
 	var created bool
 
-	// The row, its port allocations and the secrets and variables it references are
-	// written together. A workload whose ports could not be claimed must not exist at
+	// The row, its port allocations and everything it references are written
+	// together. A workload whose ports could not be claimed must not exist at
 	// all: the reconciler would otherwise start it against a specification naming host
 	// ports nothing holds, so the caller would be told the apply failed while orca
 	// ran it anyway.
@@ -148,13 +155,85 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Po
 			return err
 		}
 
-		return linkVariables(ctx, tx, stored.ID, w.Variables)
+		if err = linkVariables(ctx, tx, stored.ID, w.Variables); err != nil {
+			return err
+		}
+
+		return linkWorkloads(ctx, tx, stored.ID, w.Workloads)
 	})
 	if err != nil {
 		return Workload{}, false, err
 	}
 
 	return stored, created, nil
+}
+
+// ReferencedBy returns the names of the workloads referencing the workload with the
+// given name.
+//
+// Read from the recorded links rather than by matching the reference text inside each
+// stored specification, for the reason a secret's users are: the answer must not
+// depend on how a reference is written.
+//
+// A workload being deleted still counts, as it does for a secret. Its instances run
+// until the reconciler has torn them down, so the address it reads is still one it is
+// using.
+//
+// The workload itself is left out. A workload referencing its own address is fine, but
+// it is not something a change to that workload has to redeploy: it is already being
+// rewritten by whatever moved it.
+func (r *WorkloadRepository) ReferencedBy(ctx context.Context, name string) ([]string, error) {
+	const q = `
+		SELECT w.name
+		FROM workload_reference AS r
+		INNER JOIN workload AS w ON w.id = r.workload_id
+		WHERE r.workload_name = ? AND w.name != ?
+		ORDER BY w.name ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, q, name, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query workload references: %w", err)
+	}
+
+	var workloads []string
+	defer rows.Close()
+
+	for rows.Next() {
+		var workload string
+		if err = rows.Scan(&workload); err != nil {
+			return nil, fmt.Errorf("failed to scan workload reference: %w", err)
+		}
+
+		workloads = append(workloads, workload)
+	}
+
+	return workloads, rows.Err()
+}
+
+// linkWorkloads records which other workloads a workload references inside an existing
+// transaction, so that it can be composed with the write of the workload itself.
+//
+// Replaced wholesale for the reason a secret's links are: the stored links have to
+// describe the specification that was just written, so a reference removed from a
+// manifest stops counting as a use.
+func linkWorkloads(ctx context.Context, tx *sql.Tx, workloadID string, names []string) error {
+	const (
+		clear  = `DELETE FROM workload_reference WHERE workload_id = ?`
+		insert = `INSERT INTO workload_reference (workload_id, workload_name) VALUES (?, ?)`
+	)
+
+	if _, err := tx.ExecContext(ctx, clear, workloadID); err != nil {
+		return fmt.Errorf("failed to clear workload references: %w", err)
+	}
+
+	for _, name := range names {
+		if _, err := tx.ExecContext(ctx, insert, workloadID, name); err != nil {
+			return fmt.Errorf("failed to record workload reference: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func insert(ctx context.Context, tx *sql.Tx, w Workload, labels string) (Workload, error) {
