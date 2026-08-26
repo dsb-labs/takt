@@ -12,6 +12,8 @@ import (
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/wire"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 type (
@@ -19,7 +21,7 @@ type (
 	WorkloadService interface {
 		// Apply should store the given specification as desired state, reporting
 		// whether the workload was newly created.
-		Apply(ctx context.Context, spec api.WorkloadSpec) (service.Workload, bool, error)
+		Apply(ctx context.Context, spec manifest.Spec) (service.Workload, bool, error)
 		// Get should return the workload with the given name.
 		Get(ctx context.Context, name string) (service.Workload, error)
 		// List should return the workloads matching every one of the given queries,
@@ -105,7 +107,14 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		}, nil
 	}
 
-	spec := *request.Body
+	// Converted to the canonical shape here, at the edge, so that everything below
+	// this package reasons about a manifest.Spec rather than about the wire format.
+	spec, err := wire.ToSpec(*request.Body)
+	if err != nil {
+		return api.ApplyWorkload400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+		}, nil
+	}
 
 	// The name appears in both the path and the body, so a mismatch is ambiguous
 	// rather than something to silently resolve in favour of either one.
@@ -141,8 +150,8 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		errors.Is(err, service.ErrWorkloadNotFound),
 		errors.Is(err, service.ErrPortNotPublished),
 		errors.Is(err, service.ErrInvalidSpec),
-		errors.Is(err, service.ErrNoRuntime),
-		errors.Is(err, service.ErrAmbiguousRuntime):
+		errors.Is(err, manifest.ErrNoRuntime),
+		errors.Is(err, manifest.ErrAmbiguousRuntime):
 		// Everything the specification names that does not exist is the caller's to
 		// fix, and naming it is the whole point: the alternative is an operator who
 		// mistyped one being told only that something went wrong.
@@ -550,7 +559,7 @@ func newWorkload(w service.Workload) api.Workload {
 		Version:   w.Version,
 		Runtime:   api.Runtime(w.Runtime),
 		State:     api.WorkloadState(w.State),
-		Spec:      w.Spec,
+		Spec:      wire.FromSpec(w.Spec),
 		CreatedAt: w.CreatedAt,
 		UpdatedAt: w.UpdatedAt,
 	}

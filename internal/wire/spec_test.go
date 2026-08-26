@@ -18,34 +18,38 @@ func TestToSpec(t *testing.T) {
 	// the wire. A default applied to only one of them would make the same manifest
 	// behave differently depending on the route it took.
 	t.Run("resolves the defaults a manifest file would get", func(t *testing.T) {
-		spec := wire.ToSpec(api.WorkloadSpec{
+		spec, err := wire.ToSpec(api.WorkloadSpec{
 			Version:   "v1",
 			Name:      "example",
 			Container: &api.ContainerSpec{Image: "example/example:latest"},
 		})
+		require.NoError(t, err)
 
 		require.NotNil(t, spec.Restart)
 		assert.Equal(t, manifest.RestartAlways, spec.Restart.Policy)
 		assert.Equal(t, manifest.DefaultRestartDelay, spec.Restart.Delay)
 	})
 
-	t.Run("records a duration that does not parse", func(t *testing.T) {
-		// Recorded rather than returned as an error, because this is also the path a
-		// client reads a workload back through. Validation reports it.
-		spec := wire.ToSpec(api.WorkloadSpec{
+	t.Run("rejects a restart delay that is not a duration", func(t *testing.T) {
+		_, err := wire.ToSpec(api.WorkloadSpec{
 			Version:   "v1",
 			Name:      "example",
 			Restart:   &api.RestartSpec{Delay: new("half an hour")},
+			Container: &api.ContainerSpec{Image: "example/example:latest"},
+		})
+
+		assert.ErrorContains(t, err, `"half an hour" is not a duration`)
+	})
+
+	t.Run("rejects a health check timing that is not a duration", func(t *testing.T) {
+		_, err := wire.ToSpec(api.WorkloadSpec{
+			Version:   "v1",
+			Name:      "example",
 			Health:    &api.HealthSpec{HTTP: new("/healthz"), Interval: new("often")},
 			Container: &api.ContainerSpec{Image: "example/example:latest"},
 		})
 
-		require.NotNil(t, spec.Restart)
-		assert.Equal(t, "half an hour", spec.Restart.InvalidDelay)
-		require.NotNil(t, spec.Health)
-		assert.Equal(t, []string{"interval"}, spec.Health.Invalid)
-
-		assert.Error(t, manifest.Validate(spec))
+		assert.ErrorContains(t, err, `"often" is not a duration`)
 	})
 }
 
@@ -117,7 +121,9 @@ func TestFromSpec(t *testing.T) {
 
 		// A specification that survives a round trip unchanged is what lets the
 		// client submit what it parsed and read back something comparable.
-		assert.Equal(t, spec, wire.ToSpec(wire.FromSpec(spec)))
+		actual, err := wire.ToSpec(wire.FromSpec(spec))
+		require.NoError(t, err)
+		assert.Equal(t, spec, actual)
 	})
 
 	t.Run("round-trips an exec specification", func(t *testing.T) {
@@ -128,6 +134,8 @@ func TestFromSpec(t *testing.T) {
 			Exec:    &manifest.Exec{Command: []string{"echo", "hello world"}},
 		}
 
-		assert.Equal(t, spec, wire.ToSpec(wire.FromSpec(spec)))
+		actual, err := wire.ToSpec(wire.FromSpec(spec))
+		require.NoError(t, err)
+		assert.Equal(t, spec, actual)
 	})
 }

@@ -18,11 +18,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/driver/exec"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 // The driver is consumed through two interfaces, which are deliberately narrower than
@@ -920,10 +920,10 @@ func workload(name string, version int, hash, script string) driver.Workload {
 		Name:     name,
 		Version:  version,
 		SpecHash: hash,
-		Spec: api.WorkloadSpec{
+		Spec: manifest.Spec{
 			Version: "v1",
 			Name:    name,
-			Exec:    &api.ExecSpec{Command: []string{"sh", "-c", script}},
+			Exec:    &manifest.Exec{Command: []string{"sh", "-c", script}},
 		},
 	}
 }

@@ -42,7 +42,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.MatchedBy(func(spec generated.WorkloadSpec) bool {
+				svc.EXPECT().Apply(mock.Anything, mock.MatchedBy(func(spec manifest.Spec) bool {
 					return spec.Name == "example" && spec.Container != nil
 				})).Return(workload("example", service.WorkloadStateRunning), true, nil).Once()
 			},
@@ -96,7 +96,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
 				svc.EXPECT().Apply(mock.Anything, mock.Anything).
-					Return(service.Workload{}, false, service.ErrNoRuntime).Once()
+					Return(service.Workload{}, false, manifest.ErrNoRuntime).Once()
 			},
 			ExpectStatus: http.StatusBadRequest,
 		},
@@ -106,7 +106,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
 				svc.EXPECT().Apply(mock.Anything, mock.Anything).
-					Return(service.Workload{}, false, service.ErrAmbiguousRuntime).Once()
+					Return(service.Workload{}, false, manifest.ErrAmbiguousRuntime).Once()
 			},
 			ExpectStatus: http.StatusBadRequest,
 		},
@@ -949,12 +949,27 @@ func containerSpec(name string) generated.WorkloadSpec {
 	}
 }
 
+// canonicalSpec is what the service holds, where containerSpec is what a request
+// carries. The API converts between them, so a test asserting on a response needs
+// both shapes.
+func canonicalSpec(name string) manifest.Spec {
+	spec := manifest.Spec{
+		Version:   "v1",
+		Name:      name,
+		Container: &manifest.Container{Image: "example/example:latest"},
+	}
+
+	spec.Defaults()
+
+	return spec
+}
+
 func workload(name string, state service.WorkloadState) service.Workload {
 	return service.Workload{
 		Name:      name,
 		Version:   1,
 		Runtime:   manifest.RuntimeContainer,
-		Spec:      containerSpec(name),
+		Spec:      canonicalSpec(name),
 		State:     state,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),

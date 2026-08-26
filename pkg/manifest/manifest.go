@@ -7,6 +7,7 @@
 package manifest
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -93,6 +94,23 @@ func Parse(r io.Reader) (Spec, error) {
 	if err := Validate(spec); err != nil {
 		return Spec{}, err
 	}
+
+	return spec, nil
+}
+
+// Decode reads a stored specification, resolving the defaults as Parse does.
+//
+// A specification is stored with its defaults already resolved, so this normally
+// changes nothing. It runs anyway because a decoded specification is not otherwise a
+// resolved one: a caller reading a field the manifest left unset would find a zero
+// value where every other path finds the default.
+func Decode(data []byte) (Spec, error) {
+	var spec Spec
+	if err := json.Unmarshal(data, &spec); err != nil {
+		return Spec{}, fmt.Errorf("failed to decode workload spec: %w", err)
+	}
+
+	spec.Defaults()
 
 	return spec, nil
 }
@@ -206,10 +224,6 @@ func Validate(spec Spec) error {
 func validateRestart(restart *Restart) error {
 	if restart == nil {
 		return nil
-	}
-
-	if restart.InvalidDelay != "" {
-		return fmt.Errorf("invalid restart: %q is not a duration", restart.InvalidDelay)
 	}
 
 	switch {
@@ -497,10 +511,6 @@ func validateHealth(spec Spec, runtime Runtime) error {
 	health := spec.Health
 	if health == nil {
 		return nil
-	}
-
-	if len(health.Invalid) > 0 {
-		return fmt.Errorf("invalid health: %s is not a duration", strings.Join(health.Invalid, ", "))
 	}
 
 	switch {

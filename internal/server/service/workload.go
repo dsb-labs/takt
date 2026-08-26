@@ -15,12 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
-	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -35,11 +33,6 @@ var (
 	// ErrUnsupportedRuntime is returned when a specification names a runtime the
 	// server cannot run yet.
 	ErrUnsupportedRuntime = errors.New("unsupported runtime")
-	// ErrNoRuntime is returned when a specification names no runtime at all.
-	ErrNoRuntime = errors.New("no runtime specified")
-	// ErrAmbiguousRuntime is returned when a specification names more than one
-	// runtime, leaving no single driver to run it.
-	ErrAmbiguousRuntime = errors.New("more than one runtime specified")
 	// ErrWorkloadDeleting is returned when applying a workload that is currently
 	// being torn down.
 	ErrWorkloadDeleting = errors.New("workload is being deleted")
@@ -452,12 +445,18 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 //
 // Applying an unchanged specification is a no-op that leaves the version alone;
 // a changed one increments it, which is what later causes the reconciler to
-// replace any running instance. Returns ErrNoRuntime when the specification names
-// no runtime, or ErrUnsupportedRuntime when it names one the server cannot run.
-func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Workload, bool, error) {
+// replace any running instance. Returns manifest.ErrNoRuntime when the
+// specification names no runtime, or ErrUnsupportedRuntime when it names one the
+// server cannot run.
+func (s *WorkloadService) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool, error) {
+	// Resolved here rather than trusted from the caller, so that what gets stored and
+	// hashed is the specification with its defaults in place however it arrived. A
+	// caller that already resolved them changes nothing by asking again.
+	spec.Defaults()
+
 	// The runtime is resolved first so that naming none or naming two is reported as
 	// exactly that, rather than as a general validation failure.
-	runtime, err := runtimeOf(spec)
+	runtime, err := manifest.RuntimeOf(spec)
 	if err != nil {
 		return Workload{}, false, err
 	}
@@ -468,7 +467,7 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 	// that skips the CLI has to be held to them too. Without this the server accepted
 	// an unknown schema version, a name breaking its own documented rules, and an
 	// empty image that could only ever fail to start.
-	if err = manifest.Validate(wire.ToSpec(spec)); err != nil {
+	if err = manifest.Validate(spec); err != nil {
 		return Workload{}, false, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
 
@@ -577,8 +576,8 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 // something specific and has to be told it isn't available.
 func (s *WorkloadService) store(
 	ctx context.Context,
-	spec api.WorkloadSpec,
-	runtime api.Runtime,
+	spec manifest.Spec,
+	runtime manifest.Runtime,
 	held []database.Port,
 	read references,
 	digest string,
@@ -588,7 +587,7 @@ func (s *WorkloadService) store(
 	const attempts = 5
 
 	for attempt := range attempts {
-		ports, err := s.resolvePorts(ctx, spec.Name, held, portMappings(spec))
+		ports, err := s.resolvePorts(ctx, spec.Name, held, spec.Ports)
 		if err != nil {
 			return database.Workload{}, false, err
 		}
@@ -608,9 +607,7 @@ func (s *WorkloadService) store(
 			Workloads: read.workloads,
 		}
 
-		if spec.Labels != nil {
-			row.Labels = *spec.Labels
-		}
+		row.Labels = spec.Labels
 
 		// The row and its ports are written together, so a claim that loses a race
 		// leaves no workload behind for the reconciler to start against ports
@@ -621,7 +618,7 @@ func (s *WorkloadService) store(
 			return stored, created, nil
 		case !errors.Is(err, database.ErrHostPortTaken):
 			return database.Workload{}, false, fmt.Errorf("failed to store workload: %w", err)
-		case pinned(portMappings(spec)):
+		case pinned(spec.Ports):
 			return database.Workload{}, false, fmt.Errorf("%w: %v", ErrHostPortTaken, err)
 		}
 
@@ -634,9 +631,9 @@ func (s *WorkloadService) store(
 
 // pinned reports whether any mapping names a host port explicitly, which decides
 // whether a claim collision is the caller's problem or orca's to retry.
-func pinned(mappings []api.PortMapping) bool {
-	return slices.ContainsFunc(mappings, func(mapping api.PortMapping) bool {
-		return mapping.From != nil
+func pinned(mappings []manifest.Port) bool {
+	return slices.ContainsFunc(mappings, func(mapping manifest.Port) bool {
+		return mapping.From != 0
 	})
 }
 
@@ -920,9 +917,9 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 		return false, fmt.Errorf("failed to read workload ports: %w", err)
 	}
 
-	var spec api.WorkloadSpec
-	if err = json.Unmarshal(row.Spec, &spec); err != nil {
-		return false, fmt.Errorf("failed to decode workload spec: %w", err)
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
+		return false, err
 	}
 
 	// Dropping the dynamic allocations is what makes resolution pick new ports for
@@ -1060,9 +1057,9 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 		return false, fmt.Errorf("failed to load workload: %w", err)
 	}
 
-	var spec api.WorkloadSpec
-	if err = json.Unmarshal(row.Spec, &spec); err != nil {
-		return false, fmt.Errorf("failed to decode workload spec: %w", err)
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
+		return false, err
 	}
 
 	read, err := s.resolveReferences(ctx, spec)
@@ -1118,7 +1115,7 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 // stored one, whose host ports have already been resolved. A mapping whose host port
 // was allocated is returned without it, so resolution allocates afresh; a pinned one
 // keeps it.
-func requestedMappings(spec api.WorkloadSpec, held []database.Port) []api.PortMapping {
+func requestedMappings(spec manifest.Spec, held []database.Port) []manifest.Port {
 	allocated := make(map[portKey]struct{}, len(held))
 	for _, allocation := range held {
 		if allocation.Dynamic {
@@ -1126,12 +1123,12 @@ func requestedMappings(spec api.WorkloadSpec, held []database.Port) []api.PortMa
 		}
 	}
 
-	mappings := portMappings(spec)
-	requested := make([]api.PortMapping, 0, len(mappings))
+	mappings := spec.Ports
+	requested := make([]manifest.Port, 0, len(mappings))
 
 	for _, mapping := range mappings {
 		if _, ok := allocated[portKey{mapping.To, protocolOf(mapping)}]; ok {
-			requested = append(requested, api.PortMapping{Name: mapping.Name, To: mapping.To, Protocol: mapping.Protocol})
+			requested = append(requested, manifest.Port{Name: mapping.Name, To: mapping.To, Protocol: mapping.Protocol})
 			continue
 		}
 
@@ -1147,7 +1144,7 @@ func requestedMappings(spec api.WorkloadSpec, held []database.Port) []api.PortMa
 // A port's protocol is part of its identity here as it is in the schema, since TCP
 // and UDP are separate address spaces: what is taken on one says nothing about the
 // other, and resolving them against a single set would refuse ports that are free.
-func (s *WorkloadService) resolvePorts(ctx context.Context, name string, existing []database.Port, mappings []api.PortMapping) ([]database.Port, error) {
+func (s *WorkloadService) resolvePorts(ctx context.Context, name string, existing []database.Port, mappings []manifest.Port) ([]database.Port, error) {
 	held := make(map[portKey]database.Port, len(existing))
 	for _, allocation := range existing {
 		held[portKey{allocation.Container, port.Protocol(allocation.Protocol)}] = allocation
@@ -1168,9 +1165,9 @@ func (s *WorkloadService) resolvePorts(ctx context.Context, name string, existin
 	// A pinned port is taken by this specification whatever else it asks for, so it
 	// is off limits before anything is allocated around it.
 	for _, mapping := range mappings {
-		if mapping.From != nil {
+		if mapping.From != 0 {
 			protocol := protocolOf(mapping)
-			taken[protocol] = append(taken[protocol], *mapping.From)
+			taken[protocol] = append(taken[protocol], mapping.From)
 		}
 	}
 
@@ -1200,7 +1197,7 @@ func (s *WorkloadService) resolvePorts(ctx context.Context, name string, existin
 // unrelated ones. Allocating them separately would work — the address spaces are
 // independent — but a DNS server answering on 20000/udp and 20014/tcp reads as an
 // accident.
-func (s *WorkloadService) allocate(held map[portKey]database.Port, taken map[port.Protocol][]int, mappings []api.PortMapping) (map[portKey]int, error) {
+func (s *WorkloadService) allocate(held map[portKey]database.Port, taken map[port.Protocol][]int, mappings []manifest.Port) (map[portKey]int, error) {
 	var order []int
 
 	groups := make(map[int][]port.Protocol)
@@ -1209,7 +1206,7 @@ func (s *WorkloadService) allocate(held map[portKey]database.Port, taken map[por
 		// A pinned port was chosen by the caller, and one the workload already holds
 		// stays where it is so that its address doesn't move every time something
 		// unrelated about the workload changes.
-		if mapping.From != nil {
+		if mapping.From != 0 {
 			continue
 		}
 
@@ -1258,26 +1255,26 @@ func (s *WorkloadService) resolvePort(
 	name string,
 	held map[portKey]database.Port,
 	allocations map[portKey]int,
-	mapping api.PortMapping,
+	mapping manifest.Port,
 ) (database.Port, error) {
 	protocol := protocolOf(mapping)
 
 	// A pinned host port is a decision orca must not quietly override, so it is
 	// used as given once nothing else holds it.
-	if mapping.From != nil {
-		holder, isHeld, err := s.ports.HolderOf(ctx, *mapping.From, string(protocol))
+	if mapping.From != 0 {
+		holder, isHeld, err := s.ports.HolderOf(ctx, mapping.From, string(protocol))
 		switch {
 		case err != nil:
 			return database.Port{}, fmt.Errorf("failed to look up host port: %w", err)
 		case isHeld && holder != name:
 			return database.Port{}, fmt.Errorf("%w: %d/%s is used by workload %q",
-				ErrHostPortTaken, *mapping.From, protocol, holder)
+				ErrHostPortTaken, mapping.From, protocol, holder)
 		}
 
 		return database.Port{
-			Name:      nameOf(mapping),
+			Name:      mapping.Name,
 			Container: mapping.To,
-			Host:      *mapping.From,
+			Host:      mapping.From,
 			Protocol:  string(protocol),
 		}, nil
 	}
@@ -1287,13 +1284,13 @@ func (s *WorkloadService) resolvePort(
 	// renaming a port is a change to what the specification calls it rather than a
 	// reason to move where it is reached.
 	if previous, ok := held[portKey{mapping.To, protocol}]; ok && previous.Dynamic {
-		previous.Name = nameOf(mapping)
+		previous.Name = mapping.Name
 
 		return previous, nil
 	}
 
 	return database.Port{
-		Name:      nameOf(mapping),
+		Name:      mapping.Name,
 		Container: mapping.To,
 		Host:      allocations[portKey{mapping.To, protocol}],
 		Protocol:  string(protocol),
@@ -1301,26 +1298,16 @@ func (s *WorkloadService) resolvePort(
 	}, nil
 }
 
-// nameOf reports what a mapping calls its port, which is empty for one the
-// specification did not name.
-func nameOf(mapping api.PortMapping) string {
-	if mapping.Name == nil {
-		return ""
-	}
-
-	return *mapping.Name
-}
-
 // protocolOf reports which protocol a mapping publishes on.
 //
 // A mapping naming none asks for TCP, which is what every specification stored before
 // the protocol existed described.
-func protocolOf(mapping api.PortMapping) port.Protocol {
-	if mapping.Protocol == nil {
+func protocolOf(mapping manifest.Port) port.Protocol {
+	if mapping.Protocol == "" {
 		return port.ProtocolTCP
 	}
 
-	return port.Protocol(*mapping.Protocol)
+	return port.Protocol(mapping.Protocol)
 }
 
 // resolveVolumes fills in where each mounted volume lives on the host, rejecting a
@@ -1333,18 +1320,16 @@ func protocolOf(mapping api.PortMapping) port.Protocol {
 // by the reconciler as the workload starts, at a path that changes with every version,
 // so storing one would move the hash for a reason the operator did not ask for and put
 // orca's own layout in the API.
-func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadSpec) (api.WorkloadSpec, error) {
-	if spec.Volumes == nil || len(*spec.Volumes) == 0 {
+func (s *WorkloadService) resolveVolumes(ctx context.Context, spec manifest.Spec) (manifest.Spec, error) {
+	if len(spec.Volumes) == 0 {
 		return spec, nil
 	}
 
-	mounts := make([]api.VolumeMount, 0, len(*spec.Volumes))
-	for _, mount := range *spec.Volumes {
-		// Which source a mount names is read through the same rules validation applied,
-		// rather than by inspecting the wire fields again here. Each mount is converted
-		// on its own, so nothing depends on a conversion of the whole specification
-		// yielding one element per wire mount in the same order.
-		kind, err := manifest.KindOf(wire.ToVolumeMount(mount))
+	mounts := make([]manifest.VolumeMount, 0, len(spec.Volumes))
+	for _, mount := range spec.Volumes {
+		// Which source a mount names is read through the same rules validation
+		// applied, rather than by inspecting the fields again here.
+		kind, err := manifest.KindOf(mount)
 		if err != nil {
 			return spec, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 		}
@@ -1364,18 +1349,18 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadS
 		// Whatever went wrong is returned as it stands, including a volume that does
 		// not exist: the locator already names what it could not find, so wrapping it
 		// again would only repeat the name.
-		path, err := s.volumes.Path(ctx, *mount.Name)
+		path, err := s.volumes.Path(ctx, mount.Name)
 		if err != nil {
 			return spec, err
 		}
 
-		mount.From = new(path)
+		mount.From = path
 		mounts = append(mounts, mount)
 	}
 
 	// The specification is taken by value, so this replaces only this copy's slice
 	// header and leaves the caller's alone.
-	spec.Volumes = &mounts
+	spec.Volumes = mounts
 
 	return spec, nil
 }
@@ -1392,15 +1377,13 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadS
 // makes deleting a secret, a variable or a referenced workload move the hash of the
 // workloads reading it, which is how they come to report that something they need has
 // gone. Refusing the reference is the business of the caller that can act on it.
-func (s *WorkloadService) resolveReferences(ctx context.Context, spec api.WorkloadSpec) (references, error) {
-	resolvedSpec := wire.ToSpec(spec)
-
-	found, err := manifest.References(resolvedSpec)
+func (s *WorkloadService) resolveReferences(ctx context.Context, spec manifest.Spec) (references, error) {
+	found, err := manifest.References(spec)
 	if err != nil {
 		return references{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
 
-	refreshed, err := manifest.Refreshed(resolvedSpec)
+	refreshed, err := manifest.Refreshed(spec)
 	if err != nil {
 		return references{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
@@ -1472,8 +1455,8 @@ func (s *WorkloadService) resolveReferences(ctx context.Context, spec api.Worklo
 // each is a registry round-trip, and each fails when the registry is unreachable.
 // That is the honest outcome: a hash computed without the digest would claim the
 // image is unchanged when nothing checked.
-func (s *WorkloadService) resolveDigest(ctx context.Context, spec api.WorkloadSpec) (string, error) {
-	if spec.Container == nil || spec.Container.Pull == nil || *spec.Container.Pull != api.PullPolicyAlways {
+func (s *WorkloadService) resolveDigest(ctx context.Context, spec manifest.Spec) (string, error) {
+	if spec.Container == nil || spec.Container.Pull != manifest.PullAlways {
 		return "", nil
 	}
 
@@ -1509,8 +1492,8 @@ func missing(names []string, held map[string]string) []string {
 // The resolved ports are part of the specification that gets hashed, which is what
 // makes a reallocated port replace the container running on the old one: to the
 // reconciler it is simply a specification that has changed.
-func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.WorkloadSpec {
-	if spec.Ports == nil || len(ports) == 0 {
+func withResolvedPorts(spec manifest.Spec, ports []database.Port) manifest.Spec {
+	if len(spec.Ports) == 0 || len(ports) == 0 {
 		return spec
 	}
 
@@ -1519,8 +1502,8 @@ func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.Workloa
 		byPort[portKey{allocation.Container, port.Protocol(allocation.Protocol)}] = allocation
 	}
 
-	mappings := make([]api.PortMapping, 0, len(ports))
-	for _, mapping := range *spec.Ports {
+	mappings := make([]manifest.Port, 0, len(ports))
+	for _, mapping := range spec.Ports {
 		protocol := protocolOf(mapping)
 
 		resolved, ok := byPort[portKey{mapping.To, protocol}]
@@ -1528,17 +1511,17 @@ func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.Workloa
 			continue
 		}
 
-		mappings = append(mappings, api.PortMapping{
+		mappings = append(mappings, manifest.Port{
 			Name:     mapping.Name,
 			To:       mapping.To,
-			From:     new(resolved.Host),
-			Protocol: new(api.Protocol(protocol)),
+			From:     resolved.Host,
+			Protocol: manifest.Protocol(protocol),
 		})
 	}
 
 	// The specification is taken by value, so assigning the mappings here replaces
 	// only this copy's slice header and leaves the caller's alone.
-	spec.Ports = &mappings
+	spec.Ports = mappings
 
 	return spec
 }
@@ -1561,15 +1544,6 @@ func newResolvedPorts(ports []database.Port) []ResolvedPort {
 	}
 
 	return resolved
-}
-
-// portMappings returns the port mappings a specification publishes.
-func portMappings(spec api.WorkloadSpec) []api.PortMapping {
-	if spec.Ports == nil {
-		return nil
-	}
-
-	return *spec.Ports
 }
 
 func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (Workload, error) {
@@ -1676,22 +1650,6 @@ func healthState(state driver.State, reported Health) driver.State {
 	}
 }
 
-// runtimeOf reports which runtime a specification names, which is determined by
-// which block it carries rather than by a discriminator field. Exactly one block
-// must be present.
-func runtimeOf(spec api.WorkloadSpec) (api.Runtime, error) {
-	switch {
-	case spec.Container != nil && spec.Exec != nil:
-		return "", ErrAmbiguousRuntime
-	case spec.Container != nil:
-		return api.Container, nil
-	case spec.Exec != nil:
-		return api.Exec, nil
-	default:
-		return "", ErrNoRuntime
-	}
-}
-
 // canonicalise encodes spec as JSON and hashes it, mixing in the revision of each
 // secret and the value of each variable the workload reads. Go's encoder writes
 // struct fields in declaration order and map keys in sorted order, so the encoding is
@@ -1720,7 +1678,7 @@ func runtimeOf(spec api.WorkloadSpec) (api.Runtime, error) {
 //
 // A workload reading none of these hashes exactly as it would without this, which is
 // what stops an upgrade replacing every running instance.
-func canonicalise(spec api.WorkloadSpec, read references, digest string) ([]byte, string, error) {
+func canonicalise(spec manifest.Spec, read references, digest string) ([]byte, string, error) {
 	encoded, err := json.Marshal(spec)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to encode workload spec: %w", err)
@@ -1787,14 +1745,14 @@ func (r references) hashed() (map[string]string, map[string]string) {
 }
 
 func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, reported Health, lastError string, lastErrorAt time.Time) (Workload, error) {
-	var spec api.WorkloadSpec
-	if err := json.Unmarshal(row.Spec, &spec); err != nil {
-		return Workload{}, fmt.Errorf("failed to decode workload spec: %w", err)
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
+		return Workload{}, err
 	}
 
 	deleting := !row.DeletedAt.IsZero()
 	suspended := !row.SuspendedAt.IsZero()
-	policy := wire.ToSpec(spec).Restart
+	policy := spec.Restart
 
 	// An instance a driver keeps only so that its output can still be read is left out
 	// of what the workload reports. It has ended and nothing will restart it, so
@@ -1822,7 +1780,7 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 	// would be worse than no answer.
 	var next time.Time
 	if !suspended {
-		next = nextRun(wire.ToSpec(spec).Schedule, instances, row.UpdatedAt)
+		next = nextRun(spec.Schedule, instances, row.UpdatedAt)
 	}
 
 	return Workload{
@@ -1978,7 +1936,7 @@ type Workload struct {
 	// Which runtime the specification names.
 	Runtime manifest.Runtime
 	// The specification that was submitted.
-	Spec api.WorkloadSpec
+	Spec manifest.Spec
 	// Arbitrary key-value pairs attached to the workload.
 	Labels map[string]string
 	// The instances the driver is currently running for the workload.

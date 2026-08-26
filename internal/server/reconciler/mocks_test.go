@@ -7,11 +7,11 @@ package reconciler_test
 import (
 	"context"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/pkg/manifest"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -844,7 +844,7 @@ func (_m *MockMounts) EXPECT() *MockMounts_Expecter {
 }
 
 // Deliver provides a mock function for the type MockMounts
-func (_mock *MockMounts) Deliver(ctx context.Context, id string, version int, spec api.WorkloadSpec) ([]driver.Volume, error) {
+func (_mock *MockMounts) Deliver(ctx context.Context, id string, version int, spec manifest.Spec) ([]driver.Volume, error) {
 	ret := _mock.Called(ctx, id, version, spec)
 
 	if len(ret) == 0 {
@@ -853,17 +853,17 @@ func (_mock *MockMounts) Deliver(ctx context.Context, id string, version int, sp
 
 	var r0 []driver.Volume
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, api.WorkloadSpec) ([]driver.Volume, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, manifest.Spec) ([]driver.Volume, error)); ok {
 		return returnFunc(ctx, id, version, spec)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, api.WorkloadSpec) []driver.Volume); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, manifest.Spec) []driver.Volume); ok {
 		r0 = returnFunc(ctx, id, version, spec)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]driver.Volume)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int, api.WorkloadSpec) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int, manifest.Spec) error); ok {
 		r1 = returnFunc(ctx, id, version, spec)
 	} else {
 		r1 = ret.Error(1)
@@ -880,12 +880,12 @@ type MockMounts_Deliver_Call struct {
 //   - ctx context.Context
 //   - id string
 //   - version int
-//   - spec api.WorkloadSpec
+//   - spec manifest.Spec
 func (_e *MockMounts_Expecter) Deliver(ctx any, id any, version any, spec any) *MockMounts_Deliver_Call {
 	return &MockMounts_Deliver_Call{Call: _e.mock.On("Deliver", ctx, id, version, spec)}
 }
 
-func (_c *MockMounts_Deliver_Call) Run(run func(ctx context.Context, id string, version int, spec api.WorkloadSpec)) *MockMounts_Deliver_Call {
+func (_c *MockMounts_Deliver_Call) Run(run func(ctx context.Context, id string, version int, spec manifest.Spec)) *MockMounts_Deliver_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -899,9 +899,9 @@ func (_c *MockMounts_Deliver_Call) Run(run func(ctx context.Context, id string, 
 		if args[2] != nil {
 			arg2 = args[2].(int)
 		}
-		var arg3 api.WorkloadSpec
+		var arg3 manifest.Spec
 		if args[3] != nil {
-			arg3 = args[3].(api.WorkloadSpec)
+			arg3 = args[3].(manifest.Spec)
 		}
 		run(
 			arg0,
@@ -918,7 +918,7 @@ func (_c *MockMounts_Deliver_Call) Return(volumes []driver.Volume, err error) *M
 	return _c
 }
 
-func (_c *MockMounts_Deliver_Call) RunAndReturn(run func(ctx context.Context, id string, version int, spec api.WorkloadSpec) ([]driver.Volume, error)) *MockMounts_Deliver_Call {
+func (_c *MockMounts_Deliver_Call) RunAndReturn(run func(ctx context.Context, id string, version int, spec manifest.Spec) ([]driver.Volume, error)) *MockMounts_Deliver_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1026,7 +1026,7 @@ func (_c *MockMounts_Prune_Call) RunAndReturn(run func(keep []string) error) *Mo
 }
 
 // Refresh provides a mock function for the type MockMounts
-func (_mock *MockMounts) Refresh(ctx context.Context, name string, id string, version int, spec api.WorkloadSpec) ([]service.Refresh, error) {
+func (_mock *MockMounts) Refresh(ctx context.Context, name string, id string, version int, spec manifest.Spec) ([]service.Refresh, error) {
 	ret := _mock.Called(ctx, name, id, version, spec)
 
 	if len(ret) == 0 {
@@ -1035,17 +1035,17 @@ func (_mock *MockMounts) Refresh(ctx context.Context, name string, id string, ve
 
 	var r0 []service.Refresh
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, api.WorkloadSpec) ([]service.Refresh, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, manifest.Spec) ([]service.Refresh, error)); ok {
 		return returnFunc(ctx, name, id, version, spec)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, api.WorkloadSpec) []service.Refresh); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, manifest.Spec) []service.Refresh); ok {
 		r0 = returnFunc(ctx, name, id, version, spec)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]service.Refresh)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, int, api.WorkloadSpec) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, int, manifest.Spec) error); ok {
 		r1 = returnFunc(ctx, name, id, version, spec)
 	} else {
 		r1 = ret.Error(1)
@@ -1063,12 +1063,12 @@ type MockMounts_Refresh_Call struct {
 //   - name string
 //   - id string
 //   - version int
-//   - spec api.WorkloadSpec
+//   - spec manifest.Spec
 func (_e *MockMounts_Expecter) Refresh(ctx any, name any, id any, version any, spec any) *MockMounts_Refresh_Call {
 	return &MockMounts_Refresh_Call{Call: _e.mock.On("Refresh", ctx, name, id, version, spec)}
 }
 
-func (_c *MockMounts_Refresh_Call) Run(run func(ctx context.Context, name string, id string, version int, spec api.WorkloadSpec)) *MockMounts_Refresh_Call {
+func (_c *MockMounts_Refresh_Call) Run(run func(ctx context.Context, name string, id string, version int, spec manifest.Spec)) *MockMounts_Refresh_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1086,9 +1086,9 @@ func (_c *MockMounts_Refresh_Call) Run(run func(ctx context.Context, name string
 		if args[3] != nil {
 			arg3 = args[3].(int)
 		}
-		var arg4 api.WorkloadSpec
+		var arg4 manifest.Spec
 		if args[4] != nil {
-			arg4 = args[4].(api.WorkloadSpec)
+			arg4 = args[4].(manifest.Spec)
 		}
 		run(
 			arg0,
@@ -1106,7 +1106,7 @@ func (_c *MockMounts_Refresh_Call) Return(refreshs []service.Refresh, err error)
 	return _c
 }
 
-func (_c *MockMounts_Refresh_Call) RunAndReturn(run func(ctx context.Context, name string, id string, version int, spec api.WorkloadSpec) ([]service.Refresh, error)) *MockMounts_Refresh_Call {
+func (_c *MockMounts_Refresh_Call) RunAndReturn(run func(ctx context.Context, name string, id string, version int, spec manifest.Spec) ([]service.Refresh, error)) *MockMounts_Refresh_Call {
 	_c.Call.Return(run)
 	return _c
 }

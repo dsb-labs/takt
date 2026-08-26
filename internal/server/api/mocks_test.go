@@ -8,10 +8,10 @@ import (
 	"context"
 	"io"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/pkg/manifest"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -1070,7 +1070,7 @@ func (_m *MockWorkloadService) EXPECT() *MockWorkloadService_Expecter {
 }
 
 // Apply provides a mock function for the type MockWorkloadService
-func (_mock *MockWorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (service.Workload, bool, error) {
+func (_mock *MockWorkloadService) Apply(ctx context.Context, spec manifest.Spec) (service.Workload, bool, error) {
 	ret := _mock.Called(ctx, spec)
 
 	if len(ret) == 0 {
@@ -1080,20 +1080,20 @@ func (_mock *MockWorkloadService) Apply(ctx context.Context, spec api.WorkloadSp
 	var r0 service.Workload
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, api.WorkloadSpec) (service.Workload, bool, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Spec) (service.Workload, bool, error)); ok {
 		return returnFunc(ctx, spec)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, api.WorkloadSpec) service.Workload); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Spec) service.Workload); ok {
 		r0 = returnFunc(ctx, spec)
 	} else {
 		r0 = ret.Get(0).(service.Workload)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, api.WorkloadSpec) bool); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Spec) bool); ok {
 		r1 = returnFunc(ctx, spec)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, api.WorkloadSpec) error); ok {
+	if returnFunc, ok := ret.Get(2).(func(context.Context, manifest.Spec) error); ok {
 		r2 = returnFunc(ctx, spec)
 	} else {
 		r2 = ret.Error(2)
@@ -1108,20 +1108,20 @@ type MockWorkloadService_Apply_Call struct {
 
 // Apply is a helper method to define mock.On call
 //   - ctx context.Context
-//   - spec api.WorkloadSpec
+//   - spec manifest.Spec
 func (_e *MockWorkloadService_Expecter) Apply(ctx any, spec any) *MockWorkloadService_Apply_Call {
 	return &MockWorkloadService_Apply_Call{Call: _e.mock.On("Apply", ctx, spec)}
 }
 
-func (_c *MockWorkloadService_Apply_Call) Run(run func(ctx context.Context, spec api.WorkloadSpec)) *MockWorkloadService_Apply_Call {
+func (_c *MockWorkloadService_Apply_Call) Run(run func(ctx context.Context, spec manifest.Spec)) *MockWorkloadService_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 api.WorkloadSpec
+		var arg1 manifest.Spec
 		if args[1] != nil {
-			arg1 = args[1].(api.WorkloadSpec)
+			arg1 = args[1].(manifest.Spec)
 		}
 		run(
 			arg0,
@@ -1136,7 +1136,7 @@ func (_c *MockWorkloadService_Apply_Call) Return(workload service.Workload, b bo
 	return _c
 }
 
-func (_c *MockWorkloadService_Apply_Call) RunAndReturn(run func(ctx context.Context, spec api.WorkloadSpec) (service.Workload, bool, error)) *MockWorkloadService_Apply_Call {
+func (_c *MockWorkloadService_Apply_Call) RunAndReturn(run func(ctx context.Context, spec manifest.Spec) (service.Workload, bool, error)) *MockWorkloadService_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -69,14 +69,6 @@ type (
 		// How long to wait before the first restart, doubling on each consecutive
 		// failure. Zero means DefaultRestartDelay.
 		Delay time.Duration `json:"delay,omitempty"`
-
-		// The delay field as written when it did not parse, reported by validation
-		// so that a typo is an error rather than a silent default.
-		//
-		// Exported because the mapping that records it lives outside this package,
-		// and tagged out of both encodings because it describes a specification
-		// rather than being part of one.
-		InvalidDelay string `json:"-" yaml:"-"`
 	}
 
 	// The Spec type describes the desired state of a workload.
@@ -151,13 +143,6 @@ type (
 		// manifest would have to spell this "startperiod" while the wire format spells
 		// it "startPeriod".
 		StartPeriod time.Duration `yaml:"startPeriod" json:"startPeriod,omitempty"`
-
-		// The timing fields that were present but unparseable, reported by
-		// validation so that a typo is an error rather than a silent default.
-		//
-		// Exported and tagged out of both encodings for the reason
-		// Restart.InvalidDelay is.
-		Invalid []string `json:"-" yaml:"-"`
 	}
 
 	// The Resources type describes the resource limits a workload runs under.
@@ -250,6 +235,20 @@ type (
 	// derived from the field that is present rather than from a discriminator, as a
 	// specification's runtime is.
 	VolumeMount struct {
+		// Where the volume's data is on the host, resolved by the server from the
+		// named volume. Empty for a mounted secret or variable.
+		//
+		// Tagged out of the YAML encoding because it is not the operator's to write:
+		// a manifest naming a path here is rejected as an unknown field. It is part
+		// of the JSON encoding because the server stores it, as it stores an
+		// allocated host port, so that the runtime is given a path rather than a
+		// name to look up. Being stored, it is covered by the hash, so a volume whose
+		// path changed replaces the instances bound to the old one.
+		//
+		// A mounted value carries none. Where the server writes the file is its own
+		// layout and changes with every version of the workload, so storing it would
+		// move the hash for a reason the operator did not ask for.
+		From string `json:"from,omitempty" yaml:"-"`
 		// The volume to mount, which must already exist.
 		Name string `json:"name,omitempty"`
 		// The secret to mount as a file, which must already exist.

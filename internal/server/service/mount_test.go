@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -25,8 +24,8 @@ func TestMountService_Deliver(t *testing.T) {
 		svc, root := newMountService(t, secrets, variables)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
-			api.VolumeMount{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"},
-			api.VolumeMount{Var: new("app-config"), To: "/etc/app/config.json"},
+			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
+			manifest.VolumeMount{Var: "app-config", To: "/etc/app/config.json"},
 		))
 		require.NoError(t, err)
 		require.Len(t, mounts, 2)
@@ -55,7 +54,7 @@ func TestMountService_Deliver(t *testing.T) {
 		svc, root := newMountService(t, secrets, nil)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
-			api.VolumeMount{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"},
+			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
 		))
 		require.NoError(t, err)
 		require.Len(t, mounts, 1)
@@ -81,8 +80,8 @@ func TestMountService_Deliver(t *testing.T) {
 		svc, _ := newMountService(t, secrets, variables)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
-			api.VolumeMount{Secret: new("shared"), To: "/etc/secret"},
-			api.VolumeMount{Var: new("shared"), To: "/etc/variable"},
+			manifest.VolumeMount{Secret: "shared", To: "/etc/secret"},
+			manifest.VolumeMount{Var: "shared", To: "/etc/variable"},
 		))
 		require.NoError(t, err)
 		require.Len(t, mounts, 2)
@@ -105,7 +104,7 @@ func TestMountService_Deliver(t *testing.T) {
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("second", nil).Once()
 
 		svc, _ := newMountService(t, secrets, nil)
-		spec := mountSpec(api.VolumeMount{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"})
+		spec := mountSpec(manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"})
 
 		first, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
 		require.NoError(t, err)
@@ -128,7 +127,7 @@ func TestMountService_Deliver(t *testing.T) {
 		svc, root := newMountService(t, nil, nil)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
-			api.VolumeMount{Name: new("example-data"), To: "/var/lib/example", From: new("/somewhere")},
+			manifest.VolumeMount{Name: "example-data", To: "/var/lib/example", From: "/somewhere"},
 		))
 		require.NoError(t, err)
 		assert.Empty(t, mounts)
@@ -148,7 +147,7 @@ func TestMountService_Deliver(t *testing.T) {
 		// Writing an empty file would hand the workload a value orca does not hold,
 		// which it would then use.
 		_, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
-			api.VolumeMount{Secret: new("nope"), To: "/etc/tls/cert.pem"},
+			manifest.VolumeMount{Secret: "nope", To: "/etc/tls/cert.pem"},
 		))
 		assert.ErrorIs(t, err, service.ErrSecretNotFound)
 	})
@@ -157,7 +156,7 @@ func TestMountService_Deliver(t *testing.T) {
 		svc, _ := newMountService(t, nil, nil)
 
 		_, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
-			api.VolumeMount{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"},
+			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
 		))
 		assert.ErrorIs(t, err, service.ErrSecretNotFound)
 	})
@@ -169,7 +168,7 @@ func TestMountService_Deliver(t *testing.T) {
 		// not looked at.
 		for _, id := range []string{"", ".", "..", "../escape", "with/separator", "UPPERCASE"} {
 			_, err := svc.Deliver(t.Context(), id, 1, mountSpec(
-				api.VolumeMount{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"},
+				manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
 			))
 			assert.ErrorIs(t, err, service.ErrInvalidMount, "accepted the identifier %q", id)
 		}
@@ -179,11 +178,11 @@ func TestMountService_Deliver(t *testing.T) {
 func TestMountService_Refresh(t *testing.T) {
 	t.Parallel()
 
-	signalled := func() api.WorkloadSpec {
-		return mountSpec(api.VolumeMount{
-			Secret: new("tls-cert"),
+	signalled := func() manifest.Spec {
+		return mountSpec(manifest.VolumeMount{
+			Secret: "tls-cert",
 			To:     "/etc/tls/cert.pem",
-			Signal: new(api.SIGHUP),
+			Signal: manifest.SignalHUP,
 		})
 	}
 
@@ -258,7 +257,7 @@ func TestMountService_Refresh(t *testing.T) {
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("first", nil).Once()
 
 		svc, _ := newMountService(t, secrets, nil)
-		spec := mountSpec(api.VolumeMount{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"})
+		spec := mountSpec(manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"})
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
 		require.NoError(t, err)
@@ -290,7 +289,7 @@ func TestMountService_Refresh(t *testing.T) {
 		svc, _ := newMountService(t, nil, nil)
 
 		refreshed, err := svc.Refresh(t.Context(), "example", testVolumeID, 1, mountSpec(
-			api.VolumeMount{Name: new("example-data"), To: "/var/lib/example"},
+			manifest.VolumeMount{Name: "example-data", To: "/var/lib/example"},
 		))
 		require.NoError(t, err)
 		assert.Empty(t, refreshed)
@@ -307,7 +306,7 @@ func TestMountService_Forget(t *testing.T) {
 		svc, _ := newMountService(t, secrets, nil)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
-			api.VolumeMount{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"},
+			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
 		))
 		require.NoError(t, err)
 		require.Len(t, mounts, 1)
@@ -343,7 +342,7 @@ func TestMountService_Prune(t *testing.T) {
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a certificate", nil).Twice()
 
 		svc, _ := newMountService(t, secrets, nil)
-		spec := mountSpec(api.VolumeMount{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"})
+		spec := mountSpec(manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"})
 
 		kept, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
 		require.NoError(t, err)
@@ -374,9 +373,9 @@ func TestMountService_Prune(t *testing.T) {
 
 // mountSpec returns a container specification mounting the given mounts, which is all
 // the mount service reads of one.
-func mountSpec(mounts ...api.VolumeMount) api.WorkloadSpec {
+func mountSpec(mounts ...manifest.VolumeMount) manifest.Spec {
 	spec := containerSpec("example", "example/example:latest")
-	spec.Volumes = &mounts
+	spec.Volumes = mounts
 
 	return spec
 }

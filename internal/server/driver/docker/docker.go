@@ -27,9 +27,9 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/telemetry"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 // Name is how this driver identifies itself, and is what the server maps a
@@ -144,14 +144,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", ErrNotContainerWorkload
 	}
 
-	// The policy is read through the pointer here so that a specification stored
-	// before the field existed, which carries none, keeps today's behaviour.
-	var policy api.PullPolicy
-	if spec.Pull != nil {
-		policy = *spec.Pull
-	}
-
-	if err := d.ensureImage(ctx, spec.Image, policy); err != nil {
+	if err := d.ensureImage(ctx, spec.Image, spec.Pull); err != nil {
 		return "", err
 	}
 
@@ -186,8 +179,8 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 			Image: spec.Image,
 			// Nil rather than empty when the workload names no command, so the image
 			// keeps the one it declares. An empty slice would replace it with nothing.
-			Cmd:          command(spec.Command),
-			User:         user(spec.User),
+			Cmd:          spec.Command,
+			User:         spec.User,
 			Env:          environment(w.Env),
 			Labels:       labels,
 			ExposedPorts: exposed,
@@ -203,7 +196,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 			SecurityOpt:    []string{"no-new-privileges"},
 			CapAdd:         capabilities(spec.CapAdd),
 			CapDrop:        capabilities(spec.CapDrop),
-			ReadonlyRootfs: readOnly(spec.ReadOnly),
+			ReadonlyRootfs: spec.ReadOnly,
 		},
 		nil, nil,
 		containerName(w.Name, w.Version, attempt),
@@ -588,13 +581,13 @@ func (d *Driver) inspect(ctx context.Context, instance *driver.Instance) {
 
 // ensureImage makes the named image available under the workload's pull policy.
 //
-// The empty policy means api.PullPolicyMissing, so a specification written before
+// The empty policy means manifest.PullMissing, so a specification written before
 // the policy existed behaves as it always did. An always policy pulls without
 // looking at what is held locally, since the point of asking for it is to fetch the
 // tag's current content. A never policy must fail when the image is absent rather
 // than falling through to a pull, or it is indistinguishable from missing.
-func (d *Driver) ensureImage(ctx context.Context, ref string, policy api.PullPolicy) error {
-	if policy != api.PullPolicyAlways {
+func (d *Driver) ensureImage(ctx context.Context, ref string, policy manifest.PullPolicy) error {
+	if policy != manifest.PullAlways {
 		images, err := d.client.ImageList(ctx, image.ListOptions{
 			Filters: filters.NewArgs(filters.Arg("reference", ref)),
 		})
@@ -606,7 +599,7 @@ func (d *Driver) ensureImage(ctx context.Context, ref string, policy api.PullPol
 			return nil
 		}
 
-		if policy == api.PullPolicyNever {
+		if policy == manifest.PullNever {
 			return fmt.Errorf("image %q is not present and the pull policy forbids pulling it", ref)
 		}
 	}
@@ -887,39 +880,14 @@ func supersededBy(containers []container.Summary) map[string]bool {
 	return superseded
 }
 
-// command returns the command a container should run, or nil when the specification
-// names none so that the image keeps the one it declares.
-func command(cmd *[]string) []string {
-	if cmd == nil {
-		return nil
-	}
-
-	return *cmd
-}
-
-// user returns the user a container should run as, or empty when the specification
-// names none so that the image keeps the one it declares.
-func user(name *string) string {
-	if name == nil {
-		return ""
-	}
-
-	return *name
-}
-
-// readOnly reports whether the specification asks for a read-only root filesystem.
-func readOnly(value *bool) bool {
-	return value != nil && *value
-}
-
 // capabilities converts a specification's capability list into the type docker
 // expects, or nil when the specification names none.
-func capabilities(names *[]string) strslice.StrSlice {
-	if names == nil {
+func capabilities(names []string) strslice.StrSlice {
+	if len(names) == 0 {
 		return nil
 	}
 
-	return strslice.StrSlice(*names)
+	return strslice.StrSlice(names)
 }
 
 // resources converts a specification's resource limits into the cgroup settings
@@ -929,17 +897,17 @@ func capabilities(names *[]string) strslice.StrSlice {
 // Validation proved the memory size parses, so an error here means the stored
 // specification and the rules have diverged rather than that the operator made a
 // mistake.
-func resources(spec *api.ResourcesSpec) (container.Resources, error) {
+func resources(spec *manifest.Resources) (container.Resources, error) {
 	if spec == nil {
 		return container.Resources{}, nil
 	}
 
 	var limits container.Resources
 
-	if spec.Memory != nil && *spec.Memory != "" {
-		memory, err := units.RAMInBytes(*spec.Memory)
+	if spec.Memory != "" {
+		memory, err := units.RAMInBytes(spec.Memory)
 		if err != nil {
-			return container.Resources{}, fmt.Errorf("failed to parse memory limit %q: %w", *spec.Memory, err)
+			return container.Resources{}, fmt.Errorf("failed to parse memory limit %q: %w", spec.Memory, err)
 		}
 
 		limits.Memory = memory
@@ -949,15 +917,15 @@ func resources(spec *api.ResourcesSpec) (container.Resources, error) {
 		limits.MemorySwap = memory
 	}
 
-	if spec.CPU != nil && *spec.CPU > 0 {
+	if spec.CPU > 0 {
 		// Docker expresses a CPU limit in billionths of a core, so half a core is
 		// 500 million. Rounded rather than truncated so the workload gets the
 		// nearest representable limit to the one it asked for.
-		limits.NanoCPUs = int64(math.Round(*spec.CPU * 1e9))
+		limits.NanoCPUs = int64(math.Round(spec.CPU * 1e9))
 	}
 
-	if spec.Pids != nil && *spec.Pids > 0 {
-		limits.PidsLimit = new(int64(*spec.Pids))
+	if spec.Pids > 0 {
+		limits.PidsLimit = new(int64(spec.Pids))
 	}
 
 	return limits, nil

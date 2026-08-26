@@ -10,13 +10,9 @@
 package driver
 
 import (
-	"encoding/json"
-	"fmt"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -93,7 +89,7 @@ type (
 		Labels map[string]string
 		// The specification the workload was stored with, which carries the runtime
 		// block the driver reads.
-		Spec api.WorkloadSpec
+		Spec manifest.Spec
 	}
 
 	// The Instance type describes one unit of work a driver is running on behalf of
@@ -221,9 +217,9 @@ type (
 // is the driver's business, and a server that understood each of them would have to
 // change every time a runtime was added.
 func NewWorkload(row database.Workload) (Workload, error) {
-	var spec api.WorkloadSpec
-	if err := json.Unmarshal(row.Spec, &spec); err != nil {
-		return Workload{}, fmt.Errorf("failed to decode workload spec: %w", err)
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
+		return Workload{}, err
 	}
 
 	w := Workload{
@@ -235,50 +231,47 @@ func NewWorkload(row database.Workload) (Workload, error) {
 		Spec:     spec,
 	}
 
-	if spec.Env != nil {
-		w.Env = *spec.Env
-	}
+	w.Env = spec.Env
 
-	if spec.Ports != nil {
-		w.Ports = make([]Port, 0, len(*spec.Ports))
-		for _, mapping := range *spec.Ports {
+	if len(spec.Ports) > 0 {
+		w.Ports = make([]Port, 0, len(spec.Ports))
+		for _, mapping := range spec.Ports {
 			// A specification reaching a driver has had its ports resolved, so a
 			// mapping with no host port is a workload the server has not finished
 			// settling. It is left for a later pass rather than published wrongly.
-			if mapping.From == nil {
+			if mapping.From == 0 {
 				continue
 			}
 
-			protocol := string(api.TCP)
-			if mapping.Protocol != nil {
-				protocol = string(*mapping.Protocol)
+			protocol := string(manifest.ProtocolTCP)
+			if mapping.Protocol != "" {
+				protocol = string(mapping.Protocol)
 			}
 
-			w.Ports = append(w.Ports, Port{Container: mapping.To, Host: *mapping.From, Protocol: protocol})
+			w.Ports = append(w.Ports, Port{Container: mapping.To, Host: mapping.From, Protocol: protocol})
 		}
 	}
 
-	if spec.Volumes != nil {
-		w.Volumes = make([]Volume, 0, len(*spec.Volumes))
-		for _, mount := range *spec.Volumes {
+	if len(spec.Volumes) > 0 {
+		w.Volumes = make([]Volume, 0, len(spec.Volumes))
+		for _, mount := range spec.Volumes {
 			// Only a volume is resolved here, and which source a mount names is asked
 			// of the manifest package rather than inferred from which field is set. A
 			// mounted secret or variable is written as the workload starts and added to
 			// this by whoever wrote it, so that nothing about a value ever reaches a
 			// stored specification.
-			converted := wire.ToVolumeMount(mount)
-			if kind, err := manifest.KindOf(converted); err != nil || kind != manifest.MountVolume {
+			if kind, err := manifest.KindOf(mount); err != nil || kind != manifest.MountVolume {
 				continue
 			}
 
 			// Unresolved for the same reason a port can be: the server had not
 			// finished settling the workload. Mounting nothing would be worse than
 			// waiting, since the workload would start and write somewhere else.
-			if mount.From == nil {
+			if mount.From == "" {
 				continue
 			}
 
-			w.Volumes = append(w.Volumes, Volume{Name: converted.Name, Host: *mount.From, Target: mount.To})
+			w.Volumes = append(w.Volumes, Volume{Name: mount.Name, Host: mount.From, Target: mount.To})
 		}
 	}
 

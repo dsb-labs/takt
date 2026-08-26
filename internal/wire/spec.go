@@ -12,6 +12,7 @@
 package wire
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
@@ -27,14 +28,29 @@ import (
 // The defaults are resolved by the canonical package before the specification is
 // returned, so a workload reaching orca over HTTP means what the same workload
 // written as a manifest file means.
-func ToSpec(spec api.WorkloadSpec) manifest.Spec {
+//
+// A duration that does not parse is an error. The wire format spells one as a string,
+// so this is the only place that reads it, and a specification carrying one orca
+// cannot understand is not a specification it can run.
+func ToSpec(spec api.WorkloadSpec) (manifest.Spec, error) {
 	out := manifest.Spec{
 		Version: spec.Version,
 		Name:    spec.Name,
 	}
 
+	restart, err := toRestart(spec.Restart)
+	if err != nil {
+		return manifest.Spec{}, err
+	}
+
+	health, err := toHealth(spec.Health)
+	if err != nil {
+		return manifest.Spec{}, err
+	}
+
 	out.Schedule = toSchedule(spec.Schedule)
-	out.Restart = toRestart(spec.Restart)
+	out.Restart = restart
+	out.Health = health
 
 	if spec.Labels != nil {
 		out.Labels = *spec.Labels
@@ -67,7 +83,6 @@ func ToSpec(spec api.WorkloadSpec) manifest.Spec {
 		}
 	}
 
-	out.Health = toHealth(spec.Health)
 	out.Resources = toResources(spec.Resources)
 
 	if spec.Container != nil {
@@ -99,7 +114,7 @@ func ToSpec(spec api.WorkloadSpec) manifest.Spec {
 
 	out.Defaults()
 
-	return out
+	return out, nil
 }
 
 // ToVolumeMount maps a wire mount onto the canonical shape.
@@ -116,6 +131,9 @@ func ToSpec(spec api.WorkloadSpec) manifest.Spec {
 func ToVolumeMount(mount api.VolumeMount) manifest.VolumeMount {
 	out := manifest.VolumeMount{To: mount.To}
 
+	if mount.From != nil {
+		out.From = *mount.From
+	}
 	if mount.Name != nil {
 		out.Name = *mount.Name
 	}
@@ -132,15 +150,11 @@ func ToVolumeMount(mount api.VolumeMount) manifest.VolumeMount {
 	return out
 }
 
-// toHealth maps a wire health check onto the canonical shape.
-//
-// A duration that doesn't parse is recorded rather than returned, because this is
-// also the path a client uses to read a workload back, where an error about a value
-// the server already accepted would be nothing the caller could act on. Validation
-// reports it instead.
-func toHealth(spec *api.HealthSpec) *manifest.Health {
+// toHealth maps a wire health check onto the canonical shape, returning an error
+// when one of the timing fields is not a duration.
+func toHealth(spec *api.HealthSpec) (*manifest.Health, error) {
 	if spec == nil {
-		return nil
+		return nil, nil
 	}
 
 	var health manifest.Health
@@ -158,34 +172,50 @@ func toHealth(spec *api.HealthSpec) *manifest.Health {
 		health.Retries = *spec.Retries
 	}
 
-	for _, field := range []struct {
-		name  string
-		value *string
-		into  *time.Duration
-	}{
-		{"interval", spec.Interval, &health.Interval},
-		{"timeout", spec.Timeout, &health.Timeout},
-		{"startPeriod", spec.StartPeriod, &health.StartPeriod},
-	} {
-		if field.value == nil || *field.value == "" {
-			continue
-		}
-
-		if parsed, err := time.ParseDuration(*field.value); err == nil {
-			*field.into = parsed
-		} else {
-			health.Invalid = append(health.Invalid, field.name)
-		}
+	interval, err := duration(spec.Interval)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse health check interval: %w", err)
 	}
 
-	return &health
+	health.Interval = interval
+
+	timeout, err := duration(spec.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse health check timeout: %w", err)
+	}
+
+	health.Timeout = timeout
+
+	startPeriod, err := duration(spec.StartPeriod)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse health check start period: %w", err)
+	}
+
+	health.StartPeriod = startPeriod
+
+	return &health, nil
+}
+
+// duration parses an optional duration, which is zero when the field is absent or
+// empty. The canonical package resolves the default for a timing field left unset.
+func duration(value *string) (time.Duration, error) {
+	if value == nil || *value == "" {
+		return 0, nil
+	}
+
+	parsed, err := time.ParseDuration(*value)
+	if err != nil {
+		return 0, fmt.Errorf("%q is not a duration", *value)
+	}
+
+	return parsed, nil
 }
 
 // toResources maps wire resource limits onto the canonical shape.
 //
-// The memory size is carried across as written rather than parsed here, so a value
-// that does not parse survives to be reported by validation instead of erroring on
-// the path a client uses to read a workload back.
+// The memory size is carried across as written rather than parsed, unlike a duration.
+// The stored specification has to hold exactly what the manifest said, so the size is
+// kept as text and validation proves it parses.
 func toResources(spec *api.ResourcesSpec) *manifest.Resources {
 	if spec == nil {
 		return nil
@@ -221,35 +251,33 @@ func toSchedule(spec *api.ScheduleSpec) *manifest.Schedule {
 	return &schedule
 }
 
-// toRestart maps a wire restart policy onto the canonical shape.
+// toRestart maps a wire restart policy onto the canonical shape, returning an error
+// when the delay is not a duration.
 //
 // A nil policy still produces one, because every workload has an answer to what
 // happens when it ends. What that answer is comes from the defaults ToSpec resolves.
-//
-// A delay that does not parse is recorded rather than returned, because this is also
-// the path a client uses to read a workload back, where an error about a value the
-// server already accepted would be nothing the caller could act on. Validation reports
-// it instead.
-func toRestart(spec *api.RestartSpec) *manifest.Restart {
+func toRestart(spec *api.RestartSpec) (*manifest.Restart, error) {
 	restart := new(manifest.Restart)
 
-	if spec != nil {
-		if spec.Policy != nil {
-			restart.Policy = manifest.RestartPolicy(*spec.Policy)
-		}
-		if spec.Attempts != nil {
-			restart.Attempts = *spec.Attempts
-		}
-		if spec.Delay != nil && *spec.Delay != "" {
-			if parsed, err := time.ParseDuration(*spec.Delay); err == nil {
-				restart.Delay = parsed
-			} else {
-				restart.InvalidDelay = *spec.Delay
-			}
-		}
+	if spec == nil {
+		return restart, nil
 	}
 
-	return restart
+	if spec.Policy != nil {
+		restart.Policy = manifest.RestartPolicy(*spec.Policy)
+	}
+	if spec.Attempts != nil {
+		restart.Attempts = *spec.Attempts
+	}
+
+	delay, err := duration(spec.Delay)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse restart delay: %w", err)
+	}
+
+	restart.Delay = delay
+
+	return restart, nil
 }
 
 // FromSpec maps a canonical specification onto the type the API accepts.
@@ -354,6 +382,12 @@ func FromSpec(s manifest.Spec) api.WorkloadSpec {
 func FromVolumeMount(mount manifest.VolumeMount) api.VolumeMount {
 	out := api.VolumeMount{To: mount.To}
 
+	// Sent so that a caller reading a workload back sees where its volume lives, the
+	// way it sees the host port the server settled on. A caller submitting one leaves
+	// it empty, and the server resolves it from the volume that is named.
+	if mount.From != "" {
+		out.From = new(mount.From)
+	}
 	if mount.Name != "" {
 		out.Name = new(mount.Name)
 	}

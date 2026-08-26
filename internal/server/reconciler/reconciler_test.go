@@ -17,7 +17,6 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
@@ -1309,7 +1308,7 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 	tt := []struct {
 		Name        string
 		Cron        string
-		Overlap     api.OverlapPolicy
+		Overlap     manifest.OverlapPolicy
 		Now         time.Time
 		Instances   []driver.Instance
 		ExpectStart bool
@@ -1347,7 +1346,7 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 			// means: the occurrence is honoured and the run is cut short.
 			Name:    "an occurrence is due while a run is still going, replace",
 			Cron:    daily,
-			Overlap: api.Replace,
+			Overlap: manifest.OverlapReplace,
 			Now:     ran.Add(24 * time.Hour),
 			Instances: []driver.Instance{
 				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning, StartedAt: ran},
@@ -1360,7 +1359,7 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 			// rather than the run being cut short.
 			Name:    "an occurrence is due while a run is still going, skip",
 			Cron:    daily,
-			Overlap: api.Skip,
+			Overlap: manifest.OverlapSkip,
 			Now:     ran.Add(24 * time.Hour),
 			Instances: []driver.Instance{
 				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning, StartedAt: ran},
@@ -1575,20 +1574,20 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 
 	tt := []struct {
 		Name          string
-		Policy        api.RestartPolicy
+		Policy        manifest.RestartPolicy
 		State         driver.State
 		ExitCode      int
 		ExpectRestart bool
 	}{
 		{
 			Name:          "always restarts a clean exit",
-			Policy:        api.RestartPolicyAlways,
+			Policy:        manifest.RestartAlways,
 			State:         driver.StateExited,
 			ExpectRestart: true,
 		},
 		{
 			Name:          "always restarts a failure",
-			Policy:        api.RestartPolicyAlways,
+			Policy:        manifest.RestartAlways,
 			State:         driver.StateFailed,
 			ExitCode:      1,
 			ExpectRestart: true,
@@ -1597,20 +1596,20 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 			// The job did what it was asked to do, so running it again would repeat
 			// work nobody asked to repeat.
 			Name:          "on-failure leaves a clean exit alone",
-			Policy:        api.RestartPolicyOnFailure,
+			Policy:        manifest.RestartOnFailure,
 			State:         driver.StateExited,
 			ExpectRestart: false,
 		},
 		{
 			Name:          "on-failure restarts a failure",
-			Policy:        api.RestartPolicyOnFailure,
+			Policy:        manifest.RestartOnFailure,
 			State:         driver.StateFailed,
 			ExitCode:      1,
 			ExpectRestart: true,
 		},
 		{
 			Name:          "never leaves a clean exit alone",
-			Policy:        api.RestartPolicyNever,
+			Policy:        manifest.RestartNever,
 			State:         driver.StateExited,
 			ExpectRestart: false,
 		},
@@ -1618,7 +1617,7 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 			// Retired without being called a success: the reconciler stops acting on
 			// it, and the state it reports still says the workload failed.
 			Name:          "never leaves a failure alone",
-			Policy:        api.RestartPolicyNever,
+			Policy:        manifest.RestartNever,
 			State:         driver.StateFailed,
 			ExitCode:      1,
 			ExpectRestart: false,
@@ -1688,7 +1687,7 @@ func TestReconciler_Run_RerunsARetiredWorkloadWhenItsSpecChanges(t *testing.T) {
 	// moved on. That is what runs a finished job again: the operator changed what they
 	// asked for, so what ran is out of date.
 	row := storedWorkload("example", "hash-two")
-	row.Spec = specWithRestart("example", api.RestartPolicyOnFailure)
+	row.Spec = specWithRestart("example", manifest.RestartOnFailure)
 
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
@@ -1742,12 +1741,12 @@ func TestReconciler_Run_ForgetsChecksOfARetiredWorkload(t *testing.T) {
 	row.ID = "workload-one"
 	// Declares both a check and a policy that retires it, which is the combination
 	// that matters: the check has to stop when the workload finishes.
-	spec, err := json.Marshal(api.WorkloadSpec{
+	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      "example",
-		Restart:   &api.RestartSpec{Policy: new(api.RestartPolicyOnFailure)},
-		Health:    &api.HealthSpec{HTTP: new("/healthz")},
-		Container: &api.ContainerSpec{Image: "example/example:latest"},
+		Restart:   &manifest.Restart{Policy: manifest.RestartOnFailure},
+		Health:    &manifest.Health{HTTP: "/healthz"},
+		Container: &manifest.Container{Image: "example/example:latest"},
 	})
 	require.NoError(t, err)
 	row.Spec = spec
@@ -2460,7 +2459,7 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 
 		delivers := newCounter()
 		mounts.EXPECT().Deliver(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(context.Context, string, int, api.WorkloadSpec) ([]driver.Volume, error) {
+			RunAndReturn(func(context.Context, string, int, manifest.Spec) ([]driver.Volume, error) {
 				delivers.inc()
 
 				return nil, errors.New("secret not found: nope")
@@ -3168,15 +3167,15 @@ func awaitPasses(t *testing.T, r *reconciler.Reconciler, passes uint64) {
 // specWithSignalledMount returns a stored specification mounting a secret that asks to
 // be signalled when it changes, which is what makes a workload worth refreshing.
 func specWithSignalledMount(name string) []byte {
-	spec, err := json.Marshal(api.WorkloadSpec{
+	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      name,
-		Container: &api.ContainerSpec{Image: "example/example:latest"},
-		Volumes: new([]api.VolumeMount{{
-			Secret: new("tls-cert"),
+		Container: &manifest.Container{Image: "example/example:latest"},
+		Volumes: []manifest.VolumeMount{{
+			Secret: "tls-cert",
 			To:     "/etc/tls/cert.pem",
-			Signal: new(api.SIGHUP),
-		}}),
+			Signal: manifest.SignalHUP,
+		}},
 	})
 	if err != nil {
 		panic(err)
@@ -3188,11 +3187,11 @@ func specWithSignalledMount(name string) []byte {
 // specWithHealth returns a stored specification declaring a check, so the reconciler
 // has something to resolve into a probe.
 func specWithHealth(name string) []byte {
-	spec, err := json.Marshal(api.WorkloadSpec{
+	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      name,
-		Container: &api.ContainerSpec{Image: "example/example:latest"},
-		Health:    &api.HealthSpec{HTTP: new("/healthz")},
+		Container: &manifest.Container{Image: "example/example:latest"},
+		Health:    &manifest.Health{HTTP: "/healthz"},
 	})
 	if err != nil {
 		panic(err)
@@ -3204,15 +3203,15 @@ func specWithHealth(name string) []byte {
 // specWithCheckedPort returns a stored specification whose check names one of the
 // workload's ports, or names none when port is empty.
 func specWithCheckedPort(name, port string) []byte {
-	health := api.HealthSpec{HTTP: new("/healthz")}
+	health := manifest.Health{HTTP: "/healthz"}
 	if port != "" {
-		health.Port = new(port)
+		health.Port = manifest.PortRef(port)
 	}
 
-	spec, err := json.Marshal(api.WorkloadSpec{
+	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      name,
-		Container: &api.ContainerSpec{Image: "example/example:latest"},
+		Container: &manifest.Container{Image: "example/example:latest"},
 		Health:    &health,
 	})
 	if err != nil {
@@ -3223,17 +3222,17 @@ func specWithCheckedPort(name, port string) []byte {
 }
 
 // specWithSchedule returns a stored specification declaring a schedule.
-func specWithSchedule(name, expression string, overlap api.OverlapPolicy) []byte {
-	schedule := api.ScheduleSpec{Cron: expression}
+func specWithSchedule(name, expression string, overlap manifest.OverlapPolicy) []byte {
+	schedule := manifest.Schedule{Cron: expression}
 	if overlap != "" {
-		schedule.Overlap = new(overlap)
+		schedule.Overlap = overlap
 	}
 
-	spec, err := json.Marshal(api.WorkloadSpec{
+	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      name,
 		Schedule:  &schedule,
-		Container: &api.ContainerSpec{Image: "example/example:latest"},
+		Container: &manifest.Container{Image: "example/example:latest"},
 	})
 	if err != nil {
 		panic(err)
@@ -3245,11 +3244,11 @@ func specWithSchedule(name, expression string, overlap api.OverlapPolicy) []byte
 // specWithAttempts returns a stored specification capping how many times a workload is
 // restarted.
 func specWithAttempts(name string, attempts int) []byte {
-	spec, err := json.Marshal(api.WorkloadSpec{
+	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      name,
-		Restart:   &api.RestartSpec{Attempts: new(attempts)},
-		Container: &api.ContainerSpec{Image: "example/example:latest"},
+		Restart:   &manifest.Restart{Attempts: attempts},
+		Container: &manifest.Container{Image: "example/example:latest"},
 	})
 	if err != nil {
 		panic(err)
@@ -3259,12 +3258,12 @@ func specWithAttempts(name string, attempts int) []byte {
 }
 
 // specWithRestart returns a stored specification declaring a restart policy.
-func specWithRestart(name string, policy api.RestartPolicy) []byte {
-	spec, err := json.Marshal(api.WorkloadSpec{
+func specWithRestart(name string, policy manifest.RestartPolicy) []byte {
+	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      name,
-		Restart:   &api.RestartSpec{Policy: new(policy)},
-		Container: &api.ContainerSpec{Image: "example/example:latest"},
+		Restart:   &manifest.Restart{Policy: policy},
+		Container: &manifest.Container{Image: "example/example:latest"},
 	})
 	if err != nil {
 		panic(err)
@@ -3275,11 +3274,11 @@ func specWithRestart(name string, policy api.RestartPolicy) []byte {
 
 // specWithEnv returns a stored specification setting the given environment.
 func specWithEnv(name string, env map[string]string) []byte {
-	spec, err := json.Marshal(api.WorkloadSpec{
+	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      name,
-		Env:       new(env),
-		Container: &api.ContainerSpec{Image: "example/example:latest"},
+		Env:       env,
+		Container: &manifest.Container{Image: "example/example:latest"},
 	})
 	if err != nil {
 		panic(err)
@@ -3289,10 +3288,10 @@ func specWithEnv(name string, env map[string]string) []byte {
 }
 
 func storedWorkload(name, hash string) database.Workload {
-	spec, err := json.Marshal(api.WorkloadSpec{
+	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      name,
-		Container: &api.ContainerSpec{Image: "example/example:latest"},
+		Container: &manifest.Container{Image: "example/example:latest"},
 	})
 	if err != nil {
 		panic(err)
@@ -3301,7 +3300,7 @@ func storedWorkload(name, hash string) database.Workload {
 	return database.Workload{
 		Name:     name,
 		Version:  1,
-		Runtime:  string(api.Container),
+		Runtime:  string(manifest.RuntimeContainer),
 		Spec:     spec,
 		SpecHash: hash,
 	}

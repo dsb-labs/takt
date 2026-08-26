@@ -21,7 +21,6 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
@@ -36,7 +35,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 
 	tt := []struct {
 		Name       string
-		Spec       api.WorkloadSpec
+		Spec       manifest.Spec
 		SetupMocks func(*MockDriver, *MockWorkloadRepository, *MockPortRepository)
 		Assert     func(*testing.T, service.Workload, bool)
 		ExpectErr  error
@@ -50,7 +49,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 
 				repo.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(w database.Workload) bool {
 					return w.Name == "example" &&
-						w.Runtime == string(api.Container) &&
+						w.Runtime == string(manifest.RuntimeContainer) &&
 						w.SpecHash != "" &&
 						len(w.Spec) > 0
 				})).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
@@ -96,7 +95,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 		},
 		{
 			Name: "rejects an unknown schema version",
-			Spec: func() api.WorkloadSpec {
+			Spec: func() manifest.Spec {
 				spec := containerSpec("example", "example/example:latest")
 				spec.Version = "v99"
 				return spec
@@ -121,9 +120,9 @@ func TestWorkloadService_Apply(t *testing.T) {
 		},
 		{
 			Name: "rejects a schedule that is not cron",
-			Spec: func() api.WorkloadSpec {
+			Spec: func() manifest.Spec {
 				spec := containerSpec("example", "example/example:latest")
-				spec.Schedule = &api.ScheduleSpec{Cron: "not a cron"}
+				spec.Schedule = &manifest.Schedule{Cron: "not a cron"}
 				return spec
 			}(),
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
@@ -131,9 +130,9 @@ func TestWorkloadService_Apply(t *testing.T) {
 		},
 		{
 			Name: "rejects a port outside the usable range",
-			Spec: func() api.WorkloadSpec {
+			Spec: func() manifest.Spec {
 				spec := containerSpec("example", "example/example:latest")
-				spec.Ports = &[]api.PortMapping{{To: 70000}}
+				spec.Ports = []manifest.Port{{To: 70000}}
 				return spec
 			}(),
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
@@ -143,11 +142,11 @@ func TestWorkloadService_Apply(t *testing.T) {
 			// The CLI rejects this too, but a caller that skips the CLI must not be
 			// able to store limits the exec runtime would silently never apply.
 			Name: "rejects resource limits on an exec workload",
-			Spec: api.WorkloadSpec{
+			Spec: manifest.Spec{
 				Version:   "v1",
 				Name:      "example",
-				Resources: &api.ResourcesSpec{Memory: new("512m")},
-				Exec:      &api.ExecSpec{Command: []string{"echo", "hello world"}},
+				Resources: &manifest.Resources{Memory: "512m"},
+				Exec:      &manifest.Exec{Command: []string{"echo", "hello world"}},
 			},
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
 			ExpectErr:  service.ErrInvalidSpec,
@@ -156,9 +155,9 @@ func TestWorkloadService_Apply(t *testing.T) {
 			// The CLI checks this, but a caller that skips the CLI must not be able
 			// to store a label key orca's own documented rules refuse.
 			Name: "rejects a label using the reserved orca. prefix",
-			Spec: func() api.WorkloadSpec {
+			Spec: func() manifest.Spec {
 				spec := containerSpec("example", "example/example:latest")
-				spec.Labels = &map[string]string{"orca.workload": "spoof"}
+				spec.Labels = map[string]string{"orca.workload": "spoof"}
 				return spec
 			}(),
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
@@ -169,10 +168,10 @@ func TestWorkloadService_Apply(t *testing.T) {
 			// means: the service records desired state and the reconciler routes it to
 			// whichever driver runs it.
 			Name: "accepts an exec workload",
-			Spec: api.WorkloadSpec{
+			Spec: manifest.Spec{
 				Version: "v1",
 				Name:    "example",
-				Exec:    &api.ExecSpec{Command: []string{"echo", "hello world"}},
+				Exec:    &manifest.Exec{Command: []string{"echo", "hello world"}},
 			},
 			SetupMocks: func(d *MockDriver, repo *MockWorkloadRepository, _ *MockPortRepository) {
 				repo.EXPECT().Get(mock.Anything, "example").
@@ -194,23 +193,23 @@ func TestWorkloadService_Apply(t *testing.T) {
 		},
 		{
 			Name: "rejects a workload naming no runtime",
-			Spec: api.WorkloadSpec{
+			Spec: manifest.Spec{
 				Version: "v1",
 				Name:    "example",
 			},
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
-			ExpectErr:  service.ErrNoRuntime,
+			ExpectErr:  manifest.ErrNoRuntime,
 		},
 		{
 			Name: "rejects a workload naming two runtimes",
-			Spec: api.WorkloadSpec{
+			Spec: manifest.Spec{
 				Version:   "v1",
 				Name:      "example",
-				Container: &api.ContainerSpec{Image: "example/example:latest"},
-				Exec:      &api.ExecSpec{Command: []string{"echo", "hello"}},
+				Container: &manifest.Container{Image: "example/example:latest"},
+				Exec:      &manifest.Exec{Command: []string{"echo", "hello"}},
 			},
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
-			ExpectErr:  service.ErrAmbiguousRuntime,
+			ExpectErr:  manifest.ErrAmbiguousRuntime,
 		},
 	}
 
@@ -237,7 +236,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 	t.Parallel()
 
 	spec := containerSpec("example", "example/example:latest")
-	spec.Volumes = &[]api.VolumeMount{{Name: new("example-data"), To: "/var/lib/example"}}
+	spec.Volumes = []manifest.VolumeMount{{Name: "example-data", To: "/var/lib/example"}}
 
 	t.Run("stores where each mounted volume lives", func(t *testing.T) {
 		t.Parallel()
@@ -258,16 +257,13 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		repo.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(w database.Workload) bool {
-			var stored api.WorkloadSpec
-			if err := json.Unmarshal(w.Spec, &stored); err != nil || stored.Volumes == nil {
+			var stored manifest.Spec
+			if err := json.Unmarshal(w.Spec, &stored); err != nil {
 				return false
 			}
 
-			mounts := *stored.Volumes
-
-			return len(mounts) == 1 &&
-				mounts[0].From != nil &&
-				*mounts[0].From == "/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0"
+			return len(stored.Volumes) == 1 &&
+				stored.Volumes[0].From == "/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0"
 		})).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
 			w.Version = 1
 
@@ -643,7 +639,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 
 	tt := []struct {
 		Name      string
-		Policy    api.RestartPolicy
+		Policy    manifest.RestartPolicy
 		Instances []driver.Instance
 		Expected  service.WorkloadState
 	}{
@@ -651,7 +647,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			// The default policy restarts whatever happened, so a clean exit is a
 			// workload waiting to come back rather than one that finished.
 			Name:   "a clean exit under always is stopped",
-			Policy: api.RestartPolicyAlways,
+			Policy: manifest.RestartAlways,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 			},
@@ -659,7 +655,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 		},
 		{
 			Name:   "a clean exit under on-failure is completed",
-			Policy: api.RestartPolicyOnFailure,
+			Policy: manifest.RestartOnFailure,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 			},
@@ -669,7 +665,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			// Retired, but not a success. Reporting this as completed would tell an
 			// operator the job did its work when it did not.
 			Name:   "a failure under never is still failed",
-			Policy: api.RestartPolicyNever,
+			Policy: manifest.RestartNever,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateFailed, ExitCode: 1},
 			},
@@ -677,7 +673,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 		},
 		{
 			Name:   "a clean exit under never is completed",
-			Policy: api.RestartPolicyNever,
+			Policy: manifest.RestartNever,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 			},
@@ -687,7 +683,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			// Completion must not mask a problem: the operator needs the failure
 			// first, and the completion is true but not the news.
 			Name:   "a failed instance outranks a completed one",
-			Policy: api.RestartPolicyOnFailure,
+			Policy: manifest.RestartOnFailure,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 				{ID: "container-two", Workload: "example", State: driver.StateFailed, ExitCode: 1},
@@ -696,7 +692,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 		},
 		{
 			Name:   "a running instance outranks a completed one",
-			Policy: api.RestartPolicyOnFailure,
+			Policy: manifest.RestartOnFailure,
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 				{ID: "container-two", Workload: "example", State: driver.StateRunning},
@@ -711,7 +707,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 
 			row := storedWorkload("example")
 			spec := containerSpec("example", "example/example:latest")
-			spec.Restart = &api.RestartSpec{Policy: new(tc.Policy)}
+			spec.Restart = &manifest.Restart{Policy: tc.Policy}
 
 			encoded, err := json.Marshal(spec)
 			require.NoError(t, err)
@@ -774,7 +770,7 @@ func TestWorkloadService_Get_NextRun(t *testing.T) {
 			row := storedWorkload("example")
 			if tc.Cron != "" {
 				spec := containerSpec("example", "example/example:latest")
-				spec.Schedule = &api.ScheduleSpec{Cron: tc.Cron}
+				spec.Schedule = &manifest.Schedule{Cron: tc.Cron}
 
 				encoded, err := json.Marshal(spec)
 				require.NoError(t, err)
@@ -872,7 +868,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 		// The caller asked for this port specifically, so retrying would be picking
 		// a different one behind their back.
 		spec := containerSpec("example", "example/example:latest")
-		spec.Ports = &[]api.PortMapping{{To: 8080, From: new(4141)}}
+		spec.Ports = []manifest.Port{{To: 8080, From: 4141}}
 
 		_, _, err := svc.Apply(t.Context(), spec)
 		assert.ErrorIs(t, err, service.ErrHostPortTaken)
@@ -882,9 +878,9 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 	t.Parallel()
 
-	referencing := func(value string) api.WorkloadSpec {
+	referencing := func(value string) manifest.Spec {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = &map[string]string{"DSN": value}
+		spec.Env = map[string]string{"DSN": value}
 
 		return spec
 	}
@@ -1054,14 +1050,14 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		svc := newTestService(t, d, repo, ports, nil)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Ports = &[]api.PortMapping{{To: 53, Protocol: new(api.UDP)}}
+		spec.Ports = []manifest.Port{{To: 53, Protocol: manifest.ProtocolUDP}}
 
 		_, _, err := svc.Apply(t.Context(), spec)
 		require.NoError(t, err)
 
 		require.Len(t, claimed, 1)
 		assert.Equal(t, 53, claimed[0].Container)
-		assert.Equal(t, string(api.UDP), claimed[0].Protocol)
+		assert.Equal(t, string(manifest.ProtocolUDP), claimed[0].Protocol)
 		assert.Equal(t, 20000, claimed[0].Host)
 	})
 
@@ -1087,17 +1083,17 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		// A DNS server answering on 20000/udp and 20014/tcp reads as an accident, so
 		// the two allocations are made together.
 		spec := containerSpec("example", "example/example:latest")
-		spec.Ports = &[]api.PortMapping{
-			{To: 53, Protocol: new(api.TCP)},
-			{To: 53, Protocol: new(api.UDP)},
+		spec.Ports = []manifest.Port{
+			{To: 53, Protocol: manifest.ProtocolTCP},
+			{To: 53, Protocol: manifest.ProtocolUDP},
 		}
 
 		_, _, err := svc.Apply(t.Context(), spec)
 		require.NoError(t, err)
 
 		require.Len(t, claimed, 2)
-		assert.Equal(t, string(api.TCP), claimed[0].Protocol)
-		assert.Equal(t, string(api.UDP), claimed[1].Protocol)
+		assert.Equal(t, string(manifest.ProtocolTCP), claimed[0].Protocol)
+		assert.Equal(t, string(manifest.ProtocolUDP), claimed[1].Protocol)
 		assert.Equal(t, claimed[0].Host, claimed[1].Host)
 	})
 
@@ -1123,7 +1119,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		svc := newTestService(t, d, repo, ports, nil)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Ports = &[]api.PortMapping{{Name: new("http"), To: 8080}, {To: 9090}}
+		spec.Ports = []manifest.Port{{Name: "http", To: 8080}, {To: 9090}}
 
 		workload, _, err := svc.Apply(t.Context(), spec)
 		require.NoError(t, err)
@@ -1162,7 +1158,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		// Renaming a port says what the specification calls it, not where it is
 		// reached, so the address the workload already had must not move.
 		spec := containerSpec("example", "example/example:latest")
-		spec.Ports = &[]api.PortMapping{{Name: new("api"), To: 8080}}
+		spec.Ports = []manifest.Port{{Name: "api", To: 8080}}
 
 		_, _, err := svc.Apply(t.Context(), spec)
 		require.NoError(t, err)
@@ -1183,7 +1179,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 
 		// A workload holding 5353/tcp does not hold 5353/udp, so asking about the
 		// wrong space would report a port as taken that nothing has.
-		ports.EXPECT().HolderOf(mock.Anything, 5353, string(api.UDP)).Return("", false, nil).Once()
+		ports.EXPECT().HolderOf(mock.Anything, 5353, string(manifest.ProtocolUDP)).Return("", false, nil).Once()
 
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
 			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
@@ -1194,7 +1190,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		svc := newTestService(t, d, repo, ports, nil)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Ports = &[]api.PortMapping{{To: 53, From: new(5353), Protocol: new(api.UDP)}}
+		spec.Ports = []manifest.Port{{To: 53, From: 5353, Protocol: manifest.ProtocolUDP}}
 
 		_, _, err := svc.Apply(t.Context(), spec)
 		require.NoError(t, err)
@@ -1222,7 +1218,7 @@ func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 
 	// A workload has to actually want a host port for allocation to be reached.
 	spec := containerSpec("example", "example/example:latest")
-	spec.Ports = &[]api.PortMapping{{To: 8080}}
+	spec.Ports = []manifest.Port{{To: 8080}}
 
 	// An exhausted range is a capacity problem rather than a fault or a bad request,
 	// and the API depends on this translation to answer 503 rather than 500.
@@ -1414,7 +1410,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 		addresses := NewMockWorkloadAddresses(t)
 
 		consumer := containerSpec("api", "example/example:latest")
-		consumer.Env = &map[string]string{"DSN": "${workload:postgres:pg}"}
+		consumer.Env = map[string]string{"DSN": "${workload:postgres:pg}"}
 
 		consumerSpec, err := json.Marshal(consumer)
 		require.NoError(t, err)
@@ -1713,15 +1709,15 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 			Apply(t.Context(), containerSpec("example", "example/example:latest"))
 		require.NoError(t, err)
 
-		// Pinned to the literal, because this is the hash orca computed before secrets
-		// existed. A change here replaces every running instance on upgrade, so it has
-		// to be a decision rather than a side effect.
-		assert.Equal(t, "485029cc492e6cb9a301bdde6d7632286d9613ebae081824118e64611dcdf60f", hash)
+		// Pinned to the literal, because a change here replaces every running instance
+		// on upgrade and has to be a decision rather than a side effect. The value
+		// moved once, when the stored specification became the canonical one.
+		assert.Equal(t, "371a0141b0c044f8548664539d7cb3cca729520d0a5844e58651f5602ae77713", hash)
 	})
 
 	t.Run("moves the hash when a secret's revision moves", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"DSN": "postgres://app:${secret:db-password}@localhost/app"})
+		spec.Env = map[string]string{"DSN": "postgres://app:${secret:db-password}@localhost/app"}
 
 		first := applyForHash(t, spec, map[string]string{"db-password": "rev-one"})
 		second := applyForHash(t, spec, map[string]string{"db-password": "rev-two"})
@@ -1733,7 +1729,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 
 	t.Run("keeps the hash when the revision is unchanged", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+		spec.Env = map[string]string{"DSN": "${secret:db-password}"}
 
 		first := applyForHash(t, spec, map[string]string{"db-password": "rev-one"})
 		second := applyForHash(t, spec, map[string]string{"db-password": "rev-one"})
@@ -1745,11 +1741,11 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 
 	t.Run("hashes a workload reading a secret differently from one that does not", func(t *testing.T) {
 		plain := containerSpec("example", "example/example:latest")
-		plain.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+		plain.Env = map[string]string{"DSN": "${secret:db-password}"}
 
 		withSecret := applyForHash(t, plain, map[string]string{"db-password": "rev-one"})
 
-		assert.NotEqual(t, "485029cc492e6cb9a301bdde6d7632286d9613ebae081824118e64611dcdf60f", withSecret)
+		assert.NotEqual(t, "371a0141b0c044f8548664539d7cb3cca729520d0a5844e58651f5602ae77713", withSecret)
 	})
 
 	t.Run("stores the reference rather than the value", func(t *testing.T) {
@@ -1757,7 +1753,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 		secrets := NewMockSecretRevisions(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+		spec.Env = map[string]string{"DSN": "${secret:db-password}"}
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -1790,7 +1786,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 		secrets := NewMockSecretRevisions(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"DSN": "${secret:nope}"})
+		spec.Env = map[string]string{"DSN": "${secret:nope}"}
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -1807,7 +1803,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"DSN": "${secret:unterminated"})
+		spec.Env = map[string]string{"DSN": "${secret:unterminated"}
 
 		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec)
 		assert.ErrorIs(t, err, service.ErrInvalidSpec)
@@ -1819,20 +1815,20 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 
 	t.Run("hashes a workload reading a secret exactly as it did before variables", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"DSN": "postgres://app:${secret:db-password}@localhost/app"})
+		spec.Env = map[string]string{"DSN": "postgres://app:${secret:db-password}@localhost/app"}
 
-		// Pinned to the literal, because this is the hash orca computed for this
-		// workload before variables existed. Adding a field to what is hashed would
+		// Pinned to the literal, because a workload reading only a secret has to hash
+		// as it did before variables existed. Adding a field to what is hashed would
 		// otherwise replace every running instance that reads a secret, so both fields
 		// are omitted when empty and this is the test that holds them to it.
 		assert.Equal(t,
-			"75ec730e704fa8d23450ee2a8101b3ef5dbe273494684d4512a4c59da0710efb",
+			"084f5988e3dddd828f6a59d9e03b9d3a6e6c0b4be738ac1769243fabc3b27e34",
 			applyForHashOf(t, spec, map[string]string{"db-password": "rev-one"}, nil))
 	})
 
 	t.Run("moves the hash when a variable's value changes", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+		spec.Env = map[string]string{"LEVEL": "${var:log-level}"}
 
 		first := applyForHashOf(t, spec, nil, map[string]string{"log-level": "debug"})
 		second := applyForHashOf(t, spec, nil, map[string]string{"log-level": "info"})
@@ -1844,7 +1840,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 
 	t.Run("keeps the hash when the value is unchanged", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+		spec.Env = map[string]string{"LEVEL": "${var:log-level}"}
 
 		first := applyForHashOf(t, spec, nil, map[string]string{"log-level": "debug"})
 		second := applyForHashOf(t, spec, nil, map[string]string{"log-level": "debug"})
@@ -1857,19 +1853,19 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 
 	t.Run("hashes a workload reading a variable differently from one that does not", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+		spec.Env = map[string]string{"LEVEL": "${var:log-level}"}
 
 		withVariable := applyForHashOf(t, spec, nil, map[string]string{"log-level": "debug"})
 
-		assert.NotEqual(t, "485029cc492e6cb9a301bdde6d7632286d9613ebae081824118e64611dcdf60f", withVariable)
+		assert.NotEqual(t, "371a0141b0c044f8548664539d7cb3cca729520d0a5844e58651f5602ae77713", withVariable)
 	})
 
 	t.Run("hashes the two kinds into different places", func(t *testing.T) {
 		asSecret := containerSpec("example", "example/example:latest")
-		asSecret.Env = new(map[string]string{"VALUE": "${secret:shared}"})
+		asSecret.Env = map[string]string{"VALUE": "${secret:shared}"}
 
 		asVariable := containerSpec("example", "example/example:latest")
-		asVariable.Env = new(map[string]string{"VALUE": "${var:shared}"})
+		asVariable.Env = map[string]string{"VALUE": "${var:shared}"}
 
 		// A name held by both kinds contributes to a different field of what is hashed,
 		// so the two never collide even given the same name and the same text.
@@ -1884,7 +1880,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 		secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+		spec.Env = map[string]string{"LEVEL": "${var:log-level}"}
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -1918,7 +1914,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 		secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"DSN": "postgres://app:${secret:db-password}@${var:db-host}/app"})
+		spec.Env = map[string]string{"DSN": "postgres://app:${secret:db-password}@${var:db-host}/app"}
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -1948,7 +1944,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 		secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"LEVEL": "${var:nope}"})
+		spec.Env = map[string]string{"LEVEL": "${var:nope}"}
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -1965,7 +1961,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+		spec.Env = map[string]string{"LEVEL": "${var:log-level}"}
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -1979,11 +1975,12 @@ func TestWorkloadService_Apply_HashesImageDigest(t *testing.T) {
 	t.Parallel()
 
 	t.Run("hashes a workload without a pull policy exactly as before", func(t *testing.T) {
-		// Pinned to the literal from before the pull policy existed. The resolver
-		// mock is strict, so this also proves no registry round-trip is made for a
-		// workload that never asked for one.
+		// Pinned to the same literal a workload reading nothing hashes to, because a
+		// workload naming no pull policy must hash as one from before the field
+		// existed. The resolver mock is strict, so this also proves no registry
+		// round-trip is made for a workload that never asked for one.
 		assert.Equal(t,
-			"485029cc492e6cb9a301bdde6d7632286d9613ebae081824118e64611dcdf60f",
+			"371a0141b0c044f8548664539d7cb3cca729520d0a5844e58651f5602ae77713",
 			applyForDigestHash(t, containerSpec("example", "example/example:latest"), nil))
 	})
 
@@ -2075,12 +2072,12 @@ func TestWorkloadService_Rehash(t *testing.T) {
 		secrets := NewMockSecretRevisions(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+		spec.Env = map[string]string{"DSN": "${secret:db-password}"}
 
 		encoded, err := json.Marshal(spec)
 		require.NoError(t, err)
 
-		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(api.Container), Spec: encoded, SpecHash: "stale"}
+		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(manifest.RuntimeContainer), Spec: encoded, SpecHash: "stale"}
 		held := []database.Port{{WorkloadID: row.ID, Container: 80, Host: 20001, Protocol: "tcp", Dynamic: true}}
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
@@ -2116,7 +2113,7 @@ func TestWorkloadService_Rehash(t *testing.T) {
 		secrets := NewMockSecretRevisions(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+		spec.Env = map[string]string{"DSN": "${secret:db-password}"}
 
 		revisions := map[string]string{"db-password": "rev-one"}
 		hash := applyForHash(t, spec, revisions)
@@ -2140,7 +2137,7 @@ func TestWorkloadService_Rehash(t *testing.T) {
 		secrets := NewMockSecretRevisions(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"DSN": "${secret:db-password}"})
+		spec.Env = map[string]string{"DSN": "${secret:db-password}"}
 
 		encoded, err := json.Marshal(spec)
 		require.NoError(t, err)
@@ -2166,7 +2163,7 @@ func TestWorkloadService_Rehash(t *testing.T) {
 		secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+		spec.Env = map[string]string{"LEVEL": "${var:log-level}"}
 
 		encoded, err := json.Marshal(spec)
 		require.NoError(t, err)
@@ -2202,7 +2199,7 @@ func TestWorkloadService_Rehash(t *testing.T) {
 		secrets, variables := NewMockSecretRevisions(t), NewMockVariableValues(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"LEVEL": "${var:log-level}"})
+		spec.Env = map[string]string{"LEVEL": "${var:log-level}"}
 
 		// The hash the workload already holds for this value, so the rehash finds
 		// nothing to do. The mock has no Upsert expectation, so a write would fail.
@@ -2292,11 +2289,11 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 
 	// The literal hash of a workload mounting nothing, which is what every assertion
 	// about a mounted value not reaching the hash is compared against.
-	const plainHash = "485029cc492e6cb9a301bdde6d7632286d9613ebae081824118e64611dcdf60f"
+	const plainHash = "371a0141b0c044f8548664539d7cb3cca729520d0a5844e58651f5602ae77713"
 
 	t.Run("moves the hash when a mounted secret's revision moves", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Volumes = new([]api.VolumeMount{{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"}})
+		spec.Volumes = []manifest.VolumeMount{{Secret: "tls-cert", To: "/etc/tls/cert.pem"}}
 
 		first := applyForHash(t, spec, map[string]string{"tls-cert": "rev-one"})
 		second := applyForHash(t, spec, map[string]string{"tls-cert": "rev-two"})
@@ -2308,7 +2305,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 
 	t.Run("moves the hash when a mounted variable's value moves", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Volumes = new([]api.VolumeMount{{Var: new("app-config"), To: "/etc/app/config.json"}})
+		spec.Volumes = []manifest.VolumeMount{{Var: "app-config", To: "/etc/app/config.json"}}
 
 		first := applyForHashOf(t, spec, nil, map[string]string{"app-config": "first"})
 		second := applyForHashOf(t, spec, nil, map[string]string{"app-config": "second"})
@@ -2318,11 +2315,11 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 
 	t.Run("keeps the hash when a signalled secret's revision moves", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Volumes = new([]api.VolumeMount{{
-			Secret: new("tls-cert"),
+		spec.Volumes = []manifest.VolumeMount{{
+			Secret: "tls-cert",
 			To:     "/etc/tls/cert.pem",
-			Signal: new(api.SIGHUP),
-		}})
+			Signal: manifest.SignalHUP,
+		}}
 
 		first := applyForHash(t, spec, map[string]string{"tls-cert": "rev-one"})
 		second := applyForHash(t, spec, map[string]string{"tls-cert": "rev-two"})
@@ -2335,11 +2332,11 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 
 	t.Run("keeps the hash when a signalled variable's value moves", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Volumes = new([]api.VolumeMount{{
-			Var:    new("app-config"),
+		spec.Volumes = []manifest.VolumeMount{{
+			Var:    "app-config",
 			To:     "/etc/app/config.json",
-			Signal: new(api.SIGUSR1),
-		}})
+			Signal: manifest.SignalUSR1,
+		}}
 
 		first := applyForHashOf(t, spec, nil, map[string]string{"app-config": "first"})
 		second := applyForHashOf(t, spec, nil, map[string]string{"app-config": "second"})
@@ -2351,12 +2348,12 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 		// An environment variable is fixed once a process has started, so a workload
 		// reading the value there has to be replaced however its mount asked to be told.
 		spec := containerSpec("example", "example/example:latest")
-		spec.Env = new(map[string]string{"CERT": "${secret:tls-cert}"})
-		spec.Volumes = new([]api.VolumeMount{{
-			Secret: new("tls-cert"),
+		spec.Env = map[string]string{"CERT": "${secret:tls-cert}"}
+		spec.Volumes = []manifest.VolumeMount{{
+			Secret: "tls-cert",
 			To:     "/etc/tls/cert.pem",
-			Signal: new(api.SIGHUP),
-		}})
+			Signal: manifest.SignalHUP,
+		}}
 
 		first := applyForHash(t, spec, map[string]string{"tls-cert": "rev-one"})
 		second := applyForHash(t, spec, map[string]string{"tls-cert": "rev-two"})
@@ -2366,11 +2363,11 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 
 	t.Run("hashes a workload whose only reading is signalled exactly as one reading nothing", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
-		spec.Volumes = new([]api.VolumeMount{{
-			Secret: new("tls-cert"),
+		spec.Volumes = []manifest.VolumeMount{{
+			Secret: "tls-cert",
 			To:     "/etc/tls/cert.pem",
-			Signal: new(api.SIGHUP),
-		}})
+			Signal: manifest.SignalHUP,
+		}}
 
 		hash := applyForHash(t, spec, map[string]string{"tls-cert": "rev-one"})
 
@@ -2385,7 +2382,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 		secrets := NewMockSecretRevisions(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Volumes = new([]api.VolumeMount{{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"}})
+		spec.Volumes = []manifest.VolumeMount{{Secret: "tls-cert", To: "/etc/tls/cert.pem"}}
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -2421,7 +2418,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 		secrets := NewMockSecretRevisions(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Volumes = new([]api.VolumeMount{{Secret: new("nope"), To: "/etc/tls/cert.pem"}})
+		spec.Volumes = []manifest.VolumeMount{{Secret: "nope", To: "/etc/tls/cert.pem"}}
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -2438,7 +2435,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Volumes = new([]api.VolumeMount{{To: "/etc/tls/cert.pem"}})
+		spec.Volumes = []manifest.VolumeMount{{To: "/etc/tls/cert.pem"}}
 
 		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec)
 		assert.ErrorIs(t, err, service.ErrInvalidSpec)
@@ -2451,7 +2448,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 		secrets := NewMockSecretRevisions(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Volumes = new([]api.VolumeMount{{Secret: new("tls-cert"), To: "/etc/tls/cert.pem"}})
+		spec.Volumes = []manifest.VolumeMount{{Secret: "tls-cert", To: "/etc/tls/cert.pem"}}
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
@@ -2468,7 +2465,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 	})
 }
 
-func applyForHash(t *testing.T, spec api.WorkloadSpec, revisions map[string]string) string {
+func applyForHash(t *testing.T, spec manifest.Spec, revisions map[string]string) string {
 	t.Helper()
 
 	return applyForHashOf(t, spec, revisions, nil)
@@ -2477,7 +2474,7 @@ func applyForHash(t *testing.T, spec api.WorkloadSpec, revisions map[string]stri
 // applyForHashOf applies spec against the given secret revisions and variable values
 // and returns the hash the service stored, so that a test can compare two hashes
 // without repeating the mock wiring.
-func applyForHashOf(t *testing.T, spec api.WorkloadSpec, revisions, values map[string]string) string {
+func applyForHashOf(t *testing.T, spec manifest.Spec, revisions, values map[string]string) string {
 	t.Helper()
 
 	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
@@ -2506,7 +2503,7 @@ func applyForHashOf(t *testing.T, spec api.WorkloadSpec, revisions, values map[s
 // applyForDigestHash applies spec against a resolver answering the given digests and
 // returns the hash the service stored. A nil digests map builds a service with no
 // resolver at all, for the workloads that never ask for one.
-func applyForDigestHash(t *testing.T, spec api.WorkloadSpec, digests map[string]string) string {
+func applyForDigestHash(t *testing.T, spec manifest.Spec, digests map[string]string) string {
 	t.Helper()
 
 	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
@@ -2544,12 +2541,12 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Ports = new([]api.PortMapping{{To: 80, From: new(20005)}})
+		spec.Ports = []manifest.Port{{To: 80, From: 20005}}
 
 		encoded, err := json.Marshal(spec)
 		require.NoError(t, err)
 
-		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(api.Container), Spec: encoded, SpecHash: "hash-one"}
+		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(manifest.RuntimeContainer), Spec: encoded, SpecHash: "hash-one"}
 		held := []database.Port{{WorkloadID: row.ID, Container: 80, Host: 20005, Protocol: "tcp", Dynamic: true}}
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
@@ -2584,12 +2581,12 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 		addresses := NewMockWorkloadAddresses(t)
 
 		spec := containerSpec("example", "example/example:latest")
-		spec.Ports = new([]api.PortMapping{{To: 80, From: new(20005)}})
+		spec.Ports = []manifest.Port{{To: 80, From: 20005}}
 
 		encoded, err := json.Marshal(spec)
 		require.NoError(t, err)
 
-		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(api.Container), Spec: encoded, SpecHash: "hash-one"}
+		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(manifest.RuntimeContainer), Spec: encoded, SpecHash: "hash-one"}
 		held := []database.Port{{WorkloadID: row.ID, Container: 80, Host: 20005, Protocol: "tcp", Dynamic: true}}
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
@@ -2605,7 +2602,7 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 		// reason nobody asked for. Miss it and the reference reads as automatic and
 		// quietly is not.
 		consumer := containerSpec("api", "example/example:latest")
-		consumer.Env = &map[string]string{"DSN": "${workload:example:http}"}
+		consumer.Env = map[string]string{"DSN": "${workload:example:http}"}
 
 		consumerSpec, err := json.Marshal(consumer)
 		require.NoError(t, err)
@@ -2903,19 +2900,19 @@ func (a allocatorStub) Allocate(protocols []port.Protocol, taken map[port.Protoc
 	return 20000 + claimed, nil
 }
 
-func containerSpec(name, image string) api.WorkloadSpec {
-	return api.WorkloadSpec{
+func containerSpec(name, image string) manifest.Spec {
+	return manifest.Spec{
 		Version:   "v1",
 		Name:      name,
-		Container: &api.ContainerSpec{Image: image},
+		Container: &manifest.Container{Image: image},
 	}
 }
 
 // pullAlwaysSpec builds a container workload whose pull policy asks for the image's
 // digest to reach the hash.
-func pullAlwaysSpec(name, image string) api.WorkloadSpec {
+func pullAlwaysSpec(name, image string) manifest.Spec {
 	spec := containerSpec(name, image)
-	spec.Container.Pull = new(api.PullPolicyAlways)
+	spec.Container.Pull = manifest.PullAlways
 
 	return spec
 }
@@ -2929,7 +2926,7 @@ func storedWorkload(name string) database.Workload {
 	return database.Workload{
 		Name:     name,
 		Version:  1,
-		Runtime:  string(api.Container),
+		Runtime:  string(manifest.RuntimeContainer),
 		Spec:     spec,
 		SpecHash: "hash-one",
 	}
@@ -2994,7 +2991,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 				defer wg.Done()
 
 				spec := containerSpec(workloadName(i), "example/example:latest")
-				spec.Ports = &[]api.PortMapping{{To: 8080}}
+				spec.Ports = []manifest.Port{{To: 8080}}
 
 				applied[i], _, errs[i] = svc.Apply(t.Context(), spec)
 			}()
@@ -3022,7 +3019,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		svc, _ := newConcurrentTestService(t)
 
 		first := containerSpec("first", "example/example:latest")
-		first.Ports = &[]api.PortMapping{{From: new(21000), To: 8080}}
+		first.Ports = []manifest.Port{{From: 21000, To: 8080}}
 
 		_, _, err := svc.Apply(t.Context(), first)
 		require.NoError(t, err)
@@ -3031,7 +3028,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		// A pinned one is the caller's decision, and quietly moving it would hand back
 		// a workload reachable somewhere other than where they asked for.
 		second := containerSpec("second", "example/example:latest")
-		second.Ports = &[]api.PortMapping{{From: new(21000), To: 8080}}
+		second.Ports = []manifest.Port{{From: 21000, To: 8080}}
 
 		_, _, err = svc.Apply(t.Context(), second)
 		assert.ErrorIs(t, err, service.ErrHostPortTaken)
@@ -3044,7 +3041,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		// definitely holds. The real allocator picks at random across its range, which
 		// would make whether these two collide a matter of luck.
 		taken := containerSpec("taken", "example/example:latest")
-		taken.Ports = &[]api.PortMapping{{From: new(20000), To: 8080}}
+		taken.Ports = []manifest.Port{{From: 20000, To: 8080}}
 
 		_, _, err := svc.Apply(t.Context(), taken)
 		require.NoError(t, err)
@@ -3063,7 +3060,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		})
 
 		contender := containerSpec("contender", "example/example:latest")
-		contender.Ports = &[]api.PortMapping{{To: 8080}}
+		contender.Ports = []manifest.Port{{To: 8080}}
 
 		_, _, err = blind.Apply(t.Context(), contender)
 		require.ErrorIs(t, err, service.ErrHostPortTaken)

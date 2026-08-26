@@ -184,9 +184,13 @@ func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool,
 
 	switch {
 	case resp.JSON201 != nil:
-		return newWorkload(resp.JSON201.Workload), true, nil
+		workload, err := newWorkload(resp.JSON201.Workload)
+
+		return workload, true, err
 	case resp.JSON200 != nil:
-		return newWorkload(resp.JSON200.Workload), false, nil
+		workload, err := newWorkload(resp.JSON200.Workload)
+
+		return workload, false, err
 	case resp.JSON400 != nil:
 		return Workload{}, false, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON409 != nil:
@@ -212,7 +216,7 @@ func (c *Client) Get(ctx context.Context, name string) (Workload, error) {
 
 	switch {
 	case resp.JSON200 != nil:
-		return newWorkload(resp.JSON200.Workload), nil
+		return newWorkload(resp.JSON200.Workload)
 	case resp.JSON404 != nil:
 		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
 	case resp.JSON500 != nil:
@@ -242,8 +246,13 @@ func (c *Client) List(ctx context.Context, queries ...string) ([]Workload, error
 	switch {
 	case resp.JSON200 != nil:
 		workloads := make([]Workload, 0, len(resp.JSON200.Workloads))
-		for _, workload := range resp.JSON200.Workloads {
-			workloads = append(workloads, newWorkload(workload))
+		for _, reported := range resp.JSON200.Workloads {
+			workload, err := newWorkload(reported)
+			if err != nil {
+				return nil, err
+			}
+
+			workloads = append(workloads, workload)
 		}
 
 		return workloads, nil
@@ -333,7 +342,9 @@ func (c *Client) Delete(ctx context.Context, name string, options ...LifecycleOp
 	var workload Workload
 	switch {
 	case resp.JSON202 != nil:
-		workload = newWorkload(resp.JSON202.Workload)
+		if workload, err = newWorkload(resp.JSON202.Workload); err != nil {
+			return Workload{}, err
+		}
 	case resp.JSON404 != nil:
 		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
 	case resp.JSON409 != nil:
@@ -405,7 +416,9 @@ func (c *Client) Stop(ctx context.Context, name string, options ...LifecycleOpti
 	var workload Workload
 	switch {
 	case resp.JSON202 != nil:
-		workload = newWorkload(resp.JSON202.Workload)
+		if workload, err = newWorkload(resp.JSON202.Workload); err != nil {
+			return Workload{}, err
+		}
 	case resp.JSON404 != nil:
 		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
 	case resp.JSON409 != nil:
@@ -463,7 +476,9 @@ func (c *Client) Start(ctx context.Context, name string, options ...LifecycleOpt
 	var workload Workload
 	switch {
 	case resp.JSON202 != nil:
-		workload = newWorkload(resp.JSON202.Workload)
+		if workload, err = newWorkload(resp.JSON202.Workload); err != nil {
+			return Workload{}, err
+		}
 	case resp.JSON404 != nil:
 		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
 	case resp.JSON409 != nil:
@@ -520,7 +535,9 @@ func (c *Client) Restart(ctx context.Context, name string, options ...LifecycleO
 	var workload Workload
 	switch {
 	case resp.JSON202 != nil:
-		workload = newWorkload(resp.JSON202.Workload)
+		if workload, err = newWorkload(resp.JSON202.Workload); err != nil {
+			return Workload{}, err
+		}
 	case resp.JSON404 != nil:
 		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
 	case resp.JSON409 != nil:
@@ -703,13 +720,24 @@ func (c *Client) logsError(resp *http.Response) error {
 	return newError(resp.StatusCode, &body)
 }
 
-func newWorkload(w api.Workload) Workload {
+// newWorkload maps a workload the server reported onto the shape the client returns.
+//
+// It fails when the specification does not convert, which means the server sent one
+// this client cannot read. That is a malformed response rather than something the
+// caller did, so it is reported rather than silently returning a workload missing
+// whatever did not convert.
+func newWorkload(w api.Workload) (Workload, error) {
+	spec, err := wire.ToSpec(w.Spec)
+	if err != nil {
+		return Workload{}, fmt.Errorf("failed to read the specification of workload %s: %w", w.Name, err)
+	}
+
 	workload := Workload{
 		Name:      w.Name,
 		Version:   w.Version,
 		Runtime:   manifest.Runtime(w.Runtime),
 		State:     WorkloadState(w.State),
-		Spec:      wire.ToSpec(w.Spec),
+		Spec:      spec,
 		CreatedAt: w.CreatedAt,
 		UpdatedAt: w.UpdatedAt,
 	}
@@ -749,7 +777,7 @@ func newWorkload(w api.Workload) Workload {
 	}
 
 	if w.Instances == nil {
-		return workload
+		return workload, nil
 	}
 
 	workload.Instances = make([]Instance, 0, len(*w.Instances))
@@ -782,5 +810,5 @@ func newWorkload(w api.Workload) Workload {
 		workload.Instances = append(workload.Instances, mapped)
 	}
 
-	return workload
+	return workload, nil
 }

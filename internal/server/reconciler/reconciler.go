@@ -5,7 +5,6 @@ package reconciler
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -23,13 +22,11 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/internal/server/telemetry"
-	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -109,10 +106,10 @@ type (
 	Mounts interface {
 		// Deliver should write a file for every value the specification mounts and
 		// return them as mounts the driver can honour.
-		Deliver(ctx context.Context, id string, version int, spec api.WorkloadSpec) ([]driver.Volume, error)
+		Deliver(ctx context.Context, id string, version int, spec manifest.Spec) ([]driver.Volume, error)
 		// Refresh should rewrite the mounted values that have changed since they were
 		// delivered, reporting the signal each affected workload asked for.
-		Refresh(ctx context.Context, name, id string, version int, spec api.WorkloadSpec) ([]service.Refresh, error)
+		Refresh(ctx context.Context, name, id string, version int, spec manifest.Spec) ([]service.Refresh, error)
 		// Forget should remove the files written for a workload, once nothing is
 		// running for it.
 		Forget(id string) error
@@ -803,13 +800,13 @@ func (r *Reconciler) refresh(ctx context.Context, row database.Workload) error {
 		return nil
 	}
 
-	var spec api.WorkloadSpec
-	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
 		// Validated before it was stored, so this means the specification and the rules
 		// have diverged. Nothing about the mounts can be read, and the workload is left
 		// running rather than being disturbed on the strength of a spec nothing could
 		// read.
-		return fmt.Errorf("failed to decode workload spec: %w", err)
+		return err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
@@ -902,12 +899,12 @@ func (r *Reconciler) register(ctx context.Context, rows []database.Workload, obs
 // either means the specification and the rules have diverged — and running a workload
 // continuously is a better failure than never running it again.
 func (r *Reconciler) schedule(row database.Workload) cron.Schedule {
-	var spec api.WorkloadSpec
-	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
 		return nil
 	}
 
-	declared := wire.ToSpec(spec).Schedule
+	declared := spec.Schedule
 	if declared == nil {
 		return nil
 	}
@@ -925,12 +922,12 @@ func (r *Reconciler) schedule(row database.Workload) cron.Schedule {
 // overlap reads what a stored workload asks for when an occurrence comes due while the
 // previous run is still going.
 func overlap(row database.Workload) manifest.OverlapPolicy {
-	var spec api.WorkloadSpec
-	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
 		return manifest.OverlapReplace
 	}
 
-	declared := wire.ToSpec(spec).Schedule
+	declared := spec.Schedule
 	if declared == nil {
 		return manifest.OverlapReplace
 	}
@@ -945,12 +942,12 @@ func overlap(row database.Workload) manifest.OverlapPolicy {
 // restart a workload is a better failure than retiring it on the strength of a spec
 // nothing could read.
 func restartPolicy(row database.Workload) *manifest.Restart {
-	var spec api.WorkloadSpec
-	if err := json.Unmarshal(row.Spec, &spec); err != nil {
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
 		return &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay}
 	}
 
-	return wire.ToSpec(spec).Restart
+	return spec.Restart
 }
 
 // retired reports whether every ended instance is one the policy leaves alone, and so
@@ -979,12 +976,12 @@ func retired(restart *manifest.Restart, instances []driver.Instance) bool {
 // healthCheck resolves a stored workload's health check into something probeable,
 // reporting false when the workload declares none.
 func healthCheck(bind string, row database.Workload, ports []database.Port) (health.Check, bool, error) {
-	var spec api.WorkloadSpec
-	if err := json.Unmarshal(row.Spec, &spec); err != nil {
-		return health.Check{}, false, fmt.Errorf("failed to decode workload spec: %w", err)
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
+		return health.Check{}, false, err
 	}
 
-	resolved := wire.ToSpec(spec)
+	resolved := spec
 	if resolved.Health == nil {
 		return health.Check{}, false, nil
 	}

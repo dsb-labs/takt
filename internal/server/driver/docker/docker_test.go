@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 func TestDriver_Start(t *testing.T) {
@@ -251,7 +251,7 @@ func TestDriver_Start(t *testing.T) {
 			// held locally is not even asked about: the strict mocks fail this case
 			// if ImageList is called.
 			Name:     "pulls on every start under the always policy",
-			Workload: workload("example", 0, "", pulledSpec("example/example:latest", api.PullPolicyAlways), nil, nil),
+			Workload: workload("example", 0, "", pulledSpec("example/example:latest", manifest.PullAlways), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				// Read to number the attempt, so a replacement cannot collide with a
 				// container being kept for its output.
@@ -272,14 +272,14 @@ func TestDriver_Start(t *testing.T) {
 			// from missing, so an absent image must fail: the strict mocks fail this
 			// case if ImagePull is called.
 			Name:     "refuses to start under the never policy when the image is absent",
-			Workload: workload("example", 0, "", pulledSpec("example/example:latest", api.PullPolicyNever), nil, nil),
+			Workload: workload("example", 0, "", pulledSpec("example/example:latest", manifest.PullNever), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).Return(nil, nil).Once()
 			},
 		},
 		{
 			Name:     "starts under the never policy when the image is present",
-			Workload: workload("example", 0, "", pulledSpec("example/example:latest", api.PullPolicyNever), nil, nil),
+			Workload: workload("example", 0, "", pulledSpec("example/example:latest", manifest.PullNever), nil, nil),
 			SetupMocks: func(c *MockClient) {
 				// Read to number the attempt, so a replacement cannot collide with a
 				// container being kept for its output.
@@ -317,7 +317,7 @@ func TestDriver_Start(t *testing.T) {
 			Name: "applies the workload's resource limits",
 			Workload: withResources(
 				workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
-				api.ResourcesSpec{Memory: new("512m"), CPU: new(0.5), Pids: new(100)},
+				manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 100},
 			),
 			SetupMocks: func(c *MockClient) {
 				// Read to number the attempt, so a replacement cannot collide with a
@@ -1321,14 +1321,14 @@ func sentCredentials(username, password string) func(string) bool {
 
 // workload builds the neutral shape a driver is handed, so a test names only the
 // fields it cares about.
-func workload(name string, version int, hash string, spec api.ContainerSpec, ports []driver.Port, labels map[string]string) driver.Workload {
+func workload(name string, version int, hash string, spec manifest.Container, ports []driver.Port, labels map[string]string) driver.Workload {
 	return driver.Workload{
 		Name:     name,
 		Version:  version,
 		SpecHash: hash,
 		Ports:    ports,
 		Labels:   labels,
-		Spec: api.WorkloadSpec{
+		Spec: manifest.Spec{
 			Version:   "v1",
 			Name:      name,
 			Container: &spec,
@@ -1352,36 +1352,30 @@ func withVolumes(w driver.Workload, volumes ...driver.Volume) driver.Workload {
 
 // withResources sets the resource limits on a workload, which live beside the
 // runtime block rather than inside it.
-func withResources(w driver.Workload, resources api.ResourcesSpec) driver.Workload {
+func withResources(w driver.Workload, resources manifest.Resources) driver.Workload {
 	w.Spec.Resources = &resources
 
 	return w
 }
 
 // containerSpec builds a container block, taking nil for the parts a test leaves out.
-func containerSpec(image string, command []string) api.ContainerSpec {
-	spec := api.ContainerSpec{Image: image}
-
-	if command != nil {
-		spec.Command = &command
-	}
-
-	return spec
+func containerSpec(image string, command []string) manifest.Container {
+	return manifest.Container{Image: image, Command: command}
 }
 
 // pulledSpec builds a container block naming a pull policy.
-func pulledSpec(image string, policy api.PullPolicy) api.ContainerSpec {
-	return api.ContainerSpec{Image: image, Pull: &policy}
+func pulledSpec(image string, policy manifest.PullPolicy) manifest.Container {
+	return manifest.Container{Image: image, Pull: policy}
 }
 
 // hardenedSpec builds a container block naming every hardening field.
-func hardenedSpec(image string) api.ContainerSpec {
-	return api.ContainerSpec{
+func hardenedSpec(image string) manifest.Container {
+	return manifest.Container{
 		Image:    image,
-		User:     new("65532:65532"),
-		ReadOnly: new(true),
-		CapAdd:   new([]string{"NET_ADMIN"}),
-		CapDrop:  new([]string{"ALL"}),
+		User:     "65532:65532",
+		ReadOnly: true,
+		CapAdd:   []string{"NET_ADMIN"},
+		CapDrop:  []string{"ALL"},
 	}
 }
 

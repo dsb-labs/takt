@@ -12,9 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -117,7 +115,7 @@ func NewMountService(config MountServiceConfig) *MountService {
 // Returns ErrSecretNotFound or ErrVariableNotFound naming what it could not read.
 // Writing an empty file instead would hand the workload a value orca does not hold,
 // which it would then use.
-func (s *MountService) Deliver(ctx context.Context, id string, version int, spec api.WorkloadSpec) ([]driver.Volume, error) {
+func (s *MountService) Deliver(ctx context.Context, id string, version int, spec manifest.Spec) ([]driver.Volume, error) {
 	mounts := valueMounts(spec)
 	if len(mounts) == 0 {
 		return nil, nil
@@ -182,7 +180,7 @@ func (s *MountService) Deliver(ctx context.Context, id string, version int, spec
 // so a renamed file would leave the workload reading the old contents forever — which
 // is the one failure this exists to avoid. The caller signals the workload once this
 // returns, so nothing is told to reload a file that has not been written yet.
-func (s *MountService) Refresh(ctx context.Context, name, id string, version int, spec api.WorkloadSpec) ([]Refresh, error) {
+func (s *MountService) Refresh(ctx context.Context, name, id string, version int, spec manifest.Spec) ([]Refresh, error) {
 	mounts := signalledMounts(spec)
 	if len(mounts) == 0 {
 		return nil, nil
@@ -493,20 +491,11 @@ func digest(value string) string {
 
 // valueMounts returns the mounts of a secret or a variable the specification names, in
 // the order it names them.
-//
-// Only the mounts are converted, rather than the whole specification through NewSpec.
-// This is asked on every pass for every running workload, and converting the rest would
-// allocate a restart policy, a port slice and a health check only to discard them.
-func valueMounts(spec api.WorkloadSpec) []manifest.VolumeMount {
-	if spec.Volumes == nil {
-		return nil
-	}
-
+func valueMounts(spec manifest.Spec) []manifest.VolumeMount {
 	var mounts []manifest.VolumeMount
-	for _, mount := range *spec.Volumes {
-		converted := wire.ToVolumeMount(mount)
-		if _, ok := converted.Reference(); ok {
-			mounts = append(mounts, converted)
+	for _, mount := range spec.Volumes {
+		if _, ok := mount.Reference(); ok {
+			mounts = append(mounts, mount)
 		}
 	}
 
@@ -518,20 +507,15 @@ func valueMounts(spec api.WorkloadSpec) []manifest.VolumeMount {
 //
 // One pass over the specification rather than a filter of valueMounts, so the common
 // case of a workload with nothing to refresh allocates nothing at all.
-func signalledMounts(spec api.WorkloadSpec) []manifest.VolumeMount {
-	if spec.Volumes == nil {
-		return nil
-	}
-
+func signalledMounts(spec manifest.Spec) []manifest.VolumeMount {
 	var mounts []manifest.VolumeMount
-	for _, mount := range *spec.Volumes {
-		if mount.Signal == nil || *mount.Signal == "" {
+	for _, mount := range spec.Volumes {
+		if mount.Signal == "" {
 			continue
 		}
 
-		converted := wire.ToVolumeMount(mount)
-		if _, ok := converted.Reference(); ok {
-			mounts = append(mounts, converted)
+		if _, ok := mount.Reference(); ok {
+			mounts = append(mounts, mount)
 		}
 	}
 
