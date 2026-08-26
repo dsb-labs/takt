@@ -184,6 +184,31 @@ type (
 		protocol  port.Protocol
 	}
 
+	// The WorkloadState type names what a workload is doing overall, derived from
+	// the instances the driver reports and whether the workload is being torn down.
+	//
+	// Owned here rather than taken from the wire format, because a state is
+	// something orca establishes rather than something a caller submits. The HTTP
+	// API maps it onto the state it publishes, as it does every other field.
+	WorkloadState string
+
+	// The ResolvedPort type describes a port mapping as it was actually applied,
+	// carrying the host port the server settled on. This is what a caller uses to
+	// reach the workload.
+	ResolvedPort struct {
+		// What the specification called this port. Empty for one it did not name.
+		Name string
+		// The port the workload listens on inside its runtime.
+		To int
+		// The host port that reaches it.
+		From int
+		// The transport protocol the port is published on.
+		Protocol manifest.Protocol
+		// Whether the host port was allocated by the server rather than pinned by
+		// the specification.
+		Dynamic bool
+	}
+
 	// The Health type reports what orca established about a workload's health,
 	// and whether it checks the workload at all.
 	Health struct {
@@ -343,6 +368,27 @@ type (
 		checker    Checker
 		reconciler Reconciler
 	}
+)
+
+const (
+	// WorkloadStatePending is a workload the reconciler has yet to start.
+	WorkloadStatePending WorkloadState = "pending"
+	// WorkloadStateRunning is a workload with an instance up.
+	WorkloadStateRunning WorkloadState = "running"
+	// WorkloadStateTerminating is a workload being torn down, or one whose instance
+	// is on its way out.
+	WorkloadStateTerminating WorkloadState = "terminating"
+	// WorkloadStateStopped is a workload whose instance ended cleanly and will not
+	// be started again.
+	WorkloadStateStopped WorkloadState = "stopped"
+	// WorkloadStateCompleted is a workload whose run finished, which is the end a
+	// job is meant to reach.
+	WorkloadStateCompleted WorkloadState = "completed"
+	// WorkloadStateFailed is a workload whose instance ended badly.
+	WorkloadStateFailed WorkloadState = "failed"
+	// WorkloadStateSuspended is a workload that has been stopped and is
+	// intentionally not running.
+	WorkloadStateSuspended WorkloadState = "suspended"
 )
 
 // The WorkloadServiceConfig type contains fields used to construct a WorkloadService.
@@ -1497,28 +1543,21 @@ func withResolvedPorts(spec api.WorkloadSpec, ports []database.Port) api.Workloa
 	return spec
 }
 
-// newResolvedPorts maps stored allocations onto the wire format.
-func newResolvedPorts(ports []database.Port) []api.ResolvedPort {
+// newResolvedPorts maps stored allocations onto the service's view of them.
+func newResolvedPorts(ports []database.Port) []ResolvedPort {
 	if len(ports) == 0 {
 		return nil
 	}
 
-	resolved := make([]api.ResolvedPort, 0, len(ports))
+	resolved := make([]ResolvedPort, 0, len(ports))
 	for _, port := range ports {
-		entry := api.ResolvedPort{
+		resolved = append(resolved, ResolvedPort{
+			Name:     port.Name,
 			To:       port.Container,
 			From:     port.Host,
-			Protocol: api.Protocol(port.Protocol),
+			Protocol: manifest.Protocol(port.Protocol),
 			Dynamic:  port.Dynamic,
-		}
-
-		// Reported as absent rather than as an empty string for a port the
-		// specification did not name, which is how the field is sent everywhere else.
-		if port.Name != "" {
-			entry.Name = new(port.Name)
-		}
-
-		resolved = append(resolved, entry)
+		})
 	}
 
 	return resolved
@@ -1789,7 +1828,7 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 	return Workload{
 		Name:        row.Name,
 		Version:     row.Version,
-		Runtime:     api.Runtime(row.Runtime),
+		Runtime:     manifest.Runtime(row.Runtime),
 		Spec:        spec,
 		Labels:      row.Labels,
 		Instances:   instances,
@@ -1883,24 +1922,24 @@ func CompletionState(instance driver.Instance, restart *manifest.Restart) driver
 // a consequence of the teardown rather than news in its own right. Failure outranks
 // a clean exit, and a workload with no instances at all is pending, because the
 // reconciler has yet to start it.
-func StateOf(instances []driver.Instance, deleting, suspended bool) api.WorkloadState {
+func StateOf(instances []driver.Instance, deleting, suspended bool) WorkloadState {
 	if deleting {
-		return api.WorkloadStateTerminating
+		return WorkloadStateTerminating
 	}
 
 	if suspended {
-		return api.WorkloadStateSuspended
+		return WorkloadStateSuspended
 	}
 
 	if len(instances) == 0 {
-		return api.WorkloadStatePending
+		return WorkloadStatePending
 	}
 
 	var terminating, failed, exited, completed bool
 	for _, instance := range instances {
 		switch instance.State {
 		case driver.StateRunning:
-			return api.WorkloadStateRunning
+			return WorkloadStateRunning
 		case driver.StateTerminating:
 			terminating = true
 		case driver.StateFailed:
@@ -1917,15 +1956,15 @@ func StateOf(instances []driver.Instance, deleting, suspended bool) api.Workload
 	// an operator needs first.
 	switch {
 	case terminating:
-		return api.WorkloadStateTerminating
+		return WorkloadStateTerminating
 	case failed:
-		return api.WorkloadStateFailed
+		return WorkloadStateFailed
 	case exited:
-		return api.WorkloadStateStopped
+		return WorkloadStateStopped
 	case completed:
-		return api.WorkloadStateCompleted
+		return WorkloadStateCompleted
 	default:
-		return api.WorkloadStatePending
+		return WorkloadStatePending
 	}
 }
 
@@ -1937,7 +1976,7 @@ type Workload struct {
 	// Incremented every time the workload's specification changes.
 	Version int
 	// Which runtime the specification names.
-	Runtime api.Runtime
+	Runtime manifest.Runtime
 	// The specification that was submitted.
 	Spec api.WorkloadSpec
 	// Arbitrary key-value pairs attached to the workload.
@@ -1945,12 +1984,12 @@ type Workload struct {
 	// The instances the driver is currently running for the workload.
 	Instances []driver.Instance
 	// The port mappings the server settled on, including any it allocated.
-	Ports []api.ResolvedPort
+	Ports []ResolvedPort
 	// What orca established about whether the workload is working.
 	Health Health
 	// The workload's overall state, derived from its instances and whether it is
 	// being deleted or suspended.
-	State api.WorkloadState
+	State WorkloadState
 	// Whether the workload has been marked for deletion and is being torn down.
 	Deleting bool
 	// Whether the workload has been stopped and is intentionally not running.

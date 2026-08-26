@@ -569,14 +569,14 @@ func (r *Reconciler) prune(rows []database.Workload) {
 
 // Every state a workload can report. Recording all of them each pass means a
 // state nothing is in reads as zero rather than holding whatever it last was.
-var workloadStates = []api.WorkloadState{
-	api.WorkloadStateCompleted,
-	api.WorkloadStateFailed,
-	api.WorkloadStatePending,
-	api.WorkloadStateRunning,
-	api.WorkloadStateStopped,
-	api.WorkloadStateSuspended,
-	api.WorkloadStateTerminating,
+var workloadStates = []service.WorkloadState{
+	service.WorkloadStateCompleted,
+	service.WorkloadStateFailed,
+	service.WorkloadStatePending,
+	service.WorkloadStateRunning,
+	service.WorkloadStateStopped,
+	service.WorkloadStateSuspended,
+	service.WorkloadStateTerminating,
 }
 
 // measure records the number of workloads in each state.
@@ -586,7 +586,7 @@ var workloadStates = []api.WorkloadState{
 // before the restart policy is folded in, because the observed map is what the
 // rest of the pass converges from.
 func (r *Reconciler) measure(ctx context.Context, rows []database.Workload, observed map[string][]driver.Instance) {
-	counts := make(map[api.WorkloadState]int, len(workloadStates))
+	counts := make(map[service.WorkloadState]int, len(workloadStates))
 	for _, row := range rows {
 		policy := restartPolicy(row)
 

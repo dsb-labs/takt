@@ -520,13 +520,36 @@ func instanceHealth(reported service.Health, instance driver.Instance) *api.Inst
 	return &api.InstanceHealth{Status: api.HealthStatus(instance.RuntimeHealth)}
 }
 
+// newResolvedPorts maps the ports the server settled on onto the wire format.
+func newResolvedPorts(ports []service.ResolvedPort) []api.ResolvedPort {
+	resolved := make([]api.ResolvedPort, 0, len(ports))
+	for _, port := range ports {
+		entry := api.ResolvedPort{
+			To:       port.To,
+			From:     port.From,
+			Protocol: api.Protocol(port.Protocol),
+			Dynamic:  port.Dynamic,
+		}
+
+		// Reported as absent rather than as an empty string for a port the
+		// specification did not name, which is how the field is sent everywhere else.
+		if port.Name != "" {
+			entry.Name = new(port.Name)
+		}
+
+		resolved = append(resolved, entry)
+	}
+
+	return resolved
+}
+
 // newWorkload maps the service's view of a workload onto the wire format.
 func newWorkload(w service.Workload) api.Workload {
 	workload := api.Workload{
 		Name:      w.Name,
 		Version:   w.Version,
-		Runtime:   w.Runtime,
-		State:     w.State,
+		Runtime:   api.Runtime(w.Runtime),
+		State:     api.WorkloadState(w.State),
 		Spec:      w.Spec,
 		CreatedAt: w.CreatedAt,
 		UpdatedAt: w.UpdatedAt,
@@ -550,7 +573,7 @@ func newWorkload(w service.Workload) api.Workload {
 	}
 
 	if len(w.Ports) > 0 {
-		workload.Ports = new(w.Ports)
+		workload.Ports = new(newResolvedPorts(w.Ports))
 	}
 
 	if len(w.Instances) == 0 {

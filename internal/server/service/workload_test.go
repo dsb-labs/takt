@@ -64,10 +64,10 @@ func TestWorkloadService_Apply(t *testing.T) {
 				assert.True(t, created)
 				assert.Equal(t, "example", w.Name)
 				assert.Equal(t, 1, w.Version)
-				assert.Equal(t, api.Container, w.Runtime)
+				assert.Equal(t, manifest.RuntimeContainer, w.Runtime)
 				// Nothing is running yet, so the workload reads as pending until
 				// the reconciler starts it.
-				assert.Equal(t, api.WorkloadStatePending, w.State)
+				assert.Equal(t, service.WorkloadStatePending, w.State)
 			},
 		},
 		{
@@ -89,7 +89,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 			},
 			Assert: func(t *testing.T, w service.Workload, created bool) {
 				assert.False(t, created)
-				assert.Equal(t, api.WorkloadStateRunning, w.State)
+				assert.Equal(t, service.WorkloadStateRunning, w.State)
 				require.Len(t, w.Instances, 1)
 				assert.Equal(t, "container-one", w.Instances[0].ID)
 			},
@@ -189,7 +189,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 			},
 			Assert: func(t *testing.T, w service.Workload, created bool) {
 				assert.True(t, created)
-				assert.Equal(t, api.Exec, w.Runtime)
+				assert.Equal(t, manifest.RuntimeExec, w.Runtime)
 			},
 		},
 		{
@@ -385,7 +385,7 @@ func TestWorkloadService_Get(t *testing.T) {
 		got, err := svc.Get(t.Context(), "example")
 		require.NoError(t, err)
 
-		assert.Equal(t, api.WorkloadStateRunning, got.State)
+		assert.Equal(t, service.WorkloadStateRunning, got.State)
 		require.Len(t, got.Instances, 1)
 	})
 
@@ -403,7 +403,7 @@ func TestWorkloadService_Get(t *testing.T) {
 
 		assert.Equal(t, "example", got.Name)
 		assert.Empty(t, got.Instances)
-		assert.Equal(t, api.WorkloadStatePending, got.State)
+		assert.Equal(t, service.WorkloadStatePending, got.State)
 	})
 
 	t.Run("reports a missing workload", func(t *testing.T) {
@@ -425,13 +425,13 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 		Name        string
 		Result      health.Result
 		Checked     bool
-		ExpectState api.WorkloadState
+		ExpectState service.WorkloadState
 	}{
 		{
 			Name:        "a passing check leaves the workload running",
 			Result:      health.Result{Status: health.StatusHealthy},
 			Checked:     true,
-			ExpectState: api.WorkloadStateRunning,
+			ExpectState: service.WorkloadStateRunning,
 		},
 		{
 			Name:    "a check that has not passed yet reads as pending",
@@ -439,7 +439,7 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 			Checked: true,
 			// A workload still warming up must not be replaced for not having
 			// answered yet, so this has to be a state the reconciler treats as up.
-			ExpectState: api.WorkloadStatePending,
+			ExpectState: service.WorkloadStatePending,
 		},
 		{
 			Name:    "a failing check makes the workload failed",
@@ -447,12 +447,12 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 			Checked: true,
 			// The container is running as far as docker is concerned, but it cannot
 			// serve — which is the whole point of checking.
-			ExpectState: api.WorkloadStateFailed,
+			ExpectState: service.WorkloadStateFailed,
 		},
 		{
 			Name:        "an unchecked workload is unaffected",
 			Checked:     false,
-			ExpectState: api.WorkloadStateRunning,
+			ExpectState: service.WorkloadStateRunning,
 		},
 	}
 
@@ -572,18 +572,18 @@ func TestWorkloadService_Get_State(t *testing.T) {
 	tt := []struct {
 		Name      string
 		Instances []driver.Instance
-		Expected  api.WorkloadState
+		Expected  service.WorkloadState
 	}{
 		{
 			Name:     "nothing running yet is pending",
-			Expected: api.WorkloadStatePending,
+			Expected: service.WorkloadStatePending,
 		},
 		{
 			Name: "a container being torn down is terminating",
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateTerminating},
 			},
-			Expected: api.WorkloadStateTerminating,
+			Expected: service.WorkloadStateTerminating,
 		},
 		{
 			Name: "a replacement already up outranks its departing predecessor",
@@ -593,7 +593,7 @@ func TestWorkloadService_Get_State(t *testing.T) {
 			},
 			// The workload is serving traffic, so reporting it as terminating
 			// would misrepresent a healthy mid-replacement workload.
-			Expected: api.WorkloadStateRunning,
+			Expected: service.WorkloadStateRunning,
 		},
 		{
 			Name: "teardown is reported ahead of how the instance ended",
@@ -603,7 +603,7 @@ func TestWorkloadService_Get_State(t *testing.T) {
 			},
 			// The non-zero exit is a consequence of the teardown — orca stopped
 			// it — rather than news in its own right.
-			Expected: api.WorkloadStateTerminating,
+			Expected: service.WorkloadStateTerminating,
 		},
 		{
 			Name: "a failed instance outranks a clean exit",
@@ -611,14 +611,14 @@ func TestWorkloadService_Get_State(t *testing.T) {
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 				{ID: "container-two", Workload: "example", State: driver.StateFailed, ExitCode: 1},
 			},
-			Expected: api.WorkloadStateFailed,
+			Expected: service.WorkloadStateFailed,
 		},
 		{
 			Name: "a clean exit is stopped",
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 			},
-			Expected: api.WorkloadStateStopped,
+			Expected: service.WorkloadStateStopped,
 		},
 	}
 
@@ -645,7 +645,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 		Name      string
 		Policy    api.RestartPolicy
 		Instances []driver.Instance
-		Expected  api.WorkloadState
+		Expected  service.WorkloadState
 	}{
 		{
 			// The default policy restarts whatever happened, so a clean exit is a
@@ -655,7 +655,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 			},
-			Expected: api.WorkloadStateStopped,
+			Expected: service.WorkloadStateStopped,
 		},
 		{
 			Name:   "a clean exit under on-failure is completed",
@@ -663,7 +663,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 			},
-			Expected: api.WorkloadStateCompleted,
+			Expected: service.WorkloadStateCompleted,
 		},
 		{
 			// Retired, but not a success. Reporting this as completed would tell an
@@ -673,7 +673,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateFailed, ExitCode: 1},
 			},
-			Expected: api.WorkloadStateFailed,
+			Expected: service.WorkloadStateFailed,
 		},
 		{
 			Name:   "a clean exit under never is completed",
@@ -681,7 +681,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			Instances: []driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 			},
-			Expected: api.WorkloadStateCompleted,
+			Expected: service.WorkloadStateCompleted,
 		},
 		{
 			// Completion must not mask a problem: the operator needs the failure
@@ -692,7 +692,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 				{ID: "container-two", Workload: "example", State: driver.StateFailed, ExitCode: 1},
 			},
-			Expected: api.WorkloadStateFailed,
+			Expected: service.WorkloadStateFailed,
 		},
 		{
 			Name:   "a running instance outranks a completed one",
@@ -701,7 +701,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 				{ID: "container-one", Workload: "example", State: driver.StateExited},
 				{ID: "container-two", Workload: "example", State: driver.StateRunning},
 			},
-			Expected: api.WorkloadStateRunning,
+			Expected: service.WorkloadStateRunning,
 		},
 	}
 
@@ -817,8 +817,8 @@ func TestWorkloadService_List(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, got, 2)
 
-		assert.Equal(t, api.WorkloadStateRunning, got[0].State)
-		assert.Equal(t, api.WorkloadStatePending, got[1].State)
+		assert.Equal(t, service.WorkloadStateRunning, got[0].State)
+		assert.Equal(t, service.WorkloadStatePending, got[1].State)
 	})
 }
 
@@ -1135,9 +1135,8 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		// Reported back as well, since the name is how a caller tells one of a
 		// workload's addresses from another.
 		require.Len(t, workload.Ports, 2)
-		require.NotNil(t, workload.Ports[0].Name)
-		assert.Equal(t, "http", *workload.Ports[0].Name)
-		assert.Nil(t, workload.Ports[1].Name)
+		assert.Equal(t, "http", workload.Ports[0].Name)
+		assert.Empty(t, workload.Ports[1].Name)
 	})
 
 	t.Run("keeps the host port when a port is renamed", func(t *testing.T) {
@@ -1274,7 +1273,7 @@ func TestWorkloadService_Get_DriverHangs(t *testing.T) {
 
 	assert.Equal(t, "example", got.Name)
 	assert.Empty(t, got.Instances)
-	assert.Equal(t, api.WorkloadStatePending, got.State)
+	assert.Equal(t, service.WorkloadStatePending, got.State)
 }
 
 func TestWorkloadService_List_Queries(t *testing.T) {
@@ -1356,7 +1355,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 		// and reports the workload as on its way out. A running instance does not
 		// make it read as running any more.
 		assert.True(t, got.Deleting)
-		assert.Equal(t, api.WorkloadStateTerminating, got.State)
+		assert.Equal(t, service.WorkloadStateTerminating, got.State)
 	})
 
 	t.Run("notifies the reconciler", func(t *testing.T) {
@@ -1475,7 +1474,7 @@ func TestWorkloadService_Stop(t *testing.T) {
 		// and reports the workload as held down. A running instance does not make
 		// it read as running any more.
 		assert.True(t, got.Suspended)
-		assert.Equal(t, api.WorkloadStateSuspended, got.State)
+		assert.Equal(t, service.WorkloadStateSuspended, got.State)
 	})
 
 	t.Run("notifies the reconciler", func(t *testing.T) {
@@ -1544,7 +1543,7 @@ func TestWorkloadService_Start(t *testing.T) {
 		// Nothing has started yet, so the workload reads as pending: the mark is
 		// cleared and the reconciler brings the instances back.
 		assert.False(t, got.Suspended)
-		assert.Equal(t, api.WorkloadStatePending, got.State)
+		assert.Equal(t, service.WorkloadStatePending, got.State)
 	})
 
 	t.Run("notifies the reconciler", func(t *testing.T) {
@@ -1628,7 +1627,7 @@ func TestWorkloadService_Restart(t *testing.T) {
 
 		// The specification and version are untouched, so the workload reads
 		// exactly as it did: a restart is not a change of desired state.
-		assert.Equal(t, api.WorkloadStateRunning, got.State)
+		assert.Equal(t, service.WorkloadStateRunning, got.State)
 	})
 
 	t.Run("refuses a suspended workload", func(t *testing.T) {
@@ -2726,7 +2725,7 @@ func TestWorkloadService_Get_LeavesOutARetainedInstance(t *testing.T) {
 	// attempt before it, which is the opposite of what keeping the output is for.
 	require.Len(t, workload.Instances, 1)
 	assert.Equal(t, "current", workload.Instances[0].ID)
-	assert.Equal(t, api.WorkloadStateRunning, workload.State)
+	assert.Equal(t, service.WorkloadStateRunning, workload.State)
 }
 
 // newTestService builds a service whose port repository answers the reads every path
