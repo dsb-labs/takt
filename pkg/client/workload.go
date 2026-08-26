@@ -256,18 +256,18 @@ func (c *Client) List(ctx context.Context, queries ...string) ([]Workload, error
 }
 
 type (
-	// The WaitOption type is a function that modifies whether a lifecycle
-	// operation blocks until the server has acted on it.
-	WaitOption func(*waitConfig)
+	// The LifecycleOption type is a function that modifies how a workload
+	// lifecycle operation is performed.
+	LifecycleOption func(*lifecycleConfig)
 
-	waitConfig struct {
+	lifecycleConfig struct {
 		wait     bool
 		interval time.Duration
 	}
 )
 
-func defaultWaitConfig() *waitConfig {
-	return &waitConfig{
+func defaultLifecycleConfig() *lifecycleConfig {
+	return &lifecycleConfig{
 		interval: 500 * time.Millisecond,
 	}
 }
@@ -279,14 +279,14 @@ func defaultWaitConfig() *waitConfig {
 //
 // Waiting is polling, so the call returns once that has happened, the context is
 // cancelled, or the server reports an error.
-func WithWait() WaitOption {
-	return func(c *waitConfig) { c.wait = true }
+func WithWait() LifecycleOption {
+	return func(c *lifecycleConfig) { c.wait = true }
 }
 
 // WithWaitInterval modifies how often a waiting operation polls the server, and
 // implies WithWait.
-func WithWaitInterval(interval time.Duration) WaitOption {
-	return func(c *waitConfig) {
+func WithWaitInterval(interval time.Duration) LifecycleOption {
+	return func(c *lifecycleConfig) {
 		c.wait = true
 		c.interval = interval
 	}
@@ -298,8 +298,8 @@ func WithWaitInterval(interval time.Duration) WaitOption {
 // Deletion is asynchronous: the returned workload is reported as terminating, and
 // disappears once the server has stopped everything running for it. Pass WithWait
 // to block until that has happened.
-func (c *Client) Delete(ctx context.Context, name string, options ...WaitOption) (Workload, error) {
-	config := defaultWaitConfig()
+func (c *Client) Delete(ctx context.Context, name string, options ...LifecycleOption) (Workload, error) {
+	config := defaultLifecycleConfig()
 	for _, option := range options {
 		option(config)
 	}
@@ -365,8 +365,8 @@ func (c *Client) waitForTeardown(ctx context.Context, name string, interval time
 // running for it. The specification and its version are untouched, so Start
 // resumes the workload rather than replacing it. Suspension survives a server
 // restart and holds until Start clears it.
-func (c *Client) Stop(ctx context.Context, name string, options ...WaitOption) (Workload, error) {
-	config := defaultWaitConfig()
+func (c *Client) Stop(ctx context.Context, name string, options ...LifecycleOption) (Workload, error) {
+	config := defaultLifecycleConfig()
 	for _, option := range options {
 		option(config)
 	}
@@ -423,8 +423,8 @@ func instanceUp(instance Instance) bool {
 // scheduled workload that is its next occurrence, so waiting on one blocks until
 // the schedule next fires. Starting a workload that is not suspended changes
 // nothing.
-func (c *Client) Start(ctx context.Context, name string, options ...WaitOption) (Workload, error) {
-	config := defaultWaitConfig()
+func (c *Client) Start(ctx context.Context, name string, options ...LifecycleOption) (Workload, error) {
+	config := defaultLifecycleConfig()
 	for _, option := range options {
 		option(config)
 	}
@@ -465,8 +465,8 @@ func (c *Client) Start(ctx context.Context, name string, options ...WaitOption) 
 // The replacement happens on the server's next pass, from the unchanged
 // specification, so the version does not move. Pass WithWait to block until an
 // instance that did not exist before the request has appeared.
-func (c *Client) Restart(ctx context.Context, name string, options ...WaitOption) (Workload, error) {
-	config := defaultWaitConfig()
+func (c *Client) Restart(ctx context.Context, name string, options ...LifecycleOption) (Workload, error) {
+	config := defaultLifecycleConfig()
 	for _, option := range options {
 		option(config)
 	}

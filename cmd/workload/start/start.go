@@ -30,7 +30,7 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			var options []client.WaitOption
+			var options []client.LifecycleOption
 			if wait {
 				options = append(options, client.WithWait())
 			}
