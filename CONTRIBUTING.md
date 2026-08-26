@@ -60,6 +60,29 @@ go run . serve dev.toml
 
 `dev.toml` binds to localhost, keeps its state in `./data`, and logs at debug level.
 
+## The capability the dev loop wants
+
+Deleting a volume a container wrote as another user needs `CAP_DAC_OVERRIDE` — see
+[Deleting a volume a container wrote](docs/operating.md#deleting-a-volume-a-container-wrote).
+A production server gets it from its systemd unit. A dev server started with `go run`
+has no unit, so give your own sessions the capability once through `pam_cap`:
+
+```sh
+# /etc/security/capability.conf, above the "none *" line. The ^ raises the
+# capability as ambient, so every process in the session holds it.
+^cap_dac_override <your-user>
+```
+
+`pam_cap.so` is already in the PAM stack on Debian and Ubuntu. Log in again and
+check with `grep CapAmb /proc/self/status`, which reports `0000000000000002`.
+After that, volume deletion works under `go run` and in the tests, with nothing
+to redo when the binary is rebuilt.
+
+One test watches the confinement trampoline strip this capability from a workload.
+It grants itself one inside a user namespace, so it runs without any of the above.
+It skips only where the test process holds no ambient capability and the host also
+refuses unprivileged user namespaces — the `pam_cap` grant covers that case too.
+
 ## Layout
 
 ```

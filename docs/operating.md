@@ -200,6 +200,11 @@ Two consequences are worth knowing:
 - **A workload cannot attach a debugger to the server.** Landlock scopes `ptrace`
   between domains. Without that, restricting the filesystem alone would be defeatable.
 
+A workload also starts with no ambient capabilities. orca drops the ambient set
+before the command runs, so a capability granted to the server — see
+[Deleting a volume a container wrote](#deleting-a-volume-a-container-wrote) — never
+reaches a workload.
+
 What it does not cover is anything not reached through a filesystem path. Signal
 scoping arrives in a later Landlock version than orca requires, so a confined workload
 can still send a signal to the server. The network is not restricted either.
@@ -234,6 +239,31 @@ would know it sits inside orca's data directory, and could walk out of it.
 
 A volume is bind-mounted into a container, so the Docker daemon has to share this
 filesystem. Volumes do not work against a daemon reached over the network.
+
+### Deleting a volume a container wrote
+
+A container runs as whatever user its image names, and the files it writes to a
+volume belong to that user. The postgres image is the familiar case: it re-owns its
+data directory and makes it readable only by its own user. The server's user then
+cannot remove those files, and `orca volume delete` fails with a permission error.
+
+Grant the server the `CAP_DAC_OVERRIDE` capability, which lets it remove files
+whatever their owner. Under systemd:
+
+```ini
+[Service]
+User=orca
+AmbientCapabilities=CAP_DAC_OVERRIDE
+```
+
+The grant does not reach the workloads. orca drops its ambient capabilities before an
+exec workload's command runs, so the command holds none of them. A container's
+capabilities come from the Docker daemon rather than from orca.
+
+The grant is optional. A server without it runs everything, and only deleting a
+volume holding another user's files needs it. The same ownership stops anything else
+running as the server's user — a backup, for one — from reading those files, and the
+capability changes nothing for them.
 
 ## Restarting the server
 
