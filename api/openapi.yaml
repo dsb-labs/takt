@@ -108,6 +108,11 @@ paths:
         increments it and causes the running instances to be replaced.
 
         The specification's name must match the name in the path.
+
+        Everything the specification names has to exist: a volume it mounts, a secret
+        or variable it reads, and a workload whose address it references. One that
+        does not is a 400 naming what is missing, rather than a workload stored in a
+        state it could never run in.
       requestBody:
         required: true
         content:

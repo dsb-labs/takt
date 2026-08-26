@@ -138,12 +138,18 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 	case errors.Is(err, service.ErrVolumeNotFound),
 		errors.Is(err, service.ErrSecretNotFound),
 		errors.Is(err, service.ErrVariableNotFound),
+		errors.Is(err, service.ErrWorkloadNotFound),
+		errors.Is(err, service.ErrPortNotPublished),
 		errors.Is(err, service.ErrInvalidSpec),
 		errors.Is(err, service.ErrNoRuntime),
 		errors.Is(err, service.ErrAmbiguousRuntime):
-		// A volume, a secret or a variable that does not exist is the caller's to fix,
-		// and naming it is the whole point: the alternative is an operator who mistyped
-		// one being told only that something went wrong.
+		// Everything the specification names that does not exist is the caller's to
+		// fix, and naming it is the whole point: the alternative is an operator who
+		// mistyped one being told only that something went wrong.
+		//
+		// A workload that does not exist means one the specification references. This
+		// endpoint creates the workload it is given, so it is never the workload being
+		// applied that is missing.
 		return api.ApplyWorkload400JSONResponse{
 			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
 		}, nil

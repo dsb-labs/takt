@@ -153,6 +153,34 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			},
 		},
 		{
+			Name: "reports a workload the specification references but does not exist",
+			Path: "/api/v1/workloads/example",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Workload{}, false, fmt.Errorf("%w: postgres", service.ErrWorkloadNotFound)).Once()
+			},
+			// This endpoint creates the workload it is given, so a workload that does
+			// not exist is always one the specification references.
+			ExpectStatus: http.StatusBadRequest,
+			AssertBody: func(t *testing.T, body string) {
+				assert.Contains(t, body, "postgres")
+			},
+		},
+		{
+			Name: "reports a port the referenced workload does not publish",
+			Path: "/api/v1/workloads/example",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Workload{}, false, fmt.Errorf("%w: postgres:http", service.ErrPortNotPublished)).Once()
+			},
+			ExpectStatus: http.StatusBadRequest,
+			AssertBody: func(t *testing.T, body string) {
+				assert.Contains(t, body, "postgres:http")
+			},
+		},
+		{
 			Name: "reports a workload that is being deleted",
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),

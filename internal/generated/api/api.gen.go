@@ -1777,6 +1777,11 @@ type ClientInterface interface {
 	//
 	// The specification's name must match the name in the path.
 	//
+	// Everything the specification names has to exist: a volume it mounts, a secret
+	// or variable it reads, and a workload whose address it references. One that
+	// does not is a 400 naming what is missing, rather than a workload stored in a
+	// state it could never run in.
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
@@ -1790,6 +1795,11 @@ type ClientInterface interface {
 	// increments it and causes the running instances to be replaced.
 	//
 	// The specification's name must match the name in the path.
+	//
+	// Everything the specification names has to exist: a volume it mounts, a secret
+	// or variable it reads, and a workload whose address it references. One that
+	// does not is a 400 naming what is missing, rather than a workload stored in a
+	// state it could never run in.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -2388,6 +2398,11 @@ func (c *Client) GetWorkload(ctx context.Context, name WorkloadName, reqEditors 
 //
 // The specification's name must match the name in the path.
 //
+// Everything the specification names has to exist: a volume it mounts, a secret
+// or variable it reads, and a workload whose address it references. One that
+// does not is a 400 naming what is missing, rather than a workload stored in a
+// state it could never run in.
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
@@ -2411,6 +2426,11 @@ func (c *Client) ApplyWorkloadWithBody(ctx context.Context, name WorkloadName, c
 // increments it and causes the running instances to be replaced.
 //
 // The specification's name must match the name in the path.
+//
+// Everything the specification names has to exist: a volume it mounts, a secret
+// or variable it reads, and a workload whose address it references. One that
+// does not is a 400 naming what is missing, rather than a workload stored in a
+// state it could never run in.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -4021,6 +4041,11 @@ type ClientWithResponsesInterface interface {
 	//
 	// The specification's name must match the name in the path.
 	//
+	// Everything the specification names has to exist: a volume it mounts, a secret
+	// or variable it reads, and a workload whose address it references. One that
+	// does not is a 400 naming what is missing, rather than a workload stored in a
+	// state it could never run in.
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
@@ -4034,6 +4059,11 @@ type ClientWithResponsesInterface interface {
 	// increments it and causes the running instances to be replaced.
 	//
 	// The specification's name must match the name in the path.
+	//
+	// Everything the specification names has to exist: a volume it mounts, a secret
+	// or variable it reads, and a workload whose address it references. One that
+	// does not is a 400 naming what is missing, rather than a workload stored in a
+	// state it could never run in.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -5913,6 +5943,11 @@ func (c *ClientWithResponses) GetWorkloadWithResponse(ctx context.Context, name 
 //
 // The specification's name must match the name in the path.
 //
+// Everything the specification names has to exist: a volume it mounts, a secret
+// or variable it reads, and a workload whose address it references. One that
+// does not is a 400 naming what is missing, rather than a workload stored in a
+// state it could never run in.
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
@@ -5932,6 +5967,11 @@ func (c *ClientWithResponses) ApplyWorkloadWithBodyWithResponse(ctx context.Cont
 // increments it and causes the running instances to be replaced.
 //
 // The specification's name must match the name in the path.
+//
+// Everything the specification names has to exist: a volume it mounts, a secret
+// or variable it reads, and a workload whose address it references. One that
+// does not is a 400 naming what is missing, rather than a workload stored in a
+// state it could never run in.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
