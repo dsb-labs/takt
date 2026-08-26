@@ -174,6 +174,65 @@ func TestEnvResolver_Resolve(t *testing.T) {
 			Resolve(t.Context(), map[string]string{"LEVEL": "${var:log-level}"})
 		assert.ErrorIs(t, err, manifest.ErrUnknownVariable)
 	})
+
+	t.Run("substitutes the address of a referenced workload", func(t *testing.T) {
+		addresses := NewMockAddressResolver(t)
+
+		addresses.EXPECT().
+			Address(mock.Anything, manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres", Port: "pg"}).
+			Return("10.0.0.5:20432", nil).Once()
+
+		resolved, err := newTestEnvResolverWithAddresses(t, addresses).Resolve(t.Context(), map[string]string{
+			"DSN": "postgres://app@${workload:postgres:pg}/app",
+		})
+		require.NoError(t, err)
+		assert.Equal(t, "postgres://app@10.0.0.5:20432/app", resolved["DSN"])
+	})
+
+	t.Run("reports a workload that does not exist", func(t *testing.T) {
+		addresses := NewMockAddressResolver(t)
+
+		addresses.EXPECT().Address(mock.Anything, mock.Anything).
+			Return("", fmt.Errorf("%w: nope", service.ErrWorkloadNotFound)).Once()
+
+		// The paced restart retries until the workload exists, so this is what a
+		// consumer waiting on its dependency reports in the meantime.
+		_, err := newTestEnvResolverWithAddresses(t, addresses).
+			Resolve(t.Context(), map[string]string{"DSN": "${workload:nope}"})
+		require.ErrorIs(t, err, manifest.ErrUnknownWorkload)
+		assert.Contains(t, err.Error(), "DSN")
+		assert.Contains(t, err.Error(), "nope")
+	})
+
+	t.Run("reports a port the referenced workload does not publish", func(t *testing.T) {
+		addresses := NewMockAddressResolver(t)
+
+		failure := fmt.Errorf("%w: workload postgres does not publish http", service.ErrPortNotPublished)
+		addresses.EXPECT().Address(mock.Anything, mock.Anything).Return("", failure).Once()
+
+		// Not the same as a workload nobody created. The workload is right there, and
+		// an operator told its address is unknown would go looking for the wrong
+		// thing.
+		_, err := newTestEnvResolverWithAddresses(t, addresses).
+			Resolve(t.Context(), map[string]string{"DSN": "${workload:postgres:http}"})
+		require.ErrorIs(t, err, failure)
+		assert.NotErrorIs(t, err, manifest.ErrUnknownWorkload)
+	})
+
+	t.Run("refuses a workload reference on a server resolving none", func(t *testing.T) {
+		_, err := newTestEnvResolver(t, nil, nil).
+			Resolve(t.Context(), map[string]string{"DSN": "${workload:postgres}"})
+		assert.ErrorIs(t, err, manifest.ErrUnknownWorkload)
+	})
+}
+
+func newTestEnvResolverWithAddresses(t *testing.T, addresses service.AddressResolver) *service.EnvResolver {
+	t.Helper()
+
+	return service.NewEnvResolver(service.EnvResolverConfig{
+		Logger:    newTestLogger(t),
+		Workloads: addresses,
+	})
 }
 
 func newTestEnvResolver(t *testing.T, secrets, variables service.ValueStore) *service.EnvResolver {

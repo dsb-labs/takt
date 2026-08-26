@@ -22,6 +22,19 @@ type (
 		Value(ctx context.Context, name string) (string, error)
 	}
 
+	// The AddressResolver interface describes how the resolver turns a reference to
+	// another workload into the address that workload is reached at.
+	//
+	// Separate from ValueStore because the two answer different questions. A secret
+	// and a variable are read by name, where an address is derived from what orca
+	// settled on for the workload being referenced.
+	AddressResolver interface {
+		// Address should return the address the reference names, reporting
+		// ErrWorkloadNotFound when nothing holds the name and ErrPortNotPublished
+		// when the workload publishes no such port.
+		Address(ctx context.Context, reference manifest.Reference) (string, error)
+	}
+
 	// The EnvResolver type turns the references in a workload's environment into the
 	// values it is started with.
 	//
@@ -34,6 +47,7 @@ type (
 		logger    *slog.Logger
 		secrets   ValueStore
 		variables ValueStore
+		workloads AddressResolver
 	}
 
 	// The EnvResolverConfig type contains fields used to construct an EnvResolver.
@@ -46,6 +60,9 @@ type (
 		// Where the variables a workload reads are read from. May be nil, in which
 		// case a workload referencing a variable fails to start.
 		Variables ValueStore
+		// Where the address of a referenced workload is resolved. May be nil, in
+		// which case a workload referencing another fails to start.
+		Workloads AddressResolver
 	}
 )
 
@@ -55,6 +72,7 @@ func NewEnvResolver(config EnvResolverConfig) *EnvResolver {
 		logger:    config.Logger.With("component", "service"),
 		secrets:   config.Secrets,
 		variables: config.Variables,
+		workloads: config.Workloads,
 	}
 }
 
@@ -107,7 +125,9 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[s
 		switch {
 		case failed != nil:
 			return nil, failed
-		case errors.Is(err, manifest.ErrUnknownSecret), errors.Is(err, manifest.ErrUnknownVariable):
+		case errors.Is(err, manifest.ErrUnknownSecret),
+			errors.Is(err, manifest.ErrUnknownVariable),
+			errors.Is(err, manifest.ErrUnknownWorkload):
 			// Naming the environment variable as well as what it reads, so that an
 			// operator has both ends of the reference that could not be resolved.
 			return nil, fmt.Errorf("%s reads %w", key, err)
@@ -128,6 +148,10 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[s
 // what reports it. That keeps one description of an unresolved reference, whichever
 // kind it named and wherever expansion was called from.
 func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference) (string, bool, error) {
+	if reference.Kind == manifest.KindWorkload {
+		return r.address(ctx, reference)
+	}
+
 	store, missing := storeFor(r.secrets, r.variables, reference.Kind)
 
 	// A server holding no store of that kind holds nothing under the name, which is
@@ -145,6 +169,32 @@ func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference) (
 	}
 
 	return value, true, nil
+}
+
+// address resolves a reference to another workload into the address that workload is
+// reached at.
+//
+// A workload nobody created is a false, so that expansion reports it the way it
+// reports a secret nobody created. A workload that exists but publishes no such port
+// is an error instead: the reference names something specific about a workload that
+// is right there, and being told the address is unknown would send an operator
+// looking for the wrong thing.
+func (r *EnvResolver) address(ctx context.Context, reference manifest.Reference) (string, bool, error) {
+	// A server resolving no addresses holds nothing under the name, which is the same
+	// answer as a workload nobody created.
+	if r.workloads == nil {
+		return "", false, nil
+	}
+
+	address, err := r.workloads.Address(ctx, reference)
+	switch {
+	case errors.Is(err, ErrWorkloadNotFound):
+		return "", false, nil
+	case err != nil:
+		return "", false, err
+	}
+
+	return address, true, nil
 }
 
 // storeFor returns the store holding values of the given kind, along with the error

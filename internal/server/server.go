@@ -175,6 +175,22 @@ func Run(ctx context.Context, config Config) error {
 		Directory: config.Data.Directory,
 	})
 
+	// The address a workload dials to reach another workload's published ports.
+	// Resolved once at startup rather than per reference: it is a property of this
+	// host and its configuration, neither of which moves while the server runs.
+	workloadAddress, err := config.Workload.Address()
+	if err != nil {
+		logger.With("error", err, "address", workloadAddress).
+			Warn("this host has no routable address, so only exec workloads can reach another workload")
+	}
+
+	addressSvc := service.NewAddressService(service.AddressServiceConfig{
+		Logger:    logger,
+		Workloads: workloads,
+		Ports:     ports,
+		Address:   workloadAddress,
+	})
+
 	// The drivers are keyed by the name each one declares, which is what a workload's
 	// runtime is matched against. A runtime with no driver is stored and left alone.
 	//
@@ -195,6 +211,7 @@ func Run(ctx context.Context, config Config) error {
 			Logger:    logger,
 			Secrets:   secretSvc,
 			Variables: variableSvc,
+			Workloads: addressSvc,
 		}),
 		// Written as a workload starts and removed when it stops, so a mounted value's
 		// plaintext is on the disk for no longer than the workload reading it.
@@ -250,6 +267,7 @@ func Run(ctx context.Context, config Config) error {
 		// each thing currently holds and nothing else.
 		Secrets:    secrets,
 		Variables:  variables,
+		Addresses:  addressSvc,
 		Images:     dockerDriver,
 		Allocator:  allocator,
 		Checker:    checker,

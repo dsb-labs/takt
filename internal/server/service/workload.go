@@ -213,6 +213,13 @@ type (
 		// confirm a guess at it; a variable's value is reported by the API anyway, so
 		// the indirection would protect nothing and cost a column.
 		Variables map[string]string `json:"variables,omitempty"`
+		// The address each workload reference resolved to, keyed by the reference as
+		// it was written. Omitted when the workload references none.
+		//
+		// This is what makes a reallocated host port replace the instances reading
+		// it: the address they were started with is part of what they are, so one
+		// that moved is a specification that changed.
+		Workloads map[string]string `json:"workloads,omitempty"`
 		// The digest the image's registry reports, set only for a workload whose pull
 		// policy is always. It reaches the hash without being stored, the way a
 		// secret's revision does, so a rebuilt tag replaces the instance without the
@@ -242,6 +249,18 @@ type (
 		Values(ctx context.Context, names []string) (map[string]string, error)
 	}
 
+	// The WorkloadAddresses interface describes how the service learns what address
+	// a reference to another workload resolves to.
+	//
+	// Narrower than the address service it is satisfied by: hashing a workload needs
+	// the address and nothing else.
+	WorkloadAddresses interface {
+		// Address should return the address the reference names, reporting
+		// ErrWorkloadNotFound when nothing holds the name and ErrPortNotPublished
+		// when the workload publishes no such port.
+		Address(ctx context.Context, reference manifest.Reference) (string, error)
+	}
+
 	// The ImageResolver interface describes how the service learns which digest an
 	// image reference currently resolves to.
 	//
@@ -266,10 +285,31 @@ type (
 		secrets []string
 		// The names of the variables the specification references.
 		variables []string
+		// The names of the other workloads the specification references, without
+		// repeats: one workload referenced at two ports is one name.
+		workloads []string
 		// The revision of each secret that exists, keyed by name.
 		revisions map[string]string
 		// The value of each variable that exists, keyed by name.
 		values map[string]string
+		// The address each workload reference resolved to, keyed by the reference as
+		// it was written. Nil when the specification references no workload, so that
+		// one which references none hashes as it did before it could.
+		//
+		// The whole address rather than the port alone. A workload is started with
+		// what this holds, so a host that changed leaves every consumer holding an
+		// address that no longer reaches anything — which is a change to the
+		// specification in every sense that matters.
+		addresses map[string]string
+		// The workload references naming a workload that does not exist, and those
+		// naming a port the referenced workload does not publish.
+		//
+		// Recorded rather than returned as an error, because a workload that has gone
+		// has to move the hash of whatever reads it rather than stop it being
+		// rehashed. Refusing the reference is the business of the caller that can act
+		// on it, which is the apply.
+		unknown     []string
+		absentPorts []string
 		// What the specification reads only through a mount naming a signal, which is
 		// deliberately kept out of the hash.
 		//
@@ -290,6 +330,7 @@ type (
 		volumes    VolumeLocator
 		secrets    SecretRevisions
 		variables  VariableValues
+		addresses  WorkloadAddresses
 		images     ImageResolver
 		allocator  Allocator
 		checker    Checker
@@ -317,6 +358,9 @@ type WorkloadServiceConfig struct {
 	// Where the values of the variables a workload reads are read from. May be nil,
 	// in which case a workload referencing a variable is rejected.
 	Variables VariableValues
+	// Where the address of a referenced workload is resolved. May be nil, in which
+	// case a workload referencing another is rejected.
+	Addresses WorkloadAddresses
 	// Where a pull-always workload's image digest is resolved. May be nil, in which
 	// case such a workload is rejected.
 	Images ImageResolver
@@ -342,6 +386,7 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		volumes:    config.Volumes,
 		secrets:    config.Secrets,
 		variables:  config.Variables,
+		addresses:  config.Addresses,
 		images:     config.Images,
 		allocator:  config.Allocator,
 		checker:    config.Checker,
@@ -430,6 +475,17 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 		return Workload{}, false, fmt.Errorf("%w: %s", ErrVariableNotFound, strings.Join(absent, ", "))
 	}
 
+	// A workload that does not exist is refused here rather than at start, as a secret
+	// is. The workload could never run, and the operator asking for it is the one who
+	// can fix the name or apply the workload it names first.
+	if len(read.unknown) > 0 {
+		return Workload{}, false, fmt.Errorf("%w: %s", ErrWorkloadNotFound, strings.Join(read.unknown, ", "))
+	}
+
+	if len(read.absentPorts) > 0 {
+		return Workload{}, false, fmt.Errorf("%w: %s", ErrPortNotPublished, strings.Join(read.absentPorts, ", "))
+	}
+
 	// Resolved here rather than inside store, whose port retries would repeat the
 	// registry round-trip for nothing: the digest does not depend on the ports.
 	digest, err := s.resolveDigest(ctx, spec)
@@ -492,6 +548,7 @@ func (s *WorkloadService) store(
 			SpecHash:  hash,
 			Secrets:   read.secrets,
 			Variables: read.variables,
+			Workloads: read.workloads,
 		}
 
 		if spec.Labels != nil {
@@ -838,7 +895,7 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 	}
 
 	row.Spec, row.SpecHash = encoded, hash
-	row.Secrets, row.Variables = read.secrets, read.variables
+	row.Secrets, row.Variables, row.Workloads = read.secrets, read.variables, read.workloads
 
 	// The ports travel with the write, as they do for an apply. Claiming them
 	// separately beforehand would not survive it: the write replaces a workload's
@@ -924,7 +981,7 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 	}
 
 	row.SpecHash = hash
-	row.Secrets, row.Variables = read.secrets, read.variables
+	row.Secrets, row.Variables, row.Workloads = read.secrets, read.variables, read.workloads
 
 	if _, _, err = s.workloads.Upsert(ctx, row, held...); err != nil {
 		return false, fmt.Errorf("failed to store workload: %w", err)
@@ -1211,9 +1268,9 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadS
 // separately, reaching the hash without being stored.
 //
 // Something that does not exist is simply absent rather than an error. That is what
-// makes deleting a secret or a variable move the hash of the workloads reading it,
-// which is how they come to report that something they need has gone. Refusing the
-// reference is the business of the caller that can act on it.
+// makes deleting a secret, a variable or a referenced workload move the hash of the
+// workloads reading it, which is how they come to report that something they need has
+// gone. Refusing the reference is the business of the caller that can act on it.
 func (s *WorkloadService) resolveReferences(ctx context.Context, spec api.WorkloadSpec) (references, error) {
 	resolvedSpec := manifest.NewSpec(spec)
 
@@ -1230,6 +1287,7 @@ func (s *WorkloadService) resolveReferences(ctx context.Context, spec api.Worklo
 	resolved := references{
 		secrets:   manifest.Names(found, manifest.KindSecret),
 		variables: manifest.Names(found, manifest.KindVariable),
+		workloads: manifest.Names(found, manifest.KindWorkload),
 		refreshed: refreshed,
 	}
 
@@ -1251,6 +1309,34 @@ func (s *WorkloadService) resolveReferences(ctx context.Context, spec api.Worklo
 		if resolved.values, err = s.variables.Values(ctx, resolved.variables); err != nil {
 			return references{}, fmt.Errorf("failed to read variable values: %w", err)
 		}
+	}
+
+	// The port a reference names is part of what is being resolved, so these are read
+	// one reference at a time rather than one workload at a time.
+	for _, reference := range manifest.Of(found, manifest.KindWorkload) {
+		if s.addresses == nil {
+			return references{}, fmt.Errorf("%w: this server resolves no workload addresses", ErrWorkloadNotFound)
+		}
+
+		address, err := s.addresses.Address(ctx, reference)
+		switch {
+		case errors.Is(err, ErrWorkloadNotFound):
+			resolved.unknown = append(resolved.unknown, reference.String())
+
+			continue
+		case errors.Is(err, ErrPortNotPublished):
+			resolved.absentPorts = append(resolved.absentPorts, reference.String())
+
+			continue
+		case err != nil:
+			return references{}, fmt.Errorf("failed to resolve the address of workload %s: %w", reference.Name, err)
+		}
+
+		if resolved.addresses == nil {
+			resolved.addresses = make(map[string]string, len(found))
+		}
+
+		resolved.addresses[reference.String()] = address
 	}
 
 	return resolved, nil
@@ -1511,6 +1597,10 @@ func runtimeOf(spec api.WorkloadSpec) (api.Runtime, error) {
 // Such a mount asked for the file to be rewritten and the workload signalled, and a
 // hash that moved with the value would replace the instance instead.
 //
+// The address each referenced workload resolved to is mixed in the same way. That is
+// what makes a reallocated host port replace the instances reading it: the address
+// they were started with is part of what they are.
+//
 // A pull-always workload's image digest is mixed in the same way, so a rebuilt tag
 // reads as an ordinary specification change. It is empty for every other workload.
 //
@@ -1524,7 +1614,7 @@ func canonicalise(spec api.WorkloadSpec, read references, digest string) ([]byte
 
 	revisions, values := read.hashed()
 
-	if len(revisions) == 0 && len(values) == 0 && digest == "" {
+	if len(revisions) == 0 && len(values) == 0 && len(read.addresses) == 0 && digest == "" {
 		sum := sha256.Sum256(encoded)
 
 		return encoded, hex.EncodeToString(sum[:]), nil
@@ -1534,6 +1624,7 @@ func canonicalise(spec api.WorkloadSpec, read references, digest string) ([]byte
 		Spec:      encoded,
 		Secrets:   revisions,
 		Variables: values,
+		Workloads: read.addresses,
 		Digest:    digest,
 	})
 	if err != nil {

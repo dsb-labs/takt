@@ -1,0 +1,120 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
+	"strconv"
+
+	"github.com/dsb-labs/orca/internal/server/database"
+	"github.com/dsb-labs/orca/pkg/manifest"
+)
+
+var (
+	// ErrPortNotPublished is returned when a reference names a port the referenced
+	// workload does not publish.
+	ErrPortNotPublished = errors.New("port not published")
+)
+
+type (
+	// The WorkloadLocator interface describes how the address service finds the
+	// workload a reference names.
+	//
+	// Narrower than the repository it is satisfied by: resolving an address needs one
+	// workload at a time and nothing else.
+	WorkloadLocator interface {
+		// Get should return the workload with the given name, reporting
+		// database.ErrWorkloadNotFound when no such workload exists.
+		Get(ctx context.Context, name string) (database.Workload, error)
+	}
+
+	// The PortLocator interface describes how the address service finds the ports a
+	// workload publishes.
+	PortLocator interface {
+		// List should return the ports allocated to the workload with the given
+		// identifier.
+		List(ctx context.Context, workloadID string) ([]database.Port, error)
+	}
+
+	// The AddressService type turns a reference to another workload into the address
+	// that workload is reached at.
+	//
+	// The host is the same for every workload, since orca publishes their ports on
+	// this one machine. What differs is the port, which orca may have chosen and may
+	// revise, and which is the reason a workload's address is worth referencing
+	// rather than writing down.
+	AddressService struct {
+		logger    *slog.Logger
+		workloads WorkloadLocator
+		ports     PortLocator
+		address   string
+	}
+
+	// The AddressServiceConfig type contains fields used to construct an
+	// AddressService.
+	AddressServiceConfig struct {
+		// The logger used for resolution events.
+		Logger *slog.Logger
+		// Where the referenced workload is read from.
+		Workloads WorkloadLocator
+		// Where the ports a workload publishes are read from.
+		Ports PortLocator
+		// The address a workload dials to reach another workload's published ports.
+		Address string
+	}
+)
+
+// NewAddressService returns a new instance of the AddressService type.
+func NewAddressService(config AddressServiceConfig) *AddressService {
+	return &AddressService{
+		logger:    config.Logger.With("component", "service"),
+		workloads: config.Workloads,
+		ports:     config.Ports,
+		address:   config.Address,
+	}
+}
+
+// Address returns the address the reference names.
+//
+// A reference naming a port resolves to a host and a port. One naming none resolves
+// to the host alone, so that a workload composing an address it already knows the
+// port of does not have to name it twice.
+//
+// The referenced workload must publish at least one port, whichever form was written.
+// A workload publishing none is reachable at no address, so a reference to one could
+// never mean anything.
+//
+// Returns ErrWorkloadNotFound when nothing holds the name, or ErrPortNotPublished
+// when the workload holds it but publishes no such port.
+func (s *AddressService) Address(ctx context.Context, reference manifest.Reference) (string, error) {
+	row, err := s.workloads.Get(ctx, reference.Name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return "", fmt.Errorf("%w: %s", ErrWorkloadNotFound, reference.Name)
+	case err != nil:
+		return "", fmt.Errorf("failed to load workload: %w", err)
+	}
+
+	published, err := s.ports.List(ctx, row.ID)
+	if err != nil {
+		return "", fmt.Errorf("failed to read workload ports: %w", err)
+	}
+
+	if len(published) == 0 {
+		return "", fmt.Errorf("%w: workload %s publishes no ports", ErrPortNotPublished, reference.Name)
+	}
+
+	if reference.Port == "" {
+		return s.address, nil
+	}
+
+	for _, port := range published {
+		if reference.Port.Matches(port.Name, port.Container) {
+			return net.JoinHostPort(s.address, strconv.Itoa(port.Host)), nil
+		}
+	}
+
+	return "", fmt.Errorf("%w: workload %s does not publish %s", ErrPortNotPublished, reference.Name, reference.Port)
+}

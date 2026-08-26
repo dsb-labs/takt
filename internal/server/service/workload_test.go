@@ -2,9 +2,12 @@ package service_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -25,6 +28,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 func TestWorkloadService_Apply(t *testing.T) {
@@ -860,6 +864,155 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 
 		_, _, err := svc.Apply(t.Context(), spec)
 		assert.ErrorIs(t, err, service.ErrHostPortTaken)
+	})
+}
+
+func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
+	t.Parallel()
+
+	referencing := func(value string) api.WorkloadSpec {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = &map[string]string{"DSN": value}
+
+		return spec
+	}
+
+	t.Run("records the workloads a specification references", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		addresses := NewMockWorkloadAddresses(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+		addresses.EXPECT().
+			Address(mock.Anything, manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres", Port: "pg"}).
+			Return("10.0.0.5:20432", nil).Once()
+
+		var stored database.Workload
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				stored = w
+				w.ID, w.Version = "id-one", 1
+				return w, true, nil
+			})
+
+		_, _, err := newTestAddressAwareService(t, d, repo, ports, addresses).
+			Apply(t.Context(), referencing("postgres://app@${workload:postgres:pg}/app"))
+		require.NoError(t, err)
+
+		// Recorded so that moving the referenced workload's ports can find what reads
+		// them without parsing every stored specification.
+		assert.Equal(t, []string{"postgres"}, stored.Workloads)
+
+		// The reference is stored as written. Storing the address would leave the
+		// workload holding one that has since moved.
+		assert.Contains(t, string(stored.Spec), "${workload:postgres:pg}")
+	})
+
+	t.Run("moves the hash when the referenced address moves", func(t *testing.T) {
+		hashes := make([]string, 0, 2)
+
+		for _, address := range []string{"10.0.0.5:20432", "10.0.0.5:20500"} {
+			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+			addresses := NewMockWorkloadAddresses(t)
+
+			repo.EXPECT().Get(mock.Anything, "example").
+				Return(database.Workload{}, database.ErrWorkloadNotFound)
+			d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+			addresses.EXPECT().Address(mock.Anything, mock.Anything).Return(address, nil).Once()
+
+			repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+					hashes = append(hashes, w.SpecHash)
+					w.ID, w.Version = "id-one", 1
+					return w, true, nil
+				})
+
+			_, _, err := newTestAddressAwareService(t, d, repo, ports, addresses).
+				Apply(t.Context(), referencing("postgres://app@${workload:postgres:pg}/app"))
+			require.NoError(t, err)
+		}
+
+		// The address a workload was started with is part of what it is, so a host
+		// port that was reallocated has to replace the instances reading it.
+		require.Len(t, hashes, 2)
+		assert.NotEqual(t, hashes[0], hashes[1])
+	})
+
+	t.Run("refuses a workload that does not exist", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		addresses := NewMockWorkloadAddresses(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+
+		addresses.EXPECT().Address(mock.Anything, mock.Anything).
+			Return("", fmt.Errorf("%w: nope", service.ErrWorkloadNotFound)).Once()
+
+		// The workload could never run, and the operator asking for it is the one who
+		// can fix the name or apply what it names first.
+		_, _, err := newTestAddressAwareService(t, d, repo, ports, addresses).
+			Apply(t.Context(), referencing("${workload:nope}"))
+		require.ErrorIs(t, err, service.ErrWorkloadNotFound)
+		assert.Contains(t, err.Error(), "nope")
+
+		repo.AssertNotCalled(t, "Upsert")
+	})
+
+	t.Run("refuses a port the referenced workload does not publish", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		addresses := NewMockWorkloadAddresses(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+
+		addresses.EXPECT().Address(mock.Anything, mock.Anything).
+			Return("", fmt.Errorf("%w: workload postgres does not publish http", service.ErrPortNotPublished)).Once()
+
+		_, _, err := newTestAddressAwareService(t, d, repo, ports, addresses).
+			Apply(t.Context(), referencing("${workload:postgres:http}"))
+		require.ErrorIs(t, err, service.ErrPortNotPublished)
+		assert.Contains(t, err.Error(), "postgres:http")
+
+		repo.AssertNotCalled(t, "Upsert")
+	})
+
+	t.Run("refuses a reference on a server resolving no addresses", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+
+		_, _, err := newTestService(t, d, repo, ports, nil).
+			Apply(t.Context(), referencing("${workload:postgres}"))
+		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
+	})
+
+	t.Run("hashes a workload referencing none as it did before", func(t *testing.T) {
+		// A workload reading nothing must encode exactly as it always has, or an
+		// upgrade would replace every running instance.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+		var stored database.Workload
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				stored = w
+				w.ID, w.Version = "id-one", 1
+				return w, true, nil
+			})
+
+		_, _, err := newTestService(t, d, repo, ports, nil).
+			Apply(t.Context(), containerSpec("example", "example/example:latest"))
+		require.NoError(t, err)
+
+		sum := sha256.Sum256(stored.Spec)
+		assert.Equal(t, hex.EncodeToString(sum[:]), stored.SpecHash)
+		assert.Empty(t, stored.Workloads)
 	})
 }
 
@@ -2549,6 +2702,32 @@ func newTestReferenceAwareService(
 	}
 
 	return service.NewWorkloadService(config)
+}
+
+// newTestAddressAwareService builds a service that can resolve the address of a
+// referenced workload, for the tests about what such a reference does to a hash.
+func newTestAddressAwareService(
+	t *testing.T,
+	d *MockDriver,
+	repo *MockWorkloadRepository,
+	ports *MockPortRepository,
+	addresses *MockWorkloadAddresses,
+) *service.WorkloadService {
+	t.Helper()
+
+	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+
+	return service.NewWorkloadService(service.WorkloadServiceConfig{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]service.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Addresses: addresses,
+		Allocator: allocatorStub{},
+	})
 }
 
 // The allocatorStub type hands out ports from a fixed base, so a test can predict
