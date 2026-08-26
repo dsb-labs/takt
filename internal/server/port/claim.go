@@ -53,17 +53,29 @@ type (
 		Allocated(ctx context.Context) (map[string][]int, error)
 	}
 
+	// The Allocation interface describes how a Claimer obtains a host port for a
+	// mapping that names none.
+	//
+	// The Allocator in this package satisfies it. It is an interface so that a
+	// caller's tests can settle ports against something deterministic, since the
+	// real allocator picks at random and binds a socket to prove a port is free.
+	Allocation interface {
+		// Allocate should return a host port that is free on every protocol named,
+		// avoiding the ports already taken on each of them.
+		Allocate(protocols []Protocol, taken map[Protocol][]int) (int, error)
+	}
+
 	// The Claimer type settles a workload's ports on the host ports they are reached
 	// at, allocating one for every mapping that did not ask for a particular port.
 	Claimer struct {
-		allocator *Allocator
+		allocator Allocation
 		ports     Repository
 	}
 
 	// The ClaimerConfig type contains fields used to construct a Claimer.
 	ClaimerConfig struct {
 		// The allocator used to choose a host port for a mapping that names none.
-		Allocator *Allocator
+		Allocator Allocation
 		// Where the ports every workload already holds are read from.
 		Ports Repository
 	}
@@ -293,4 +305,43 @@ func protocolOf(mapping manifest.Port) Protocol {
 	}
 
 	return Protocol(mapping.Protocol)
+}
+
+// Resolved returns spec with every port's host side filled in from the claims.
+//
+// The resolved ports are part of the specification that gets hashed, which is what
+// makes a reallocated port replace the container running on the old one: to the
+// reconciler it is simply a specification that has changed.
+func Resolved(spec manifest.Spec, claims []Claim) manifest.Spec {
+	if len(spec.Ports) == 0 || len(claims) == 0 {
+		return spec
+	}
+
+	settled := make(map[key]Claim, len(claims))
+	for _, claim := range claims {
+		settled[key{claim.Container, claim.Protocol}] = claim
+	}
+
+	mappings := make([]manifest.Port, 0, len(claims))
+	for _, mapping := range spec.Ports {
+		protocol := protocolOf(mapping)
+
+		claim, ok := settled[key{mapping.To, protocol}]
+		if !ok {
+			continue
+		}
+
+		mappings = append(mappings, manifest.Port{
+			Name:     mapping.Name,
+			To:       mapping.To,
+			From:     claim.Host,
+			Protocol: manifest.Protocol(protocol),
+		})
+	}
+
+	// The specification is taken by value, so assigning the mappings here replaces
+	// only this copy's slice header and leaves the caller's alone.
+	spec.Ports = mappings
+
+	return spec
 }

@@ -235,6 +235,7 @@ func Run(ctx context.Context, config Config) error {
 	})
 
 	allocator := port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort})
+	claimer := port.NewClaimer(port.ClaimerConfig{Allocator: allocator, Ports: ports})
 
 	// The count of allocations is read from the repository once per scrape, so a
 	// pass never pays for it. A gauge that cannot be registered costs the metric
@@ -269,7 +270,7 @@ func Run(ctx context.Context, config Config) error {
 		Variables:  variables,
 		Addresses:  addressSvc,
 		Images:     dockerDriver,
-		Allocator:  allocator,
+		Claimer:    claimer,
 		Checker:    checker,
 		Reconciler: reconcile,
 	})

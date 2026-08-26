@@ -36,14 +36,8 @@ var (
 	// ErrWorkloadSuspended is returned when restarting a workload that is
 	// suspended, since nothing would start until it is started again.
 	ErrWorkloadSuspended = errors.New("workload is suspended")
-	// ErrHostPortTaken is returned when a specification pins a host port that
-	// another workload already holds.
-	ErrHostPortTaken = errors.New("host port already in use")
 	// ErrInvalidQuery is returned when a list query is malformed.
 	ErrInvalidQuery = errors.New("invalid query")
-	// ErrNoPortsAvailable is returned when no host port is free for a workload that
-	// needs one allocated.
-	ErrNoPortsAvailable = errors.New("no host port available")
 	// ErrInvalidSpec is returned when a specification does not describe a runnable
 	// workload.
 	ErrInvalidSpec = errors.New("invalid specification")
@@ -145,12 +139,12 @@ type (
 		Path(ctx context.Context, name string) (string, error)
 	}
 
-	// The Allocator interface describes how the service obtains a host port for a
-	// workload that didn't ask for a particular one.
-	Allocator interface {
-		// Allocate should return a host port that is free on every protocol named,
-		// avoiding the ports already taken on each of them.
-		Allocate(protocols []port.Protocol, taken map[port.Protocol][]int) (int, error)
+	// The Claimer interface describes how the service settles a workload's ports on
+	// the host ports they are reached at.
+	Claimer interface {
+		// Resolve should settle every mapping on a host port, keeping the
+		// allocations the workload already holds.
+		Resolve(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, error)
 	}
 
 	// The Checker interface describes how the service reads the health of
@@ -164,14 +158,6 @@ type (
 		// Result should return the most recent outcome for a workload, reporting
 		// false when it has no check registered.
 		Result(workload string) (health.Result, bool)
-	}
-
-	// The portKey type identifies one of a workload's ports, which takes both the
-	// port inside the workload and the protocol it is published on: TCP and UDP are
-	// separate address spaces, so 53/tcp and 53/udp are different ports.
-	portKey struct {
-		container int
-		protocol  port.Protocol
 	}
 
 	// The WorkloadState type names what a workload is doing overall, derived from
@@ -313,7 +299,7 @@ type (
 		variables  VariableValues
 		addresses  WorkloadAddresses
 		images     ImageResolver
-		allocator  Allocator
+		claims     Claimer
 		checker    Checker
 		reconciler Reconciler
 	}
@@ -366,8 +352,8 @@ type WorkloadServiceConfig struct {
 	// Where a pull-always workload's image digest is resolved. May be nil, in which
 	// case such a workload is rejected.
 	Images ImageResolver
-	// The allocator used to choose host ports.
-	Allocator Allocator
+	// The claimer used to settle a workload's ports on host ports.
+	Claimer Claimer
 	// The checker that establishes whether workloads are working. May be nil, in
 	// which case no workload is checked and none reports health.
 	Checker Checker
@@ -390,7 +376,7 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		variables:  config.Variables,
 		addresses:  config.Addresses,
 		images:     config.Images,
-		allocator:  config.Allocator,
+		claims:     config.Claimer,
 		checker:    config.Checker,
 		reconciler: config.Reconciler,
 	}
@@ -542,13 +528,17 @@ func (s *WorkloadService) store(
 	// couldn't settle its ports than wait indefinitely for a quiet moment.
 	const attempts = 5
 
+	current := heldClaims(held)
+
 	for attempt := range attempts {
-		ports, err := s.resolvePorts(ctx, spec.Name, held, spec.Ports)
+		claims, err := s.claims.Resolve(ctx, spec.Name, current, spec.Ports)
 		if err != nil {
 			return database.Workload{}, false, err
 		}
 
-		encoded, hash, err := spechash.Compute(withResolvedPorts(spec, ports), read.hashInputs(digest))
+		ports := allocations(claims, "")
+
+		encoded, hash, err := spechash.Compute(port.Resolved(spec, claims), read.hashInputs(digest))
 		if err != nil {
 			return database.Workload{}, false, err
 		}
@@ -574,23 +564,15 @@ func (s *WorkloadService) store(
 			return stored, created, nil
 		case !errors.Is(err, database.ErrHostPortTaken):
 			return database.Workload{}, false, fmt.Errorf("failed to store workload: %w", err)
-		case pinned(spec.Ports):
-			return database.Workload{}, false, fmt.Errorf("%w: %v", ErrHostPortTaken, err)
+		case port.Pinned(spec.Ports):
+			return database.Workload{}, false, fmt.Errorf("%w: %v", port.ErrHostPortTaken, err)
 		}
 
 		s.logger.With("workload", spec.Name, "attempt", attempt+1).
 			Debug("host port was claimed by another workload, allocating again")
 	}
 
-	return database.Workload{}, false, fmt.Errorf("%w: gave up after %d attempts", ErrHostPortTaken, attempts)
-}
-
-// pinned reports whether any mapping names a host port explicitly, which decides
-// whether a claim collision is the caller's problem or orca's to retry.
-func pinned(mappings []manifest.Port) bool {
-	return slices.ContainsFunc(mappings, func(mapping manifest.Port) bool {
-		return mapping.From != 0
-	})
+	return database.Workload{}, false, fmt.Errorf("%w: gave up after %d attempts", port.ErrHostPortTaken, attempts)
 }
 
 // Get returns the workload with the given name, with the state observed from the
@@ -880,16 +862,17 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 
 	// Dropping the dynamic allocations is what makes resolution pick new ports for
 	// them, since resolution only reuses what it finds still held.
-	var pinned []database.Port
+	var pinned []port.Claim
 	var dynamic bool
 
-	for _, port := range held {
-		if port.Dynamic {
+	current := heldClaims(held)
+	for _, claim := range current {
+		if claim.Dynamic {
 			dynamic = true
 			continue
 		}
 
-		pinned = append(pinned, port)
+		pinned = append(pinned, claim)
 	}
 
 	if !dynamic {
@@ -898,14 +881,12 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 
 	// The stored specification already has its host ports filled in, so the dynamic
 	// ones are cleared to ask for a fresh allocation rather than the same port back.
-	ports, err := s.resolvePorts(ctx, name, pinned, requestedMappings(spec, held))
+	claims, err := s.claims.Resolve(ctx, name, pinned, port.Requested(spec.Ports, current))
 	if err != nil {
 		return false, err
 	}
 
-	for i := range ports {
-		ports[i].WorkloadID = row.ID
-	}
+	ports := allocations(claims, row.ID)
 
 	// Read again rather than carried over, for the same reason the ports are handed
 	// back to the write: the stored links are replaced by whatever the write is given,
@@ -920,7 +901,7 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 		return false, err
 	}
 
-	encoded, hash, err := spechash.Compute(withResolvedPorts(spec, ports), read.hashInputs(digest))
+	encoded, hash, err := spechash.Compute(port.Resolved(spec, claims), read.hashInputs(digest))
 	if err != nil {
 		return false, err
 	}
@@ -1065,205 +1046,6 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 	s.wake()
 
 	return true, nil
-}
-
-// requestedMappings recovers what a specification originally asked for from the
-// stored one, whose host ports have already been resolved. A mapping whose host port
-// was allocated is returned without it, so resolution allocates afresh; a pinned one
-// keeps it.
-func requestedMappings(spec manifest.Spec, held []database.Port) []manifest.Port {
-	allocated := make(map[portKey]struct{}, len(held))
-	for _, allocation := range held {
-		if allocation.Dynamic {
-			allocated[portKey{allocation.Container, port.Protocol(allocation.Protocol)}] = struct{}{}
-		}
-	}
-
-	mappings := spec.Ports
-	requested := make([]manifest.Port, 0, len(mappings))
-
-	for _, mapping := range mappings {
-		if _, ok := allocated[portKey{mapping.To, protocolOf(mapping)}]; ok {
-			requested = append(requested, manifest.Port{Name: mapping.Name, To: mapping.To, Protocol: mapping.Protocol})
-			continue
-		}
-
-		requested = append(requested, mapping)
-	}
-
-	return requested
-}
-
-// resolvePorts settles every mapping in a specification on a host port, keeping the
-// allocations the workload already holds.
-//
-// A port's protocol is part of its identity here as it is in the schema, since TCP
-// and UDP are separate address spaces: what is taken on one says nothing about the
-// other, and resolving them against a single set would refuse ports that are free.
-func (s *WorkloadService) resolvePorts(ctx context.Context, name string, existing []database.Port, mappings []manifest.Port) ([]database.Port, error) {
-	held := make(map[portKey]database.Port, len(existing))
-	for _, allocation := range existing {
-		held[portKey{allocation.Container, port.Protocol(allocation.Protocol)}] = allocation
-	}
-
-	// Ports already promised to any workload are off limits, along with the ones
-	// resolved so far in this specification.
-	allocated, err := s.ports.Allocated(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read allocated ports: %w", err)
-	}
-
-	taken := make(map[port.Protocol][]int, len(allocated))
-	for protocol, ports := range allocated {
-		taken[port.Protocol(protocol)] = ports
-	}
-
-	// A pinned port is taken by this specification whatever else it asks for, so it
-	// is off limits before anything is allocated around it.
-	for _, mapping := range mappings {
-		if mapping.From != 0 {
-			protocol := protocolOf(mapping)
-			taken[protocol] = append(taken[protocol], mapping.From)
-		}
-	}
-
-	allocations, err := s.allocate(held, taken, mappings)
-	if err != nil {
-		return nil, err
-	}
-
-	resolved := make([]database.Port, 0, len(mappings))
-	for _, mapping := range mappings {
-		port, err := s.resolvePort(ctx, name, held, allocations, mapping)
-		if err != nil {
-			return nil, err
-		}
-
-		resolved = append(resolved, port)
-	}
-
-	return resolved, nil
-}
-
-// allocate chooses a host port for every mapping that needs one, reporting them by
-// the port and protocol they belong to.
-//
-// The mappings of one container port are allocated together, so a workload publishing
-// 53 over both protocols is reached at the same number on each rather than at two
-// unrelated ones. Allocating them separately would work — the address spaces are
-// independent — but a DNS server answering on 20000/udp and 20014/tcp reads as an
-// accident.
-func (s *WorkloadService) allocate(held map[portKey]database.Port, taken map[port.Protocol][]int, mappings []manifest.Port) (map[portKey]int, error) {
-	var order []int
-
-	groups := make(map[int][]port.Protocol)
-
-	for _, mapping := range mappings {
-		// A pinned port was chosen by the caller, and one the workload already holds
-		// stays where it is so that its address doesn't move every time something
-		// unrelated about the workload changes.
-		if mapping.From != 0 {
-			continue
-		}
-
-		protocol := protocolOf(mapping)
-		if previous, ok := held[portKey{mapping.To, protocol}]; ok && previous.Dynamic {
-			continue
-		}
-
-		if _, ok := groups[mapping.To]; !ok {
-			order = append(order, mapping.To)
-		}
-
-		groups[mapping.To] = append(groups[mapping.To], protocol)
-	}
-
-	allocations := make(map[portKey]int, len(order))
-
-	for _, container := range order {
-		protocols := groups[container]
-
-		host, err := s.allocator.Allocate(protocols, taken)
-		if err != nil {
-			if errors.Is(err, port.ErrRangeExhausted) {
-				// Every port orca may allocate is in use. The request was valid and
-				// will become servable when a workload is deleted or the range
-				// widened, so it is reported as a capacity problem rather than a
-				// fault or a bad request.
-				return nil, fmt.Errorf("%w for %d: %v", ErrNoPortsAvailable, container, err)
-			}
-
-			return nil, fmt.Errorf("failed to allocate host port for %d: %w", container, err)
-		}
-
-		for _, protocol := range protocols {
-			allocations[portKey{container, protocol}] = host
-			taken[protocol] = append(taken[protocol], host)
-		}
-	}
-
-	return allocations, nil
-}
-
-// resolvePort settles one mapping on the host port it will be reached at.
-func (s *WorkloadService) resolvePort(
-	ctx context.Context,
-	name string,
-	held map[portKey]database.Port,
-	allocations map[portKey]int,
-	mapping manifest.Port,
-) (database.Port, error) {
-	protocol := protocolOf(mapping)
-
-	// A pinned host port is a decision orca must not quietly override, so it is
-	// used as given once nothing else holds it.
-	if mapping.From != 0 {
-		holder, isHeld, err := s.ports.HolderOf(ctx, mapping.From, string(protocol))
-		switch {
-		case err != nil:
-			return database.Port{}, fmt.Errorf("failed to look up host port: %w", err)
-		case isHeld && holder != name:
-			return database.Port{}, fmt.Errorf("%w: %d/%s is used by workload %q",
-				ErrHostPortTaken, mapping.From, protocol, holder)
-		}
-
-		return database.Port{
-			Name:      mapping.Name,
-			Container: mapping.To,
-			Host:      mapping.From,
-			Protocol:  string(protocol),
-		}, nil
-	}
-
-	// An existing allocation is kept so that the workload's address doesn't move
-	// every time something unrelated about it changes. Only the host port is kept:
-	// renaming a port is a change to what the specification calls it rather than a
-	// reason to move where it is reached.
-	if previous, ok := held[portKey{mapping.To, protocol}]; ok && previous.Dynamic {
-		previous.Name = mapping.Name
-
-		return previous, nil
-	}
-
-	return database.Port{
-		Name:      mapping.Name,
-		Container: mapping.To,
-		Host:      allocations[portKey{mapping.To, protocol}],
-		Protocol:  string(protocol),
-		Dynamic:   true,
-	}, nil
-}
-
-// protocolOf reports which protocol a mapping publishes on.
-//
-// A mapping naming none asks for TCP, which is what every specification stored before
-// the protocol existed described.
-func protocolOf(mapping manifest.Port) port.Protocol {
-	if mapping.Protocol == "" {
-		return port.ProtocolTCP
-	}
-
-	return port.Protocol(mapping.Protocol)
 }
 
 // resolveVolumes fills in where each mounted volume lives on the host, rejecting a
@@ -1443,43 +1225,41 @@ func missing(names []string, held map[string]string) []string {
 	return absent
 }
 
-// withResolvedPorts returns spec with every port's host side filled in.
-//
-// The resolved ports are part of the specification that gets hashed, which is what
-// makes a reallocated port replace the container running on the old one: to the
-// reconciler it is simply a specification that has changed.
-func withResolvedPorts(spec manifest.Spec, ports []database.Port) manifest.Spec {
-	if len(spec.Ports) == 0 || len(ports) == 0 {
-		return spec
-	}
-
-	byPort := make(map[portKey]database.Port, len(ports))
+// heldClaims maps stored allocations onto what claiming reads. The workload
+// identifier is dropped, because settling a workload's ports does not need to know
+// which workload it is settling.
+func heldClaims(ports []database.Port) []port.Claim {
+	claims := make([]port.Claim, 0, len(ports))
 	for _, allocation := range ports {
-		byPort[portKey{allocation.Container, port.Protocol(allocation.Protocol)}] = allocation
-	}
-
-	mappings := make([]manifest.Port, 0, len(ports))
-	for _, mapping := range spec.Ports {
-		protocol := protocolOf(mapping)
-
-		resolved, ok := byPort[portKey{mapping.To, protocol}]
-		if !ok {
-			continue
-		}
-
-		mappings = append(mappings, manifest.Port{
-			Name:     mapping.Name,
-			To:       mapping.To,
-			From:     resolved.Host,
-			Protocol: manifest.Protocol(protocol),
+		claims = append(claims, port.Claim{
+			Name:      allocation.Name,
+			Container: allocation.Container,
+			Host:      allocation.Host,
+			Protocol:  port.Protocol(allocation.Protocol),
+			Dynamic:   allocation.Dynamic,
 		})
 	}
 
-	// The specification is taken by value, so assigning the mappings here replaces
-	// only this copy's slice header and leaves the caller's alone.
-	spec.Ports = mappings
+	return claims
+}
 
-	return spec
+// allocations maps settled claims onto the rows that record them, against the
+// workload they belong to. The identifier is empty for an apply, whose row is written
+// in the same statement and has none to give yet.
+func allocations(claims []port.Claim, workloadID string) []database.Port {
+	ports := make([]database.Port, 0, len(claims))
+	for _, claim := range claims {
+		ports = append(ports, database.Port{
+			WorkloadID: workloadID,
+			Name:       claim.Name,
+			Container:  claim.Container,
+			Host:       claim.Host,
+			Protocol:   string(claim.Protocol),
+			Dynamic:    claim.Dynamic,
+		})
+	}
+
+	return ports
 }
 
 // newResolvedPorts maps stored allocations onto the service's view of them.

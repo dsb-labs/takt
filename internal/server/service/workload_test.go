@@ -280,7 +280,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Workloads: repo,
 			Ports:     ports,
 			Volumes:   volumes,
-			Allocator: allocatorStub{},
+			Claimer:   newTestClaimer(ports, allocatorStub{}),
 		})
 
 		_, _, err := svc.Apply(t.Context(), spec)
@@ -310,7 +310,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Workloads: repo,
 			Ports:     ports,
 			Volumes:   volumes,
-			Allocator: allocatorStub{},
+			Claimer:   newTestClaimer(ports, allocatorStub{}),
 		})
 
 		_, _, err := svc.Apply(t.Context(), spec)
@@ -332,7 +332,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Drivers:   map[string]service.Driver{docker.Name: d},
 			Workloads: repo,
 			Ports:     ports,
-			Allocator: allocatorStub{},
+			Claimer:   newTestClaimer(ports, allocatorStub{}),
 		})
 
 		_, _, err := svc.Apply(t.Context(), spec)
@@ -472,7 +472,7 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 				Drivers:   map[string]service.Driver{docker.Name: d},
 				Workloads: repo,
 				Ports:     ports,
-				Allocator: allocatorStub{},
+				Claimer:   newTestClaimer(ports, allocatorStub{}),
 				Checker:   checker,
 			})
 
@@ -525,7 +525,7 @@ func TestWorkloadService_Get_LastError(t *testing.T) {
 				Drivers:    map[string]service.Driver{docker.Name: d},
 				Workloads:  repo,
 				Ports:      ports,
-				Allocator:  allocatorStub{},
+				Claimer:    newTestClaimer(ports, allocatorStub{}),
 				Reconciler: rec,
 			})
 
@@ -551,7 +551,7 @@ func TestWorkloadService_Get_LastError(t *testing.T) {
 			Drivers:   map[string]service.Driver{docker.Name: d},
 			Workloads: repo,
 			Ports:     ports,
-			Allocator: allocatorStub{},
+			Claimer:   newTestClaimer(ports, allocatorStub{}),
 		})
 
 		got, err := svc.Get(t.Context(), "example")
@@ -871,7 +871,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 		spec.Ports = []manifest.Port{{To: 8080, From: 4141}}
 
 		_, _, err := svc.Apply(t.Context(), spec)
-		assert.ErrorIs(t, err, service.ErrHostPortTaken)
+		assert.ErrorIs(t, err, port.ErrHostPortTaken)
 	})
 }
 
@@ -1213,7 +1213,7 @@ func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
-		Allocator: allocatorStub{err: port.ErrRangeExhausted},
+		Claimer:   newTestClaimer(ports, allocatorStub{err: port.ErrRangeExhausted}),
 	})
 
 	// A workload has to actually want a host port for allocation to be reached.
@@ -1223,7 +1223,7 @@ func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 	// An exhausted range is a capacity problem rather than a fault or a bad request,
 	// and the API depends on this translation to answer 503 rather than 500.
 	_, _, err := svc.Apply(t.Context(), spec)
-	assert.ErrorIs(t, err, service.ErrNoPortsAvailable)
+	assert.ErrorIs(t, err, port.ErrNoPortsAvailable)
 
 	// The workload must not have been stored: it has no reachable address, and the
 	// caller was told the apply failed.
@@ -1254,7 +1254,7 @@ func TestWorkloadService_Get_DriverHangs(t *testing.T) {
 		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
-		Allocator: allocatorStub{},
+		Claimer:   newTestClaimer(ports, allocatorStub{}),
 	})
 
 	// The caller's own deadline is shorter than the service's, so this proves the
@@ -1392,7 +1392,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 			Drivers:   map[string]service.Driver{docker.Name: d},
 			Workloads: repo,
 			Ports:     ports,
-			Allocator: allocatorStub{},
+			Claimer:   newTestClaimer(ports, allocatorStub{}),
 		})
 
 		// Applying a workload that references one which does not exist is refused, so
@@ -1614,7 +1614,7 @@ func TestWorkloadService_Restart(t *testing.T) {
 			Drivers:    map[string]service.Driver{docker.Name: d},
 			Workloads:  repo,
 			Ports:      ports,
-			Allocator:  allocatorStub{},
+			Claimer:    newTestClaimer(ports, allocatorStub{}),
 			Reconciler: rec,
 		})
 
@@ -2745,7 +2745,7 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
-		Allocator: allocatorStub{},
+		Claimer:   newTestClaimer(ports, allocatorStub{}),
 	}
 
 	if notify != nil {
@@ -2784,7 +2784,7 @@ func newTestImageAwareService(
 		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
-		Allocator: allocatorStub{},
+		Claimer:   newTestClaimer(ports, allocatorStub{}),
 	}
 
 	// Left nil rather than set to a typed nil, so that the service sees no resolver
@@ -2835,7 +2835,7 @@ func newTestReferenceAwareService(
 		Workloads: repo,
 		Ports:     ports,
 		Secrets:   secrets,
-		Allocator: allocatorStub{},
+		Claimer:   newTestClaimer(ports, allocatorStub{}),
 	}
 
 	// Left nil rather than set to a typed nil, so that the service sees no variable
@@ -2875,8 +2875,14 @@ func newTestAddressAwareService(
 		Workloads: repo,
 		Ports:     ports,
 		Addresses: addresses,
-		Allocator: allocatorStub{},
+		Claimer:   newTestClaimer(ports, allocatorStub{}),
 	})
+}
+
+// newTestClaimer returns a claimer settling ports against the given allocator, which
+// is how these tests exercise real port resolution without binding sockets.
+func newTestClaimer(ports port.Repository, allocator port.Allocation) *port.Claimer {
+	return port.NewClaimer(port.ClaimerConfig{Allocator: allocator, Ports: ports})
 }
 
 // The allocatorStub type hands out ports from a fixed base, so a test can predict
@@ -3031,7 +3037,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		second.Ports = []manifest.Port{{From: 21000, To: 8080}}
 
 		_, _, err = svc.Apply(t.Context(), second)
-		assert.ErrorIs(t, err, service.ErrHostPortTaken)
+		assert.ErrorIs(t, err, port.ErrHostPortTaken)
 	})
 
 	t.Run("gives up rather than retrying forever", func(t *testing.T) {
@@ -3051,19 +3057,21 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		// because the database holds what the reader does not report. A stub allocator
 		// rather than the real one, which checks a candidate is bindable on this host
 		// and would otherwise report the range exhausted instead.
-		blind := service.NewWorkloadService(service.WorkloadServiceConfig{
+		blind := blindPorts{PortRepository: database.NewPortRepository(ports)}
+
+		blindSvc := service.NewWorkloadService(service.WorkloadServiceConfig{
 			Logger:    newTestLogger(t),
 			Drivers:   map[string]service.Driver{docker.Name: newMockDriver(t)},
 			Workloads: database.NewWorkloadRepository(ports),
-			Ports:     blindPorts{PortRepository: database.NewPortRepository(ports)},
-			Allocator: allocatorStub{},
+			Ports:     blind,
+			Claimer:   newTestClaimer(blind, allocatorStub{}),
 		})
 
 		contender := containerSpec("contender", "example/example:latest")
 		contender.Ports = []manifest.Port{{To: 8080}}
 
-		_, _, err = blind.Apply(t.Context(), contender)
-		require.ErrorIs(t, err, service.ErrHostPortTaken)
+		_, _, err = blindSvc.Apply(t.Context(), contender)
+		require.ErrorIs(t, err, port.ErrHostPortTaken)
 		// A pinned collision reports the same sentinel, so the wording is what says
 		// this was the bound being reached rather than a port the caller asked for.
 		assert.Contains(t, err.Error(), "gave up after")
@@ -3100,14 +3108,16 @@ func newConcurrentTestService(t *testing.T) (*service.WorkloadService, *sql.DB) 
 	driver := newMockDriver(t)
 	driver.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
 
+	ports := database.NewPortRepository(db)
+
 	svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger:    newTestLogger(t),
 		Drivers:   map[string]service.Driver{docker.Name: driver},
 		Workloads: database.NewWorkloadRepository(db),
-		Ports:     database.NewPortRepository(db),
+		Ports:     ports,
 		// Narrow enough that concurrent applies contend for the same ports rather
 		// than each being handed one nothing else wanted.
-		Allocator: port.New(port.Config{Min: 21000, Max: 21031}),
+		Claimer: newTestClaimer(ports, port.New(port.Config{Min: 21000, Max: 21031})),
 	})
 
 	return svc, db

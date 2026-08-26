@@ -11,6 +11,7 @@ import (
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
@@ -132,12 +133,12 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		return api.ApplyWorkload409JSONResponse{
 			Error: fmt.Sprintf("workload %q is being deleted", request.Name),
 		}, nil
-	case errors.Is(err, service.ErrHostPortTaken):
+	case errors.Is(err, port.ErrHostPortTaken):
 		// A pinned host port another workload holds is a conflict with existing
 		// state rather than a malformed request, and the message names the holder
 		// so the fix is obvious.
 		return api.ApplyWorkload409JSONResponse{Error: err.Error()}, nil
-	case errors.Is(err, service.ErrNoPortsAvailable):
+	case errors.Is(err, port.ErrNoPortsAvailable):
 		// The request is valid and will be servable once a port frees up, which is
 		// what distinguishes this from a client error: nothing about the manifest
 		// needs to change.

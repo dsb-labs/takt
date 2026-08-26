@@ -21,6 +21,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
+	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -197,7 +198,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
 				svc.EXPECT().Apply(mock.Anything, mock.Anything).
-					Return(service.Workload{}, false, service.ErrHostPortTaken).Once()
+					Return(service.Workload{}, false, port.ErrHostPortTaken).Once()
 			},
 			// A conflict with state that already exists, not a malformed request.
 			ExpectStatus: http.StatusConflict,
@@ -208,7 +209,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
 				svc.EXPECT().Apply(mock.Anything, mock.Anything).
-					Return(service.Workload{}, false, service.ErrNoPortsAvailable).Once()
+					Return(service.Workload{}, false, port.ErrNoPortsAvailable).Once()
 			},
 			// Nothing about the request needs to change: it becomes servable once a
 			// workload is deleted or the range widened, which is what separates this
