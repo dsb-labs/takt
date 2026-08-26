@@ -127,6 +127,43 @@ func TestVolumeService_Delete(t *testing.T) {
 		assert.True(t, os.IsNotExist(err), "the volume's directory outlived the volume")
 	})
 
+	t.Run("names the fix when the contents cannot be removed", func(t *testing.T) {
+		t.Parallel()
+
+		// A container writes to a volume as whatever user its image names, and the
+		// server's user cannot remove another user's files. The failure has to name
+		// what grants that, because nothing else about a permission error says why a
+		// directory orca created cannot be removed.
+		repo := NewMockVolumeRepository(t)
+		repo.EXPECT().Insert(mock.Anything, "example-data").
+			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
+		repo.EXPECT().Get(mock.Anything, "example-data").
+			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
+		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
+
+		svc, _ := newVolumeService(t, repo)
+
+		volume, err := svc.Create(t.Context(), "example-data")
+		require.NoError(t, err)
+
+		// A directory this user cannot read stands in for one owned by another user,
+		// which an unprivileged test cannot make.
+		locked := filepath.Join(volume.Path, "pgdata")
+		require.NoError(t, os.Mkdir(locked, 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(locked, "file"), []byte("data"), 0o600))
+		require.NoError(t, os.Chmod(locked, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+
+		if _, err := os.ReadDir(locked); err == nil {
+			t.Skip("this user reads a directory with no permissions, so removal would succeed")
+		}
+
+		err = svc.Delete(t.Context(), "example-data", false)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "CAP_DAC_OVERRIDE",
+			"a permission failure did not say what grants removing another user's files")
+	})
+
 	tt := []struct {
 		Name       string
 		Force      bool

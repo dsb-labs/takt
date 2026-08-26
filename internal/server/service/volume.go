@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -214,7 +215,15 @@ func (s *VolumeService) Delete(ctx context.Context, name string, force bool) err
 	// cannot be reached, where a directory with no row is unreachable and unnamed:
 	// nothing would ever remove it, since removing one is only ever asked for by
 	// name.
+	//
+	// A permission failure names its fix, because nothing else about it says why a
+	// directory orca created cannot be removed: a container wrote to the volume as a
+	// user other than the server's, which is what an image that switches user does.
 	if err = os.RemoveAll(path); err != nil {
+		if errors.Is(err, fs.ErrPermission) {
+			return fmt.Errorf("failed to remove volume directory: %w: grant the server CAP_DAC_OVERRIDE to remove files a workload wrote as another user", err)
+		}
+
 		return fmt.Errorf("failed to remove volume directory: %w", err)
 	}
 
