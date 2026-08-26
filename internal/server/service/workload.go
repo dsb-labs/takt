@@ -20,6 +20,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
+	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -421,7 +422,7 @@ func (s *WorkloadService) Apply(ctx context.Context, spec api.WorkloadSpec) (Wor
 	// that skips the CLI has to be held to them too. Without this the server accepted
 	// an unknown schema version, a name breaking its own documented rules, and an
 	// empty image that could only ever fail to start.
-	if err = manifest.Validate(manifest.NewSpec(spec)); err != nil {
+	if err = manifest.Validate(wire.ToSpec(spec)); err != nil {
 		return Workload{}, false, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
 
@@ -1297,7 +1298,7 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadS
 		// rather than by inspecting the wire fields again here. Each mount is converted
 		// on its own, so nothing depends on a conversion of the whole specification
 		// yielding one element per wire mount in the same order.
-		kind, err := manifest.KindOf(manifest.NewVolumeMount(mount))
+		kind, err := manifest.KindOf(wire.ToVolumeMount(mount))
 		if err != nil {
 			return spec, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 		}
@@ -1346,7 +1347,7 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec api.WorkloadS
 // workloads reading it, which is how they come to report that something they need has
 // gone. Refusing the reference is the business of the caller that can act on it.
 func (s *WorkloadService) resolveReferences(ctx context.Context, spec api.WorkloadSpec) (references, error) {
-	resolvedSpec := manifest.NewSpec(spec)
+	resolvedSpec := wire.ToSpec(spec)
 
 	found, err := manifest.References(resolvedSpec)
 	if err != nil {
@@ -1754,7 +1755,7 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 
 	deleting := !row.DeletedAt.IsZero()
 	suspended := !row.SuspendedAt.IsZero()
-	policy := manifest.NewSpec(spec).Restart
+	policy := wire.ToSpec(spec).Restart
 
 	// An instance a driver keeps only so that its output can still be read is left out
 	// of what the workload reports. It has ended and nothing will restart it, so
@@ -1782,7 +1783,7 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 	// would be worse than no answer.
 	var next time.Time
 	if !suspended {
-		next = nextRun(manifest.NewSpec(spec).Schedule, instances, row.UpdatedAt)
+		next = nextRun(wire.ToSpec(spec).Schedule, instances, row.UpdatedAt)
 	}
 
 	return Workload{

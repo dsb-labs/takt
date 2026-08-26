@@ -88,26 +88,7 @@ func Parse(r io.Reader) (Spec, error) {
 
 	// Values left unset in the file are resolved before validation, so the rules check
 	// what will actually be used rather than zeroes.
-	//
-	// Every workload has an answer to what happens when it ends, so a manifest naming
-	// no policy still gets one.
-	if spec.Restart == nil {
-		spec.Restart = new(Restart)
-	}
-
-	spec.Restart.defaults()
-
-	for i := range spec.Ports {
-		spec.Ports[i].defaults()
-	}
-
-	if spec.Schedule != nil {
-		spec.Schedule.defaults()
-	}
-
-	if spec.Health != nil {
-		spec.Health.defaults()
-	}
+	spec.Defaults()
 
 	if err := Validate(spec); err != nil {
 		return Spec{}, err
@@ -227,8 +208,8 @@ func validateRestart(restart *Restart) error {
 		return nil
 	}
 
-	if restart.invalidDelay != "" {
-		return fmt.Errorf("invalid restart: %q is not a duration", restart.invalidDelay)
+	if restart.InvalidDelay != "" {
+		return fmt.Errorf("invalid restart: %q is not a duration", restart.InvalidDelay)
 	}
 
 	switch {
@@ -518,8 +499,8 @@ func validateHealth(spec Spec, runtime Runtime) error {
 		return nil
 	}
 
-	if len(health.invalid) > 0 {
-		return fmt.Errorf("invalid health: %s is not a duration", strings.Join(health.invalid, ", "))
+	if len(health.Invalid) > 0 {
+		return fmt.Errorf("invalid health: %s is not a duration", strings.Join(health.Invalid, ", "))
 	}
 
 	switch {

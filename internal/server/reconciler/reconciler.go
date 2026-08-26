@@ -29,6 +29,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/internal/server/telemetry"
+	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -906,7 +907,7 @@ func (r *Reconciler) schedule(row database.Workload) cron.Schedule {
 		return nil
 	}
 
-	declared := manifest.NewSpec(spec).Schedule
+	declared := wire.ToSpec(spec).Schedule
 	if declared == nil {
 		return nil
 	}
@@ -929,7 +930,7 @@ func overlap(row database.Workload) manifest.OverlapPolicy {
 		return manifest.OverlapReplace
 	}
 
-	declared := manifest.NewSpec(spec).Schedule
+	declared := wire.ToSpec(spec).Schedule
 	if declared == nil {
 		return manifest.OverlapReplace
 	}
@@ -949,7 +950,7 @@ func restartPolicy(row database.Workload) *manifest.Restart {
 		return &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay}
 	}
 
-	return manifest.NewSpec(spec).Restart
+	return wire.ToSpec(spec).Restart
 }
 
 // retired reports whether every ended instance is one the policy leaves alone, and so
@@ -983,7 +984,7 @@ func healthCheck(bind string, row database.Workload, ports []database.Port) (hea
 		return health.Check{}, false, fmt.Errorf("failed to decode workload spec: %w", err)
 	}
 
-	resolved := manifest.NewSpec(spec)
+	resolved := wire.ToSpec(spec)
 	if resolved.Health == nil {
 		return health.Check{}, false, nil
 	}

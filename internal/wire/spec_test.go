@@ -1,4 +1,4 @@
-package client
+package wire_test
 
 import (
 	"testing"
@@ -6,14 +6,54 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
-func TestWireSpec(t *testing.T) {
+func TestToSpec(t *testing.T) {
+	t.Parallel()
+
+	// A manifest reaches the server two ways, decoded from YAML and converted from
+	// the wire. A default applied to only one of them would make the same manifest
+	// behave differently depending on the route it took.
+	t.Run("resolves the defaults a manifest file would get", func(t *testing.T) {
+		spec := wire.ToSpec(api.WorkloadSpec{
+			Version:   "v1",
+			Name:      "example",
+			Container: &api.ContainerSpec{Image: "example/example:latest"},
+		})
+
+		require.NotNil(t, spec.Restart)
+		assert.Equal(t, manifest.RestartAlways, spec.Restart.Policy)
+		assert.Equal(t, manifest.DefaultRestartDelay, spec.Restart.Delay)
+	})
+
+	t.Run("records a duration that does not parse", func(t *testing.T) {
+		// Recorded rather than returned as an error, because this is also the path a
+		// client reads a workload back through. Validation reports it.
+		spec := wire.ToSpec(api.WorkloadSpec{
+			Version:   "v1",
+			Name:      "example",
+			Restart:   &api.RestartSpec{Delay: new("half an hour")},
+			Health:    &api.HealthSpec{HTTP: new("/healthz"), Interval: new("often")},
+			Container: &api.ContainerSpec{Image: "example/example:latest"},
+		})
+
+		require.NotNil(t, spec.Restart)
+		assert.Equal(t, "half an hour", spec.Restart.InvalidDelay)
+		require.NotNil(t, spec.Health)
+		assert.Equal(t, []string{"interval"}, spec.Health.Invalid)
+
+		assert.Error(t, manifest.Validate(spec))
+	})
+}
+
+func TestFromSpec(t *testing.T) {
 	t.Parallel()
 
 	t.Run("omits empty optional values", func(t *testing.T) {
-		wire := wireSpec(manifest.Spec{
+		spec := wire.FromSpec(manifest.Spec{
 			Version:   "v1",
 			Name:      "example",
 			Container: &manifest.Container{Image: "example/example:latest"},
@@ -22,24 +62,24 @@ func TestWireSpec(t *testing.T) {
 		// Sending an empty schedule or an empty label map rather than omitting it
 		// would change the specification the server hashes, making an unchanged
 		// manifest look like an update.
-		assert.Nil(t, wire.Schedule)
-		assert.Nil(t, wire.Labels)
-		assert.Nil(t, wire.Restart)
-		assert.Nil(t, wire.Resources)
-		require.NotNil(t, wire.Container)
-		assert.Nil(t, wire.Container.Pull)
-		assert.Nil(t, wire.Container.Command)
-		assert.Nil(t, wire.Container.User)
-		assert.Nil(t, wire.Container.ReadOnly)
-		assert.Nil(t, wire.Container.CapAdd)
-		assert.Nil(t, wire.Container.CapDrop)
-		assert.Nil(t, wire.Env)
-		assert.Nil(t, wire.Ports)
-		assert.Nil(t, wire.Exec)
+		assert.Nil(t, spec.Schedule)
+		assert.Nil(t, spec.Labels)
+		assert.Nil(t, spec.Restart)
+		assert.Nil(t, spec.Resources)
+		require.NotNil(t, spec.Container)
+		assert.Nil(t, spec.Container.Pull)
+		assert.Nil(t, spec.Container.Command)
+		assert.Nil(t, spec.Container.User)
+		assert.Nil(t, spec.Container.ReadOnly)
+		assert.Nil(t, spec.Container.CapAdd)
+		assert.Nil(t, spec.Container.CapDrop)
+		assert.Nil(t, spec.Env)
+		assert.Nil(t, spec.Ports)
+		assert.Nil(t, spec.Exec)
 	})
 
 	t.Run("omits the default pull policy when named", func(t *testing.T) {
-		wire := wireSpec(manifest.Spec{
+		spec := wire.FromSpec(manifest.Spec{
 			Version:   "v1",
 			Name:      "example",
 			Container: &manifest.Container{Image: "example/example:latest", Pull: manifest.PullMissing},
@@ -48,8 +88,8 @@ func TestWireSpec(t *testing.T) {
 		// A manifest that names the default has to encode as one that says
 		// nothing, or writing "pull: missing" into an existing manifest would
 		// move its hash and replace its instance for no change in behaviour.
-		require.NotNil(t, wire.Container)
-		assert.Nil(t, wire.Container.Pull)
+		require.NotNil(t, spec.Container)
+		assert.Nil(t, spec.Container.Pull)
 	})
 
 	t.Run("round-trips a full specification", func(t *testing.T) {
@@ -59,7 +99,7 @@ func TestWireSpec(t *testing.T) {
 			Schedule: &manifest.Schedule{Cron: "*/5 * * * *", Overlap: manifest.OverlapReplace},
 			Labels:   map[string]string{"some-key": "some-value"},
 			// Resolved rather than empty, because a round trip runs the value
-			// through NewSpec, which applies the defaults.
+			// through ToSpec, which applies the defaults.
 			Restart:   &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay},
 			Ports:     []manifest.Port{{Name: "http", To: 8080, From: 4141, Protocol: manifest.ProtocolTCP}},
 			Env:       map[string]string{"EXAMPLE": "EXAMPLE"},
@@ -77,7 +117,7 @@ func TestWireSpec(t *testing.T) {
 
 		// A specification that survives a round trip unchanged is what lets the
 		// client submit what it parsed and read back something comparable.
-		assert.Equal(t, spec, manifest.NewSpec(wireSpec(spec)))
+		assert.Equal(t, spec, wire.ToSpec(wire.FromSpec(spec)))
 	})
 
 	t.Run("round-trips an exec specification", func(t *testing.T) {
@@ -88,6 +128,6 @@ func TestWireSpec(t *testing.T) {
 			Exec:    &manifest.Exec{Command: []string{"echo", "hello world"}},
 		}
 
-		assert.Equal(t, spec, manifest.NewSpec(wireSpec(spec)))
+		assert.Equal(t, spec, wire.ToSpec(wire.FromSpec(spec)))
 	})
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -976,9 +975,6 @@ func TestRestart_Restarts(t *testing.T) {
 func TestRestart_Defaults(t *testing.T) {
 	t.Parallel()
 
-	// A manifest reaches the server two ways, decoded from YAML and converted from
-	// the wire. A default applied to only one of them would make the same manifest
-	// behave differently depending on the route it took.
 	t.Run("parsing a manifest that says nothing", func(t *testing.T) {
 		spec, err := manifest.Parse(strings.NewReader(`
 version: v1
@@ -991,18 +987,6 @@ container:
 		assert.Equal(t, manifest.RestartAlways, spec.Restart.Policy)
 		assert.Equal(t, manifest.DefaultRestartDelay, spec.Restart.Delay)
 		assert.Zero(t, spec.Restart.Attempts, "unset attempts means orca keeps trying")
-	})
-
-	t.Run("converting a wire specification that says nothing", func(t *testing.T) {
-		spec := manifest.NewSpec(api.WorkloadSpec{
-			Version:   "v1",
-			Name:      "example",
-			Container: &api.ContainerSpec{Image: "example/example:latest"},
-		})
-
-		require.NotNil(t, spec.Restart)
-		assert.Equal(t, manifest.RestartAlways, spec.Restart.Policy)
-		assert.Equal(t, manifest.DefaultRestartDelay, spec.Restart.Delay)
 	})
 
 	t.Run("what the manifest states is kept", func(t *testing.T) {

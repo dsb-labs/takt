@@ -8,8 +8,6 @@ import (
 
 	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v3"
-
-	"github.com/dsb-labs/orca/internal/generated/api"
 )
 
 type (
@@ -74,7 +72,11 @@ type (
 
 		// The delay field as written when it did not parse, reported by validation
 		// so that a typo is an error rather than a silent default.
-		invalidDelay string
+		//
+		// Exported because the mapping that records it lives outside this package,
+		// and tagged out of both encodings because it describes a specification
+		// rather than being part of one.
+		InvalidDelay string `json:"-" yaml:"-"`
 	}
 
 	// The Spec type describes the desired state of a workload.
@@ -110,7 +112,7 @@ type (
 		// volume that must already exist.
 		Volumes []VolumeMount `json:"volumes,omitempty"`
 		// What to do when the workload's instance ends. Never nil once a Spec has
-		// been through Parse or NewSpec, both of which resolve the defaults.
+		// been through Defaults, which Parse and the wire mapping both call.
 		Restart *Restart `json:"restart,omitempty"`
 		// How to tell whether the workload is working, rather than merely started.
 		Health *Health `json:"health,omitempty"`
@@ -152,7 +154,10 @@ type (
 
 		// The timing fields that were present but unparseable, reported by
 		// validation so that a typo is an error rather than a silent default.
-		invalid []string
+		//
+		// Exported and tagged out of both encodings for the reason
+		// Restart.InvalidDelay is.
+		Invalid []string `json:"-" yaml:"-"`
 	}
 
 	// The Resources type describes the resource limits a workload runs under.
@@ -493,192 +498,6 @@ func (p RestartPolicy) Restarts(exitCode int) bool {
 	}
 }
 
-// NewSpec maps a wire specification onto the canonical shape.
-//
-// It exists so that anything holding the wire form — the server receiving a request,
-// a client reading a response — can validate it against the same rules a manifest is
-// held to, rather than each side growing its own.
-func NewSpec(spec api.WorkloadSpec) Spec {
-	out := Spec{
-		Version: spec.Version,
-		Name:    spec.Name,
-	}
-
-	out.Schedule = newSchedule(spec.Schedule)
-	out.Restart = newRestart(spec.Restart)
-
-	if spec.Labels != nil {
-		out.Labels = *spec.Labels
-	}
-	if spec.Env != nil {
-		out.Env = *spec.Env
-	}
-	if spec.Ports != nil {
-		out.Ports = make([]Port, 0, len(*spec.Ports))
-		for _, mapping := range *spec.Ports {
-			port := Port{To: mapping.To}
-			if mapping.Name != nil {
-				port.Name = *mapping.Name
-			}
-			if mapping.From != nil {
-				port.From = *mapping.From
-			}
-			if mapping.Protocol != nil {
-				port.Protocol = Protocol(*mapping.Protocol)
-			}
-
-			port.defaults()
-
-			out.Ports = append(out.Ports, port)
-		}
-	}
-
-	if spec.Volumes != nil {
-		out.Volumes = make([]VolumeMount, 0, len(*spec.Volumes))
-		for _, mount := range *spec.Volumes {
-			out.Volumes = append(out.Volumes, NewVolumeMount(mount))
-		}
-	}
-
-	out.Health = newHealth(spec.Health)
-	out.Resources = newResources(spec.Resources)
-
-	if spec.Container != nil {
-		out.Container = &Container{Image: spec.Container.Image}
-
-		if spec.Container.Pull != nil {
-			out.Container.Pull = PullPolicy(*spec.Container.Pull)
-		}
-		if spec.Container.Command != nil {
-			out.Container.Command = *spec.Container.Command
-		}
-		if spec.Container.User != nil {
-			out.Container.User = *spec.Container.User
-		}
-		if spec.Container.ReadOnly != nil {
-			out.Container.ReadOnly = *spec.Container.ReadOnly
-		}
-		if spec.Container.CapAdd != nil {
-			out.Container.CapAdd = *spec.Container.CapAdd
-		}
-		if spec.Container.CapDrop != nil {
-			out.Container.CapDrop = *spec.Container.CapDrop
-		}
-	}
-
-	if spec.Exec != nil {
-		out.Exec = &Exec{Command: spec.Exec.Command}
-	}
-
-	return out
-}
-
-// NewVolumeMount maps a wire mount onto the canonical shape.
-//
-// Exported so that a caller which only cares about what a workload mounts can convert
-// those alone. Converting the whole specification through NewSpec allocates a restart
-// policy and the rest of it, which is waste on a path asked about every workload on
-// every reconciliation pass.
-//
-// The source fields are carried across as they were given rather than being resolved
-// to a kind here. Which source a mount names is derived wherever it matters, so a
-// mount naming none or naming two survives to be reported by validation instead of
-// becoming a mount of something arbitrary.
-func NewVolumeMount(mount api.VolumeMount) VolumeMount {
-	out := VolumeMount{To: mount.To}
-
-	if mount.Name != nil {
-		out.Name = *mount.Name
-	}
-	if mount.Secret != nil {
-		out.Secret = *mount.Secret
-	}
-	if mount.Var != nil {
-		out.Var = *mount.Var
-	}
-	if mount.Signal != nil {
-		out.Signal = Signal(*mount.Signal)
-	}
-
-	return out
-}
-
-// newHealth maps a wire health check onto the canonical shape.
-//
-// A duration that doesn't parse is recorded rather than returned, because this is
-// also the path a client uses to read a workload back, where an error about a value
-// the server already accepted would be nothing the caller could act on. Validation
-// reports it instead.
-func newHealth(spec *api.HealthSpec) *Health {
-	if spec == nil {
-		return nil
-	}
-
-	var health Health
-
-	if spec.HTTP != nil {
-		health.HTTP = *spec.HTTP
-	}
-	if spec.TCP != nil {
-		health.TCP = *spec.TCP
-	}
-	if spec.Port != nil {
-		health.Port = PortRef(*spec.Port)
-	}
-	if spec.Retries != nil {
-		health.Retries = *spec.Retries
-	}
-
-	for _, field := range []struct {
-		name  string
-		value *string
-		into  *time.Duration
-	}{
-		{"interval", spec.Interval, &health.Interval},
-		{"timeout", spec.Timeout, &health.Timeout},
-		{"startPeriod", spec.StartPeriod, &health.StartPeriod},
-	} {
-		if field.value == nil || *field.value == "" {
-			continue
-		}
-
-		if parsed, err := time.ParseDuration(*field.value); err == nil {
-			*field.into = parsed
-		} else {
-			health.invalid = append(health.invalid, field.name)
-		}
-	}
-
-	health.defaults()
-
-	return &health
-}
-
-// newResources maps wire resource limits onto the canonical shape.
-//
-// The memory size is carried across as written rather than parsed here, so a value
-// that does not parse survives to be reported by validation instead of erroring on
-// the path a client uses to read a workload back.
-func newResources(spec *api.ResourcesSpec) *Resources {
-	if spec == nil {
-		return nil
-	}
-
-	var resources Resources
-
-	if spec.Memory != nil {
-		resources.Memory = *spec.Memory
-	}
-	if spec.CPU != nil {
-		resources.CPU = *spec.CPU
-	}
-	if spec.Pids != nil {
-		resources.Pids = *spec.Pids
-	}
-
-	return &resources
-}
-
 // Parsed returns the schedule's expression ready to ask for occurrence times.
 //
 // Validation proves the expression parses, so an error here means the stored
@@ -693,54 +512,34 @@ func (s *Schedule) Parsed() (cron.Schedule, error) {
 	return parsed, nil
 }
 
-// newSchedule maps a wire schedule onto the canonical shape.
-func newSchedule(spec *api.ScheduleSpec) *Schedule {
-	if spec == nil {
-		return nil
-	}
-
-	schedule := Schedule{Cron: spec.Cron}
-
-	if spec.Overlap != nil {
-		schedule.Overlap = OverlapPolicy(*spec.Overlap)
-	}
-
-	schedule.defaults()
-
-	return &schedule
-}
-
-// newRestart maps a wire restart policy onto the canonical shape.
+// Defaults fills in what the specification left unset, so that validation checks
+// what will actually be used rather than zeroes.
 //
-// A nil policy still produces one, since every workload has an answer to what happens
-// when it ends and the answer is the default.
+// Exported because it runs however a Spec was built, decoded from YAML by Parse or
+// converted from the wire format by the caller that received one. A default applied
+// on only one of those paths would make the same manifest behave differently
+// depending on how it reached the server.
 //
-// A delay that does not parse is recorded rather than returned, because this is also
-// the path a client uses to read a workload back, where an error about a value the
-// server already accepted would be nothing the caller could act on. Validation reports
-// it instead.
-func newRestart(spec *api.RestartSpec) *Restart {
-	restart := new(Restart)
-
-	if spec != nil {
-		if spec.Policy != nil {
-			restart.Policy = RestartPolicy(*spec.Policy)
-		}
-		if spec.Attempts != nil {
-			restart.Attempts = *spec.Attempts
-		}
-		if spec.Delay != nil && *spec.Delay != "" {
-			if parsed, err := time.ParseDuration(*spec.Delay); err == nil {
-				restart.Delay = parsed
-			} else {
-				restart.invalidDelay = *spec.Delay
-			}
-		}
+// Every workload has an answer to what happens when it ends, so a specification
+// naming no policy still gets one.
+func (s *Spec) Defaults() {
+	if s.Restart == nil {
+		s.Restart = new(Restart)
 	}
 
-	restart.defaults()
+	s.Restart.defaults()
 
-	return restart
+	for i := range s.Ports {
+		s.Ports[i].defaults()
+	}
+
+	if s.Schedule != nil {
+		s.Schedule.defaults()
+	}
+
+	if s.Health != nil {
+		s.Health.defaults()
+	}
 }
 
 // defaults fills in what a schedule left unset.
@@ -808,87 +607,4 @@ func (h *Health) defaults() {
 	if h.StartPeriod == 0 {
 		h.StartPeriod = DefaultHealthStartPeriod
 	}
-}
-
-// WireSchedule maps the canonical schedule onto the wire format.
-func WireSchedule(schedule *Schedule) *api.ScheduleSpec {
-	if schedule == nil {
-		return nil
-	}
-
-	spec := api.ScheduleSpec{Cron: schedule.Cron}
-
-	if schedule.Overlap != "" {
-		spec.Overlap = new(api.OverlapPolicy(schedule.Overlap))
-	}
-
-	return &spec
-}
-
-// WireRestart maps the canonical restart policy onto the wire format.
-func WireRestart(restart *Restart) *api.RestartSpec {
-	if restart == nil {
-		return nil
-	}
-
-	spec := api.RestartSpec{}
-
-	if restart.Policy != "" {
-		spec.Policy = new(api.RestartPolicy(restart.Policy))
-	}
-	if restart.Attempts > 0 {
-		spec.Attempts = new(restart.Attempts)
-	}
-	if restart.Delay > 0 {
-		spec.Delay = new(restart.Delay.String())
-	}
-
-	return &spec
-}
-
-// WireResources maps the canonical resource limits onto the wire format.
-func WireResources(resources *Resources) *api.ResourcesSpec {
-	if resources == nil {
-		return nil
-	}
-
-	spec := api.ResourcesSpec{}
-
-	if resources.Memory != "" {
-		spec.Memory = new(resources.Memory)
-	}
-	if resources.CPU != 0 {
-		spec.CPU = new(resources.CPU)
-	}
-	if resources.Pids != 0 {
-		spec.Pids = new(resources.Pids)
-	}
-
-	return &spec
-}
-
-// WireHealth maps the canonical health check onto the wire format.
-func WireHealth(health *Health) *api.HealthSpec {
-	if health == nil {
-		return nil
-	}
-
-	spec := api.HealthSpec{
-		Interval:    new(health.Interval.String()),
-		Timeout:     new(health.Timeout.String()),
-		Retries:     new(health.Retries),
-		StartPeriod: new(health.StartPeriod.String()),
-	}
-
-	if health.HTTP != "" {
-		spec.HTTP = new(health.HTTP)
-	}
-	if health.TCP {
-		spec.TCP = new(health.TCP)
-	}
-	if health.Port != "" {
-		spec.Port = new(string(health.Port))
-	}
-
-	return &spec
 }

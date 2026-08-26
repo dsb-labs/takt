@@ -16,6 +16,7 @@ import (
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/database"
+	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -265,7 +266,7 @@ func NewWorkload(row database.Workload) (Workload, error) {
 			// mounted secret or variable is written as the workload starts and added to
 			// this by whoever wrote it, so that nothing about a value ever reaches a
 			// stored specification.
-			converted := manifest.NewVolumeMount(mount)
+			converted := wire.ToVolumeMount(mount)
 			if kind, err := manifest.KindOf(converted); err != nil || kind != manifest.MountVolume {
 				continue
 			}

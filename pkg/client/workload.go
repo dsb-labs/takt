@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -176,7 +177,7 @@ const (
 // Applying an unchanged specification is a no-op that leaves the workload's
 // version alone.
 func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool, error) {
-	resp, err := c.api.ApplyWorkloadWithResponse(ctx, spec.Name, wireSpec(spec))
+	resp, err := c.api.ApplyWorkloadWithResponse(ctx, spec.Name, wire.FromSpec(spec))
 	if err != nil {
 		return Workload{}, false, fmt.Errorf("failed to apply workload: %w", err)
 	}
@@ -708,7 +709,7 @@ func newWorkload(w api.Workload) Workload {
 		Version:   w.Version,
 		Runtime:   manifest.Runtime(w.Runtime),
 		State:     WorkloadState(w.State),
-		Spec:      manifest.NewSpec(w.Spec),
+		Spec:      wire.ToSpec(w.Spec),
 		CreatedAt: w.CreatedAt,
 		UpdatedAt: w.UpdatedAt,
 	}

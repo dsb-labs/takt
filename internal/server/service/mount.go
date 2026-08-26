@@ -14,6 +14,7 @@ import (
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -503,7 +504,7 @@ func valueMounts(spec api.WorkloadSpec) []manifest.VolumeMount {
 
 	var mounts []manifest.VolumeMount
 	for _, mount := range *spec.Volumes {
-		converted := manifest.NewVolumeMount(mount)
+		converted := wire.ToVolumeMount(mount)
 		if _, ok := converted.Reference(); ok {
 			mounts = append(mounts, converted)
 		}
@@ -528,7 +529,7 @@ func signalledMounts(spec api.WorkloadSpec) []manifest.VolumeMount {
 			continue
 		}
 
-		converted := manifest.NewVolumeMount(mount)
+		converted := wire.ToVolumeMount(mount)
 		if _, ok := converted.Reference(); ok {
 			mounts = append(mounts, converted)
 		}
