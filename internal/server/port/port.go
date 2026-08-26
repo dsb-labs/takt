@@ -1,10 +1,16 @@
-// Package port provides allocation of host ports to workloads.
+// Package port provides allocation of host ports to workloads, and settles a
+// workload's ports on the ones it is reached at.
 //
 // Allocation lives above the driver boundary rather than inside a driver. A host
 // port that orca chose is a decision it can record, report and keep stable, which is
 // what makes it usable as an address; leaving the choice to the runtime would mean
 // only discovering the address afterwards, and would have to be reimplemented by
 // every driver whose runtime has no allocator of its own.
+//
+// Claiming sits here rather than in the service that writes the result. A pinned port
+// and an allocated one are settled by the same rules, and those rules are about ports
+// rather than about workloads: which address spaces are separate, which allocation a
+// workload keeps, and which mappings have to land on the same number.
 package port
 
 import (

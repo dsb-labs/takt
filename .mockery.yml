@@ -14,3 +14,6 @@ packages:
   github.com/dsb-labs/orca/internal/server/api:
     config:
       all: true
+  github.com/dsb-labs/orca/internal/server/port:
+    config:
+      all: true
