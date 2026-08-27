@@ -381,6 +381,7 @@ func TestRequireJSON(t *testing.T) {
 		Name         string
 		Method       string
 		ContentType  string
+		NoBody       bool
 		ExpectStatus int
 	}{
 		{
@@ -421,6 +422,15 @@ func TestRequireJSON(t *testing.T) {
 			ExpectStatus: http.StatusOK,
 		},
 		{
+			// A rekey is a POST with nothing in it. Refusing it for failing to
+			// declare the type of a body it does not have would refuse it for
+			// nothing.
+			Name:         "lets a post with no body through",
+			Method:       http.MethodPost,
+			NoBody:       true,
+			ExpectStatus: http.StatusOK,
+		},
+		{
 			Name:         "lets a delete through",
 			Method:       http.MethodDelete,
 			ExpectStatus: http.StatusOK,
@@ -429,7 +439,12 @@ func TestRequireJSON(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			req := httptest.NewRequest(tc.Method, "/api/v1/workloads/example", strings.NewReader("{}"))
+			body := "{}"
+			if tc.NoBody {
+				body = ""
+			}
+
+			req := httptest.NewRequest(tc.Method, "/api/v1/workloads/example", strings.NewReader(body))
 			if tc.ContentType != "" {
 				req.Header.Set("Content-Type", tc.ContentType)
 			}
