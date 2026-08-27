@@ -94,7 +94,7 @@ default:
 state.db          the workloads that have been applied
 state.db-wal      SQLite's write-ahead log
 state.db-shm      SQLite's shared-memory index
-secret.key        the key secrets are encrypted with
+keys/             the keys secrets are encrypted with, one file each
 exec/state/       what orca started, one directory per exec workload
 exec/workloads/   where exec workloads run, one directory each
 volumes/          one directory per volume
@@ -106,9 +106,9 @@ The database holds each workload's stored specification, environment included, s
 creates the directory and its files readable only by the user running the server.
 
 A secret's value is encrypted in the database rather than held in a specification, so
-a backup of `state.db` alone does not disclose one. `secret.key` is what decrypts
-them, and it needs a backup of its own: a value sealed under a key that is gone cannot
-be recovered. Keeping the two apart is what makes the database safe to copy. See
+a backup of `state.db` alone does not disclose one. The keyring is what decrypts them,
+and it needs a backup of its own: a value sealed under a key that is gone cannot be
+recovered. Keeping the two apart is what makes the database safe to copy. See
 [Secrets](secrets.md#the-encryption-key).
 
 `mounts/files/` is the exception. A workload that mounts a secret gets a file holding
@@ -144,15 +144,17 @@ reason:
 
 | Not in the archive | Why | What to do |
 |---|---|---|
-| `secret.key` | The database and the key are separable on purpose, so a copy of the database is safe to keep where a key would not be. | Back it up once, separately. It does not change. |
+| The keyring | The database and the keys are separable on purpose, so a copy of the database is safe to keep where a key would not be. | Back it up separately. It changes only when you rekey. |
 | Volume data | Copying arbitrary user data is not orca's job. | `orca volume list` reports each path. Back those up yourself. |
 | `mounts/` | Transient. Rewritten as a workload starts. | Nothing. |
 
-`--include-key` puts the key in the archive. It makes a restore one step instead of
-two, and it makes the archive key material: anything that can read it can read every
-secret the node holds, now and after the key is next rotated. Setting
-`secrets.key-file` to somewhere already covered by a backup is the better answer, and
-then the default needs nothing.
+`--include-keys` puts the keyring in the archive. It makes a restore one step instead
+of two, and it makes the archive key material: anything that can read it can read
+every secret the node holds. Setting `secrets.keys` to somewhere already covered by a
+backup is the better answer, and then the default needs nothing.
+
+Every key goes in, not only the one sealing secrets now. A key that `orca admin rekey`
+replaced still opens the archives taken before it was replaced.
 
 ### Putting one back
 
@@ -162,9 +164,11 @@ cover anyway. With the server stopped:
 1. Extract `state.db` into the data directory. **Remove any `state.db-wal` and
    `state.db-shm` first.** SQLite reads a stale log against the restored database and
    the result is silently wrong.
-2. Put `secret.key` back, `chmod 600`. The server refuses to start on a key that is
-   readable by anyone else. Without it every workload reading a secret fails to start,
-   with nothing pointing at the cause.
+2. Put the `keys/` directory back, each file `chmod 600`. The server refuses to start
+   on a key that is readable by anyone else. Without the keyring every workload
+   reading a secret fails to start, with nothing pointing at the cause. Restore the
+   whole directory rather than one key: the database names the key it needs, and that
+   may not be the newest one if the archive predates a rekey.
 3. Restore volume data under the paths `orca volume list` reported. A volume is found
    by the identifier it was assigned, so recreating one by name gives an empty volume
    and a row pointing at nothing.
@@ -219,7 +223,7 @@ output survives for as long as the workload does.
 ## Confinement
 
 An `exec` workload runs as the same user as the server. File permissions therefore
-stop it reaching nothing that user can reach, which includes `secret.key`, the
+stop it reaching nothing that user can reach, which includes the keyring, the
 database, and every other workload's mounted plaintext. Running workloads as a
 separate user would need privileges orca deliberately does not ask for.
 

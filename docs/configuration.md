@@ -28,7 +28,7 @@ max-port = 32000
 allow-paths = []
 
 [secrets]
-key-file = ""
+keys = ""
 
 [telemetry]
 otlp-endpoint = ""
@@ -188,21 +188,27 @@ directory. Which paths are opened is the operator's decision.
 
 | Key | Default | Description |
 |---|---|---|
-| `key-file` | empty | The file holding the key secrets are encrypted with. |
+| `keys` | empty | The directory holding the keys secrets are encrypted with. |
 
-Empty puts the key at `secret.key` inside the data directory. It is generated on first
-start, 32 random bytes, readable only by the user running the server.
+Empty puts the keyring at `keys/` inside the data directory. A key is generated on
+first start, 32 random bytes, readable only by the user running the server.
 
-Set this to keep the key off the same disk as the database:
+A directory rather than a file because `orca admin rekey` writes a new key before
+anything points at it. Each key is named by an identifier the database records, so
+which one is current is a question the database answers. The keyring keeps the keys
+it has replaced, since they still open the backups taken before the rekey.
+
+Set this to keep the keyring off the same disk as the database:
 
 ```toml
 [secrets]
-key-file = "/etc/orca/secret.key"
+keys = "/etc/orca/keys"
 ```
 
-The file needs a backup, and the backup should not sit beside the database. A value
-sealed under a key that is gone cannot be recovered, and anything that can read the
-key can read every secret orca holds. See [Secrets](secrets.md#the-encryption-key).
+The keyring needs a backup, and the backup should not sit beside the database. A value
+sealed under a key that is gone cannot be recovered, and anything that can read a key
+can read every secret sealed under it. See
+[The encryption key](secrets.md#the-encryption-key).
 
 ## telemetry
 

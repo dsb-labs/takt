@@ -161,27 +161,57 @@ Creating the secret again recovers them without any further action.
 
 ## The encryption key
 
-Values are encrypted with AES-256-GCM. The key lives beside the database:
+Values are encrypted with AES-256-GCM. The keys live in a directory beside the
+database:
 
 ```
-~/.local/share/orca/secret.key
+~/.local/share/orca/keys/da879s0hpe2ten8re4u0.key
 ```
 
-It is generated on first start, 32 random bytes, readable only by the user running
-the server. Point `secrets.key-file` somewhere else to keep it off the same disk as
-the database. See [Configuration](configuration.md).
+A key is generated on first start, 32 random bytes, readable only by the user running
+the server. Point `secrets.keys` somewhere else to keep the keyring off the same disk
+as the database. See [Configuration](configuration.md).
 
-**Back the key up, and keep the backup separate from the database.** A value sealed
-under a key that is gone cannot be recovered. A backup of the data directory holds
-both, which makes it a complete copy and also a single thing worth protecting.
+Each key is named by an identifier, and the database records which key sealed each
+secret. That is what lets `orca admin rekey` write a new key before anything points
+at it, so a rotation is never a moment where the database and the keyring disagree.
 
-`orca admin backup` leaves the key out for this reason, so the archive it writes is
-safe to keep where the key would not be. Point `secrets.key-file` at somewhere your
+**Back the keyring up, and keep the backup separate from the database.** A value
+sealed under a key that is gone cannot be recovered. A backup of the data directory
+holds both, which makes it a complete copy and also a single thing worth protecting.
+
+`orca admin backup` leaves the keyring out for this reason, so the archive it writes
+is safe to keep where a key would not be. Point `secrets.keys` at somewhere your
 existing backups already cover and there is nothing else to remember. See
 [Backups](operating.md#backups).
 
-If the key is lost, the secrets are not recoverable. Set each one again, which moves
-its revision and redeploys the workloads reading it.
+If the keys are lost, the secrets are not recoverable. Set each one again, which
+moves its revision and redeploys the workloads reading it.
+
+### Rotating the key
+
+```sh
+orca admin rekey
+```
+
+The server generates a key, re-seals every secret under it, and starts using it. This
+is the way off the key a node was started with, which matters when that key leaks —
+in a backup, on an imaged disk, committed by accident — and as ordinary hygiene.
+
+**No workload is redeployed.** A rekey changes how a value is stored, not what it is,
+so no revision moves and no specification hash with it. A node that was running before
+the rekey is running the same instances after it.
+
+The rewrite is one transaction, and the new key reaches the keyring before anything
+points at it. A rekey that is interrupted therefore leaves every secret under the old
+key or every secret under the new one, with nothing to repair by hand.
+
+The key that was replaced is kept. It still opens the backups taken before the rekey,
+which is why `orca admin backup --include-keys` carries the whole keyring rather than
+the current key alone.
+
+**Back the keyring up afterwards.** The copy you had opens nothing the node now
+holds.
 
 The secret's name is part of what the encryption authenticates, so a value copied to
 another row in the database fails to open rather than decrypting as whichever secret

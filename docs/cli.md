@@ -28,6 +28,7 @@ orca variable get <name>                Show a single variable
 orca variable delete <name>             Delete a variable                    (alias: rm)
 
 orca admin backup <destination>         Write a backup of the node to a file
+orca admin rekey                        Re-encrypt every secret under a new key
 ```
 
 Commands are grouped by what they act on, so a verb reads the same whichever noun
@@ -398,12 +399,12 @@ something replaces them. Creating the variable again recovers them. See
 
 ```sh
 orca admin backup /backups/orca.zip
-orca admin backup /backups/orca.zip --include-key
+orca admin backup /backups/orca.zip --include-keys
 ```
 
 | Flag | Description |
 |---|---|
-| `--include-key` | Put the secret encryption key in the archive. |
+| `--include-keys` | Put the keyring in the archive. |
 
 Asks the server for a consistent snapshot of its database and writes it to the
 destination as a zip archive. The server keeps running throughout.
@@ -425,15 +426,39 @@ to standard error, so the two do not mix when the output is piped.
 on the host and back those up separately. orca has no business copying arbitrary user
 data.
 
-**The encryption key is not in the archive** unless `--include-key` is passed. A
-database without its key decrypts nothing, and that is what makes a copy of it safe
-to keep somewhere a key would not be. An archive holding both is key material: it
-opens every secret the node holds, and it keeps opening them long after it was taken.
-Setting `secrets.key-file` to a path you already back up is the better answer. See
+**The keyring is not in the archive** unless `--include-keys` is passed. A database
+without its keys decrypts nothing, and that is what makes a copy of it safe to keep
+somewhere a key would not be. An archive holding both is key material: it opens every
+secret the node holds, and it keeps opening them long after it was taken. Setting
+`secrets.keys` to a path you already back up is the better answer. See
 [The encryption key](secrets.md#the-encryption-key).
 
-Restoring is not yet a command. See [State on disk](operating.md#state-on-disk) for
-what the archive holds and what has to be put back beside it.
+Every key goes in, not only the one sealing secrets now. A key that `orca admin rekey`
+replaced still opens the archives taken before it was replaced.
+
+Restoring is not yet a command. See [Backups](operating.md#backups) for what the
+archive holds and what has to be put back beside it.
+
+## admin rekey
+
+```sh
+orca admin rekey
+```
+
+Generates a new encryption key, re-seals every secret under it, and starts using it.
+The server keeps running throughout.
+
+This is the way off the key a node was started with, which matters when that key leaks
+and as ordinary hygiene. The alternative is setting every secret again, which needs
+you to still hold every plaintext — the thing a secret store exists to avoid.
+
+**No workload is redeployed.** A rekey changes how a value is stored, not what it is,
+so no revision moves and no specification hash with it.
+
+The key that was replaced is kept in the keyring, because it still opens the backups
+taken before now. Take a fresh backup of the keyring afterwards: the copy you had
+opens nothing the node holds. See
+[Rotating the key](secrets.md#rotating-the-key).
 
 ## Workload states
 

@@ -381,7 +381,7 @@ account for.
 ## The kernel confines an exec workload, and there is no opt-out
 
 An exec workload runs as the same user as the server, so file permissions draw no
-boundary around it. Without one it reads `secret.key`, reads the database, reads every
+boundary around it. Without one it reads the keyring, reads the database, reads every
 other workload's mounted plaintext, and writes to every volume. A container gets that
 boundary from the runtime. An exec process had none.
 
