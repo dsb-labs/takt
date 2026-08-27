@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/dsb-labs/orca/internal/server/database"
+	"github.com/dsb-labs/orca/internal/server/secret"
 )
 
 // The directory a backup archive holds the keyring under, mirroring where the
@@ -23,14 +24,30 @@ type (
 		logger   *slog.Logger
 		database string
 		keys     KeyStore
+		secrets  SecretRekeyer
 	}
 
-	// The KeyStore interface describes the keyring a backup reads from.
+	// The KeyStore interface describes the keyring the admin operations read from
+	// and write to.
 	KeyStore interface {
 		// Directory should report where the keyring's keys are kept.
 		Directory() string
 		// List should return the identifier of every key in the keyring.
 		List() ([]string, error)
+		// Create should generate a key, write it to the keyring, and return its
+		// identifier.
+		Create() (string, error)
+		// Read should return the key with the given identifier.
+		Read(id string) ([]byte, error)
+	}
+
+	// The SecretRekeyer interface describes how the admin service re-encrypts the
+	// secrets the secret service owns.
+	SecretRekeyer interface {
+		// Rekey should re-encrypt every secret under the given cipher, record
+		// keyID as the key they are sealed under, and return how many moved along
+		// with the key they were sealed under before.
+		Rekey(ctx context.Context, cipher Cipher, keyID string) (int, string, error)
 	}
 
 	// The AdminServiceConfig type contains fields used to construct an
@@ -43,6 +60,19 @@ type (
 		Database string
 		// The keyring holding the keys a secret's value is encrypted under.
 		Keys KeyStore
+		// The secrets a rekey re-encrypts.
+		Secrets SecretRekeyer
+	}
+
+	// The Rekey type describes a completed rekey.
+	Rekey struct {
+		// How many secrets were re-encrypted.
+		Secrets int
+		// The key they are now sealed under.
+		KeyID string
+		// The key they were sealed under before, which the keyring keeps because
+		// it still opens the backups taken before the rekey.
+		PreviousKeyID string
 	}
 
 	// The BackupOptions type describes what a backup covers.
@@ -87,6 +117,7 @@ func NewAdminService(config AdminServiceConfig) *AdminService {
 		logger:   config.Logger.With("component", "admin"),
 		database: config.Database,
 		keys:     config.Keys,
+		secrets:  config.Secrets,
 	}
 }
 
@@ -225,4 +256,44 @@ func addToArchive(archive *zip.Writer, path, name string) error {
 	}
 
 	return nil
+}
+
+// Rekey re-encrypts every secret under a newly generated key.
+//
+// The new key is written to the keyring before anything points at it, and the
+// database is what decides when it becomes current. Those two facts are what make
+// this safe to interrupt: a key nothing references is inert and swept later, and the
+// rows moving to it happen in one transaction. There is no window where the keyring
+// and the database disagree about which key opens what, and so nothing to repair
+// afterwards.
+//
+// The key that was replaced is kept. It still opens the backups taken before the
+// rekey, and an operator restoring one of those needs it.
+func (s *AdminService) Rekey(ctx context.Context) (Rekey, error) {
+	id, err := s.keys.Create()
+	if err != nil {
+		return Rekey{}, fmt.Errorf("failed to generate an encryption key: %w", err)
+	}
+
+	key, err := s.keys.Read(id)
+	if err != nil {
+		return Rekey{}, fmt.Errorf("failed to read the new encryption key: %w", err)
+	}
+
+	cipher, err := secret.New(key)
+	if err != nil {
+		return Rekey{}, fmt.Errorf("failed to construct a cipher for the new key: %w", err)
+	}
+
+	count, previous, err := s.secrets.Rekey(ctx, cipher, id)
+	if err != nil {
+		// The key stays in the keyring. Removing it here would race a rekey that
+		// committed and failed to report, and a key nothing references costs
+		// thirty-two bytes.
+		return Rekey{}, err
+	}
+
+	s.logger.With("secrets", count, "key", id, "previous", previous).Info("node rekeyed")
+
+	return Rekey{Secrets: count, KeyID: id, PreviousKeyID: previous}, nil
 }

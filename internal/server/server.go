@@ -251,6 +251,7 @@ func Run(ctx context.Context, config Config) error {
 		Logger:   logger,
 		Database: databasePath(config),
 		Keys:     keys,
+		Secrets:  secretSvc,
 	})
 
 	allocator := port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort})

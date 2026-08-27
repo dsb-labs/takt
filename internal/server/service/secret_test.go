@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -250,6 +251,7 @@ func newTestSecretService(t *testing.T, secrets *MockSecretRepository, cipher se
 		Logger:  newTestLogger(t),
 		Secrets: secrets,
 		Cipher:  cipher,
+		KeyID:   "test-key",
 	})
 }
 
@@ -259,13 +261,167 @@ func newTestSecretService(t *testing.T, secrets *MockSecretRepository, cipher se
 func newTestCipher(t *testing.T) *secret.Cipher {
 	t.Helper()
 
+	return newSeededCipher(t, 0)
+}
+
+// newSeededCipher returns a cipher over a key the seed distinguishes, for a test
+// that needs two ciphers that are genuinely different from each other.
+func newSeededCipher(t *testing.T, seed byte) *secret.Cipher {
+	t.Helper()
+
 	key := make([]byte, secret.KeyLength)
 	for i := range key {
-		key[i] = byte(i)
+		key[i] = byte(i) + seed
 	}
 
 	c, err := secret.New(key)
 	require.NoError(t, err)
 
 	return c
+}
+
+func TestSecretService_Rekey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("re-encrypts every secret under the new cipher", func(t *testing.T) {
+		secrets := NewMockSecretRepository(t)
+		old, new := newSeededCipher(t, 0), newSeededCipher(t, 1)
+
+		sealed, err := old.Seal("db-password", []byte("hunter2"))
+		require.NoError(t, err)
+
+		secrets.EXPECT().ListSealed(mock.Anything).
+			Return([]database.Secret{{Name: "db-password", Value: sealed, KeyID: "old"}}, nil).Once()
+
+		var written map[string][]byte
+		secrets.EXPECT().Rekey(mock.Anything, "new", mock.Anything).
+			RunAndReturn(func(_ context.Context, _ string, values map[string][]byte) error {
+				written = values
+
+				return nil
+			}).Once()
+
+		svc := newTestSecretService(t, secrets, old)
+
+		count, previous, err := svc.Rekey(t.Context(), new, "new")
+		require.NoError(t, err)
+		assert.Equal(t, 1, count)
+		assert.Equal(t, "test-key", previous)
+
+		// The value written has to open under the new cipher and not the old one,
+		// which is the whole of what a rekey is.
+		opened, err := new.Open("db-password", written["db-password"])
+		require.NoError(t, err)
+		assert.Equal(t, []byte("hunter2"), opened)
+
+		_, err = old.Open("db-password", written["db-password"])
+		assert.Error(t, err)
+	})
+
+	// Writing past a value that will not open would record a secret nothing can read
+	// as though it had moved.
+	t.Run("aborts when a value does not open", func(t *testing.T) {
+		secrets := NewMockSecretRepository(t)
+
+		secrets.EXPECT().ListSealed(mock.Anything).
+			Return([]database.Secret{{Name: "db-password", Value: []byte("not a ciphertext")}}, nil).Once()
+
+		svc := newTestSecretService(t, secrets, nil)
+
+		_, _, err := svc.Rekey(t.Context(), newTestCipher(t), "new")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "db-password")
+	})
+
+	// The service keeps sealing under the key the database still names, or the next
+	// secret set would be unreadable by the node that stored it.
+	t.Run("keeps the old cipher when the rewrite fails", func(t *testing.T) {
+		secrets := NewMockSecretRepository(t)
+		old := newTestCipher(t)
+
+		secrets.EXPECT().ListSealed(mock.Anything).Return(nil, nil).Once()
+		secrets.EXPECT().Rekey(mock.Anything, "new", mock.Anything).
+			Return(database.ErrSecretsChanged).Once()
+
+		svc := newTestSecretService(t, secrets, old)
+
+		_, _, err := svc.Rekey(t.Context(), newSeededCipher(t, 1), "new")
+		require.ErrorIs(t, err, database.ErrSecretsChanged)
+
+		// Still sealing under the original key, which the stored value proves by
+		// opening under it.
+		sealed, err := old.Seal("db-password", []byte("hunter2"))
+		require.NoError(t, err)
+
+		secrets.EXPECT().Get(mock.Anything, "db-password").
+			Return(database.Secret{Name: "db-password", Value: sealed}, nil).Once()
+
+		value, err := svc.Value(t.Context(), "db-password")
+		require.NoError(t, err)
+		assert.Equal(t, "hunter2", value)
+	})
+}
+
+// TestSecretService_RekeyIsAtomicForReaders covers the property the lock exists for.
+// A reader running while a rekey is in flight sees the values and the cipher from the
+// same side of it, never a value sealed under one key opened with another.
+//
+// Run under -race, this also proves the cipher swap is not a data race against the
+// readers.
+func TestSecretService_RekeyIsAtomicForReaders(t *testing.T) {
+	t.Parallel()
+
+	old, new := newSeededCipher(t, 0), newSeededCipher(t, 1)
+
+	sealedOld, err := old.Seal("db-password", []byte("hunter2"))
+	require.NoError(t, err)
+	sealedNew, err := new.Seal("db-password", []byte("hunter2"))
+	require.NoError(t, err)
+
+	secrets := NewMockSecretRepository(t)
+	secrets.EXPECT().ListSealed(mock.Anything).
+		Return([]database.Secret{{Name: "db-password", Value: sealedOld}}, nil).Once()
+
+	// The repository flips to the resealed value when the rewrite commits, which is
+	// what a reader on the other side of the transaction would see.
+	rewritten := make(chan struct{})
+	secrets.EXPECT().Rekey(mock.Anything, "new", mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ map[string][]byte) error {
+			close(rewritten)
+
+			return nil
+		}).Once()
+
+	secrets.EXPECT().Get(mock.Anything, "db-password").
+		RunAndReturn(func(_ context.Context, _ string) (database.Secret, error) {
+			select {
+			case <-rewritten:
+				return database.Secret{Name: "db-password", Value: sealedNew}, nil
+			default:
+				return database.Secret{Name: "db-password", Value: sealedOld}, nil
+			}
+		})
+
+	svc := newTestSecretService(t, secrets, old)
+
+	var wg sync.WaitGroup
+
+	for range 20 {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			// Whichever side of the rekey this lands on, the value has to come back
+			// intact. A read that straddled it would fail to decrypt.
+			value, err := svc.Value(t.Context(), "db-password")
+			assert.NoError(t, err)
+			assert.Equal(t, "hunter2", value)
+		}()
+	}
+
+	_, _, err = svc.Rekey(t.Context(), new, "new")
+	require.NoError(t, err)
+
+	wg.Wait()
 }

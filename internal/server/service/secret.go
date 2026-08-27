@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dsb-labs/orca/internal/server/database"
@@ -48,6 +49,13 @@ type (
 		Get(ctx context.Context, name string) (database.Secret, error)
 		// List should return every secret, without their values.
 		List(ctx context.Context) ([]database.Secret, error)
+		// ListSealed should return every secret including its value and the key
+		// that sealed it.
+		ListSealed(ctx context.Context) ([]database.Secret, error)
+		// Rekey should replace every secret's sealed value with the one given for
+		// it and record keyID as the key they are now sealed under, in one
+		// transaction.
+		Rekey(ctx context.Context, keyID string, sealed map[string][]byte) error
 		// Delete should remove the secret with the given name.
 		Delete(ctx context.Context, name string) error
 		// UsedBy should name the workloads referencing the secret with the given
@@ -90,9 +98,19 @@ type (
 	SecretService struct {
 		logger  *slog.Logger
 		secrets SecretRepository
-		cipher  Cipher
-		keyID   string
 		rehash  func(ctx context.Context, workload string) error
+
+		// Guards the cipher and the identifier naming it, which move together and
+		// only when a rekey replaces both.
+		//
+		// Every read of a sealed value is held for the whole of the read, not only
+		// across the decryption: the row and the cipher have to come from the same
+		// side of a rekey. A caller that read a row under the old key and decrypted
+		// it under the new one would see a value that will not open, in a database
+		// where nothing is wrong.
+		mu     sync.RWMutex
+		cipher Cipher
+		keyID  string
 	}
 
 	// The SecretServiceConfig type contains fields used to construct a
@@ -139,6 +157,12 @@ func (s *SecretService) Set(ctx context.Context, name string, value []byte) (Sec
 	if !referenceNamePattern.MatchString(name) || len(name) > 63 {
 		return Secret{}, false, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidSecret)
 	}
+
+	// Held across the comparison, the sealing and the write, so a value cannot be
+	// sealed under one key and recorded against another. A rekey running at the same
+	// time waits for this rather than overtaking it.
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	existing, err := s.secrets.Get(ctx, name)
 	switch {
@@ -257,6 +281,11 @@ func (s *SecretService) Delete(ctx context.Context, name string, force bool) err
 // ErrSecretNotFound when nothing holds the name, which the resolver turns into a
 // refusal to start rather than handing the workload the reference text.
 func (s *SecretService) Value(ctx context.Context, name string) (string, error) {
+	// The row and the cipher have to come from the same side of a rekey, so the read
+	// is held for both rather than only for the decryption.
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	stored, err := s.secrets.Get(ctx, name)
 	switch {
 	case errors.Is(err, database.ErrSecretNotFound):
@@ -274,6 +303,10 @@ func (s *SecretService) Value(ctx context.Context, name string) (string, error) 
 }
 
 // unchanged reports whether stored already holds value.
+//
+// Called with the cipher's read lock already held, and so does not take it. Taking
+// it twice on one goroutine deadlocks whenever a rekey is waiting between the two,
+// because a pending writer stops further readers.
 //
 // A stored value that will not open counts as changed. That is what a key rotated
 // out from under the database looks like, and re-sealing under the current key is
@@ -331,4 +364,71 @@ func newRevision() (string, error) {
 	}
 
 	return hex.EncodeToString(buf), nil
+}
+
+// Rekey re-encrypts every secret under the given cipher and records keyID as the key
+// they are sealed under, returning how many were moved and the key they were sealed
+// under before.
+//
+// The cipher the service seals with is replaced only once the rewrite has committed,
+// under the same lock that holds every read of a sealed value. A caller reading a
+// secret while this runs therefore sees the values and the cipher from the same side
+// of the rekey, never a mixture of the two.
+//
+// Every value is decrypted and re-encrypted before anything is written, and a value
+// that will not open aborts the whole thing. Writing past one would leave a secret
+// nothing can read, recorded as though it had moved.
+//
+// No revision changes, so nothing referencing a secret is redeployed by this. A
+// rekey changes how a value is stored, not what it is.
+func (s *SecretService) Rekey(ctx context.Context, cipher Cipher, keyID string) (int, string, error) {
+	// The write lock, so no value is sealed under the outgoing key while the rewrite
+	// is in flight and none is read between the commit and the swap.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	previous := s.keyID
+
+	stored, err := s.secrets.ListSealed(ctx)
+	if err != nil {
+		return 0, "", fmt.Errorf("failed to load secrets: %w", err)
+	}
+
+	sealed := make(map[string][]byte, len(stored))
+
+	for _, secret := range stored {
+		opened, err := s.cipher.Open(secret.Name, secret.Value)
+		if err != nil {
+			// Named without its value, and counted without its name elsewhere. That
+			// a particular secret will not open is what an operator needs; what is
+			// in it is not.
+			return 0, "", fmt.Errorf("failed to decrypt secret %s: %w", secret.Name, err)
+		}
+
+		resealed, err := cipher.Seal(secret.Name, opened)
+
+		// Zeroed as soon as it has been resealed rather than left for the collector.
+		// Every plaintext orca holds is in this loop, which is the largest number of
+		// them that are ever in memory at once.
+		clear(opened)
+
+		if err != nil {
+			return 0, "", fmt.Errorf("failed to encrypt secret %s: %w", secret.Name, err)
+		}
+
+		sealed[secret.Name] = resealed
+	}
+
+	if err = s.secrets.Rekey(ctx, keyID, sealed); err != nil {
+		return 0, "", err
+	}
+
+	// After the commit, so a rewrite that failed leaves the service sealing and
+	// opening under the key the database still names.
+	s.cipher = cipher
+	s.keyID = keyID
+
+	s.logger.With("secrets", len(sealed), "key", keyID).Info("secrets re-encrypted under a new key")
+
+	return len(sealed), previous, nil
 }
