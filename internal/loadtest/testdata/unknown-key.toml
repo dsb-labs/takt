@@ -1,0 +1,5 @@
+name = "typo"
+
+[fleet]
+containers = 1
+mounts-secrets = 0.5

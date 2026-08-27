@@ -1,0 +1,5 @@
+name = "unreadable"
+
+[fleet]
+containers = 1
+reads-secret = 1.0

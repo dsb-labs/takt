@@ -1,0 +1,5 @@
+name = "too-high"
+
+[fleet]
+containers = 1
+health-checks = 1.5

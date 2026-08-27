@@ -1,0 +1,8 @@
+name = "no-weights"
+
+[fleet]
+containers = 1
+
+[churn]
+duration = "10s"
+workers = 2
