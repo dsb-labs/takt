@@ -110,6 +110,66 @@ func (_c *MockAdmin_PrepareBackup_Call) RunAndReturn(run func(ctx context.Contex
 	return _c
 }
 
+// Rekey provides a mock function for the type MockAdmin
+func (_mock *MockAdmin) Rekey(ctx context.Context) (service.Rekey, error) {
+	ret := _mock.Called(ctx)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Rekey")
+	}
+
+	var r0 service.Rekey
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (service.Rekey, error)); ok {
+		return returnFunc(ctx)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context) service.Rekey); ok {
+		r0 = returnFunc(ctx)
+	} else {
+		r0 = ret.Get(0).(service.Rekey)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockAdmin_Rekey_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Rekey'
+type MockAdmin_Rekey_Call struct {
+	*mock.Call
+}
+
+// Rekey is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockAdmin_Expecter) Rekey(ctx any) *MockAdmin_Rekey_Call {
+	return &MockAdmin_Rekey_Call{Call: _e.mock.On("Rekey", ctx)}
+}
+
+func (_c *MockAdmin_Rekey_Call) Run(run func(ctx context.Context)) *MockAdmin_Rekey_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAdmin_Rekey_Call) Return(rekey service.Rekey, err error) *MockAdmin_Rekey_Call {
+	_c.Call.Return(rekey, err)
+	return _c
+}
+
+func (_c *MockAdmin_Rekey_Call) RunAndReturn(run func(ctx context.Context) (service.Rekey, error)) *MockAdmin_Rekey_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockSecretService creates a new instance of MockSecretService. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockSecretService(t interface {

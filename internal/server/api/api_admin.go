@@ -19,6 +19,8 @@ type (
 		// PrepareBackup should take a snapshot of the state a backup covers. The
 		// returned backup should be closed by the caller.
 		PrepareBackup(ctx context.Context, options service.BackupOptions) (*service.Backup, error)
+		// Rekey should re-encrypt every secret under a newly generated key.
+		Rekey(ctx context.Context) (service.Rekey, error)
 	}
 
 	// The AdminAPI type exposes the HTTP endpoints acting on the node itself
@@ -133,4 +135,22 @@ func (r backupResponse) VisitGetBackupResponse(w http.ResponseWriter) error {
 	w.WriteHeader(http.StatusOK)
 
 	return r.backup.Stream(w)
+}
+
+// Rekey re-encrypts every secret under a newly generated key and reports what moved.
+func (a *AdminAPI) Rekey(ctx context.Context, _ api.RekeyRequestObject) (api.RekeyResponseObject, error) {
+	rekey, err := a.admin.Rekey(ctx)
+	if err != nil {
+		return api.Rekey500JSONResponse{
+			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
+				Error: a.internalError("rekey the node", err),
+			},
+		}, nil
+	}
+
+	return api.Rekey200JSONResponse{
+		Secrets:       rekey.Secrets,
+		KeyID:         rekey.KeyID,
+		PreviousKeyID: rekey.PreviousKeyID,
+	}, nil
 }

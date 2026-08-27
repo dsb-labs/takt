@@ -872,6 +872,45 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v1/admin/rekey:
+    post:
+      operationId: rekey
+      tags: [admin]
+      summary: Re-encrypt every secret under a new key
+      description: |
+        Generates a new encryption key and re-seals every secret under it, then
+        records it as the key the node uses. The server keeps running throughout.
+
+        This exists because there is otherwise no way off the key a node started
+        with. It matters when a key leaks — in a backup, on an imaged disk,
+        committed by accident — and as ordinary hygiene.
+
+        **No workload is redeployed.** A rekey changes how a value is stored, not
+        what it is, so no secret's revision moves and no specification hash with
+        it. A node that was running before this call is running the same instances
+        after it.
+
+        The rewrite is one transaction, and the new key is written to the keyring
+        before anything points at it. A rekey that is interrupted therefore leaves
+        every secret under the old key or every secret under the new one, with
+        nothing to repair by hand.
+
+        The key that was replaced is kept. It still opens the backups taken before
+        this call, and restoring one of those needs it. `GET /api/v1/admin/backup`
+        with `includeKeys` carries the whole keyring for that reason.
+
+        Back the keyring up after this. The copy taken before it no longer opens
+        anything the node holds.
+      responses:
+        "200":
+          description: The secrets were re-encrypted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RekeyResult"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /health:
     get:
       operationId: getHealth
@@ -2201,6 +2240,22 @@ components:
       description: |
         The body returned when a variable is deleted, which has nothing in it yet, for
         the same reason deleting a secret returns one.
+
+    RekeyResult:
+      type: object
+      required: [secrets, keyId, previousKeyId]
+      properties:
+        secrets:
+          type: integer
+          description: How many secrets were re-encrypted.
+        keyId:
+          type: string
+          description: The key the node's secrets are now sealed under.
+        previousKeyId:
+          type: string
+          description: |
+            The key they were sealed under before. The keyring keeps it, because it
+            still opens the backups taken before this call.
 
     GetHealthResult:
       type: object

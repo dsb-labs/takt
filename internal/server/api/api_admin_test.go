@@ -66,6 +66,35 @@ func TestAdminAPI_GetBackup(t *testing.T) {
 	})
 }
 
+func TestAdminAPI_Rekey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports what moved", func(t *testing.T) {
+		admin := NewMockAdmin(t)
+		admin.EXPECT().Rekey(mock.Anything).
+			Return(service.Rekey{Secrets: 3, KeyID: "new", PreviousKeyID: "old"}, nil).Once()
+
+		resp := doAdminPost(t, admin, "/api/v1/admin/rekey")
+
+		require.Equal(t, http.StatusOK, resp.Code)
+		assert.JSONEq(t, `{"secrets":3,"keyId":"new","previousKeyId":"old"}`, resp.Body.String())
+	})
+
+	t.Run("reports a rekey that failed", func(t *testing.T) {
+		admin := NewMockAdmin(t)
+		admin.EXPECT().Rekey(mock.Anything).
+			Return(service.Rekey{}, errors.New("a secret would not open")).Once()
+
+		resp := doAdminPost(t, admin, "/api/v1/admin/rekey")
+
+		require.Equal(t, http.StatusInternalServerError, resp.Code)
+
+		// The response says what failed and not which secret, because the message
+		// reaches whoever can reach the API and the log is where the detail belongs.
+		assert.JSONEq(t, `{"error":"failed to rekey the node"}`, resp.Body.String())
+	})
+}
+
 // newAdminService returns a service over a data directory holding a database and a
 // keyring, so that there is something to back up, along with the key's identifier.
 func newAdminService(t *testing.T) (*service.AdminService, string) {
@@ -111,6 +140,18 @@ func archivedNames(t *testing.T, archive []byte) []string {
 func doAdmin(t *testing.T, admin api.Admin, target string) *httptest.ResponseRecorder {
 	t.Helper()
 
+	return serveAdmin(t, admin, http.MethodGet, target)
+}
+
+func doAdminPost(t *testing.T, admin api.Admin, target string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	return serveAdmin(t, admin, http.MethodPost, target)
+}
+
+func serveAdmin(t *testing.T, admin api.Admin, method, target string) *httptest.ResponseRecorder {
+	t.Helper()
+
 	logger := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError}))
 
 	// The whole surface is registered even for a test about one resource, since the
@@ -130,7 +171,7 @@ func doAdmin(t *testing.T, admin api.Admin, target string) *httptest.ResponseRec
 		Admin: api.NewAdminAPI(api.AdminAPIConfig{Logger: logger, Admin: admin}),
 	}).Register(mux)
 
-	req := httptest.NewRequest(http.MethodGet, target, nil)
+	req := httptest.NewRequest(method, target, nil)
 	resp := httptest.NewRecorder()
 	mux.ServeHTTP(resp, req)
 
