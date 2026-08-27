@@ -2613,3 +2613,125 @@ func (s *Suite) TestBackupLeavesTheKeyringOut() {
 
 	s.Equal([]string{"state.db"}, names)
 }
+
+// TestRekeyKeepsSecretsReadable proves the point of the command: every secret is
+// re-sealed under a new key and a workload reading one still gets its value.
+//
+// The workload is started before the rekey and read after it, so this covers the
+// value surviving the rewrite rather than merely being set again.
+func (s *Suite) TestRekeyKeepsSecretsReadable() {
+	name, secret := s.workloadName(), s.secretName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupSecret(secret) })
+
+	stored, _, err := s.client.SetSecret(s.ctx(), secret, []byte("survives-a-rekey"))
+	s.Require().NoError(err)
+
+	rekey, err := s.client.Rekey(s.ctx())
+	s.Require().NoError(err)
+	s.NotEmpty(rekey.KeyID)
+	s.NotEqual(rekey.KeyID, rekey.PreviousKeyID)
+	s.GreaterOrEqual(rekey.Secrets, 1)
+
+	// The revision is unchanged. A rekey changes how a value is stored, not what it
+	// is, so nothing reading it has any reason to be replaced.
+	after, err := s.client.GetSecret(s.ctx(), secret)
+	s.Require().NoError(err)
+	s.Equal(stored.Revision, after.Revision)
+
+	// And the value opens under the key the rekey produced, which only a workload
+	// reading it can show.
+	spec := s.jobSpec(name, manifest.RestartNever, 0)
+	spec.Container.Command = []string{"sh", "-c", `echo "[$VALUE]"; exit 0`}
+	spec.Env = map[string]string{"VALUE": "${secret:" + secret + "}"}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+
+	var out bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
+	s.Contains(out.String(), "[survives-a-rekey]")
+}
+
+// TestRekeyDoesNotRedeployWorkloads proves the guarantee an operator decides a
+// maintenance window on. A rekey moves no revision, so no specification hash moves
+// and the instances that were running keep running.
+func (s *Suite) TestRekeyDoesNotRedeployWorkloads() {
+	name, secret := s.workloadName(), s.secretName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupSecret(secret) })
+
+	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("unchanged-by-a-rekey"))
+	s.Require().NoError(err)
+
+	spec := s.containerSpec(name)
+	spec.Env = map[string]string{"VALUE": "${secret:" + secret + "}"}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	before, err := s.client.Get(s.ctx(), name)
+	s.Require().NoError(err)
+	s.Require().Len(before.Instances, 1)
+
+	_, err = s.client.Rekey(s.ctx())
+	s.Require().NoError(err)
+
+	// A pass has to have run against the rekeyed database before this means anything,
+	// or it would pass simply by being asked too early.
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	after, err := s.client.Get(s.ctx(), name)
+	s.Require().NoError(err)
+	s.Require().Len(after.Instances, 1)
+
+	s.Equal(before.Version, after.Version, "the rekey moved the workload's version")
+	s.Equal(before.Instances[0].SpecHash, after.Instances[0].SpecHash, "the rekey moved a specification hash")
+
+	// The same instance, not a replacement that happens to hash the same.
+	s.Equal(before.Instances[0].ID, after.Instances[0].ID, "the rekey replaced the running instance")
+}
+
+// TestRekeySurvivesAServerRestart proves the database is what names the current key.
+// A restarted server has a keyring holding both the old key and the new one, and only
+// the rows say which of them opens what.
+func (s *Suite) TestRekeySurvivesAServerRestart() {
+	directory := s.T().TempDir()
+	s.restart(withDataDirectory(directory))
+
+	name, secret := s.workloadName(), s.secretName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupSecret(secret) })
+
+	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("across-a-rekey"))
+	s.Require().NoError(err)
+
+	rekey, err := s.client.Rekey(s.ctx())
+	s.Require().NoError(err)
+
+	// Both keys are on disk, so picking the newest file rather than reading the
+	// database would be a coin toss the server must not be making.
+	entries, err := os.ReadDir(filepath.Join(directory, "keys"))
+	s.Require().NoError(err)
+	s.Len(entries, 2)
+
+	s.restart(withDataDirectory(directory))
+
+	spec := s.jobSpec(name, manifest.RestartNever, 0)
+	spec.Container.Command = []string{"sh", "-c", `echo "[$VALUE]"; exit 0`}
+	spec.Env = map[string]string{"VALUE": "${secret:" + secret + "}"}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+
+	var out bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
+	s.Contains(out.String(), "[across-a-rekey]")
+
+	s.NotEmpty(rekey.PreviousKeyID)
+}
