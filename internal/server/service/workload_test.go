@@ -57,7 +57,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 					return w, true, nil
 				}).Once()
 
-				d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+				d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 			},
 			Assert: func(t *testing.T, w service.Workload, created bool) {
 				assert.True(t, created)
@@ -82,7 +82,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 						return w, false, nil
 					}).Once()
 
-				d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+				d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return([]driver.Instance{
 					{ID: "container-one", Workload: "example", State: driver.StateRunning},
 				}, nil).Once()
 			},
@@ -184,7 +184,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 						return w, true, nil
 					}).Once()
 
-				d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+				d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 			},
 			Assert: func(t *testing.T, w service.Workload, created bool) {
 				assert.True(t, created)
@@ -270,7 +270,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			return w, true, nil
 		}).Once()
 
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
@@ -352,7 +352,7 @@ func TestWorkloadService_Apply_NotifiesReconciler(t *testing.T) {
 			w.Version = 1
 			return w, true, nil
 		}).Once()
-	d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 	var notified bool
 	svc := newTestService(t, d, repo, ports, func() { notified = true })
@@ -372,7 +372,7 @@ func TestWorkloadService_Get(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return([]driver.Instance{
 			{ID: "container-one", Workload: "example", State: driver.StateRunning, SpecHash: "hash-one"},
 		}, nil).Once()
 
@@ -389,7 +389,7 @@ func TestWorkloadService_Get(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, errors.New("docker is down")).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("docker is down")).Once()
 
 		svc := newTestService(t, d, repo, ports, nil)
 
@@ -459,7 +459,7 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 
 			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 			ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
-			d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return([]driver.Instance{
 				{ID: "container-one", Workload: "example", State: driver.StateRunning},
 			}, nil).Once()
 
@@ -514,7 +514,7 @@ func TestWorkloadService_Get_LastError(t *testing.T) {
 
 			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 			ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
-			d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 			rec.EXPECT().LastError("example").Return(tc.Message, tc.At, tc.Recorded)
 
@@ -542,7 +542,7 @@ func TestWorkloadService_Get_LastError(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
@@ -623,7 +623,7 @@ func TestWorkloadService_Get_State(t *testing.T) {
 			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-			d.EXPECT().Observe(mock.Anything).Return(tc.Instances, nil).Once()
+			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(tc.Instances, nil).Once()
 
 			svc := newTestService(t, d, repo, ports, nil)
 
@@ -714,7 +714,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			row.Spec = encoded
 
 			repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
-			d.EXPECT().Observe(mock.Anything).Return(tc.Instances, nil).Once()
+			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(tc.Instances, nil).Once()
 
 			svc := newTestService(t, d, repo, ports, nil)
 
@@ -780,7 +780,7 @@ func TestWorkloadService_Get_NextRun(t *testing.T) {
 			row.UpdatedAt = applied
 
 			repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
-			d.EXPECT().Observe(mock.Anything).Return(tc.Instances, nil).Once()
+			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(tc.Instances, nil).Once()
 
 			svc := newTestService(t, d, repo, ports, nil)
 
@@ -828,7 +828,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil)
 		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		// Two applies racing each other can pick the same free port, and the unique
 		// constraint means one loses. Since orca chose the port, losing is its
@@ -891,7 +891,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		addresses.EXPECT().
 			Address(mock.Anything, manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres", Port: "pg"}).
@@ -927,7 +927,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 
 			repo.EXPECT().Get(mock.Anything, "example").
 				Return(database.Workload{}, database.ErrWorkloadNotFound)
-			d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 			addresses.EXPECT().Address(mock.Anything, mock.Anything).Return(address, nil).Once()
 
 			repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -1004,7 +1004,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		var stored database.Workload
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -1033,7 +1033,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		// What is taken over TCP says nothing about UDP, so an allocation that read
 		// one set of ports would refuse a port that is genuinely free.
@@ -1068,7 +1068,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		var claimed []database.Port
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -1103,7 +1103,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		var claimed []database.Port
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -1143,7 +1143,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		ports.EXPECT().List(mock.Anything, "id-one").
 			Return([]database.Port{{Name: "http", Container: 8080, Host: 20000, Protocol: "tcp", Dynamic: true}}, nil)
 		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		var claimed []database.Port
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -1175,7 +1175,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		// A workload holding 5353/tcp does not hold 5353/udp, so asking about the
 		// wrong space would report a port as taken that nothing has.
@@ -1230,6 +1230,37 @@ func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 	repo.AssertNotCalled(t, "Upsert")
 }
 
+// TestWorkloadService_Get_ObservesOneWorkload is the guard on the cost of reading a
+// single workload.
+//
+// Reading one used to observe every workload on the host and keep one entry, so the
+// cost of a get grew with the number running: half a millisecond against one
+// workload, fifty-four against a hundred and sixty. The driver is told which workload
+// to report on, and asserting that Observe is never called is what stops the fleet
+// -wide read coming back.
+func TestWorkloadService_Get_ObservesOneWorkload(t *testing.T) {
+	t.Parallel()
+
+	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+	stored := storedWorkload("example")
+
+	repo.EXPECT().Get(mock.Anything, "example").Return(stored, nil).Once()
+
+	// The identifier and the name both reach the driver, because the two runtimes
+	// key on different ones.
+	d.EXPECT().ObserveWorkload(mock.Anything, stored.ID, "example").Return(nil, nil).Once()
+
+	svc := newTestService(t, d, repo, ports, nil)
+
+	_, err := svc.Get(t.Context(), "example")
+	require.NoError(t, err)
+
+	// Observe has no expectation registered, so the mock fails the test if the
+	// service reaches for it.
+	d.AssertNotCalled(t, "Observe", mock.Anything)
+}
+
 func TestWorkloadService_Get_DriverHangs(t *testing.T) {
 	t.Parallel()
 
@@ -1241,11 +1272,12 @@ func TestWorkloadService_Get_DriverHangs(t *testing.T) {
 	// A daemon that accepts the call and never answers is the case a timeout exists
 	// for: the observation is bounded by a context, so it ends when that context does
 	// rather than when the driver decides to reply.
-	d.EXPECT().Observe(mock.Anything).RunAndReturn(func(ctx context.Context) ([]driver.Instance, error) {
-		<-ctx.Done()
+	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, _, _ string) ([]driver.Instance, error) {
+			<-ctx.Done()
 
-		return nil, ctx.Err()
-	}).Once()
+			return nil, ctx.Err()
+		}).Once()
 
 	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
@@ -1338,7 +1370,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 		marked.DeletedAt = time.Now().UTC()
 
 		repo.EXPECT().MarkDeleting(mock.Anything, "example").Return(marked, nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return([]driver.Instance{
 			{ID: "container-one", Workload: "example", State: driver.StateRunning},
 		}, nil).Once()
 
@@ -1358,7 +1390,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		repo.EXPECT().MarkDeleting(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		var notified bool
 		svc := newTestService(t, d, repo, ports, func() { notified = true })
@@ -1417,7 +1449,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 
 		repo.EXPECT().ReferencedBy(mock.Anything, "postgres").Return([]string{"api"}, nil).Once()
 		repo.EXPECT().MarkDeleting(mock.Anything, "postgres").Return(storedWorkload("postgres"), nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		// The consumer is rehashed on the way out, the way a deleted secret rehashes
 		// what read it: what it was started against no longer describes what orca
@@ -1457,7 +1489,7 @@ func TestWorkloadService_Stop(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 		repo.EXPECT().Suspend(mock.Anything, "example").Return(suspended, nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return([]driver.Instance{
 			{ID: "container-one", Workload: "example", State: driver.StateRunning},
 		}, nil).Once()
 
@@ -1478,7 +1510,7 @@ func TestWorkloadService_Stop(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 		repo.EXPECT().Suspend(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		var notified bool
 		svc := newTestService(t, d, repo, ports, func() { notified = true })
@@ -1529,7 +1561,7 @@ func TestWorkloadService_Start(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(suspended, nil).Once()
 		repo.EXPECT().Resume(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		svc := newTestService(t, d, repo, ports, nil)
 
@@ -1547,7 +1579,7 @@ func TestWorkloadService_Start(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
 		repo.EXPECT().Resume(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		var notified bool
 		svc := newTestService(t, d, repo, ports, func() { notified = true })
@@ -1595,7 +1627,7 @@ func TestWorkloadService_Restart(t *testing.T) {
 		rec := NewMockReconciler(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return([]driver.Instance{
 			{ID: "container-one", Workload: "example", SpecHash: "hash", State: driver.StateRunning},
 		}, nil).Once()
 
@@ -1695,7 +1727,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var hash string
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -1759,7 +1791,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 		secrets.EXPECT().Revisions(mock.Anything, []string{"db-password"}).
 			Return(map[string]string{"db-password": "rev-one"}, nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var stored database.Workload
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -1886,7 +1918,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 		variables.EXPECT().Values(mock.Anything, []string{"log-level"}).
 			Return(map[string]string{"log-level": "debug"}, nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var stored database.Workload
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -1922,7 +1954,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 			Return(map[string]string{"db-password": "rev-one"}, nil).Once()
 		variables.EXPECT().Values(mock.Anything, []string{"db-host"}).
 			Return(map[string]string{"db-host": "localhost"}, nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var stored database.Workload
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -2016,7 +2048,7 @@ func TestWorkloadService_Apply_HashesImageDigest(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 		images.EXPECT().Digest(mock.Anything, "example/example:latest").
 			Return("sha256:abc123", nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var stored database.Workload
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -2388,7 +2420,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 		secrets.EXPECT().Revisions(mock.Anything, []string{"tls-cert"}).
 			Return(map[string]string{"tls-cert": "rev-one"}, nil).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var stored database.Workload
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -2458,7 +2490,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
 				return w, true, nil
 			}).Once()
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
 		require.NoError(t, err)
@@ -2484,7 +2516,7 @@ func applyForHashOf(t *testing.T, spec manifest.Spec, revisions, values map[stri
 		Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 	secrets.EXPECT().Revisions(mock.Anything, mock.Anything).Return(revisions, nil).Maybe()
 	variables.EXPECT().Values(mock.Anything, mock.Anything).Return(values, nil).Maybe()
-	d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	var hash string
 	repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -2510,7 +2542,7 @@ func applyForDigestHash(t *testing.T, spec manifest.Spec, digests map[string]str
 
 	repo.EXPECT().Get(mock.Anything, spec.Name).
 		Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
-	d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	var hash string
 	repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -2707,7 +2739,7 @@ func TestWorkloadService_Get_LeavesOutARetainedInstance(t *testing.T) {
 
 	// What a workload looks like just after a restart: the attempt now running, and the
 	// failed one the driver keeps so that its output can still be read.
-	d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return([]driver.Instance{
 		{ID: "current", Workload: "example", State: driver.StateRunning},
 		{ID: "retained", Workload: "example", State: driver.StateFailed, ExitCode: 1, Retained: true},
 	}, nil).Once()
@@ -3106,7 +3138,7 @@ func newConcurrentTestService(t *testing.T) (*service.WorkloadService, *sql.DB) 
 	t.Cleanup(func() { require.NoError(t, db.Close()) })
 
 	driver := newMockDriver(t)
-	driver.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+	driver.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	ports := database.NewPortRepository(db)
 

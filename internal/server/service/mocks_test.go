@@ -2290,6 +2290,80 @@ func (_c *MockDriver_Observe_Call) RunAndReturn(run func(ctx context.Context) ([
 	return _c
 }
 
+// ObserveWorkload provides a mock function for the type MockDriver
+func (_mock *MockDriver) ObserveWorkload(ctx context.Context, id string, name string) ([]driver.Instance, error) {
+	ret := _mock.Called(ctx, id, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ObserveWorkload")
+	}
+
+	var r0 []driver.Instance
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) ([]driver.Instance, error)); ok {
+		return returnFunc(ctx, id, name)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) []driver.Instance); ok {
+		r0 = returnFunc(ctx, id, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]driver.Instance)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, id, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockDriver_ObserveWorkload_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ObserveWorkload'
+type MockDriver_ObserveWorkload_Call struct {
+	*mock.Call
+}
+
+// ObserveWorkload is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id string
+//   - name string
+func (_e *MockDriver_Expecter) ObserveWorkload(ctx any, id any, name any) *MockDriver_ObserveWorkload_Call {
+	return &MockDriver_ObserveWorkload_Call{Call: _e.mock.On("ObserveWorkload", ctx, id, name)}
+}
+
+func (_c *MockDriver_ObserveWorkload_Call) Run(run func(ctx context.Context, id string, name string)) *MockDriver_ObserveWorkload_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDriver_ObserveWorkload_Call) Return(instances []driver.Instance, err error) *MockDriver_ObserveWorkload_Call {
+	_c.Call.Return(instances, err)
+	return _c
+}
+
+func (_c *MockDriver_ObserveWorkload_Call) RunAndReturn(run func(ctx context.Context, id string, name string) ([]driver.Instance, error)) *MockDriver_ObserveWorkload_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockWorkloadRepository creates a new instance of MockWorkloadRepository. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockWorkloadRepository(t interface {
