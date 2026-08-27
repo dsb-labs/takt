@@ -3,6 +3,7 @@ package backup
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -52,7 +53,10 @@ func Command() *cobra.Command {
 			// Readable only by the owner: the archive holds every workload's
 			// specification, environment included, and the key when it was asked for.
 			f, err := os.OpenFile(args[0], os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-			if err != nil {
+			switch {
+			case errors.Is(err, os.ErrExist):
+				return fmt.Errorf("%s already exists, and a backup does not replace one", args[0])
+			case err != nil:
 				return fmt.Errorf("failed to create backup file: %w", err)
 			}
 			defer f.Close()
@@ -63,14 +67,20 @@ func Command() *cobra.Command {
 			}
 
 			if err = c.Backup(cmd.Context(), f, options...); err != nil {
+				err = fmt.Errorf("failed to write backup: %w", err)
+
 				// The file has already been created, and what is in it is a partial
 				// archive at best. Left behind it looks like a backup, so a request
 				// that failed takes it with it.
+				//
+				// A removal that itself fails is joined onto the original rather than
+				// replacing it. Which request failed is the more useful half, and the
+				// file left behind is the half that needs acting on.
 				if removeErr := os.Remove(args[0]); removeErr != nil {
-					return fmt.Errorf("failed to write backup, and failed to remove %s: %w", args[0], removeErr)
+					return errors.Join(err, fmt.Errorf("failed to remove %s: %w", args[0], removeErr))
 				}
 
-				return fmt.Errorf("failed to write backup: %w", err)
+				return err
 			}
 
 			info, err := f.Stat()

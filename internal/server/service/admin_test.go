@@ -93,7 +93,7 @@ func TestAdminService_PrepareBackup(t *testing.T) {
 
 		backup, err := newAdminService(t, dir).PrepareBackup(t.Context(), service.BackupOptions{})
 		assert.Nil(t, backup)
-		assert.ErrorIs(t, err, database.ErrNoDatabase)
+		assert.ErrorIs(t, err, database.ErrNoSnapshotSource)
 
 		// The temporary directory a failed preparation made goes with it, or a server
 		// asked for a backup it cannot take accumulates one per attempt.

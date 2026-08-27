@@ -117,7 +117,7 @@ func (s *AdminService) PrepareBackup(ctx context.Context, options BackupOptions)
 	if err = database.Snapshot(ctx, s.database, snapshot); err != nil {
 		backup.closeAfterFailure()
 
-		return nil, err
+		return nil, fmt.Errorf("failed to snapshot the database: %w", err)
 	}
 
 	backup.files = append(backup.files, backupFile{name: name, path: snapshot})

@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	// ErrNoDatabase is returned when there is no database at the path to snapshot.
-	ErrNoDatabase = errors.New("database does not exist")
+	// ErrNoSnapshotSource is returned when there is no database at the path to
+	// snapshot.
+	ErrNoSnapshotSource = errors.New("database to snapshot does not exist")
 	// ErrSnapshotExists is returned when something is already at the destination.
 	ErrSnapshotExists = errors.New("snapshot already exists")
 )
@@ -28,17 +29,19 @@ var (
 // surface on its own that reads as an unexplained failure on the second run rather
 // than as the safety property it is.
 func Snapshot(ctx context.Context, source, destination string) error {
-	if _, err := os.Stat(source); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("%w: %s", ErrNoDatabase, source)
-		}
-
+	_, err := os.Stat(source)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("%w: %s", ErrNoSnapshotSource, source)
+	case err != nil:
 		return fmt.Errorf("failed to read database: %w", err)
 	}
 
-	if _, err := os.Stat(destination); err == nil {
+	_, err = os.Stat(destination)
+	switch {
+	case err == nil:
 		return fmt.Errorf("%w: %s", ErrSnapshotExists, destination)
-	} else if !errors.Is(err, os.ErrNotExist) {
+	case !errors.Is(err, os.ErrNotExist):
 		return fmt.Errorf("failed to read snapshot destination: %w", err)
 	}
 

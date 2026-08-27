@@ -102,7 +102,7 @@ func TestSnapshot(t *testing.T) {
 		source := filepath.Join(t.TempDir(), "state.db")
 		destination := filepath.Join(t.TempDir(), "backup.db")
 
-		assert.ErrorIs(t, Snapshot(t.Context(), source, destination), ErrNoDatabase)
+		assert.ErrorIs(t, Snapshot(t.Context(), source, destination), ErrNoSnapshotSource)
 		assert.NoFileExists(t, destination)
 	})
 
