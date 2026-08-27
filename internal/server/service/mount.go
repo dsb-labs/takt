@@ -268,6 +268,62 @@ func (s *MountService) Forget(id string) error {
 	return nil
 }
 
+// Reclaim removes every version a workload holds except the one named, which is what
+// takes a superseded mounted value's plaintext off the disk.
+//
+// A workload keeps a directory per version so that a replacement's files do not
+// overwrite those the instance being replaced is still reading. Nothing removed them
+// afterwards: Forget works on the whole workload and runs only on delete, and Prune
+// works on whole workloads that no longer exist. So every rotation of a mounted
+// secret left the previous version's plaintext on the disk for the life of the
+// workload — a certificate rotated monthly accumulated a private key a month, read by
+// nothing and removed by nothing.
+//
+// Called after the replacement has started rather than before. Removing the old
+// version first would pull the files out from under an instance that is still running
+// if the start then fails.
+//
+// Sweeping everything but the current version rather than removing a named one also
+// reclaims what a crash between delivering and starting left behind. A workload that
+// has delivered nothing is not an error, and neither is one already holding only the
+// version named.
+func (s *MountService) Reclaim(id string, keep int) error {
+	for _, tree := range []string{s.files, s.state} {
+		dir, err := s.dir(tree, id)
+		if err != nil {
+			return err
+		}
+
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// Nothing has been delivered for this workload.
+				continue
+			}
+
+			return fmt.Errorf("failed to read mount directory: %w", pathless(err))
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() || entry.Name() == strconv.Itoa(keep) {
+				continue
+			}
+
+			// A directory whose name is not a version is not something this wrote,
+			// so it is left where it is rather than removed on a guess.
+			if _, err = strconv.Atoi(entry.Name()); err != nil {
+				continue
+			}
+
+			if err = os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+				return fmt.Errorf("failed to remove superseded mount directory: %w", pathless(err))
+			}
+		}
+	}
+
+	return nil
+}
+
 // Prune removes what the service wrote for workloads other than those named.
 //
 // This is how a value delivered by a server that stopped before it could tear the

@@ -296,6 +296,73 @@ func TestMountService_Refresh(t *testing.T) {
 	})
 }
 
+func TestMountService_Reclaim(t *testing.T) {
+	t.Parallel()
+
+	// The leak this exists to stop. Every rotation of a mounted secret left the
+	// previous version's plaintext on the disk for the life of the workload.
+	t.Run("removes the superseded version's plaintext", func(t *testing.T) {
+		secrets := NewMockValueStore(t)
+		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("the first certificate", nil).Once()
+		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("the second certificate", nil).Once()
+
+		svc, _ := newMountService(t, secrets, nil)
+
+		spec := mountSpec(manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"})
+
+		first, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
+		require.NoError(t, err)
+		require.Len(t, first, 1)
+
+		second, err := svc.Deliver(t.Context(), testVolumeID, 2, spec)
+		require.NoError(t, err)
+		require.Len(t, second, 1)
+
+		// Both are on the disk before the sweep, or this would pass without doing
+		// anything.
+		require.FileExists(t, first[0].Host)
+		require.FileExists(t, second[0].Host)
+
+		require.NoError(t, svc.Reclaim(testVolumeID, 2))
+
+		_, err = os.Stat(first[0].Host)
+		assert.True(t, os.IsNotExist(err), "the superseded value is still on the disk")
+
+		// The version the workload is running keeps its files, which it is still
+		// reading.
+		assert.FileExists(t, second[0].Host)
+	})
+
+	t.Run("keeps a workload that holds only the version named", func(t *testing.T) {
+		secrets := NewMockValueStore(t)
+		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a certificate", nil).Once()
+
+		svc, _ := newMountService(t, secrets, nil)
+
+		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
+			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
+		))
+		require.NoError(t, err)
+
+		require.NoError(t, svc.Reclaim(testVolumeID, 1))
+		assert.FileExists(t, mounts[0].Host)
+	})
+
+	t.Run("accepts a workload it never wrote for", func(t *testing.T) {
+		svc, _ := newMountService(t, nil, nil)
+
+		// A workload that mounts nothing has no versions to sweep, which is not a
+		// failure: the reconciler calls this after every start.
+		assert.NoError(t, svc.Reclaim(testVolumeID, 1))
+	})
+
+	t.Run("refuses an identifier it cannot use as a directory", func(t *testing.T) {
+		svc, _ := newMountService(t, nil, nil)
+
+		assert.ErrorIs(t, svc.Reclaim("../escape", 1), service.ErrInvalidMount)
+	})
+}
+
 func TestMountService_Forget(t *testing.T) {
 	t.Parallel()
 
