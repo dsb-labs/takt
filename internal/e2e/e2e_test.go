@@ -1332,7 +1332,14 @@ func (s *Suite) TestExecWorkloadCannotReachTheDataDirectory() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 
 	// The key the server generated on startup, which opens every secret it holds.
-	key := filepath.Join(s.directory, "secret.key")
+	// Named by an identifier, so it is found rather than assumed.
+	keyring := filepath.Join(s.directory, "keys")
+
+	entries, err := os.ReadDir(keyring)
+	s.Require().NoError(err, "this test needs a keyring the server's own user can read")
+	s.Require().Len(entries, 1)
+
+	key := filepath.Join(keyring, entries[0].Name())
 
 	contents, err := os.ReadFile(key)
 	s.Require().NoError(err, "this test needs a key file the server's own user can read")

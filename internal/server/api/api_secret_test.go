@@ -316,7 +316,7 @@ func TestSecretAPI_HidesInternalFailures(t *testing.T) {
 	// A failure while handling a secret could quote the value it was handling, so what
 	// reaches the caller matters more here than elsewhere.
 	internal := errors.New(`failed to encrypt secret: hunter2 under key ` +
-		`/var/lib/orca/secret.key: cipher: message authentication failed`)
+		`/var/lib/orca/keys/da879s0hpe2ten8re4u0.key: cipher: message authentication failed`)
 
 	tt := []struct {
 		Name       string
@@ -378,7 +378,7 @@ func TestSecretAPI_HidesInternalFailures(t *testing.T) {
 
 			reported := resp.Body.String()
 			assert.NotContains(t, reported, "hunter2")
-			assert.NotContains(t, reported, "secret.key")
+			assert.NotContains(t, reported, "da879s0hpe2ten8re4u0.key")
 			assert.NotContains(t, reported, "authentication failed")
 		})
 	}
