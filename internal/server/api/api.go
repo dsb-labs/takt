@@ -203,21 +203,15 @@ func Guard(logger *slog.Logger, permitted []string) func(http.Handler) http.Hand
 // a browser would have had to ask permission for.
 func RequireJSON(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// A request with nothing to decode has no content type to check.
-		if r.Method != http.MethodPut && r.Method != http.MethodPost && r.Method != http.MethodPatch {
-			next.ServeHTTP(w, r)
-
-			return
-		}
-
-		// Nor does a method that usually carries a body but did not this time. A
-		// rekey is a POST with nothing in it, and refusing it for failing to declare
-		// the type of a body it does not have would be refusing it for nothing.
+		// A request with nothing to decode has no content type to check. Length is
+		// unset on a chunked body, so the method is what says a body was meant.
 		//
-		// Zero is a body that is definitely absent rather than one whose length is
-		// unknown: a chunked request reports -1, so this cannot be used to smuggle
-		// one past the check.
-		if r.ContentLength == 0 {
+		// Every write this API serves carries a JSON object, including the ones with
+		// nothing to say: a rekey sends an empty one rather than no body at all. So a
+		// write arriving without one has nothing this can let through, and a bodyless
+		// POST is exactly what a browser may send across origins without asking
+		// permission first.
+		if r.Method != http.MethodPut && r.Method != http.MethodPost && r.Method != http.MethodPatch {
 			next.ServeHTTP(w, r)
 
 			return

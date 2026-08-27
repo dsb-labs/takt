@@ -97,7 +97,7 @@ func (c *Client) Rekey(ctx context.Context) (Rekey, error) {
 	// The client with no request timeout. How long a rekey takes is the number of
 	// secrets the server holds, which is the operator's business rather than
 	// something a fixed deadline should decide.
-	resp, err := c.stream.RekeyWithResponse(ctx)
+	resp, err := c.stream.RekeyWithResponse(ctx, api.RekeyJSONRequestBody{})
 	if err != nil {
 		return Rekey{}, fmt.Errorf("failed to rekey: %w", err)
 	}

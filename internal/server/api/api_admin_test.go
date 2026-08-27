@@ -4,11 +4,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -140,16 +142,18 @@ func archivedNames(t *testing.T, archive []byte) []string {
 func doAdmin(t *testing.T, admin api.Admin, target string) *httptest.ResponseRecorder {
 	t.Helper()
 
-	return serveAdmin(t, admin, http.MethodGet, target)
+	return serveAdmin(t, admin, http.MethodGet, target, nil)
 }
 
+// doAdminPost sends the empty JSON object every write to this API carries, which is
+// what the endpoint's request schema describes.
 func doAdminPost(t *testing.T, admin api.Admin, target string) *httptest.ResponseRecorder {
 	t.Helper()
 
-	return serveAdmin(t, admin, http.MethodPost, target)
+	return serveAdmin(t, admin, http.MethodPost, target, strings.NewReader(`{}`))
 }
 
-func serveAdmin(t *testing.T, admin api.Admin, method, target string) *httptest.ResponseRecorder {
+func serveAdmin(t *testing.T, admin api.Admin, method, target string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError}))
@@ -171,7 +175,11 @@ func serveAdmin(t *testing.T, admin api.Admin, method, target string) *httptest.
 		Admin: api.NewAdminAPI(api.AdminAPIConfig{Logger: logger, Admin: admin}),
 	}).Register(mux)
 
-	req := httptest.NewRequest(method, target, nil)
+	req := httptest.NewRequest(method, target, body)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
 	resp := httptest.NewRecorder()
 	mux.ServeHTTP(resp, req)
 

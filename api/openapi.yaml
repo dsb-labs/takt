@@ -901,6 +901,12 @@ paths:
 
         Back the keyring up after this. The copy taken before it no longer opens
         anything the node holds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RekeyRequest"
       responses:
         "200":
           description: The secrets were re-encrypted.
@@ -2240,6 +2246,12 @@ components:
       description: |
         The body returned when a variable is deleted, which has nothing in it yet, for
         the same reason deleting a secret returns one.
+
+    RekeyRequest:
+      type: object
+      description: |
+        The body sent to rekey a node, which has nothing in it yet. It exists for
+        the same reasons the stop body does.
 
     RekeyResult:
       type: object

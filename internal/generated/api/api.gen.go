@@ -693,6 +693,10 @@ type Protocol string
 // resolves wherever a docker pull on the host would.
 type PullPolicy string
 
+// RekeyRequest The body sent to rekey a node, which has nothing in it yet. It exists for
+// the same reasons the stop body does.
+type RekeyRequest = map[string]interface{}
+
 // RekeyResult defines model for RekeyResult.
 type RekeyResult struct {
 	// KeyID The key the node's secrets are now sealed under.
@@ -1467,6 +1471,9 @@ type GetWorkloadLogsParams struct {
 	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
 }
 
+// RekeyJSONRequestBody defines body for Rekey for application/json ContentType.
+type RekeyJSONRequestBody = RekeyRequest
+
 // SetSecretJSONRequestBody defines body for SetSecret for application/json ContentType.
 type SetSecretJSONRequestBody = SecretSpec
 
@@ -1586,6 +1593,37 @@ type ClientInterface interface {
 	// Corresponds with GET /api/v1/admin/backup (the `GetBackup` operationId).
 	GetBackup(ctx context.Context, params *GetBackupParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RekeyWithBody Re-encrypt every secret under a new key
+	//
+	// Generates a new encryption key and re-seals every secret under it, then
+	// records it as the key the node uses. The server keeps running throughout.
+	//
+	// This exists because there is otherwise no way off the key a node started
+	// with. It matters when a key leaks — in a backup, on an imaged disk,
+	// committed by accident — and as ordinary hygiene.
+	//
+	// **No workload is redeployed.** A rekey changes how a value is stored, not
+	// what it is, so no secret's revision moves and no specification hash with
+	// it. A node that was running before this call is running the same instances
+	// after it.
+	//
+	// The rewrite is one transaction, and the new key is written to the keyring
+	// before anything points at it. A rekey that is interrupted therefore leaves
+	// every secret under the old key or every secret under the new one, with
+	// nothing to repair by hand.
+	//
+	// The key that was replaced is kept. It still opens the backups taken before
+	// this call, and restoring one of those needs it. `GET /api/v1/admin/backup`
+	// with `includeKeys` carries the whole keyring for that reason.
+	//
+	// Back the keyring up after this. The copy taken before it no longer opens
+	// anything the node holds.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
+	RekeyWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// Rekey Re-encrypt every secret under a new key
 	//
 	// Generates a new encryption key and re-seals every secret under it, then
@@ -1612,8 +1650,10 @@ type ClientInterface interface {
 	// Back the keyring up after this. The copy taken before it no longer opens
 	// anything the node holds.
 	//
+	// Takes a body of the `application/json` content type.
+	//
 	// Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
-	Rekey(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	Rekey(ctx context.Context, body RekeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSecrets List secrets
 	//
@@ -2090,6 +2130,47 @@ func (c *Client) GetBackup(ctx context.Context, params *GetBackupParams, reqEdit
 	return c.Client.Do(req)
 }
 
+// RekeyWithBody Re-encrypt every secret under a new key
+//
+// Generates a new encryption key and re-seals every secret under it, then
+// records it as the key the node uses. The server keeps running throughout.
+//
+// This exists because there is otherwise no way off the key a node started
+// with. It matters when a key leaks — in a backup, on an imaged disk,
+// committed by accident — and as ordinary hygiene.
+//
+// **No workload is redeployed.** A rekey changes how a value is stored, not
+// what it is, so no secret's revision moves and no specification hash with
+// it. A node that was running before this call is running the same instances
+// after it.
+//
+// The rewrite is one transaction, and the new key is written to the keyring
+// before anything points at it. A rekey that is interrupted therefore leaves
+// every secret under the old key or every secret under the new one, with
+// nothing to repair by hand.
+//
+// The key that was replaced is kept. It still opens the backups taken before
+// this call, and restoring one of those needs it. `GET /api/v1/admin/backup`
+// with `includeKeys` carries the whole keyring for that reason.
+//
+// Back the keyring up after this. The copy taken before it no longer opens
+// anything the node holds.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
+func (c *Client) RekeyWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRekeyRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // Rekey Re-encrypt every secret under a new key
 //
 // Generates a new encryption key and re-seals every secret under it, then
@@ -2116,9 +2197,11 @@ func (c *Client) GetBackup(ctx context.Context, params *GetBackupParams, reqEdit
 // Back the keyring up after this. The copy taken before it no longer opens
 // anything the node holds.
 //
+// Takes a body of the `application/json` content type.
+//
 // Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
-func (c *Client) Rekey(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewRekeyRequest(c.Server)
+func (c *Client) Rekey(ctx context.Context, body RekeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRekeyRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2923,8 +3006,19 @@ func NewGetBackupRequest(server string, params *GetBackupParams) (*http.Request,
 	return req, nil
 }
 
-// NewRekeyRequest constructs an http.Request for the Rekey method
-func NewRekeyRequest(server string) (*http.Request, error) {
+// NewRekeyRequest calls the generic Rekey builder with application/json body
+func NewRekeyRequest(server string, body RekeyJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRekeyRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewRekeyRequestWithBody constructs an http.Request for the Rekey method, with any body, and a specified content type
+func NewRekeyRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -2942,10 +3036,12 @@ func NewRekeyRequest(server string) (*http.Request, error) {
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -4035,6 +4131,37 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/admin/backup (the `GetBackup` operationId).
 	GetBackupWithResponse(ctx context.Context, params *GetBackupParams, reqEditors ...RequestEditorFn) (*GetBackupResponse, error)
 
+	// RekeyWithBodyWithResponse Re-encrypt every secret under a new key
+	//
+	// Generates a new encryption key and re-seals every secret under it, then
+	// records it as the key the node uses. The server keeps running throughout.
+	//
+	// This exists because there is otherwise no way off the key a node started
+	// with. It matters when a key leaks — in a backup, on an imaged disk,
+	// committed by accident — and as ordinary hygiene.
+	//
+	// **No workload is redeployed.** A rekey changes how a value is stored, not
+	// what it is, so no secret's revision moves and no specification hash with
+	// it. A node that was running before this call is running the same instances
+	// after it.
+	//
+	// The rewrite is one transaction, and the new key is written to the keyring
+	// before anything points at it. A rekey that is interrupted therefore leaves
+	// every secret under the old key or every secret under the new one, with
+	// nothing to repair by hand.
+	//
+	// The key that was replaced is kept. It still opens the backups taken before
+	// this call, and restoring one of those needs it. `GET /api/v1/admin/backup`
+	// with `includeKeys` carries the whole keyring for that reason.
+	//
+	// Back the keyring up after this. The copy taken before it no longer opens
+	// anything the node holds.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
+	RekeyWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RekeyResponse, error)
+
 	// RekeyWithResponse Re-encrypt every secret under a new key
 	//
 	// Generates a new encryption key and re-seals every secret under it, then
@@ -4061,10 +4188,10 @@ type ClientWithResponsesInterface interface {
 	// Back the keyring up after this. The copy taken before it no longer opens
 	// anything the node holds.
 	//
-	// Returns a wrapper object for the known response body format(s).
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
-	RekeyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*RekeyResponse, error)
+	RekeyWithResponse(ctx context.Context, body RekeyJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyResponse, error)
 
 	// ListSecretsWithResponse List secrets
 	//
@@ -5981,6 +6108,43 @@ func (c *ClientWithResponses) GetBackupWithResponse(ctx context.Context, params 
 	return ParseGetBackupResponse(rsp)
 }
 
+// RekeyWithBodyWithResponse Re-encrypt every secret under a new key
+//
+// Generates a new encryption key and re-seals every secret under it, then
+// records it as the key the node uses. The server keeps running throughout.
+//
+// This exists because there is otherwise no way off the key a node started
+// with. It matters when a key leaks — in a backup, on an imaged disk,
+// committed by accident — and as ordinary hygiene.
+//
+// **No workload is redeployed.** A rekey changes how a value is stored, not
+// what it is, so no secret's revision moves and no specification hash with
+// it. A node that was running before this call is running the same instances
+// after it.
+//
+// The rewrite is one transaction, and the new key is written to the keyring
+// before anything points at it. A rekey that is interrupted therefore leaves
+// every secret under the old key or every secret under the new one, with
+// nothing to repair by hand.
+//
+// The key that was replaced is kept. It still opens the backups taken before
+// this call, and restoring one of those needs it. `GET /api/v1/admin/backup`
+// with `includeKeys` carries the whole keyring for that reason.
+//
+// Back the keyring up after this. The copy taken before it no longer opens
+// anything the node holds.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
+func (c *ClientWithResponses) RekeyWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RekeyResponse, error) {
+	rsp, err := c.RekeyWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRekeyResponse(rsp)
+}
+
 // RekeyWithResponse Re-encrypt every secret under a new key
 //
 // Generates a new encryption key and re-seals every secret under it, then
@@ -6007,11 +6171,11 @@ func (c *ClientWithResponses) GetBackupWithResponse(ctx context.Context, params 
 // Back the keyring up after this. The copy taken before it no longer opens
 // anything the node holds.
 //
-// Returns a wrapper object for the known response body format(s).
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
-func (c *ClientWithResponses) RekeyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*RekeyResponse, error) {
-	rsp, err := c.Rekey(ctx, reqEditors...)
+func (c *ClientWithResponses) RekeyWithResponse(ctx context.Context, body RekeyJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyResponse, error) {
+	rsp, err := c.Rekey(ctx, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -8680,6 +8844,7 @@ func (response GetBackup500JSONResponse) VisitGetBackupResponse(w http.ResponseW
 }
 
 type RekeyRequestObject struct {
+	Body *RekeyJSONRequestBody
 }
 
 type RekeyResponseObject interface {
@@ -10198,6 +10363,13 @@ func (sh *strictHandler) GetBackup(w http.ResponseWriter, r *http.Request, param
 // Rekey operation middleware
 func (sh *strictHandler) Rekey(w http.ResponseWriter, r *http.Request) {
 	var request RekeyRequestObject
+
+	var body RekeyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.Rekey(ctx, request.(RekeyRequestObject))

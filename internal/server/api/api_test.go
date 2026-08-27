@@ -422,13 +422,14 @@ func TestRequireJSON(t *testing.T) {
 			ExpectStatus: http.StatusOK,
 		},
 		{
-			// A rekey is a POST with nothing in it. Refusing it for failing to
-			// declare the type of a body it does not have would refuse it for
-			// nothing.
-			Name:         "lets a post with no body through",
+			// Every write this API serves carries a JSON object, including a rekey,
+			// which sends an empty one. A bodyless POST is therefore never a request
+			// this API meant to serve, and it is one a browser may send across
+			// origins without asking permission first.
+			Name:         "refuses a post with no body",
 			Method:       http.MethodPost,
 			NoBody:       true,
-			ExpectStatus: http.StatusOK,
+			ExpectStatus: http.StatusUnsupportedMediaType,
 		},
 		{
 			Name:         "lets a delete through",
