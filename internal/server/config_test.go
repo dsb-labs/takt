@@ -35,8 +35,8 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "0.0.0.0", config.Workload.Bind)
 				assert.Equal(t, 25000, config.Workload.MinPort)
 				assert.Equal(t, 26000, config.Workload.MaxPort)
-				assert.Equal(t, "/etc/orca/secret.key", config.Secrets.KeyFile)
-				assert.Equal(t, "/etc/orca/secret.key", config.KeyPath())
+				assert.Equal(t, "/etc/orca/keys", config.Secrets.Keys)
+				assert.Equal(t, "/etc/orca/keys", config.KeysPath())
 				assert.Equal(t, []string{"/opt/runtime", "/nix/store"}, config.Exec.AllowPaths)
 				assert.Equal(t, "http://collector.example.com:4318", config.Telemetry.OTLPEndpoint)
 				assert.Equal(t, "debug", config.Logging.Level)
@@ -277,25 +277,25 @@ func TestConfig_Validate(t *testing.T) {
 	}
 }
 
-func TestConfig_KeyPath(t *testing.T) {
+func TestConfig_KeysPath(t *testing.T) {
 	t.Parallel()
 
-	t.Run("puts the key beside the database by default", func(t *testing.T) {
+	t.Run("puts the keyring beside the database by default", func(t *testing.T) {
 		config := server.DefaultConfig()
 		config.Data.Directory = "/var/lib/orca"
 
 		// Resolved against the data directory as configured, not as defaulted. A path
 		// computed before the file was read would name the directory orca is not using.
-		assert.Equal(t, filepath.Join("/var/lib/orca", "secret.key"), config.KeyPath())
+		assert.Equal(t, filepath.Join("/var/lib/orca", "keys"), config.KeysPath())
 	})
 
-	t.Run("uses the file it was given", func(t *testing.T) {
+	t.Run("uses the directory it was given", func(t *testing.T) {
 		config := server.DefaultConfig()
 		config.Data.Directory = "/var/lib/orca"
-		config.Secrets.KeyFile = "/etc/orca/secret.key"
+		config.Secrets.Keys = "/etc/orca/keys"
 
-		// Keeping the key off the disk holding the database is a decision an operator
+		// Keeping the keys off the disk holding the database is a decision an operator
 		// is allowed to make.
-		assert.Equal(t, "/etc/orca/secret.key", config.KeyPath())
+		assert.Equal(t, "/etc/orca/keys", config.KeysPath())
 	})
 }

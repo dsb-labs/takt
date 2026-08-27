@@ -64,15 +64,20 @@ type (
 
 	// The SecretsConfig type contains configuration for the secrets orca holds.
 	SecretsConfig struct {
-		// The file holding the key a secret's value is encrypted under.
+		// The directory holding the keys a secret's value is encrypted under.
 		//
-		// Generated on first start if nothing is there. Anything that can read this
-		// file can read every secret orca holds, so it is written readable only by
-		// the user running the server — and it belongs on a backup, because a secret
-		// sealed under a key that is gone cannot be recovered.
+		// A key is generated on first start if the directory is empty. Anything that
+		// can read this directory can read every secret orca holds, so it is created
+		// readable only by the user running the server — and it belongs on a backup,
+		// because a secret sealed under a key that is gone cannot be recovered.
 		//
-		// Empty puts it beside the database, in the data directory.
-		KeyFile string `toml:"key-file"`
+		// A directory rather than a file because rotating a key writes the new one
+		// before anything points at it. Each key is named by an identifier the
+		// database records, so which one is current is something the database
+		// answers.
+		//
+		// Empty puts the keyring beside the database, in the data directory.
+		Keys string `toml:"keys"`
 	}
 
 	// The DockerConfig type contains configuration for talking to the Docker daemon.
@@ -219,17 +224,17 @@ func DefaultConfig() Config {
 	}
 }
 
-// KeyPath returns the file holding the secret encryption key.
+// KeysPath returns the directory holding the secret encryption keys.
 //
 // Resolved here rather than defaulted in DefaultConfig, because the default sits
 // inside the data directory and a configuration file may have moved that. A default
 // computed before the file was read would point at the directory orca is not using.
-func (c Config) KeyPath() string {
-	if c.Secrets.KeyFile != "" {
-		return c.Secrets.KeyFile
+func (c Config) KeysPath() string {
+	if c.Secrets.Keys != "" {
+		return c.Secrets.Keys
 	}
 
-	return filepath.Join(c.Data.Directory, "secret.key")
+	return filepath.Join(c.Data.Directory, "keys")
 }
 
 func defaultDataDir() string {

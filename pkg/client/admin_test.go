@@ -32,7 +32,7 @@ func TestClient_Backup(t *testing.T) {
 
 				// Absent rather than false. The server's own default is what
 				// decides, so a client that says nothing asks for nothing.
-				assert.Empty(t, r.URL.Query().Get("includeKey"))
+				assert.Empty(t, r.URL.Query().Get("includeKeys"))
 
 				w.Header().Set("Content-Type", "application/zip")
 				_, _ = w.Write([]byte("archive"))
@@ -40,15 +40,15 @@ func TestClient_Backup(t *testing.T) {
 			Expect: "archive",
 		},
 		{
-			Name:    "asks for the key",
-			Options: []client.BackupOption{client.WithKey()},
+			Name:    "asks for the keyring",
+			Options: []client.BackupOption{client.WithKeys()},
 			Handler: func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "true", r.URL.Query().Get("includeKey"))
+				assert.Equal(t, "true", r.URL.Query().Get("includeKeys"))
 
 				w.Header().Set("Content-Type", "application/zip")
-				_, _ = w.Write([]byte("archive with key"))
+				_, _ = w.Write([]byte("archive with keys"))
 			},
-			Expect: "archive with key",
+			Expect: "archive with keys",
 		},
 		{
 			Name: "server failure",

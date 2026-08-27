@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/dsb-labs/orca/internal/server/api"
 	"github.com/dsb-labs/orca/internal/server/database"
+	secretstore "github.com/dsb-labs/orca/internal/server/secret"
 	"github.com/dsb-labs/orca/internal/server/service"
 )
 
@@ -28,21 +28,25 @@ func TestAdminAPI_GetBackup(t *testing.T) {
 	// produced by taking one. What this asserts is that the endpoint hands the
 	// archive over intact, which a stand-in could not show.
 	t.Run("streams an archive holding the database", func(t *testing.T) {
-		resp := doAdmin(t, newAdminService(t), "/api/v1/admin/backup")
+		admin, _ := newAdminService(t)
+
+		resp := doAdmin(t, admin, "/api/v1/admin/backup")
 
 		require.Equal(t, http.StatusOK, resp.Code)
 		assert.Equal(t, "application/zip", resp.Header().Get("Content-Type"))
 		assert.Equal(t, []string{"state.db"}, archivedNames(t, resp.Body.Bytes()))
 	})
 
-	t.Run("includes the key when asked", func(t *testing.T) {
-		resp := doAdmin(t, newAdminService(t), "/api/v1/admin/backup?includeKey=true")
+	t.Run("includes the keyring when asked", func(t *testing.T) {
+		admin, keyID := newAdminService(t)
+
+		resp := doAdmin(t, admin, "/api/v1/admin/backup?includeKeys=true")
 
 		require.Equal(t, http.StatusOK, resp.Code)
 
 		names := archivedNames(t, resp.Body.Bytes())
 		slices.Sort(names)
-		assert.Equal(t, []string{"secret.key", "state.db"}, names)
+		assert.Equal(t, []string{"keys/" + keyID + ".key", "state.db"}, names)
 	})
 
 	// The reason preparing and streaming are separate calls. A snapshot that could
@@ -63,8 +67,8 @@ func TestAdminAPI_GetBackup(t *testing.T) {
 }
 
 // newAdminService returns a service over a data directory holding a database and a
-// key, so that there is something to back up.
-func newAdminService(t *testing.T) *service.AdminService {
+// keyring, so that there is something to back up, along with the key's identifier.
+func newAdminService(t *testing.T) (*service.AdminService, string) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -77,13 +81,17 @@ func newAdminService(t *testing.T) *service.AdminService {
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, db.Close()) })
 
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "secret.key"), []byte("key"), 0o600))
+	keys, err := secretstore.NewStore(filepath.Join(dir, "keys"))
+	require.NoError(t, err)
+
+	id, err := keys.Create()
+	require.NoError(t, err)
 
 	return service.NewAdminService(service.AdminServiceConfig{
 		Logger:   logger,
 		Database: filepath.Join(dir, "state.db"),
-		KeyPath:  filepath.Join(dir, "secret.key"),
-	})
+		Keys:     keys,
+	}), id
 }
 
 func archivedNames(t *testing.T, archive []byte) []string {

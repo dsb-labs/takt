@@ -2562,7 +2562,7 @@ func (s *Suite) TestBackupRestoresANode() {
 	// Taken against the server that is still running, which is what makes this
 	// different from stopping orca and copying files.
 	var archive bytes.Buffer
-	s.Require().NoError(s.client.Backup(s.ctx(), &archive, client.WithKey()))
+	s.Require().NoError(s.client.Backup(s.ctx(), &archive, client.WithKeys()))
 
 	restored := s.T().TempDir()
 	s.extract(archive.Bytes(), restored)
@@ -2597,9 +2597,9 @@ func (s *Suite) TestBackupRestoresANode() {
 	s.Contains(out.String(), "[survives-a-restore]")
 }
 
-// TestBackupLeavesTheKeyOut proves the default keeps the database and the key apart,
-// which is what makes an archive safe to keep somewhere the key would not be.
-func (s *Suite) TestBackupLeavesTheKeyOut() {
+// TestBackupLeavesTheKeyringOut proves the default keeps the database and the keys
+// apart, which is what makes an archive safe to keep somewhere a key would not be.
+func (s *Suite) TestBackupLeavesTheKeyringOut() {
 	var archive bytes.Buffer
 	s.Require().NoError(s.client.Backup(s.ctx(), &archive))
 

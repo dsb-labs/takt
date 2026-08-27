@@ -85,11 +85,21 @@ func Run(ctx context.Context, config Config) error {
 	}
 	defer dockerClient.Close()
 
-	// Loaded before anything that could seal a value, so a server that cannot reach
-	// its key fails to start rather than accepting a secret it could not store.
-	key, err := secret.LoadKey(config.KeyPath())
+	// Opened before anything that could seal a value, so a server that cannot reach
+	// its keys fails to start rather than accepting a secret it could not store.
+	keys, err := secret.NewStore(config.KeysPath())
 	if err != nil {
-		return fmt.Errorf("failed to load secret encryption key: %w", err)
+		return fmt.Errorf("failed to open the keyring: %w", err)
+	}
+
+	keyID, err := currentKey(keys)
+	if err != nil {
+		return err
+	}
+
+	key, err := keys.Read(keyID)
+	if err != nil {
+		return fmt.Errorf("failed to read the secret encryption key: %w", err)
 	}
 
 	cipher, err := secret.New(key)
@@ -237,7 +247,7 @@ func Run(ctx context.Context, config Config) error {
 	adminSvc := service.NewAdminService(service.AdminServiceConfig{
 		Logger:   logger,
 		Database: databasePath(config),
-		KeyPath:  config.KeyPath(),
+		Keys:     keys,
 	})
 
 	allocator := port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort})
@@ -396,4 +406,31 @@ func newLogger(config LoggingConfig, extra slog.Handler) *slog.Logger {
 // directory.
 func databasePath(config Config) string {
 	return filepath.Join(config.Data.Directory, "state.db")
+}
+
+// currentKey returns the identifier of the key the keyring's secrets are sealed
+// under, generating one when the keyring is empty.
+//
+// A keyring holding more than one key is refused. Nothing rotates a key yet, so a
+// second one means something outside orca put it there, and guessing which of them
+// seals the database would be guessing at whether every secret still opens.
+func currentKey(keys *secret.Store) (string, error) {
+	ids, err := keys.List()
+	if err != nil {
+		return "", fmt.Errorf("failed to read the keyring: %w", err)
+	}
+
+	switch len(ids) {
+	case 0:
+		id, err := keys.Create()
+		if err != nil {
+			return "", fmt.Errorf("failed to generate a secret encryption key: %w", err)
+		}
+
+		return id, nil
+	case 1:
+		return ids[0], nil
+	default:
+		return "", fmt.Errorf("the keyring at %s holds %d keys, and orca cannot tell which seals the database", keys.Directory(), len(ids))
+	}
 }

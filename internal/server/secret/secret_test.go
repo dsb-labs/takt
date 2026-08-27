@@ -3,6 +3,7 @@ package secret_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -110,86 +111,164 @@ func TestNew(t *testing.T) {
 	})
 }
 
-func TestLoadKey(t *testing.T) {
+func TestStore(t *testing.T) {
 	t.Parallel()
 
-	t.Run("generates a key that is readable only by its owner", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "secret.key")
+	t.Run("creates a key readable only by its owner", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "keys")
 
-		key, err := secret.LoadKey(path)
+		store, err := secret.NewStore(dir)
+		require.NoError(t, err)
+
+		id, err := store.Create()
+		require.NoError(t, err)
+
+		key, err := store.Read(id)
 		require.NoError(t, err)
 		assert.Len(t, key, secret.KeyLength)
 
-		info, err := os.Stat(path)
+		info, err := os.Stat(filepath.Join(dir, id+".key"))
 		require.NoError(t, err)
 
-		// Anything that can read the key can read every secret orca holds.
+		// Anything that can read a key can read every secret sealed under it.
 		assert.Zero(t, info.Mode().Perm()&0o077)
 	})
 
-	t.Run("returns the same key on a later start", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "secret.key")
+	t.Run("returns the same key on a later read", func(t *testing.T) {
+		store := newTestStore(t)
 
-		first, err := secret.LoadKey(path)
+		id, err := store.Create()
+		require.NoError(t, err)
+
+		first, err := store.Read(id)
 		require.NoError(t, err)
 
 		// A server that sealed something has to be able to open it again.
-		second, err := secret.LoadKey(path)
+		second, err := store.Read(id)
 		require.NoError(t, err)
 		assert.Equal(t, first, second)
 	})
 
-	t.Run("creates the directory holding it", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "nested", "secret.key")
+	// Each key is its own file, so rotating one never writes over the key still in
+	// use. That is what makes a rekey recoverable rather than a point of no return.
+	t.Run("keeps keys apart from each other", func(t *testing.T) {
+		store := newTestStore(t)
 
-		_, err := secret.LoadKey(path)
+		first, err := store.Create()
+		require.NoError(t, err)
+		second, err := store.Create()
 		require.NoError(t, err)
 
-		assert.FileExists(t, path)
+		assert.NotEqual(t, first, second)
+
+		firstKey, err := store.Read(first)
+		require.NoError(t, err)
+		secondKey, err := store.Read(second)
+		require.NoError(t, err)
+		assert.NotEqual(t, firstKey, secondKey)
+
+		ids, err := store.List()
+		require.NoError(t, err)
+		slices.Sort(ids)
+
+		expected := []string{first, second}
+		slices.Sort(expected)
+		assert.Equal(t, expected, ids)
 	})
 
-	t.Run("refuses a key file of the wrong length", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "secret.key")
-		require.NoError(t, os.WriteFile(path, []byte("too short"), 0o600))
+	t.Run("creates the directory holding the keyring", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "nested", "keys")
+
+		_, err := secret.NewStore(dir)
+		require.NoError(t, err)
+
+		assert.DirExists(t, dir)
+	})
+
+	t.Run("lists nothing in an empty keyring", func(t *testing.T) {
+		ids, err := newTestStore(t).List()
+		require.NoError(t, err)
+		assert.Empty(t, ids)
+	})
+
+	// A key the database still points at but the keyring does not hold is the one
+	// failure that has to be loud: every secret sealed under it is unreadable.
+	t.Run("reports a key that is not there", func(t *testing.T) {
+		_, err := newTestStore(t).Read("nothing")
+		assert.ErrorIs(t, err, secret.ErrKeyNotFound)
+	})
+
+	t.Run("removes a key", func(t *testing.T) {
+		store := newTestStore(t)
+
+		id, err := store.Create()
+		require.NoError(t, err)
+		require.NoError(t, store.Remove(id))
+
+		_, err = store.Read(id)
+		assert.ErrorIs(t, err, secret.ErrKeyNotFound)
+
+		// Removing one that is not there is not a failure, so a sweep does not have
+		// to race whatever else is removing keys.
+		assert.NoError(t, store.Remove(id))
+	})
+
+	t.Run("refuses a key of the wrong length", func(t *testing.T) {
+		store, id := writeKey(t, 0o600, []byte("too short"))
 
 		// Truncating the key rather than reporting it would silently seal everything
 		// under something weaker than what was asked for.
-		_, err := secret.LoadKey(path)
+		_, err := store.Read(id)
 		assert.ErrorIs(t, err, secret.ErrInvalidKey)
 	})
 
-	t.Run("refuses a key file others can read", func(t *testing.T) {
-		path := writeKey(t, 0o644)
+	t.Run("refuses a key others can read", func(t *testing.T) {
+		store, id := writeKey(t, 0o644, make([]byte, secret.KeyLength))
 
 		// Whoever else could read it has already had the chance, so starting anyway
 		// would report every secret as protected when one of them may not be.
-		_, err := secret.LoadKey(path)
+		_, err := store.Read(id)
 		assert.ErrorIs(t, err, secret.ErrKeyReadable)
 	})
 
-	t.Run("refuses a key file others can write", func(t *testing.T) {
-		path := writeKey(t, 0o622)
+	t.Run("refuses a key others can write", func(t *testing.T) {
+		store, id := writeKey(t, 0o622, make([]byte, secret.KeyLength))
 
-		// Replacing the key is enough to make orca seal new values under one somebody
+		// Replacing a key is enough to make orca seal new values under one somebody
 		// else chose, without ever reading the one it had.
-		_, err := secret.LoadKey(path)
+		_, err := store.Read(id)
 		assert.ErrorIs(t, err, secret.ErrKeyReadable)
 	})
 }
 
-// writeKey puts a key file of the right length at a temporary path, with exactly the
-// permissions asked for, and returns where it is.
+func newTestStore(t *testing.T) *secret.Store {
+	t.Helper()
+
+	store, err := secret.NewStore(filepath.Join(t.TempDir(), "keys"))
+	require.NoError(t, err)
+
+	return store
+}
+
+// writeKey puts a key file into a keyring with exactly the permissions asked for,
+// and returns the store and the key's identifier.
 //
 // The mode is applied with Chmod rather than left to WriteFile. WriteFile's mode is a
 // request the process umask filters, so a test asking for a group-writable file gets
 // one only on a host whose umask permits it. That made these tests pass locally under
 // umask 002 and fail in CI under umask 022, which is the opposite of what a permission
 // test should depend on.
-func writeKey(t *testing.T, mode os.FileMode) string {
+func writeKey(t *testing.T, mode os.FileMode, key []byte) (*secret.Store, string) {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "secret.key")
-	require.NoError(t, os.WriteFile(path, make([]byte, secret.KeyLength), mode))
+	dir := filepath.Join(t.TempDir(), "keys")
+	store, err := secret.NewStore(dir)
+	require.NoError(t, err)
+
+	const id = "planted"
+
+	path := filepath.Join(dir, id+".key")
+	require.NoError(t, os.WriteFile(path, key, mode))
 	require.NoError(t, os.Chmod(path, mode))
 
 	// The point of the test is the mode, so a host that would not give us the one we
@@ -198,13 +277,18 @@ func writeKey(t *testing.T, mode os.FileMode) string {
 	require.NoError(t, err)
 	require.Equal(t, mode, info.Mode().Perm(), "the test needs a key file with mode %#o", mode)
 
-	return path
+	return store, id
 }
 
 func newTestCipher(t *testing.T) *secret.Cipher {
 	t.Helper()
 
-	key, err := secret.LoadKey(filepath.Join(t.TempDir(), "secret.key"))
+	store := newTestStore(t)
+
+	id, err := store.Create()
+	require.NoError(t, err)
+
+	key, err := store.Read(id)
 	require.NoError(t, err)
 
 	c, err := secret.New(key)

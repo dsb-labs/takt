@@ -13,8 +13,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 )
 
 var (
@@ -105,64 +103,4 @@ func (c *Cipher) Open(name string, sealed []byte) ([]byte, error) {
 	}
 
 	return value, nil
-}
-
-// LoadKey reads the key at path, generating one if nothing is there yet.
-//
-// A generated key is written before it is used, so a server that came up once and
-// sealed something can open it again. The file is readable only by the user running
-// the server, like the database beside it: anything that can read the key can read
-// every secret orca holds.
-//
-// An existing key that anyone else can read is refused rather than narrowed. Whoever
-// could read it has already had the chance, so tightening the mode would hide that
-// rather than undo it, and orca cannot tell a mistake from a deliberate share.
-func LoadKey(path string) ([]byte, error) {
-	key, err := os.ReadFile(path)
-	switch {
-	case err == nil:
-		if len(key) != KeyLength {
-			return nil, fmt.Errorf("%w: %s holds %d bytes, need %d", ErrInvalidKey, path, len(key), KeyLength)
-		}
-
-		info, err := os.Stat(path)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read encryption key: %w", err)
-		}
-
-		if mode := info.Mode().Perm(); mode&0o077 != 0 {
-			return nil, fmt.Errorf("%w: %s is %#o, want 0600", ErrKeyReadable, path, mode)
-		}
-
-		return key, nil
-	case !errors.Is(err, os.ErrNotExist):
-		return nil, fmt.Errorf("failed to read encryption key: %w", err)
-	}
-
-	if err = os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("failed to create encryption key directory: %w", err)
-	}
-
-	key = make([]byte, KeyLength)
-	if _, err = rand.Read(key); err != nil {
-		return nil, fmt.Errorf("failed to generate encryption key: %w", err)
-	}
-
-	// Exclusive, so that two servers racing to create it cannot each write a key and
-	// leave one of them unable to open what it sealed.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return LoadKey(path)
-		}
-
-		return nil, fmt.Errorf("failed to create encryption key: %w", err)
-	}
-	defer f.Close()
-
-	if _, err = f.Write(key); err != nil {
-		return nil, fmt.Errorf("failed to write encryption key: %w", err)
-	}
-
-	return key, nil
 }

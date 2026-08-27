@@ -626,8 +626,13 @@ func (s *Suite) extract(archive []byte, directory string) {
 		s.Require().NoError(f.Close())
 		s.Require().NoError(err)
 
+		// The keyring's entries carry their directory with them, so it has to exist
+		// before the key inside it is written.
+		path := filepath.Join(directory, entry.Name)
+		s.Require().NoError(os.MkdirAll(filepath.Dir(path), 0o700))
+
 		// Only the owner, for both. The server refuses to start on a key anything
 		// else can read, and the database holds every workload's specification.
-		s.Require().NoError(os.WriteFile(filepath.Join(directory, entry.Name), contents, 0o600))
+		s.Require().NoError(os.WriteFile(path, contents, 0o600))
 	}
 }

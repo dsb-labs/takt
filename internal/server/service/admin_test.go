@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/orca/internal/server/database"
+	"github.com/dsb-labs/orca/internal/server/secret"
 	"github.com/dsb-labs/orca/internal/server/service"
 )
 
@@ -23,19 +24,29 @@ func TestAdminService_PrepareBackup(t *testing.T) {
 	t.Run("holds the database and nothing else", func(t *testing.T) {
 		dir := t.TempDir()
 		newBackupDatabase(t, dir)
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "secret.key"), []byte("key"), 0o600))
+		newTestKeyring(t, dir)
 
 		assert.Equal(t, []string{"state.db"}, archiveNames(t, streamBackup(t, dir, service.BackupOptions{})))
 	})
 
-	t.Run("holds the key when asked", func(t *testing.T) {
+	// Every key, not only the one sealing secrets now. A replaced key still opens the
+	// archives taken before it was replaced.
+	t.Run("holds the whole keyring when asked", func(t *testing.T) {
 		dir := t.TempDir()
 		newBackupDatabase(t, dir)
-		require.NoError(t, os.WriteFile(filepath.Join(dir, "secret.key"), []byte("key"), 0o600))
 
-		names := archiveNames(t, streamBackup(t, dir, service.BackupOptions{IncludeKey: true}))
+		keys := newTestKeyring(t, dir)
+		first, err := keys.Create()
+		require.NoError(t, err)
+		second, err := keys.Create()
+		require.NoError(t, err)
+
+		names := archiveNames(t, streamBackup(t, dir, service.BackupOptions{IncludeKeys: true}))
 		slices.Sort(names)
-		assert.Equal(t, []string{"secret.key", "state.db"}, names)
+
+		expected := []string{"keys/" + first + ".key", "keys/" + second + ".key", "state.db"}
+		slices.Sort(expected)
+		assert.Equal(t, expected, names)
 	})
 
 	// The archive is what an operator restores from, so the database inside it has to
@@ -76,9 +87,12 @@ func TestAdminService_PrepareBackup(t *testing.T) {
 		dir := t.TempDir()
 		newBackupDatabase(t, dir)
 
+		// Read after the service is built, so the keyring it creates is part of what
+		// the directory is expected to look like.
+		admin := newAdminService(t, dir)
 		before := entryNames(t, dir)
 
-		backup, err := newAdminService(t, dir).PrepareBackup(t.Context(), service.BackupOptions{})
+		backup, err := admin.PrepareBackup(t.Context(), service.BackupOptions{})
 		require.NoError(t, err)
 		require.NoError(t, backup.Stream(io.Discard))
 		require.NoError(t, backup.Close())
@@ -91,22 +105,36 @@ func TestAdminService_PrepareBackup(t *testing.T) {
 	t.Run("refuses before writing when the database is not there", func(t *testing.T) {
 		dir := t.TempDir()
 
-		backup, err := newAdminService(t, dir).PrepareBackup(t.Context(), service.BackupOptions{})
+		admin := newAdminService(t, dir)
+		before := entryNames(t, dir)
+
+		backup, err := admin.PrepareBackup(t.Context(), service.BackupOptions{})
 		assert.Nil(t, backup)
 		assert.ErrorIs(t, err, database.ErrNoSnapshotSource)
 
 		// The temporary directory a failed preparation made goes with it, or a server
 		// asked for a backup it cannot take accumulates one per attempt.
-		assert.Empty(t, entryNames(t, dir))
+		assert.Equal(t, before, entryNames(t, dir))
 	})
 
-	t.Run("refuses before writing when the key is not there", func(t *testing.T) {
+	t.Run("refuses before writing when the keyring cannot be read", func(t *testing.T) {
 		dir := t.TempDir()
 		newBackupDatabase(t, dir)
 
+		// A keyring whose directory was removed after the store opened it, which is
+		// what a keyring on a filesystem that went away looks like.
+		keys := newTestKeyring(t, dir)
+		require.NoError(t, os.RemoveAll(keys.Directory()))
+
 		before := entryNames(t, dir)
 
-		backup, err := newAdminService(t, dir).PrepareBackup(t.Context(), service.BackupOptions{IncludeKey: true})
+		options := service.BackupOptions{IncludeKeys: true}
+
+		backup, err := service.NewAdminService(service.AdminServiceConfig{
+			Logger:   newTestLogger(t),
+			Database: filepath.Join(dir, "state.db"),
+			Keys:     keys,
+		}).PrepareBackup(t.Context(), options)
 		assert.Nil(t, backup)
 		assert.Error(t, err)
 		assert.Equal(t, before, entryNames(t, dir))
@@ -134,8 +162,18 @@ func newAdminService(t *testing.T, dir string) *service.AdminService {
 	return service.NewAdminService(service.AdminServiceConfig{
 		Logger:   newTestLogger(t),
 		Database: filepath.Join(dir, "state.db"),
-		KeyPath:  filepath.Join(dir, "secret.key"),
+		Keys:     newTestKeyring(t, dir),
 	})
+}
+
+// newTestKeyring returns a keyring under dir, which is where a server keeps one.
+func newTestKeyring(t *testing.T, dir string) *secret.Store {
+	t.Helper()
+
+	keys, err := secret.NewStore(filepath.Join(dir, "keys"))
+	require.NoError(t, err)
+
+	return keys
 }
 
 // newBackupDatabase opens a database in dir so that there is something to back up,

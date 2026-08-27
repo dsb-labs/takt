@@ -23,7 +23,7 @@ type Result struct {
 // Command returns the "admin backup" command used to write a backup of the node.
 func Command() *cobra.Command {
 	var address string
-	var includeKey bool
+	var includeKeys bool
 
 	cmd := &cobra.Command{
 		Use:   "backup <destination>",
@@ -36,8 +36,8 @@ func Command() *cobra.Command {
 			"files and a copy of one of them is stale or torn.\n\n" +
 			"Volume data is not in the archive. Run \"orca volume list\" for the path\n" +
 			"of each volume on the host and back those up separately.\n\n" +
-			"The encryption key is not in the archive either, unless --include-key is\n" +
-			"passed. A database without its key decrypts nothing, which is what makes\n" +
+			"The keyring is not in the archive either, unless --include-keys is\n" +
+			"passed. A database without its keys decrypts nothing, which is what makes\n" +
 			"a copy of it safe to keep somewhere a key would not be.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -62,8 +62,8 @@ func Command() *cobra.Command {
 			defer f.Close()
 
 			var options []client.BackupOption
-			if includeKey {
-				options = append(options, client.WithKey())
+			if includeKeys {
+				options = append(options, client.WithKeys())
 			}
 
 			if err = c.Backup(cmd.Context(), f, options...); err != nil {
@@ -95,8 +95,8 @@ func Command() *cobra.Command {
 
 			fmt.Fprintln(out, "Volume data is not in this backup. Run \"orca volume list\" for each volume's path.")
 
-			if !includeKey {
-				fmt.Fprintln(out, "The encryption key is not in this backup. It needs a backup of its own,")
+			if !includeKeys {
+				fmt.Fprintln(out, "The keyring is not in this backup. It needs a backup of its own,")
 				fmt.Fprintln(out, "or nothing here can be decrypted.")
 			}
 
@@ -109,7 +109,7 @@ func Command() *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
-	flags.BoolVar(&includeKey, "include-key", false, "put the secret encryption key in the archive, which makes it key material")
+	flags.BoolVar(&includeKeys, "include-keys", false, "put the keyring in the archive, which makes it key material")
 
 	return cmd
 }

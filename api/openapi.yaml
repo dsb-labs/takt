@@ -840,20 +840,24 @@ paths:
         The files under `mounts/` are not in the archive either. They are transient
         and rewritten as a workload starts.
       parameters:
-        - name: includeKey
+        - name: includeKeys
           in: query
           required: false
           description: |
-            Put the secret encryption key in the archive beside the database.
+            Put the keyring in the archive beside the database.
 
             Off by default, and the default is the one to prefer. A database
-            without its key decrypts nothing, and that separability is what makes
+            without its keys decrypts nothing, and that separability is what makes
             a copy of it safe to keep somewhere a key would not be. An archive
             holding both is key material: it opens every secret orca holds, and it
             keeps opening them long after this request.
 
-            An operator who set `key-file` to somewhere they already back up needs
-            none of this. Setting it is the better answer.
+            Every key is included, not only the one sealing secrets now. A key that
+            has been replaced still opens the archives taken before it was, and an
+            operator restoring an older backup needs it.
+
+            An operator who set `secrets.keys` to somewhere they already back up
+            needs none of this. Setting it is the better answer.
           schema:
             type: boolean
             default: false

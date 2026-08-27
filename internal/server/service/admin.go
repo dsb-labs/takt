@@ -12,13 +12,25 @@ import (
 	"github.com/dsb-labs/orca/internal/server/database"
 )
 
+// The directory a backup archive holds the keyring under, mirroring where the
+// keyring sits in a data directory.
+const keyringDir = "keys"
+
 type (
 	// The AdminService type performs the operations an operator runs against the
 	// node itself rather than against the workloads on it.
 	AdminService struct {
 		logger   *slog.Logger
 		database string
-		keyPath  string
+		keys     KeyStore
+	}
+
+	// The KeyStore interface describes the keyring a backup reads from.
+	KeyStore interface {
+		// Directory should report where the keyring's keys are kept.
+		Directory() string
+		// List should return the identifier of every key in the keyring.
+		List() ([]string, error)
 	}
 
 	// The AdminServiceConfig type contains fields used to construct an
@@ -29,20 +41,20 @@ type (
 		// The SQLite database file a backup snapshots. A backup is prepared beside
 		// it, which is the data directory by construction.
 		Database string
-		// The file holding the key a secret's value is encrypted under.
-		KeyPath string
+		// The keyring holding the keys a secret's value is encrypted under.
+		Keys KeyStore
 	}
 
 	// The BackupOptions type describes what a backup covers.
 	BackupOptions struct {
-		// Include the encryption key alongside the database.
+		// Include the keyring alongside the database.
 		//
-		// Off unless asked for. The database and the key are separable on purpose:
-		// a database without its key decrypts nothing, which is what makes a copy
+		// Off unless asked for. The database and the keys are separable on purpose:
+		// a database without its keys decrypts nothing, which is what makes a copy
 		// of it safe to keep somewhere a key would not be. An archive holding both
 		// is key material, and every decision about where it is stored has to
 		// change to match.
-		IncludeKey bool
+		IncludeKeys bool
 	}
 
 	// The Backup type is a snapshot that has been taken and is waiting to be read.
@@ -74,25 +86,25 @@ func NewAdminService(config AdminServiceConfig) *AdminService {
 	return &AdminService{
 		logger:   config.Logger.With("component", "admin"),
 		database: config.Database,
-		keyPath:  config.KeyPath,
+		keys:     config.Keys,
 	}
 }
 
 // PrepareBackup takes a snapshot of what orca holds on disk.
 //
-// The backup covers a consistent snapshot of the database, and the encryption key
-// when the options ask for it. It covers neither volume data, which is arbitrary
-// user data orca has no business copying, nor the mounted secret files, which are
-// transient and rewritten as a workload starts.
+// The backup covers a consistent snapshot of the database, and the keyring when the
+// options ask for it. It covers neither volume data, which is arbitrary user data
+// orca has no business copying, nor the mounted secret files, which are transient
+// and rewritten as a workload starts.
 //
 // The returned Backup must be closed.
 func (s *AdminService) PrepareBackup(ctx context.Context, options BackupOptions) (*Backup, error) {
-	if options.IncludeKey {
+	if options.IncludeKeys {
 		// The one backup that carries durable key material. Extracting a secret
-		// through the API needs the API to be reachable at the time. The key opens
+		// through the API needs the API to be reachable at the time. A key opens
 		// every backup taken before this one and every one taken until it is
 		// rotated, so it deserves a record of having happened.
-		s.logger.Warn("preparing a backup that includes the secret encryption key")
+		s.logger.Warn("preparing a backup that includes the keyring")
 	}
 
 	// Beside the database rather than in the system temporary directory. That is the
@@ -122,17 +134,26 @@ func (s *AdminService) PrepareBackup(ctx context.Context, options BackupOptions)
 
 	backup.files = append(backup.files, backupFile{name: name, path: snapshot})
 
-	if options.IncludeKey {
-		// Read here rather than at the first byte of the archive, so that a key
-		// which is not where it was configured is reported as a failed request
-		// rather than as an archive missing the thing it was asked for.
-		if _, err = os.Stat(s.keyPath); err != nil {
+	if options.IncludeKeys {
+		// Listed here rather than at the first byte of the archive, so that a
+		// keyring that cannot be read is reported as a failed request rather than
+		// as an archive missing the thing it was asked for.
+		ids, err := s.keys.List()
+		if err != nil {
 			backup.closeAfterFailure()
 
-			return nil, fmt.Errorf("failed to read encryption key: %w", err)
+			return nil, fmt.Errorf("failed to read the keyring: %w", err)
 		}
 
-		backup.files = append(backup.files, backupFile{name: filepath.Base(s.keyPath), path: s.keyPath})
+		// Every key, not only the one sealing secrets now. A key that is no longer
+		// current still opens the archives taken before it was replaced, and an
+		// operator restoring an older backup needs it.
+		for _, id := range ids {
+			backup.files = append(backup.files, backupFile{
+				name: filepath.Join(keyringDir, id+".key"),
+				path: filepath.Join(s.keys.Directory(), id+".key"),
+			})
+		}
 	}
 
 	return backup, nil

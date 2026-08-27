@@ -1356,17 +1356,21 @@ type NotFound = ErrorResponse
 
 // GetBackupParams defines parameters for GetBackup.
 type GetBackupParams struct {
-	// IncludeKey Put the secret encryption key in the archive beside the database.
+	// IncludeKeys Put the keyring in the archive beside the database.
 	//
 	// Off by default, and the default is the one to prefer. A database
-	// without its key decrypts nothing, and that separability is what makes
+	// without its keys decrypts nothing, and that separability is what makes
 	// a copy of it safe to keep somewhere a key would not be. An archive
 	// holding both is key material: it opens every secret orca holds, and it
 	// keeps opening them long after this request.
 	//
-	// An operator who set `key-file` to somewhere they already back up needs
-	// none of this. Setting it is the better answer.
-	IncludeKey *bool `form:"includeKey,omitempty" json:"includeKey,omitempty"`
+	// Every key is included, not only the one sealing secrets now. A key that
+	// has been replaced still opens the archives taken before it was, and an
+	// operator restoring an older backup needs it.
+	//
+	// An operator who set `secrets.keys` to somewhere they already back up
+	// needs none of this. Setting it is the better answer.
+	IncludeKeys *bool `form:"includeKeys,omitempty" json:"includeKeys,omitempty"`
 }
 
 // DeleteSecretParams defines parameters for DeleteSecret.
@@ -2812,9 +2816,9 @@ func NewGetBackupRequest(server string, params *GetBackupParams) (*http.Request,
 		// per the OpenAPI spec (e.g. "color=blue,black,brown").
 		var rawQueryFragments []string
 
-		if params.IncludeKey != nil {
+		if params.IncludeKeys != nil {
 
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "includeKey", *params.IncludeKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "includeKeys", *params.IncludeKeys, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -7538,15 +7542,15 @@ func (siw *ServerInterfaceWrapper) GetBackup(w http.ResponseWriter, r *http.Requ
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetBackupParams
 
-	// ------------- Optional query parameter "includeKey" -------------
+	// ------------- Optional query parameter "includeKeys" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeKey", r.URL.Query(), &params.IncludeKey, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeKeys", r.URL.Query(), &params.IncludeKeys, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
-			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "includeKey"})
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "includeKeys"})
 		} else {
-			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "includeKey", Err: err})
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "includeKeys", Err: err})
 		}
 		return
 	}

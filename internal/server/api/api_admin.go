@@ -55,11 +55,11 @@ func (a *AdminAPI) internalError(operation string, err error) string {
 }
 
 // GetBackup returns a zip archive holding a consistent snapshot of the database, and
-// the encryption key when the request asks for it.
+// the keyring when the request asks for it.
 func (a *AdminAPI) GetBackup(ctx context.Context, request api.GetBackupRequestObject) (api.GetBackupResponseObject, error) {
 	var options service.BackupOptions
-	if request.Params.IncludeKey != nil {
-		options.IncludeKey = *request.Params.IncludeKey
+	if request.Params.IncludeKeys != nil {
+		options.IncludeKeys = *request.Params.IncludeKeys
 	}
 
 	// The snapshot is taken before the response starts, so that the failures worth
