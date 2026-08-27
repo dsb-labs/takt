@@ -354,7 +354,32 @@ func (d *Driver) Signal(ctx context.Context, _, workload, signal string) error {
 // A container something has already replaced is reported as retained, so that a caller
 // deciding what to run leaves it out while one sweeping up orphans still finds it.
 func (d *Driver) Observe(ctx context.Context) ([]driver.Instance, error) {
-	containers, err := d.containers(ctx, "")
+	return d.observe(ctx, "")
+}
+
+// ObserveWorkload reports every instance the driver is currently running for one
+// workload, in the same terms as Observe.
+//
+// The daemon does the filtering, on the label every container the driver starts
+// carries. Reading one workload therefore costs one query for that workload rather
+// than a listing of everything on the host, which is what a read of a single
+// workload used to pay.
+//
+// The identifier is unused here: a container records the workload's name in its
+// labels, and that is what the filter matches. It is part of the signature because
+// the exec driver keys its state on the identifier, and one interface serves both.
+func (d *Driver) ObserveWorkload(ctx context.Context, _, name string) ([]driver.Instance, error) {
+	return d.observe(ctx, name)
+}
+
+// observe reports the instances of one workload, or of every workload when the name
+// is empty.
+//
+// Retention is decided within whatever was listed, which is correct either way:
+// supersededBy groups by workload before choosing, so a listing narrowed to one
+// workload reaches the same answer for it as a listing of the host would.
+func (d *Driver) observe(ctx context.Context, name string) ([]driver.Instance, error) {
+	containers, err := d.containers(ctx, name)
 	if err != nil {
 		return nil, err
 	}

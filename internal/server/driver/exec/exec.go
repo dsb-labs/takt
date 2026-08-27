@@ -843,39 +843,67 @@ func (d *Driver) Observe(_ context.Context) ([]driver.Instance, error) {
 	var instances []driver.Instance
 
 	for _, id := range ids {
-		versions, err := d.versions(d.state, id)
+		instances = append(instances, d.instances(id)...)
+	}
+
+	return instances, nil
+}
+
+// ObserveWorkload reports every instance the driver is running for one workload, in
+// the same terms as Observe.
+//
+// The state tree is keyed by the workload's identifier, so this reads one directory
+// rather than every directory the driver holds. A workload with no records yet has
+// none to report, which is not a failure: it reads as a workload nothing is running
+// for, which is what it is.
+//
+// The name is unused here, because a record carries its own. It is part of the
+// signature because the docker driver filters on the name, and one interface serves
+// both.
+func (d *Driver) ObserveWorkload(_ context.Context, id, _ string) ([]driver.Instance, error) {
+	return d.instances(id), nil
+}
+
+// instances reports what the driver has recorded for one workload identifier.
+//
+// A record that cannot be read is skipped rather than returned as an error, for the
+// reason each skip gives: what is being reported is what the driver can see, and one
+// unreadable record should not hide the rest.
+func (d *Driver) instances(id string) []driver.Instance {
+	versions, err := d.versions(d.state, id)
+	if err != nil {
+		// A directory the driver cannot have created, so there is nothing here it can
+		// report on.
+		d.logger.With("id", id, "error", err).Error("skipping an unusable state directory")
+
+		return nil
+	}
+
+	instances := make([]driver.Instance, 0, len(versions))
+
+	for _, path := range versions {
+		recorded, err := readState(path)
 		if err != nil {
-			// A directory the driver cannot have created, so there is nothing here it
-			// can report on.
-			d.logger.With("id", id, "error", err).Error("skipping an unusable state directory")
+			// A directory with no readable record describes nothing that can be
+			// converged. Reporting an instance for it would have the reconciler act
+			// on a workload it cannot identify.
+			d.logger.With("id", id, "error", err).Debug("skipping unreadable instance state")
 
 			continue
 		}
 
-		for _, path := range versions {
-			recorded, err := readState(path)
-			if err != nil {
-				// A directory with no readable record describes nothing that can be
-				// converged. Reporting an instance for it would have the reconciler
-				// act on a workload it cannot identify.
-				d.logger.With("id", id, "error", err).Debug("skipping unreadable instance state")
+		// The name comes from the record rather than from the directory, which is
+		// named for the identifier. Nothing parses a path to learn a name.
+		if recorded.Workload == "" {
+			d.logger.With("id", id).Debug("skipping a record naming no workload")
 
-				continue
-			}
-
-			// The name comes from the record rather than from the directory, which is
-			// named for the identifier. Nothing parses a path to learn a name.
-			if recorded.Workload == "" {
-				d.logger.With("id", id).Debug("skipping a record naming no workload")
-
-				continue
-			}
-
-			instances = append(instances, instance(recorded.Workload, recorded, retained(path)))
+			continue
 		}
+
+		instances = append(instances, instance(recorded.Workload, recorded, retained(path)))
 	}
 
-	return instances, nil
+	return instances
 }
 
 // instance maps a record onto what the server reads.

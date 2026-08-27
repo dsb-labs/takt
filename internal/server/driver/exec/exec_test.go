@@ -124,6 +124,58 @@ func TestDriver_Start(t *testing.T) {
 	})
 }
 
+// TestDriver_ObserveWorkload covers reading one workload rather than the whole tree.
+// The state directory is keyed by identifier, so this reads one directory where
+// Observe reads every one — which is what makes a single-workload read cost the same
+// whether the host runs one workload or two hundred.
+func TestDriver_ObserveWorkload(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports only the workload asked for", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		// Identifiers the driver will accept as directory names, which is what it
+		// keys its state tree on.
+		const (
+			firstID  = "cvhs0dq0kqj4c9r8m1a1"
+			secondID = "cvhs0dq0kqj4c9r8m1a2"
+		)
+
+		writeInstanceFor(t, root, firstID, "first", 1, map[string]any{
+			"pid": os.Getpid(), "startTicks": startTicks(t, os.Getpid()),
+			"specHash": "hash-one", "version": 1,
+			"startedAt": time.Now().Format(time.RFC3339Nano),
+		})
+		writeInstanceFor(t, root, secondID, "second", 1, map[string]any{
+			"pid": os.Getpid(), "startTicks": startTicks(t, os.Getpid()),
+			"specHash": "hash-two", "version": 1,
+			"startedAt": time.Now().Format(time.RFC3339Nano),
+		})
+
+		// Both are there, so a filter that did nothing would be indistinguishable
+		// from one that worked.
+		all, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, all, 2)
+
+		instances, err := d.ObserveWorkload(t.Context(), secondID, "second")
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+		assert.Equal(t, "second", instances[0].Workload)
+		assert.Equal(t, "hash-two", instances[0].SpecHash)
+	})
+
+	// A workload nothing has been started for is not a failure. It reads as a
+	// workload with no instances, which is what it is.
+	t.Run("reports nothing for a workload with no records", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		instances, err := d.ObserveWorkload(t.Context(), "cvhs0dq0kqj4c9r8m1a3", "absent")
+		require.NoError(t, err)
+		assert.Empty(t, instances)
+	})
+}
+
 func TestDriver_Observe(t *testing.T) {
 	t.Parallel()
 
@@ -1025,6 +1077,22 @@ func writeInstance(t *testing.T, root, workload string, version int, recorded ma
 	recorded["workload"] = workload
 
 	dir := filepath.Join(root, "state", testID, strconv.Itoa(version))
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+
+	data, err := json.Marshal(recorded)
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "state.json"), data, 0o600))
+}
+
+// writeInstanceFor writes a record under a chosen identifier, for a test that needs
+// more than one workload in the tree. writeInstance keys everything on testID.
+func writeInstanceFor(t *testing.T, root, id, workload string, version int, recorded map[string]any) {
+	t.Helper()
+
+	recorded["workload"] = workload
+
+	dir := filepath.Join(root, "state", id, strconv.Itoa(version))
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 
 	data, err := json.Marshal(recorded)

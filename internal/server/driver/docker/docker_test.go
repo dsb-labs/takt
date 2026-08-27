@@ -707,6 +707,88 @@ func TestDriver_Signal(t *testing.T) {
 	})
 }
 
+// TestDriver_ObserveWorkload covers reading one workload rather than the whole host.
+// The daemon does the filtering, which is what makes a single-workload read cost the
+// same whether the host runs one container or two hundred.
+func TestDriver_ObserveWorkload(t *testing.T) {
+	t.Parallel()
+
+	t.Run("asks the daemon for one workload's containers", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		var asked dockercontainer.ListOptions
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, options dockercontainer.ListOptions) ([]dockercontainer.Summary, error) {
+				asked = options
+
+				return []dockercontainer.Summary{
+					{
+						ID:    "container-one",
+						State: dockercontainer.StateRunning,
+						Labels: map[string]string{
+							docker.LabelWorkload: "example",
+							docker.LabelSpecHash: "hash-one",
+						},
+					},
+				}, nil
+			}).Once()
+
+		d := testDriver(t, client)
+
+		instances, err := d.ObserveWorkload(t.Context(), "cvhs0dq0kqj4c9r8m1a0", "example")
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+		assert.Equal(t, "example", instances[0].Workload)
+
+		// The filter is the point. Listing everything and discarding the rest is what
+		// this exists to stop, so the label has to carry the name.
+		assert.Contains(t, asked.Filters.Get("label"), docker.LabelWorkload+"=example")
+	})
+
+	// Retention is decided within whatever was listed. supersededBy groups by
+	// workload before choosing, so narrowing the listing to one workload has to reach
+	// the same answer for it that a listing of the host would.
+	t.Run("reports the superseded container of the workload as retained", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:      "older",
+				State:   dockercontainer.StateRunning,
+				Created: 1000,
+				Labels: map[string]string{
+					docker.LabelWorkload: "example",
+					docker.LabelVersion:  "1",
+				},
+			},
+			{
+				ID:      "newer",
+				State:   dockercontainer.StateRunning,
+				Created: 2000,
+				Labels: map[string]string{
+					docker.LabelWorkload: "example",
+					docker.LabelVersion:  "2",
+				},
+			},
+		}, nil).Once()
+
+		d := testDriver(t, client)
+
+		instances, err := d.ObserveWorkload(t.Context(), "cvhs0dq0kqj4c9r8m1a0", "example")
+		require.NoError(t, err)
+		require.Len(t, instances, 2)
+
+		retained := map[string]bool{}
+		for _, instance := range instances {
+			retained[instance.ID] = instance.Retained
+		}
+
+		assert.True(t, retained["older"], "the superseded container is not retained")
+		assert.False(t, retained["newer"], "the current container is retained")
+	})
+}
+
 func TestDriver_Observe(t *testing.T) {
 	t.Parallel()
 
