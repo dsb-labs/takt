@@ -179,9 +179,22 @@ func addToArchive(archive *zip.Writer, path, name string) error {
 	}
 	defer f.Close()
 
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to read %s: %w", name, err)
+	}
+
 	// Deflated rather than stored. A SQLite page file compresses well, and the
 	// archive goes over a network to somewhere it sits for a long time.
-	entry, err := archive.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate})
+	//
+	// Dated, because a zip entry with no time in it extracts to a file dated 1980.
+	// Somebody restoring a node checks that they have the right archive, and a date
+	// that says nothing is one less way to check.
+	entry, err := archive.CreateHeader(&zip.FileHeader{
+		Name:     name,
+		Method:   zip.Deflate,
+		Modified: info.ModTime(),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to add %s to the backup archive: %w", name, err)
 	}
