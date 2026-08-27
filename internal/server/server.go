@@ -260,16 +260,11 @@ func Run(ctx context.Context, config Config) error {
 	// The count of allocations is read from the repository once per scrape, so a
 	// pass never pays for it. A gauge that cannot be registered costs the metric
 	// rather than the server.
+	// The repository's own reader, with nothing in between. The conversion that used
+	// to sit here counted the protocols rather than the ports on them.
 	err = allocator.RegisterMetrics(
 		tel.MeterProvider().Meter("github.com/dsb-labs/orca/internal/server/port"),
-		func(ctx context.Context) (map[port.Protocol]int, error) {
-			allocated, err := ports.Allocated(ctx)
-			if err != nil {
-				return nil, err
-			}
-
-			return map[port.Protocol]int{port.ProtocolTCP: len(allocated)}, nil
-		},
+		ports.Allocated,
 	)
 	if err != nil {
 		logger.With("error", err).Warn("failed to register port pool gauges")

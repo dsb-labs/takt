@@ -16,10 +16,16 @@ import (
 // single number counting both could exceed the capacity of the range, which would
 // read as a fault rather than as a range holding as many UDP ports as TCP ones.
 //
+// The allocated function reports the ports held on each protocol, which is the
+// shape the repository already returns. Counting them is done here rather than by
+// the caller: a conversion at the call site is a conversion that can be got wrong,
+// and one that turned a map of ports into the number of protocols went unnoticed
+// until a load test put more than one port on a node.
+//
 // The allocated function is asked once per scrape rather than once per pass, so
 // its cost lands on the reader — for the repository behind it, one read of the
 // allocations it already records.
-func (a *Allocator) RegisterMetrics(meter metric.Meter, allocated func(ctx context.Context) (map[Protocol]int, error)) error {
+func (a *Allocator) RegisterMetrics(meter metric.Meter, allocated func(ctx context.Context) (map[string][]int, error)) error {
 	capacity, err := meter.Int64ObservableGauge("orca.ports.capacity",
 		metric.WithDescription("The number of host ports in the configured range."),
 		metric.WithUnit("{port}"))
@@ -37,13 +43,16 @@ func (a *Allocator) RegisterMetrics(meter metric.Meter, allocated func(ctx conte
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
 		observer.ObserveInt64(capacity, int64(a.max-a.min+1))
 
-		counts, err := allocated(ctx)
+		held, err := allocated(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to count allocated ports: %w", err)
 		}
 
+		// Both protocols are observed whether or not either holds anything, so a
+		// range that has emptied reads as zero rather than as a series that stopped
+		// being reported.
 		for _, protocol := range []Protocol{ProtocolTCP, ProtocolUDP} {
-			observer.ObserveInt64(used, int64(counts[protocol]),
+			observer.ObserveInt64(used, int64(len(held[string(protocol)])),
 				metric.WithAttributes(attribute.String("protocol", string(protocol))))
 		}
 

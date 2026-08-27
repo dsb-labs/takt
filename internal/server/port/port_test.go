@@ -23,8 +23,14 @@ func TestAllocator_RegisterMetrics(t *testing.T) {
 
 	allocator := port.New(port.Config{Min: 20000, Max: 20009})
 
-	err := allocator.RegisterMetrics(meter, func(context.Context) (map[port.Protocol]int, error) {
-		return map[port.Protocol]int{port.ProtocolTCP: 3, port.ProtocolUDP: 1}, nil
+	// The ports themselves rather than a count of them, which is what the repository
+	// reports. Counting is the gauge's job: a caller that did it and got it wrong
+	// reported the number of protocols for a year without anybody noticing.
+	err := allocator.RegisterMetrics(meter, func(context.Context) (map[string][]int, error) {
+		return map[string][]int{
+			string(port.ProtocolTCP): {20000, 20001, 20002},
+			string(port.ProtocolUDP): {20003},
+		}, nil
 	})
 	require.NoError(t, err)
 
@@ -34,6 +40,32 @@ func TestAllocator_RegisterMetrics(t *testing.T) {
 	assert.EqualValues(t, 10, gaugeValue(t, collected, "orca.ports.capacity"))
 	assert.EqualValues(t, 3, protocolGaugeValue(t, collected, "orca.ports.used", port.ProtocolTCP))
 	assert.EqualValues(t, 1, protocolGaugeValue(t, collected, "orca.ports.used", port.ProtocolUDP))
+}
+
+// TestAllocator_RegisterMetrics_EmptyProtocols covers the case the old conversion
+// got right by accident. A protocol holding nothing has to read as zero rather than
+// as one, which is what counting the map's keys produced.
+func TestAllocator_RegisterMetrics_EmptyProtocols(t *testing.T) {
+	t.Parallel()
+
+	reader := sdkmetric.NewManualReader()
+	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+
+	allocator := port.New(port.Config{Min: 20000, Max: 20009})
+
+	err := allocator.RegisterMetrics(meter, func(context.Context) (map[string][]int, error) {
+		return map[string][]int{string(port.ProtocolTCP): {20000, 20001}}, nil
+	})
+	require.NoError(t, err)
+
+	var collected metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(t.Context(), &collected))
+
+	assert.EqualValues(t, 2, protocolGaugeValue(t, collected, "orca.ports.used", port.ProtocolTCP))
+
+	// Observed rather than absent, so a range that emptied reads as zero instead of
+	// as a series that stopped being reported.
+	assert.EqualValues(t, 0, protocolGaugeValue(t, collected, "orca.ports.used", port.ProtocolUDP))
 }
 
 // gaugeValue returns the single data point of the named gauge, failing the test
