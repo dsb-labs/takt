@@ -32,6 +32,8 @@ tags:
     description: Values both a workload and an operator can read.
   - name: system
     description: Liveness, readiness and metrics for the server itself.
+  - name: admin
+    description: Operations against the node itself rather than the workloads on it.
 
 paths:
   /api/v1/workloads:
@@ -810,6 +812,59 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/admin/backup:
+    get:
+      operationId: getBackup
+      tags: [admin]
+      summary: Download a backup of the node
+      description: |
+        Returns a zip archive holding a consistent snapshot of orca's database,
+        taken while the server keeps running.
+
+        The database runs in write-ahead logging mode, so at any moment the
+        committed state is spread across `state.db`, `state.db-wal` and
+        `state.db-shm`. Copying `state.db` on its own produces a file that is
+        stale or torn, and it fails quietly: SQLite opens the result happily and
+        the missing transactions are noticed later, if at all. The snapshot in
+        this archive is one statement against a live connection, so it holds
+        everything committed when the request arrived and nothing that was still
+        in flight.
+
+        **Volume data is not in the archive.** Copying arbitrary user data is not
+        something orca should do. `GET /api/v1/volumes` reports each volume's path
+        on the host for exactly this reason, and backing those up is separate work.
+
+        The files under `mounts/` are not in the archive either. They are transient
+        and rewritten as a workload starts.
+      parameters:
+        - name: includeKey
+          in: query
+          required: false
+          description: |
+            Put the secret encryption key in the archive beside the database.
+
+            Off by default, and the default is the one to prefer. A database
+            without its key decrypts nothing, and that separability is what makes
+            a copy of it safe to keep somewhere a key would not be. An archive
+            holding both is key material: it opens every secret orca holds, and it
+            keeps opening them long after this request.
+
+            An operator who set `key-file` to somewhere they already back up needs
+            none of this. Setting it is the better answer.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: The backup archive.
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
         "500":
           $ref: "#/components/responses/InternalServerError"
 

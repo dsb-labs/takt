@@ -1354,6 +1354,21 @@ type InternalServerError = ErrorResponse
 // NotFound The body returned for any unsuccessful request.
 type NotFound = ErrorResponse
 
+// GetBackupParams defines parameters for GetBackup.
+type GetBackupParams struct {
+	// IncludeKey Put the secret encryption key in the archive beside the database.
+	//
+	// Off by default, and the default is the one to prefer. A database
+	// without its key decrypts nothing, and that separability is what makes
+	// a copy of it safe to keep somewhere a key would not be. An archive
+	// holding both is key material: it opens every secret orca holds, and it
+	// keeps opening them long after this request.
+	//
+	// An operator who set `key-file` to somewhere they already back up needs
+	// none of this. Setting it is the better answer.
+	IncludeKey *bool `form:"includeKey,omitempty" json:"includeKey,omitempty"`
+}
+
 // DeleteSecretParams defines parameters for DeleteSecret.
 type DeleteSecretParams struct {
 	// Force Remove the secret even though a workload reads it. Those workloads keep
@@ -1529,6 +1544,30 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
+
+	// GetBackup Download a backup of the node
+	//
+	// Returns a zip archive holding a consistent snapshot of orca's database,
+	// taken while the server keeps running.
+	//
+	// The database runs in write-ahead logging mode, so at any moment the
+	// committed state is spread across `state.db`, `state.db-wal` and
+	// `state.db-shm`. Copying `state.db` on its own produces a file that is
+	// stale or torn, and it fails quietly: SQLite opens the result happily and
+	// the missing transactions are noticed later, if at all. The snapshot in
+	// this archive is one statement against a live connection, so it holds
+	// everything committed when the request arrived and nothing that was still
+	// in flight.
+	//
+	// **Volume data is not in the archive.** Copying arbitrary user data is not
+	// something orca should do. `GET /api/v1/volumes` reports each volume's path
+	// on the host for exactly this reason, and backing those up is separate work.
+	//
+	// The files under `mounts/` are not in the archive either. They are transient
+	// and rewritten as a workload starts.
+	//
+	// Corresponds with GET /api/v1/admin/backup (the `GetBackup` operationId).
+	GetBackup(ctx context.Context, params *GetBackupParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSecrets List secrets
 	//
@@ -1969,6 +2008,40 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /ready (the `GetReadiness` operationId).
 	GetReadiness(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// GetBackup Download a backup of the node
+//
+// Returns a zip archive holding a consistent snapshot of orca's database,
+// taken while the server keeps running.
+//
+// The database runs in write-ahead logging mode, so at any moment the
+// committed state is spread across `state.db`, `state.db-wal` and
+// `state.db-shm`. Copying `state.db` on its own produces a file that is
+// stale or torn, and it fails quietly: SQLite opens the result happily and
+// the missing transactions are noticed later, if at all. The snapshot in
+// this archive is one statement against a live connection, so it holds
+// everything committed when the request arrived and nothing that was still
+// in flight.
+//
+// **Volume data is not in the archive.** Copying arbitrary user data is not
+// something orca should do. `GET /api/v1/volumes` reports each volume's path
+// on the host for exactly this reason, and backing those up is separate work.
+//
+// The files under `mounts/` are not in the archive either. They are transient
+// and rewritten as a workload starts.
+//
+// Corresponds with GET /api/v1/admin/backup (the `GetBackup` operationId).
+func (c *Client) GetBackup(ctx context.Context, params *GetBackupParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetBackupRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 // ListSecrets List secrets
@@ -2709,6 +2782,60 @@ func (c *Client) GetReadiness(ctx context.Context, reqEditors ...RequestEditorFn
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewGetBackupRequest constructs an http.Request for the GetBackup method
+func NewGetBackupRequest(server string, params *GetBackupParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/admin/backup")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.IncludeKey != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "includeKey", *params.IncludeKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 // NewListSecretsRequest constructs an http.Request for the ListSecrets method
@@ -3770,6 +3897,32 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// GetBackupWithResponse Download a backup of the node
+	//
+	// Returns a zip archive holding a consistent snapshot of orca's database,
+	// taken while the server keeps running.
+	//
+	// The database runs in write-ahead logging mode, so at any moment the
+	// committed state is spread across `state.db`, `state.db-wal` and
+	// `state.db-shm`. Copying `state.db` on its own produces a file that is
+	// stale or torn, and it fails quietly: SQLite opens the result happily and
+	// the missing transactions are noticed later, if at all. The snapshot in
+	// this archive is one statement against a live connection, so it holds
+	// everything committed when the request arrived and nothing that was still
+	// in flight.
+	//
+	// **Volume data is not in the archive.** Copying arbitrary user data is not
+	// something orca should do. `GET /api/v1/volumes` reports each volume's path
+	// on the host for exactly this reason, and backing those up is separate work.
+	//
+	// The files under `mounts/` are not in the archive either. They are transient
+	// and rewritten as a workload starts.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/admin/backup (the `GetBackup` operationId).
+	GetBackupWithResponse(ctx context.Context, params *GetBackupParams, reqEditors ...RequestEditorFn) (*GetBackupResponse, error)
+
 	// ListSecretsWithResponse List secrets
 	//
 	// Returns the secrets the server holds, each with the workloads currently
@@ -4241,6 +4394,47 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /ready (the `GetReadiness` operationId).
 	GetReadinessWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReadinessResponse, error)
+}
+
+type GetBackupResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetBackupResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetBackupResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetBackupResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetBackupResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetBackupResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type ListSecretsResponse struct {
@@ -5564,6 +5758,38 @@ func (r GetReadinessResponse) ContentType() string {
 	return ""
 }
 
+// GetBackupWithResponse Download a backup of the node
+//
+// Returns a zip archive holding a consistent snapshot of orca's database,
+// taken while the server keeps running.
+//
+// The database runs in write-ahead logging mode, so at any moment the
+// committed state is spread across `state.db`, `state.db-wal` and
+// `state.db-shm`. Copying `state.db` on its own produces a file that is
+// stale or torn, and it fails quietly: SQLite opens the result happily and
+// the missing transactions are noticed later, if at all. The snapshot in
+// this archive is one statement against a live connection, so it holds
+// everything committed when the request arrived and nothing that was still
+// in flight.
+//
+// **Volume data is not in the archive.** Copying arbitrary user data is not
+// something orca should do. `GET /api/v1/volumes` reports each volume's path
+// on the host for exactly this reason, and backing those up is separate work.
+//
+// The files under `mounts/` are not in the archive either. They are transient
+// and rewritten as a workload starts.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/admin/backup (the `GetBackup` operationId).
+func (c *ClientWithResponses) GetBackupWithResponse(ctx context.Context, params *GetBackupParams, reqEditors ...RequestEditorFn) (*GetBackupResponse, error) {
+	rsp, err := c.GetBackup(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetBackupResponse(rsp)
+}
+
 // ListSecretsWithResponse List secrets
 //
 // Returns the secrets the server holds, each with the workloads currently
@@ -6214,6 +6440,32 @@ func (c *ClientWithResponses) GetReadinessWithResponse(ctx context.Context, reqE
 		return nil, err
 	}
 	return ParseGetReadinessResponse(rsp)
+}
+
+// ParseGetBackupResponse parses an HTTP response from a GetBackupWithResponse call
+func ParseGetBackupResponse(rsp *http.Response) (*GetBackupResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetBackupResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParseListSecretsResponse parses an HTTP response from a ListSecretsWithResponse call
@@ -7194,6 +7446,9 @@ func ParseGetReadinessResponse(rsp *http.Response) (*GetReadinessResponse, error
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// GetBackup Download a backup of the node
+	// (GET /api/v1/admin/backup)
+	GetBackup(w http.ResponseWriter, r *http.Request, params GetBackupParams)
 	// ListSecrets List secrets
 	// (GET /api/v1/secrets)
 	ListSecrets(w http.ResponseWriter, r *http.Request)
@@ -7273,6 +7528,39 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// GetBackup operation middleware
+func (siw *ServerInterfaceWrapper) GetBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBackupParams
+
+	// ------------- Optional query parameter "includeKey" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "includeKey", r.URL.Query(), &params.IncludeKey, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "includeKey"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "includeKey", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBackup(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListSecrets operation middleware
 func (siw *ServerInterfaceWrapper) ListSecrets(w http.ResponseWriter, r *http.Request) {
@@ -8054,6 +8342,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/variables/{name}", wrapper.DeleteVariable)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/variables/{name}", wrapper.GetVariable)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/variables/{name}", wrapper.SetVariable)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/admin/backup", wrapper.GetBackup)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/health", wrapper.GetHealth)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/ready", wrapper.GetReadiness)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/metrics", wrapper.GetMetrics)
@@ -8066,6 +8355,50 @@ type BadRequestJSONResponse ErrorResponse
 type InternalServerErrorJSONResponse ErrorResponse
 
 type NotFoundJSONResponse ErrorResponse
+
+type GetBackupRequestObject struct {
+	Params GetBackupParams
+}
+
+type GetBackupResponseObject interface {
+	VisitGetBackupResponse(w http.ResponseWriter) error
+}
+
+type GetBackup200ApplicationZipResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response GetBackup200ApplicationZipResponse) VisitGetBackupResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/zip")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type GetBackup500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetBackup500JSONResponse) VisitGetBackupResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type ListSecretsRequestObject struct {
 }
@@ -9404,6 +9737,9 @@ func (response GetReadiness503JSONResponse) VisitGetReadinessResponse(w http.Res
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// GetBackup Download a backup of the node
+	// (GET /api/v1/admin/backup)
+	GetBackup(ctx context.Context, request GetBackupRequestObject) (GetBackupResponseObject, error)
 	// ListSecrets List secrets
 	// (GET /api/v1/secrets)
 	ListSecrets(ctx context.Context, request ListSecretsRequestObject) (ListSecretsResponseObject, error)
@@ -9512,6 +9848,32 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// GetBackup operation middleware
+func (sh *strictHandler) GetBackup(w http.ResponseWriter, r *http.Request, params GetBackupParams) {
+	var request GetBackupRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetBackup(ctx, request.(GetBackupRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetBackup")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetBackupResponseObject); ok {
+		if err := validResponse.VisitGetBackupResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListSecrets operation middleware

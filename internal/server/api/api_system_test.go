@@ -158,6 +158,7 @@ func doSystem(t *testing.T, db api.Pinger, observer api.Observer, metrics promet
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: NewMockSecretService(t)}),
 		Variables: api.NewVariableAPI(api.VariableAPIConfig{Logger: logger, Variables: NewMockVariableService(t)}),
 		System:    api.NewSystemAPI(api.SystemAPIConfig{Logger: logger, DB: db, Observer: observer, Metrics: metrics}),
+		Admin:     api.NewAdminAPI(api.AdminAPIConfig{Logger: logger, Admin: NewMockAdmin(t)}),
 	}).Register(mux)
 
 	req := httptest.NewRequest(http.MethodGet, target, nil)

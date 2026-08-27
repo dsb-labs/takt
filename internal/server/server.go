@@ -70,7 +70,7 @@ func Run(ctx context.Context, config Config) error {
 
 	db, err := database.Open(ctx, database.Config{
 		Logger:         logger,
-		Path:           filepath.Join(config.Data.Directory, "state.db"),
+		Path:           databasePath(config),
 		MeterProvider:  tel.MeterProvider(),
 		TracerProvider: tel.TracerProvider(),
 	})
@@ -234,6 +234,12 @@ func Run(ctx context.Context, config Config) error {
 		Directory: config.Data.Directory,
 	})
 
+	adminSvc := service.NewAdminService(service.AdminServiceConfig{
+		Logger:   logger,
+		Database: databasePath(config),
+		KeyPath:  config.KeyPath(),
+	})
+
 	allocator := port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort})
 	claimer := port.NewClaimer(port.ClaimerConfig{Allocator: allocator, Ports: ports})
 
@@ -289,6 +295,7 @@ func Run(ctx context.Context, config Config) error {
 			Observer: reconcile,
 			Metrics:  tel.Gatherer(),
 		}),
+		Admin: api.NewAdminAPI(api.AdminAPIConfig{Logger: logger, Admin: adminSvc}),
 	}).Register(mux)
 
 	server := &http.Server{
@@ -383,4 +390,10 @@ func newLogger(config LoggingConfig, extra slog.Handler) *slog.Logger {
 	}
 
 	return slog.New(handler)
+}
+
+// databasePath returns the SQLite database file inside the configured data
+// directory.
+func databasePath(config Config) string {
+	return filepath.Join(config.Data.Directory, "state.db")
 }

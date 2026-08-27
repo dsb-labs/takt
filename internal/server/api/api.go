@@ -43,6 +43,7 @@ type (
 		*SecretAPI
 		*VariableAPI
 		*SystemAPI
+		*AdminAPI
 	}
 
 	// The Config type contains fields used to construct an API.
@@ -57,6 +58,8 @@ type (
 		Variables *VariableAPI
 		// The endpoints describing the server itself.
 		System *SystemAPI
+		// The endpoints acting on the node itself.
+		Admin *AdminAPI
 	}
 )
 
@@ -73,6 +76,7 @@ func New(config Config) *API {
 		SecretAPI:   config.Secrets,
 		VariableAPI: config.Variables,
 		SystemAPI:   config.System,
+		AdminAPI:    config.Admin,
 	}
 }
 
