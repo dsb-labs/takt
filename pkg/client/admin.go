@@ -11,6 +11,17 @@ import (
 )
 
 type (
+	// The Rekey type is the client-side view of a completed rekey.
+	Rekey struct {
+		// How many secrets were re-encrypted.
+		Secrets int
+		// The key the server's secrets are now sealed under.
+		KeyID string
+		// The key they were sealed under before. The server's keyring keeps it,
+		// because it still opens the backups taken before the rekey.
+		PreviousKeyID string
+	}
+
 	// The BackupOption type is a function that modifies what a backup covers.
 	BackupOption func(*backupConfig)
 
@@ -73,4 +84,34 @@ func (c *Client) Backup(ctx context.Context, out io.Writer, options ...BackupOpt
 	}
 
 	return nil
+}
+
+// Rekey re-encrypts every secret the server holds under a newly generated key.
+//
+// No workload is redeployed by this. A rekey changes how a value is stored, not what
+// it is, so no secret's revision moves.
+//
+// The keyring needs a fresh backup afterwards. The copy taken before this call no
+// longer opens anything the server holds.
+func (c *Client) Rekey(ctx context.Context) (Rekey, error) {
+	// The client with no request timeout. How long a rekey takes is the number of
+	// secrets the server holds, which is the operator's business rather than
+	// something a fixed deadline should decide.
+	resp, err := c.stream.RekeyWithResponse(ctx)
+	if err != nil {
+		return Rekey{}, fmt.Errorf("failed to rekey: %w", err)
+	}
+
+	switch {
+	case resp.JSON200 != nil:
+		return Rekey{
+			Secrets:       resp.JSON200.Secrets,
+			KeyID:         resp.JSON200.KeyID,
+			PreviousKeyID: resp.JSON200.PreviousKeyID,
+		}, nil
+	case resp.JSON500 != nil:
+		return Rekey{}, newError(http.StatusInternalServerError, resp.JSON500)
+	default:
+		return Rekey{}, newError(resp.StatusCode(), nil)
+	}
 }

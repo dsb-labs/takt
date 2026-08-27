@@ -87,3 +87,60 @@ func TestClient_Backup(t *testing.T) {
 		})
 	}
 }
+
+func TestClient_Rekey(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name         string
+		Handler      http.HandlerFunc
+		Expect       client.Rekey
+		ExpectsError bool
+	}{
+		{
+			Name: "reports what moved",
+			Handler: func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodPost, r.Method)
+				assert.Equal(t, "/api/v1/admin/rekey", r.URL.Path)
+
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(api.RekeyResult{
+					Secrets:       3,
+					KeyID:         "new",
+					PreviousKeyID: "old",
+				})
+			},
+			Expect: client.Rekey{Secrets: 3, KeyID: "new", PreviousKeyID: "old"},
+		},
+		{
+			Name: "server failure",
+			Handler: func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(api.ErrorResponse{Error: "failed to rekey the node"})
+			},
+			ExpectsError: true,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			server := httptest.NewServer(tc.Handler)
+			t.Cleanup(server.Close)
+
+			c, err := client.New(server.URL)
+			require.NoError(t, err)
+
+			actual, err := c.Rekey(t.Context())
+			if tc.ExpectsError {
+				assert.Zero(t, actual)
+				assert.Error(t, err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.Expect, actual)
+		})
+	}
+}
