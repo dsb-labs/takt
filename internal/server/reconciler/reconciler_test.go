@@ -2391,6 +2391,8 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 	t.Run("hands the driver the files it wrote", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 		mounts := NewMockMounts(t)
+		// Swept after every start, including the ones that changed nothing.
+		mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		row := storedWorkload("example", "hash-one")
 		row.ID = "workload-id"
@@ -2443,9 +2445,119 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 		assert.Equal(t, []driver.Volume{delivered}, volumes)
 	})
 
+	// The superseded version's plaintext has to go, and it has to go after the
+	// replacement is running. Sweeping first would pull the files out from under the
+	// instance being replaced if the start then failed.
+	t.Run("reclaims superseded values once the replacement has started", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		mounts := NewMockMounts(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+		row.Version = 4
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+		mounts.EXPECT().Deliver(mock.Anything, "workload-id", 4, mock.Anything).Return(nil, nil)
+
+		var order []string
+
+		d.EXPECT().Start(mock.Anything, mock.Anything).
+			RunAndReturn(func(context.Context, driver.Workload) (string, error) {
+				order = append(order, "start")
+
+				return "instance-one", nil
+			})
+
+		reclaimed := make(chan int, 1)
+		mounts.EXPECT().Reclaim("workload-id", 4).RunAndReturn(func(_ string, keep int) error {
+			order = append(order, "reclaim")
+
+			select {
+			case reclaimed <- keep:
+			default:
+			}
+
+			return nil
+		})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Mounts:    mounts,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		// The version kept is the one that just started, so everything older goes.
+		assert.Equal(t, 4, <-reclaimed)
+
+		cancel()
+		require.NoError(t, <-done)
+
+		require.GreaterOrEqual(t, len(order), 2)
+		assert.Equal(t, []string{"start", "reclaim"}, order[:2], "the sweep ran before the replacement started")
+	})
+
+	// A sweep that fails leaves plaintext nothing reads, which is worth a warning and
+	// is not worth failing a workload that started. The next start sweeps it, because
+	// this removes everything but the current version rather than one named.
+	t.Run("starts the workload even when the sweep fails", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		mounts := NewMockMounts(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+		mounts.EXPECT().Deliver(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+		mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(errors.New("permission denied"))
+
+		started := make(chan string, 1)
+		d.EXPECT().Start(mock.Anything, mock.Anything).
+			RunAndReturn(func(context.Context, driver.Workload) (string, error) {
+				select {
+				case started <- "instance-one":
+				default:
+				}
+
+				return "instance-one", nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Mounts:    mounts,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		assert.Equal(t, "instance-one", <-started)
+
+		cancel()
+		require.NoError(t, <-done)
+	})
+
 	t.Run("does not abandon ports when a value cannot be delivered", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 		mounts := NewMockMounts(t)
+		// Swept after every start, including the ones that changed nothing.
+		mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		row := storedWorkload("example", "hash-one")
 		row.ID = "workload-id"
@@ -2505,6 +2617,8 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 	t.Run("removes what it wrote once the workload is gone", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 		mounts := NewMockMounts(t)
+		// Swept after every start, including the ones that changed nothing.
+		mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		row := storedWorkload("example", "hash-one")
 		row.ID = "workload-id"
@@ -2555,6 +2669,8 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 	t.Run("removes what it wrote for workloads that no longer exist", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 		mounts := NewMockMounts(t)
+		// Swept after every start, including the ones that changed nothing.
+		mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		row := storedWorkload("example", "hash-one")
 		row.ID = "workload-id"
@@ -2605,6 +2721,8 @@ func TestReconciler_Run_RemovesMountedValuesWhenSuspended(t *testing.T) {
 
 	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 	mounts := NewMockMounts(t)
+	// Swept after every start, including the ones that changed nothing.
+	mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	row := storedWorkload("example", "hash-one")
 	row.ID = "workload-id"
@@ -2671,6 +2789,8 @@ func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
 	t.Run("signals a running workload whose mounted value changed", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 		mounts := NewMockMounts(t)
+		// Swept after every start, including the ones that changed nothing.
+		mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		row := storedWorkload("example", "hash-one")
 		row.ID = "workload-id"
@@ -2725,6 +2845,8 @@ func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
 	t.Run("signals once for several mounts naming the same signal", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 		mounts := NewMockMounts(t)
+		// Swept after every start, including the ones that changed nothing.
+		mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		row := storedWorkload("example", "hash-one")
 		row.ID = "workload-id"
@@ -2788,6 +2910,8 @@ func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
 	t.Run("does not signal a workload whose values are unchanged", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 		mounts := NewMockMounts(t)
+		// Swept after every start, including the ones that changed nothing.
+		mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		row := storedWorkload("example", "hash-one")
 		row.ID = "workload-id"
@@ -2832,6 +2956,8 @@ func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
 	t.Run("replaces a stale workload rather than refreshing it", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 		mounts := NewMockMounts(t)
+		// Swept after every start, including the ones that changed nothing.
+		mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		row := storedWorkload("example", "hash-two")
 		row.ID = "workload-id"

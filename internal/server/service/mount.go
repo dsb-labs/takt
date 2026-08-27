@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/pkg/manifest"
@@ -30,6 +31,10 @@ const (
 	// The tree holding what the service records about what it wrote, which no
 	// workload has a path to.
 	mountStateDir = "state"
+	// What a version's record is named, appended to the version number. The files
+	// tree names a version with a bare directory, so the two are swept by different
+	// names.
+	stateExtension = ".json"
 )
 
 type (
@@ -288,8 +293,18 @@ func (s *MountService) Forget(id string) error {
 // has delivered nothing is not an error, and neither is one already holding only the
 // version named.
 func (s *MountService) Reclaim(id string, keep int) error {
-	for _, tree := range []string{s.files, s.state} {
-		dir, err := s.dir(tree, id)
+	// The two trees are shaped differently: a version's files live in a directory
+	// named for the version, and its record is a single file named for the version
+	// with an extension. Both are swept, or the records accumulate one per
+	// replacement for as long as the workload exists.
+	for _, tree := range []struct {
+		root  string
+		names func(version int) string
+	}{
+		{root: s.files, names: strconv.Itoa},
+		{root: s.state, names: func(version int) string { return strconv.Itoa(version) + stateExtension }},
+	} {
+		dir, err := s.dir(tree.root, id)
 		if err != nil {
 			return err
 		}
@@ -304,24 +319,38 @@ func (s *MountService) Reclaim(id string, keep int) error {
 			return fmt.Errorf("failed to read mount directory: %w", pathless(err))
 		}
 
+		current := tree.names(keep)
+
 		for _, entry := range entries {
-			if !entry.IsDir() || entry.Name() == strconv.Itoa(keep) {
+			if entry.Name() == current {
 				continue
 			}
 
-			// A directory whose name is not a version is not something this wrote,
-			// so it is left where it is rather than removed on a guess.
-			if _, err = strconv.Atoi(entry.Name()); err != nil {
+			// An entry this did not write is left where it is rather than removed on
+			// a guess, which a version number is the only way to recognise.
+			if !isVersion(entry.Name(), tree.names) {
 				continue
 			}
 
 			if err = os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
-				return fmt.Errorf("failed to remove superseded mount directory: %w", pathless(err))
+				return fmt.Errorf("failed to remove superseded mount entry: %w", pathless(err))
 			}
 		}
 	}
 
 	return nil
+}
+
+// isVersion reports whether name is what the given tree calls one of its versions.
+func isVersion(name string, names func(version int) string) bool {
+	trimmed := strings.TrimSuffix(name, stateExtension)
+
+	version, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return false
+	}
+
+	return names(version) == name
 }
 
 // Prune removes what the service wrote for workloads other than those named.
@@ -406,7 +435,7 @@ func (s *MountService) record(id string, version int, record delivered) error {
 		return fmt.Errorf("failed to encode delivered mounts: %w", err)
 	}
 
-	path := filepath.Join(dir, strconv.Itoa(version)+".json")
+	path := filepath.Join(dir, strconv.Itoa(version)+stateExtension)
 
 	if err = os.WriteFile(path, encoded, 0o600); err != nil {
 		return fmt.Errorf("failed to record delivered mounts: %w", pathless(err))
@@ -423,7 +452,7 @@ func (s *MountService) delivered(id string, version int) (delivered, error) {
 		return delivered{}, err
 	}
 
-	contents, err := os.ReadFile(filepath.Join(dir, strconv.Itoa(version)+".json"))
+	contents, err := os.ReadFile(filepath.Join(dir, strconv.Itoa(version)+stateExtension))
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Nothing has been delivered for this version, which is what a workload

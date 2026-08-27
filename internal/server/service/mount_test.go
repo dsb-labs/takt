@@ -333,6 +333,36 @@ func TestMountService_Reclaim(t *testing.T) {
 		assert.FileExists(t, second[0].Host)
 	})
 
+	// The two trees are shaped differently — a directory per version of the files, a
+	// file per version of the records — and the first version of this swept only the
+	// directories, so the records kept accumulating unnoticed.
+	t.Run("removes the superseded version's record", func(t *testing.T) {
+		secrets := NewMockValueStore(t)
+		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a certificate", nil).Twice()
+
+		svc, root := newMountService(t, secrets, nil)
+
+		spec := mountSpec(manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"})
+
+		_, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
+		require.NoError(t, err)
+		_, err = svc.Deliver(t.Context(), testVolumeID, 2, spec)
+		require.NoError(t, err)
+
+		state := filepath.Join(root, "mounts", "state", testVolumeID)
+
+		before, err := os.ReadDir(state)
+		require.NoError(t, err)
+		require.Len(t, before, 2, "the test needs a record per version to sweep")
+
+		require.NoError(t, svc.Reclaim(testVolumeID, 2))
+
+		after, err := os.ReadDir(state)
+		require.NoError(t, err)
+		require.Len(t, after, 1)
+		assert.Equal(t, "2.json", after[0].Name())
+	})
+
 	t.Run("keeps a workload that holds only the version named", func(t *testing.T) {
 		secrets := NewMockValueStore(t)
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a certificate", nil).Once()

@@ -113,6 +113,9 @@ type (
 		// Forget should remove the files written for a workload, once nothing is
 		// running for it.
 		Forget(id string) error
+		// Reclaim should remove every version of a workload's files except the one
+		// named.
+		Reclaim(id string, keep int) error
 		// Prune should remove the files written for workloads other than those named.
 		Prune(keep []string) error
 	}
@@ -1520,6 +1523,21 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 	}
 
 	r.logger.With("workload", row.Name, "instance", id, "version", row.Version).Info("workload started")
+
+	// After the start rather than before it. A replacement's files are written
+	// alongside those the instance being replaced is still reading, and sweeping them
+	// first would pull those out from under it if this start then failed.
+	//
+	// A failure here leaves plaintext on the disk that nothing reads, which is worth
+	// a warning and is not worth failing a workload that started. The next start
+	// sweeps it, since this removes everything but the current version rather than
+	// the one it just replaced.
+	if r.mounts != nil {
+		if err = r.mounts.Reclaim(row.ID, row.Version); err != nil {
+			r.logger.With("workload", row.Name, "error", err).
+				Warn("failed to reclaim superseded mounted values")
+		}
+	}
 
 	return nil
 }

@@ -1025,6 +1025,63 @@ func (_c *MockMounts_Prune_Call) RunAndReturn(run func(keep []string) error) *Mo
 	return _c
 }
 
+// Reclaim provides a mock function for the type MockMounts
+func (_mock *MockMounts) Reclaim(id string, keep int) error {
+	ret := _mock.Called(id, keep)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Reclaim")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(string, int) error); ok {
+		r0 = returnFunc(id, keep)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockMounts_Reclaim_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Reclaim'
+type MockMounts_Reclaim_Call struct {
+	*mock.Call
+}
+
+// Reclaim is a helper method to define mock.On call
+//   - id string
+//   - keep int
+func (_e *MockMounts_Expecter) Reclaim(id any, keep any) *MockMounts_Reclaim_Call {
+	return &MockMounts_Reclaim_Call{Call: _e.mock.On("Reclaim", id, keep)}
+}
+
+func (_c *MockMounts_Reclaim_Call) Run(run func(id string, keep int)) *MockMounts_Reclaim_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockMounts_Reclaim_Call) Return(err error) *MockMounts_Reclaim_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockMounts_Reclaim_Call) RunAndReturn(run func(id string, keep int) error) *MockMounts_Reclaim_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Refresh provides a mock function for the type MockMounts
 func (_mock *MockMounts) Refresh(ctx context.Context, name string, id string, version int, spec manifest.Spec) ([]service.Refresh, error) {
 	ret := _mock.Called(ctx, name, id, version, spec)
