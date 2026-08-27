@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/orca/cmd/admin/backup"
+	"github.com/dsb-labs/orca/cmd/admin/rekey"
 )
 
 // Command returns the "admin" command, which does nothing on its own and holds the
@@ -22,6 +23,7 @@ func Command() *cobra.Command {
 
 	cmd.AddCommand(
 		backup.Command(),
+		rekey.Command(),
 	)
 
 	return cmd
