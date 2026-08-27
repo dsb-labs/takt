@@ -214,25 +214,40 @@ func TestScenario_Validate(t *testing.T) {
 func TestScenarios(t *testing.T) {
 	t.Parallel()
 
-	entries, err := os.ReadDir(filepath.Join("..", "..", "scenarios"))
+	for name, scenario := range shippedScenarios(t) {
+		t.Run(name, func(t *testing.T) {
+			assert.NotEmpty(t, scenario.Name, "a scenario carries its name into the report")
+			assert.NotEmpty(t, scenario.Description, "a scenario says what it is for")
+		})
+	}
+}
+
+// shippedScenarios parses every scenario in the library, keyed by file name.
+func shippedScenarios(t *testing.T) map[string]loadtest.Scenario {
+	t.Helper()
+
+	dir := filepath.Join("..", "..", "scenarios")
+
+	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	require.NotEmpty(t, entries, "the scenario library is empty")
+
+	scenarios := make(map[string]loadtest.Scenario, len(entries))
 
 	for _, entry := range entries {
 		if !strings.HasSuffix(entry.Name(), ".toml") {
 			continue
 		}
 
-		t.Run(entry.Name(), func(t *testing.T) {
-			f, err := os.Open(filepath.Join("..", "..", "scenarios", entry.Name()))
-			require.NoError(t, err)
-			t.Cleanup(func() { _ = f.Close() })
+		f, err := os.Open(filepath.Join(dir, entry.Name()))
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = f.Close() })
 
-			scenario, err := loadtest.ParseScenario(f)
-			require.NoError(t, err)
+		scenario, err := loadtest.ParseScenario(f)
+		require.NoError(t, err, "scenario %s does not parse", entry.Name())
 
-			assert.NotEmpty(t, scenario.Name, "a scenario carries its name into the report")
-			assert.NotEmpty(t, scenario.Description, "a scenario says what it is for")
-		})
+		scenarios[entry.Name()] = scenario
 	}
+
+	return scenarios
 }
