@@ -26,6 +26,8 @@ orca variable set <name> [value]        Set a variable's value
 orca variable list                      List variables                       (alias: ls)
 orca variable get <name>                Show a single variable
 orca variable delete <name>             Delete a variable                    (alias: rm)
+
+orca admin backup <destination>         Write a backup of the node to a file
 ```
 
 Commands are grouped by what they act on, so a verb reads the same whichever noun
@@ -391,6 +393,47 @@ A variable a workload reads is refused, and the workloads reading it are named.
 `--force` removes it anyway. Those workloads keep running, and fail to start once
 something replaces them. Creating the variable again recovers them. See
 [Variables](variables.md).
+
+## admin backup
+
+```sh
+orca admin backup /backups/orca.zip
+orca admin backup /backups/orca.zip --include-key
+```
+
+| Flag | Description |
+|---|---|
+| `--include-key` | Put the secret encryption key in the archive. |
+
+Asks the server for a consistent snapshot of its database and writes it to the
+destination as a zip archive. The server keeps running throughout.
+
+Copying `state.db` by hand does not do the same thing. The database runs in
+write-ahead logging mode, so what is committed at any moment is spread across
+`state.db`, `state.db-wal` and `state.db-shm`. A copy of the first alone is stale or
+torn, and it fails quietly: SQLite opens the result and the missing transactions are
+noticed later, if at all.
+
+A destination that already exists is refused rather than replaced. The file is
+written readable only by its owner, because it holds every workload's specification,
+environment included.
+
+The path and the size are printed as JSON. What the backup does not cover is printed
+to standard error, so the two do not mix when the output is piped.
+
+**Volume data is not in the archive.** Run `orca volume list` for each volume's path
+on the host and back those up separately. orca has no business copying arbitrary user
+data.
+
+**The encryption key is not in the archive** unless `--include-key` is passed. A
+database without its key decrypts nothing, and that is what makes a copy of it safe
+to keep somewhere a key would not be. An archive holding both is key material: it
+opens every secret the node holds, and it keeps opening them long after it was taken.
+Setting `secrets.key-file` to a path you already back up is the better answer. See
+[The encryption key](secrets.md#the-encryption-key).
+
+Restoring is not yet a command. See [State on disk](operating.md#state-on-disk) for
+what the archive holds and what has to be put back beside it.
 
 ## Workload states
 

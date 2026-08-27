@@ -122,6 +122,58 @@ The database holds desired state only. What is actually running is observed from
 runtime when asked, so nothing persisted can go stale against reality. A restarted
 server needs no recovery of orca's own bookkeeping.
 
+## Backups
+
+```sh
+orca admin backup /backups/orca.zip
+```
+
+The server takes a consistent snapshot of its database while it keeps running and
+sends it back as a zip archive.
+
+**Do not copy `state.db` with `cp`.** The database runs in write-ahead logging mode,
+so what is committed at any moment is spread across `state.db`, `state.db-wal` and
+`state.db-shm`. Copying the first alone produces a file that is stale or torn, and it
+fails quietly: SQLite opens the result happily, and the transactions that are missing
+are noticed later, if at all. On a busy node most of the committed state can be in
+the log rather than in the database file.
+
+A backup covers what is in the database: workloads, volumes' records, secrets,
+variables and port allocations. Three things it does not cover, each for its own
+reason:
+
+| Not in the archive | Why | What to do |
+|---|---|---|
+| `secret.key` | The database and the key are separable on purpose, so a copy of the database is safe to keep where a key would not be. | Back it up once, separately. It does not change. |
+| Volume data | Copying arbitrary user data is not orca's job. | `orca volume list` reports each path. Back those up yourself. |
+| `mounts/` | Transient. Rewritten as a workload starts. | Nothing. |
+
+`--include-key` puts the key in the archive. It makes a restore one step instead of
+two, and it makes the archive key material: anything that can read it can read every
+secret the node holds, now and after the key is next rotated. Setting
+`secrets.key-file` to somewhere already covered by a backup is the better answer, and
+then the default needs nothing.
+
+### Putting one back
+
+There is no `orca admin restore` yet, and the procedure has parts a command could not
+cover anyway. With the server stopped:
+
+1. Extract `state.db` into the data directory. **Remove any `state.db-wal` and
+   `state.db-shm` first.** SQLite reads a stale log against the restored database and
+   the result is silently wrong.
+2. Put `secret.key` back, `chmod 600`. The server refuses to start on a key that is
+   readable by anyone else. Without it every workload reading a secret fails to start,
+   with nothing pointing at the cause.
+3. Restore volume data under the paths `orca volume list` reported. A volume is found
+   by the identifier it was assigned, so recreating one by name gives an empty volume
+   and a row pointing at nothing.
+4. Do not restore `exec/state/`. It records process identifiers for a host that may no
+   longer exist, and the liveness check exists to prevent exactly the mistaken identity
+   that would follow.
+
+Start the server. The first pass re-derives everything else.
+
 ## Exec workload directories
 
 Each version of an `exec` workload gets a directory of its own, under two separate

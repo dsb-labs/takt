@@ -175,6 +175,11 @@ the database. See [Configuration](configuration.md).
 under a key that is gone cannot be recovered. A backup of the data directory holds
 both, which makes it a complete copy and also a single thing worth protecting.
 
+`orca admin backup` leaves the key out for this reason, so the archive it writes is
+safe to keep where the key would not be. Point `secrets.key-file` at somewhere your
+existing backups already cover and there is nothing else to remember. See
+[Backups](operating.md#backups).
+
 If the key is lost, the secrets are not recoverable. Set each one again, which moves
 its revision and redeploys the workloads reading it.
 
