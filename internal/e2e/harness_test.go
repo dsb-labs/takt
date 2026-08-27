@@ -1,12 +1,14 @@
 package e2e_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -608,4 +610,24 @@ func (b *syncBuffer) String() string {
 	defer b.mux.Unlock()
 
 	return b.buf.String()
+}
+
+// extract writes the contents of a backup archive into a data directory, following
+// the restore procedure in docs/operating.md.
+func (s *Suite) extract(archive []byte, directory string) {
+	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+	s.Require().NoError(err)
+
+	for _, entry := range reader.File {
+		f, err := entry.Open()
+		s.Require().NoError(err)
+
+		contents, err := io.ReadAll(f)
+		s.Require().NoError(f.Close())
+		s.Require().NoError(err)
+
+		// Only the owner, for both. The server refuses to start on a key anything
+		// else can read, and the database holds every workload's specification.
+		s.Require().NoError(os.WriteFile(filepath.Join(directory, entry.Name), contents, 0o600))
+	}
 }

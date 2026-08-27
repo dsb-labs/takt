@@ -14,6 +14,7 @@
 package e2e_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"fmt"
@@ -2533,4 +2534,82 @@ func (s *Suite) TestDebugBundle() {
 	logs, err := os.ReadFile(filepath.Join(s.artifacts, "logs.json"))
 	s.Require().NoError(err)
 	s.NotEmpty(logs, "the server's own log records are in the bundle")
+}
+
+// TestBackupRestoresANode proves the whole point of the backup command: an archive
+// taken from a server that is running restores onto an empty data directory and the
+// node comes back.
+//
+// The database runs in write-ahead logging mode, so most of what a busy node has
+// committed can be in the log rather than in state.db. A backup that copied the
+// database file alone would restore a node missing whatever was applied most
+// recently, and it would do it silently.
+func (s *Suite) TestBackupRestoresANode() {
+	directory := s.T().TempDir()
+	s.restart(withDataDirectory(directory))
+
+	name, secret := s.workloadName(), s.secretName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupSecret(secret) })
+
+	stored, _, err := s.client.SetSecret(s.ctx(), secret, []byte("survives-a-restore"))
+	s.Require().NoError(err)
+
+	_, _, err = s.client.Apply(s.ctx(), s.containerSpec(name))
+	s.Require().NoError(err)
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	// Taken against the server that is still running, which is what makes this
+	// different from stopping orca and copying files.
+	var archive bytes.Buffer
+	s.Require().NoError(s.client.Backup(s.ctx(), &archive, client.WithKey()))
+
+	restored := s.T().TempDir()
+	s.extract(archive.Bytes(), restored)
+
+	s.restart(withDataDirectory(restored))
+
+	// The workload is in the restored database, and the server converged onto it
+	// rather than treating the running container as an orphan.
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	// The revision is unchanged, so the secret was restored rather than replaced.
+	after, err := s.client.GetSecret(s.ctx(), secret)
+	s.Require().NoError(err)
+	s.Equal(stored.Revision, after.Revision)
+
+	// And the value opens under the key that came out of the archive, which only a
+	// workload reading it can show.
+	reader := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(reader) })
+
+	spec := s.jobSpec(reader, manifest.RestartNever, 0)
+	spec.Container.Command = []string{"sh", "-c", `echo "[$VALUE]"; exit 0`}
+	spec.Env = map[string]string{"VALUE": "${secret:" + secret + "}"}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(reader, client.WorkloadStateCompleted)
+
+	var out bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, reader, client.WithTail(10)))
+	s.Contains(out.String(), "[survives-a-restore]")
+}
+
+// TestBackupLeavesTheKeyOut proves the default keeps the database and the key apart,
+// which is what makes an archive safe to keep somewhere the key would not be.
+func (s *Suite) TestBackupLeavesTheKeyOut() {
+	var archive bytes.Buffer
+	s.Require().NoError(s.client.Backup(s.ctx(), &archive))
+
+	reader, err := zip.NewReader(bytes.NewReader(archive.Bytes()), int64(archive.Len()))
+	s.Require().NoError(err)
+
+	names := make([]string, 0, len(reader.File))
+	for _, f := range reader.File {
+		names = append(names, f.Name)
+	}
+
+	s.Equal([]string{"state.db"}, names)
 }
