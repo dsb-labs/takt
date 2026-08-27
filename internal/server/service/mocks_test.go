@@ -730,8 +730,8 @@ func (_c *MockSecretRepository_List_Call) RunAndReturn(run func(ctx context.Cont
 }
 
 // Upsert provides a mock function for the type MockSecretRepository
-func (_mock *MockSecretRepository) Upsert(ctx context.Context, name string, value []byte, revision string) (database.Secret, error) {
-	ret := _mock.Called(ctx, name, value, revision)
+func (_mock *MockSecretRepository) Upsert(ctx context.Context, name string, value []byte, revision string, keyID string) (database.Secret, error) {
+	ret := _mock.Called(ctx, name, value, revision, keyID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
@@ -739,16 +739,16 @@ func (_mock *MockSecretRepository) Upsert(ctx context.Context, name string, valu
 
 	var r0 database.Secret
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, string) (database.Secret, error)); ok {
-		return returnFunc(ctx, name, value, revision)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, string, string) (database.Secret, error)); ok {
+		return returnFunc(ctx, name, value, revision, keyID)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, string) database.Secret); ok {
-		r0 = returnFunc(ctx, name, value, revision)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, string, string) database.Secret); ok {
+		r0 = returnFunc(ctx, name, value, revision, keyID)
 	} else {
 		r0 = ret.Get(0).(database.Secret)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []byte, string) error); ok {
-		r1 = returnFunc(ctx, name, value, revision)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []byte, string, string) error); ok {
+		r1 = returnFunc(ctx, name, value, revision, keyID)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -765,11 +765,12 @@ type MockSecretRepository_Upsert_Call struct {
 //   - name string
 //   - value []byte
 //   - revision string
-func (_e *MockSecretRepository_Expecter) Upsert(ctx any, name any, value any, revision any) *MockSecretRepository_Upsert_Call {
-	return &MockSecretRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, name, value, revision)}
+//   - keyID string
+func (_e *MockSecretRepository_Expecter) Upsert(ctx any, name any, value any, revision any, keyID any) *MockSecretRepository_Upsert_Call {
+	return &MockSecretRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, name, value, revision, keyID)}
 }
 
-func (_c *MockSecretRepository_Upsert_Call) Run(run func(ctx context.Context, name string, value []byte, revision string)) *MockSecretRepository_Upsert_Call {
+func (_c *MockSecretRepository_Upsert_Call) Run(run func(ctx context.Context, name string, value []byte, revision string, keyID string)) *MockSecretRepository_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -787,11 +788,16 @@ func (_c *MockSecretRepository_Upsert_Call) Run(run func(ctx context.Context, na
 		if args[3] != nil {
 			arg3 = args[3].(string)
 		}
+		var arg4 string
+		if args[4] != nil {
+			arg4 = args[4].(string)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
+			arg4,
 		)
 	})
 	return _c
@@ -802,7 +808,7 @@ func (_c *MockSecretRepository_Upsert_Call) Return(secret database.Secret, err e
 	return _c
 }
 
-func (_c *MockSecretRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, name string, value []byte, revision string) (database.Secret, error)) *MockSecretRepository_Upsert_Call {
+func (_c *MockSecretRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, name string, value []byte, revision string, keyID string) (database.Secret, error)) *MockSecretRepository_Upsert_Call {
 	_c.Call.Return(run)
 	return _c
 }

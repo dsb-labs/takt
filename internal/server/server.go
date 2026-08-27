@@ -92,7 +92,9 @@ func Run(ctx context.Context, config Config) error {
 		return fmt.Errorf("failed to open the keyring: %w", err)
 	}
 
-	keyID, err := currentKey(keys)
+	encryptionKeys := database.NewEncryptionKeyRepository(db)
+
+	keyID, err := currentKey(ctx, keys, encryptionKeys)
 	if err != nil {
 		return err
 	}
@@ -166,6 +168,7 @@ func Run(ctx context.Context, config Config) error {
 		Logger:  logger,
 		Secrets: secrets,
 		Cipher:  cipher,
+		KeyID:   keyID,
 		Rehash:  rehash,
 	})
 
@@ -408,29 +411,33 @@ func databasePath(config Config) string {
 	return filepath.Join(config.Data.Directory, "state.db")
 }
 
-// currentKey returns the identifier of the key the keyring's secrets are sealed
-// under, generating one when the keyring is empty.
+// currentKey returns the identifier of the key secrets are sealed under, generating
+// one when the database records none.
 //
-// A keyring holding more than one key is refused. Nothing rotates a key yet, so a
-// second one means something outside orca put it there, and guessing which of them
-// seals the database would be guessing at whether every secret still opens.
-func currentKey(keys *secret.Store) (string, error) {
-	ids, err := keys.List()
+// The database is what answers this, not the keyring. A keyring may hold several
+// keys — a rekey keeps the one it replaced, because that key still opens the backups
+// taken before it — so which of them seals what is a question only the rows can
+// answer.
+func currentKey(ctx context.Context, keys *secret.Store, recorded *database.EncryptionKeyRepository) (string, error) {
+	current, err := recorded.Current(ctx)
+	switch {
+	case err == nil:
+		return current.ID, nil
+	case !errors.Is(err, database.ErrNoCurrentKey):
+		return "", fmt.Errorf("failed to read the current encryption key: %w", err)
+	}
+
+	// Written to the keyring before it is recorded. A key recorded with nothing
+	// behind it would leave every secret sealed under it unopenable, where a key
+	// nothing records is inert and swept later.
+	id, err := keys.Create()
 	if err != nil {
-		return "", fmt.Errorf("failed to read the keyring: %w", err)
+		return "", fmt.Errorf("failed to generate a secret encryption key: %w", err)
 	}
 
-	switch len(ids) {
-	case 0:
-		id, err := keys.Create()
-		if err != nil {
-			return "", fmt.Errorf("failed to generate a secret encryption key: %w", err)
-		}
-
-		return id, nil
-	case 1:
-		return ids[0], nil
-	default:
-		return "", fmt.Errorf("the keyring at %s holds %d keys, and orca cannot tell which seals the database", keys.Directory(), len(ids))
+	if err = recorded.Adopt(ctx, id); err != nil {
+		return "", err
 	}
+
+	return id, nil
 }

@@ -21,8 +21,8 @@ func TestSecretService_Set(t *testing.T) {
 
 		secrets.EXPECT().Get(mock.Anything, "db-password").
 			Return(database.Secret{}, database.ErrSecretNotFound).Once()
-		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, name string, value []byte, revision string) (database.Secret, error) {
+		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, name string, value []byte, revision, _ string) (database.Secret, error) {
 				// What reaches the database is the sealed value, never the plaintext.
 				assert.NotContains(t, string(value), "hunter2")
 
@@ -49,8 +49,8 @@ func TestSecretService_Set(t *testing.T) {
 			Return(database.Secret{Name: "db-password", Value: sealed, Revision: "rev-one"}, nil).Once()
 
 		var revision string
-		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, name string, value []byte, rev string) (database.Secret, error) {
+		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, name string, value []byte, rev, _ string) (database.Secret, error) {
 				revision = rev
 
 				return database.Secret{Name: name, Value: value, Revision: rev}, nil
@@ -91,7 +91,7 @@ func TestSecretService_Set(t *testing.T) {
 
 		secrets.EXPECT().Get(mock.Anything, "db-password").
 			Return(database.Secret{}, database.ErrSecretNotFound).Once()
-		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything).
+		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything).
 			Return(database.Secret{Name: "db-password", Revision: "rev-one"}, nil).Once()
 		secrets.EXPECT().UsedBy(mock.Anything, "db-password").
 			Return([]string{"one", "two"}, nil).Twice()
@@ -124,7 +124,7 @@ func TestSecretService_Set(t *testing.T) {
 
 		secrets.EXPECT().Get(mock.Anything, "db-password").
 			Return(database.Secret{Name: "db-password", Value: []byte("sealed under a key that is gone")}, nil).Once()
-		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything).
+		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything).
 			Return(database.Secret{Name: "db-password", Revision: "rev-two"}, nil).Once()
 		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return(nil, nil).Once()
 

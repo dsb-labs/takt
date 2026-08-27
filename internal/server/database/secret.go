@@ -14,6 +14,9 @@ import (
 var (
 	// ErrSecretNotFound is returned when no secret exists with the requested name.
 	ErrSecretNotFound = errors.New("secret not found")
+	// ErrSecretsChanged is returned when the secrets a rekey was asked to rewrite
+	// are not the secrets the database holds.
+	ErrSecretsChanged = errors.New("secrets changed during the rekey")
 )
 
 type (
@@ -31,6 +34,8 @@ type (
 		// The encrypted value. Empty on a secret that was read without it, since
 		// most reads have no business decrypting one.
 		Value []byte
+		// The identifier of the key the value is sealed under.
+		KeyID string
 		// Changes whenever the value changes, and never otherwise.
 		//
 		// This is what a referencing workload's specification hash is mixed with, so
@@ -66,13 +71,14 @@ func NewSecretRepository(db *sql.DB) *SecretRepository {
 //
 // The creation time is preserved on a secret that already existed, so rotating one
 // does not read as creating it again.
-func (r *SecretRepository) Upsert(ctx context.Context, name string, value []byte, revision string) (Secret, error) {
+func (r *SecretRepository) Upsert(ctx context.Context, name string, value []byte, revision, keyID string) (Secret, error) {
 	const q = `
-		INSERT INTO secret (id, name, value, revision, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO secret (id, name, value, revision, key_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (name) DO UPDATE SET
 			value = excluded.value,
 			revision = excluded.revision,
+			key_id = excluded.key_id,
 			updated_at = excluded.updated_at
 		RETURNING id, created_at, updated_at
 	`
@@ -84,6 +90,7 @@ func (r *SecretRepository) Upsert(ctx context.Context, name string, value []byte
 		Name:     name,
 		Value:    value,
 		Revision: revision,
+		KeyID:    keyID,
 	}
 
 	var (
@@ -91,7 +98,7 @@ func (r *SecretRepository) Upsert(ctx context.Context, name string, value []byte
 		updatedAt string
 	)
 
-	err := r.db.QueryRowContext(ctx, q, secret.ID, name, value, revision, timestamp, timestamp).
+	err := r.db.QueryRowContext(ctx, q, secret.ID, name, value, revision, keyID, timestamp, timestamp).
 		Scan(&secret.ID, &createdAt, &updatedAt)
 	if err != nil {
 		return Secret{}, fmt.Errorf("failed to upsert secret: %w", err)
@@ -111,7 +118,7 @@ func (r *SecretRepository) Upsert(ctx context.Context, name string, value []byte
 // Get returns the secret with the given name, including its encrypted value,
 // reporting ErrSecretNotFound when no such secret exists.
 func (r *SecretRepository) Get(ctx context.Context, name string) (Secret, error) {
-	const q = `SELECT id, name, value, revision, created_at, updated_at FROM secret WHERE name = ?`
+	const q = `SELECT id, name, value, revision, key_id, created_at, updated_at FROM secret WHERE name = ?`
 
 	var (
 		secret    Secret
@@ -120,7 +127,7 @@ func (r *SecretRepository) Get(ctx context.Context, name string) (Secret, error)
 	)
 
 	err := r.db.QueryRowContext(ctx, q, name).
-		Scan(&secret.ID, &secret.Name, &secret.Value, &secret.Revision, &createdAt, &updatedAt)
+		Scan(&secret.ID, &secret.Name, &secret.Value, &secret.Revision, &secret.KeyID, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Secret{}, fmt.Errorf("%w: %s", ErrSecretNotFound, name)
@@ -305,4 +312,118 @@ func linkSecrets(ctx context.Context, tx *sql.Tx, workloadID string, names []str
 	}
 
 	return nil
+}
+
+// ListSealed returns every secret including its value and the key that sealed it,
+// ordered by name.
+//
+// Unlike List, this carries the ciphertext. Only a rekey has business reading every
+// sealed value at once, which is why the ordinary listing leaves it out.
+func (r *SecretRepository) ListSealed(ctx context.Context) ([]Secret, error) {
+	const q = `SELECT id, name, value, revision, key_id, created_at, updated_at FROM secret ORDER BY name ASC`
+
+	rows, err := r.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query secrets: %w", err)
+	}
+	defer rows.Close()
+
+	var secrets []Secret
+
+	for rows.Next() {
+		var (
+			secret    Secret
+			createdAt string
+			updatedAt string
+		)
+
+		err = rows.Scan(&secret.ID, &secret.Name, &secret.Value, &secret.Revision, &secret.KeyID, &createdAt, &updatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan secret: %w", err)
+		}
+
+		if secret.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
+			return nil, fmt.Errorf("failed to parse created_at: %w", err)
+		}
+
+		if secret.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt); err != nil {
+			return nil, fmt.Errorf("failed to parse updated_at: %w", err)
+		}
+
+		secrets = append(secrets, secret)
+	}
+
+	return secrets, rows.Err()
+}
+
+// Rekey replaces every secret's sealed value with the one given for it and records
+// keyID as the key they are now sealed under, in one transaction.
+//
+// This is what makes a rekey safe to interrupt. The re-sealed values and the pointer
+// to the current key move together, so a process that dies leaves either every
+// secret under the old key or every secret under the new one. There is no state
+// where the database and the keyring disagree about which key opens what, and so
+// nothing to reconcile afterwards.
+//
+// The sealed values are keyed by secret name. A name with no entry is left alone,
+// which cannot happen when the caller passes back what ListSealed gave it, and would
+// mean a partial rekey if it did — so it is refused rather than skipped.
+//
+// The revision does not move. A rekey changes how a value is stored, not what it is,
+// so nothing referencing a secret is redeployed by one.
+func (r *SecretRepository) Rekey(ctx context.Context, keyID string, sealed map[string][]byte) error {
+	return transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
+		const (
+			countQ   = `SELECT count(*) FROM secret`
+			updateQ  = `UPDATE secret SET value = ?, key_id = ? WHERE name = ?`
+			demoteQ  = `UPDATE encryption_key SET is_current = 0 WHERE is_current = 1`
+			promoteQ = `INSERT INTO encryption_key (id, is_current, created_at) VALUES (?, 1, ?)`
+		)
+
+		// Counted inside the transaction rather than trusted from the caller's read.
+		// A secret created between the read and here would keep its old key while
+		// everything around it moved, and nothing afterwards would say so.
+		var count int
+		if err := tx.QueryRowContext(ctx, countQ).Scan(&count); err != nil {
+			return fmt.Errorf("failed to count secrets: %w", err)
+		}
+
+		if count != len(sealed) {
+			return fmt.Errorf("%w: %d secrets to rewrite, %d were resealed", ErrSecretsChanged, count, len(sealed))
+		}
+
+		// The key is recorded before anything references it. A secret pointed at a
+		// key with no row would violate the foreign key, which is the constraint
+		// keeping the database and the keyring in step.
+		//
+		// Demoted before the new one is promoted, because exactly one key may be
+		// current and the schema is what enforces it.
+		if _, err := tx.ExecContext(ctx, demoteQ); err != nil {
+			return fmt.Errorf("failed to retire the previous encryption key: %w", err)
+		}
+
+		if _, err := tx.ExecContext(ctx, promoteQ, keyID, formatTime(time.Now().UTC())); err != nil {
+			return fmt.Errorf("failed to record the new encryption key: %w", err)
+		}
+
+		for name, value := range sealed {
+			result, err := tx.ExecContext(ctx, updateQ, value, keyID, name)
+			if err != nil {
+				return fmt.Errorf("failed to reseal secret %s: %w", name, err)
+			}
+
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("failed to reseal secret %s: %w", name, err)
+			}
+
+			// The counts matching is not enough on its own: a secret deleted and
+			// another created between the read and here leaves the total unchanged.
+			if affected == 0 {
+				return fmt.Errorf("%w: secret %s is no longer there", ErrSecretsChanged, name)
+			}
+		}
+
+		return nil
+	})
 }

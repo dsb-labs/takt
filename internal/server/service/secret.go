@@ -41,8 +41,8 @@ type (
 	// service uses.
 	SecretRepository interface {
 		// Upsert should store the given encrypted value and revision as the secret
-		// with the given name.
-		Upsert(ctx context.Context, name string, value []byte, revision string) (database.Secret, error)
+		// with the given name, recording which key sealed it.
+		Upsert(ctx context.Context, name string, value []byte, revision, keyID string) (database.Secret, error)
 		// Get should return the secret with the given name, including its encrypted
 		// value.
 		Get(ctx context.Context, name string) (database.Secret, error)
@@ -91,6 +91,7 @@ type (
 		logger  *slog.Logger
 		secrets SecretRepository
 		cipher  Cipher
+		keyID   string
 		rehash  func(ctx context.Context, workload string) error
 	}
 
@@ -103,6 +104,9 @@ type (
 		Secrets SecretRepository
 		// The cipher a secret's value is stored under.
 		Cipher Cipher
+		// The identifier of the key the cipher holds, recorded against every
+		// secret the service seals so that the database says which key opens it.
+		KeyID string
 		// Called for each workload referencing a secret whose value changed, so that
 		// its specification hash moves and the reconciler replaces its instances. May
 		// be nil, in which case a rotation does not redeploy anything.
@@ -116,6 +120,7 @@ func NewSecretService(config SecretServiceConfig) *SecretService {
 		logger:  config.Logger.With("component", "service"),
 		secrets: config.Secrets,
 		cipher:  config.Cipher,
+		keyID:   config.KeyID,
 		rehash:  config.Rehash,
 	}
 }
@@ -157,7 +162,7 @@ func (s *SecretService) Set(ctx context.Context, name string, value []byte) (Sec
 		return Secret{}, false, err
 	}
 
-	stored, err := s.secrets.Upsert(ctx, name, sealed, revision)
+	stored, err := s.secrets.Upsert(ctx, name, sealed, revision, s.keyID)
 	if err != nil {
 		return Secret{}, false, err
 	}

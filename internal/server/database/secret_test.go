@@ -14,9 +14,11 @@ func TestSecretRepository_Upsert(t *testing.T) {
 	t.Parallel()
 
 	t.Run("stores a secret on first write", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
 
-		stored, err := secrets.Upsert(t.Context(), "db-password", []byte("sealed"), "rev-one")
+		stored, err := secrets.Upsert(t.Context(), "db-password", []byte("sealed"), "rev-one", keyID)
 		require.NoError(t, err)
 
 		assert.Equal(t, "db-password", stored.Name)
@@ -26,13 +28,15 @@ func TestSecretRepository_Upsert(t *testing.T) {
 	})
 
 	t.Run("replaces the value and revision of one that exists", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		first, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one")
+		first, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID)
 		require.NoError(t, err)
 
-		second, err := secrets.Upsert(ctx, "db-password", []byte("resealed"), "rev-two")
+		second, err := secrets.Upsert(ctx, "db-password", []byte("resealed"), "rev-two", keyID)
 		require.NoError(t, err)
 
 		// The identity and creation time survive, so rotating a secret does not read
@@ -51,10 +55,12 @@ func TestSecretRepository_Get(t *testing.T) {
 	t.Parallel()
 
 	t.Run("returns the stored value", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one")
+		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID)
 		require.NoError(t, err)
 
 		stored, err := secrets.Get(ctx, "db-password")
@@ -64,7 +70,8 @@ func TestSecretRepository_Get(t *testing.T) {
 	})
 
 	t.Run("reports a secret that does not exist", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		secrets := database.NewSecretRepository(db)
 
 		_, err := secrets.Get(t.Context(), "nope")
 		assert.ErrorIs(t, err, database.ErrSecretNotFound)
@@ -75,13 +82,15 @@ func TestSecretRepository_List(t *testing.T) {
 	t.Parallel()
 
 	t.Run("returns every secret without its value", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one")
+		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID)
 		require.NoError(t, err)
 
-		_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two")
+		_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two", keyID)
 		require.NoError(t, err)
 
 		listed, err := secrets.List(ctx)
@@ -100,7 +109,8 @@ func TestSecretRepository_List(t *testing.T) {
 	})
 
 	t.Run("returns nothing when none are stored", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		secrets := database.NewSecretRepository(db)
 
 		listed, err := secrets.List(t.Context())
 		require.NoError(t, err)
@@ -112,10 +122,12 @@ func TestSecretRepository_Delete(t *testing.T) {
 	t.Parallel()
 
 	t.Run("removes the secret", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one")
+		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID)
 		require.NoError(t, err)
 
 		require.NoError(t, secrets.Delete(ctx, "db-password"))
@@ -125,7 +137,8 @@ func TestSecretRepository_Delete(t *testing.T) {
 	})
 
 	t.Run("reports a secret that does not exist", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		secrets := database.NewSecretRepository(db)
 
 		err := secrets.Delete(t.Context(), "nope")
 		assert.ErrorIs(t, err, database.ErrSecretNotFound)
@@ -133,10 +146,11 @@ func TestSecretRepository_Delete(t *testing.T) {
 
 	t.Run("leaves the workloads referencing it linked", func(t *testing.T) {
 		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
 		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one")
+		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID)
 		require.NoError(t, err)
 
 		linkWorkload(t, db, "example", "db-password")
@@ -155,13 +169,15 @@ func TestSecretRepository_Revisions(t *testing.T) {
 	t.Parallel()
 
 	t.Run("returns the revision of each named secret", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one")
+		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID)
 		require.NoError(t, err)
 
-		_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two")
+		_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two", keyID)
 		require.NoError(t, err)
 
 		revisions, err := secrets.Revisions(ctx, []string{"db-password", "api-token"})
@@ -170,10 +186,12 @@ func TestSecretRepository_Revisions(t *testing.T) {
 	})
 
 	t.Run("omits a secret that does not exist", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one")
+		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID)
 		require.NoError(t, err)
 
 		// The caller knows what it asked about, so what a missing secret means is
@@ -184,7 +202,8 @@ func TestSecretRepository_Revisions(t *testing.T) {
 	})
 
 	t.Run("asks nothing when given no names", func(t *testing.T) {
-		secrets := database.NewSecretRepository(newTestDatabase(t))
+		db := newTestDatabase(t)
+		secrets := database.NewSecretRepository(db)
 
 		revisions, err := secrets.Revisions(t.Context(), nil)
 		require.NoError(t, err)
@@ -267,4 +286,156 @@ func linkWorkload(t *testing.T, db *sql.DB, name string, secrets ...string) {
 		Secrets:  secrets,
 	})
 	require.NoError(t, err)
+}
+
+func TestSecretRepository_ListSealed(t *testing.T) {
+	t.Parallel()
+
+	db := newTestDatabase(t)
+	keyID := newTestKey(t, db)
+	secrets := database.NewSecretRepository(db)
+	ctx := t.Context()
+
+	_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID)
+	require.NoError(t, err)
+	_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two", keyID)
+	require.NoError(t, err)
+
+	listed, err := secrets.ListSealed(ctx)
+	require.NoError(t, err)
+	require.Len(t, listed, 2)
+
+	// Unlike List, which leaves the ciphertext out. A rekey is the only caller with
+	// business reading every sealed value at once.
+	assert.Equal(t, "api-token", listed[0].Name)
+	assert.Equal(t, []byte("sealed-too"), listed[0].Value)
+	assert.Equal(t, keyID, listed[0].KeyID)
+}
+
+func TestSecretRepository_Rekey(t *testing.T) {
+	t.Parallel()
+
+	t.Run("moves every value and the current key together", func(t *testing.T) {
+		db := newTestDatabase(t)
+		oldKey := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
+		keys := database.NewEncryptionKeyRepository(db)
+		ctx := t.Context()
+
+		before, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", oldKey)
+		require.NoError(t, err)
+
+		require.NoError(t, secrets.Rekey(ctx, "new-key", map[string][]byte{
+			"db-password": []byte("resealed"),
+		}))
+
+		after, err := secrets.Get(ctx, "db-password")
+		require.NoError(t, err)
+		assert.Equal(t, []byte("resealed"), after.Value)
+		assert.Equal(t, "new-key", after.KeyID)
+
+		// A rekey changes how a value is stored, not what it is. A revision that
+		// moved would replace every instance reading the secret, which is the one
+		// thing a rekey must not do.
+		assert.Equal(t, before.Revision, after.Revision)
+
+		current, err := keys.Current(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "new-key", current.ID)
+
+		// The old key is kept rather than removed. It still opens the backups taken
+		// before the rekey.
+		recorded, err := keys.List(ctx)
+		require.NoError(t, err)
+		assert.Len(t, recorded, 2)
+	})
+
+	t.Run("rekeys a database holding no secrets", func(t *testing.T) {
+		db := newTestDatabase(t)
+		newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
+		keys := database.NewEncryptionKeyRepository(db)
+		ctx := t.Context()
+
+		require.NoError(t, secrets.Rekey(ctx, "new-key", map[string][]byte{}))
+
+		current, err := keys.Current(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, "new-key", current.ID)
+	})
+
+	// A secret created between the read and the rewrite would keep its old key while
+	// everything around it moved, and nothing afterwards would say so.
+	t.Run("refuses when a secret was added since the values were read", func(t *testing.T) {
+		db := newTestDatabase(t)
+		oldKey := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
+		ctx := t.Context()
+
+		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", oldKey)
+		require.NoError(t, err)
+		_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two", oldKey)
+		require.NoError(t, err)
+
+		err = secrets.Rekey(ctx, "new-key", map[string][]byte{"db-password": []byte("resealed")})
+		assert.ErrorIs(t, err, database.ErrSecretsChanged)
+
+		// Nothing moved, including the key. A refused rekey leaves the node exactly
+		// as it was.
+		unchanged, err := secrets.Get(ctx, "db-password")
+		require.NoError(t, err)
+		assert.Equal(t, []byte("sealed"), unchanged.Value)
+		assert.Equal(t, oldKey, unchanged.KeyID)
+	})
+
+	// The counts matching is not enough on its own: one secret deleted and another
+	// created leaves the total where it was.
+	t.Run("refuses when a secret was replaced by another", func(t *testing.T) {
+		db := newTestDatabase(t)
+		oldKey := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
+		ctx := t.Context()
+
+		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", oldKey)
+		require.NoError(t, err)
+
+		err = secrets.Rekey(ctx, "new-key", map[string][]byte{"api-token": []byte("resealed")})
+		assert.ErrorIs(t, err, database.ErrSecretsChanged)
+
+		unchanged, err := secrets.Get(ctx, "db-password")
+		require.NoError(t, err)
+		assert.Equal(t, oldKey, unchanged.KeyID)
+	})
+
+	// The guarantee the whole design rests on. Nothing may be left half-moved.
+	t.Run("leaves nothing behind when it fails", func(t *testing.T) {
+		db := newTestDatabase(t)
+		oldKey := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
+		keys := database.NewEncryptionKeyRepository(db)
+		ctx := t.Context()
+
+		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", oldKey)
+		require.NoError(t, err)
+		_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two", oldKey)
+		require.NoError(t, err)
+
+		// One of the two names is not there, so the rewrite fails partway through
+		// with the other already updated inside the transaction.
+		err = secrets.Rekey(ctx, "new-key", map[string][]byte{
+			"db-password": []byte("resealed"),
+			"missing":     []byte("resealed-too"),
+		})
+		assert.ErrorIs(t, err, database.ErrSecretsChanged)
+
+		listed, err := secrets.ListSealed(ctx)
+		require.NoError(t, err)
+		for _, stored := range listed {
+			assert.Equal(t, oldKey, stored.KeyID, "%s moved despite the rekey failing", stored.Name)
+		}
+
+		current, err := keys.Current(ctx)
+		require.NoError(t, err)
+		assert.Equal(t, oldKey, current.ID)
+	})
 }
