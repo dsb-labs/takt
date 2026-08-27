@@ -409,17 +409,17 @@ func (p *PortRef) UnmarshalYAML(node *yaml.Node) error {
 // more than one is.
 func KindOf(mount VolumeMount) (MountKind, error) {
 	named := make([]MountKind, 0, 3)
-	for _, candidate := range []struct {
-		kind  MountKind
-		value string
-	}{
-		{MountVolume, mount.Name},
-		{MountSecret, mount.Secret},
-		{MountVariable, mount.Var},
-	} {
-		if candidate.value != "" {
-			named = append(named, candidate.kind)
-		}
+
+	if mount.Name != "" {
+		named = append(named, MountVolume)
+	}
+
+	if mount.Secret != "" {
+		named = append(named, MountSecret)
+	}
+
+	if mount.Var != "" {
+		named = append(named, MountVariable)
 	}
 
 	switch len(named) {
