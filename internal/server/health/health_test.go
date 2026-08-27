@@ -370,9 +370,9 @@ func TestChecker_Metrics(t *testing.T) {
 	t.Parallel()
 
 	reader := sdkmetric.NewManualReader()
-	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 
-	checker := health.New(health.Config{Meter: meter})
+	checker := health.New(health.Config{MeterProvider: provider})
 
 	done := make(chan error, 1)
 	ctx, cancel := context.WithCancel(t.Context())

@@ -15,24 +15,29 @@ import (
 	"github.com/dsb-labs/orca/internal/server/port"
 )
 
-func TestAllocator_RegisterMetrics(t *testing.T) {
+func TestNew_Metrics(t *testing.T) {
 	t.Parallel()
 
 	reader := sdkmetric.NewManualReader()
-	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 
-	allocator := port.New(port.Config{Min: 20000, Max: 20009})
-
-	// The ports themselves rather than a count of them, which is what the repository
-	// reports. Counting is the gauge's job: a caller that did it and got it wrong
-	// reported the number of protocols for a year without anybody noticing.
-	err := allocator.RegisterMetrics(meter, func(context.Context) (map[string][]int, error) {
-		return map[string][]int{
-			string(port.ProtocolTCP): {20000, 20001, 20002},
-			string(port.ProtocolUDP): {20003},
-		}, nil
+	// The gauges are registered by the constructor, so an allocator built with a
+	// provider is already reporting and there is no second call to forget.
+	//
+	// Allocated reports the ports themselves rather than a count of them, which is
+	// the shape the repository returns. Counting is the gauge's job: a caller that
+	// did it and got it wrong reported the number of protocols instead.
+	port.New(port.Config{
+		Min:           20000,
+		Max:           20009,
+		MeterProvider: provider,
+		Allocated: func(context.Context) (map[string][]int, error) {
+			return map[string][]int{
+				string(port.ProtocolTCP): {20000, 20001, 20002},
+				string(port.ProtocolUDP): {20003},
+			}, nil
+		},
 	})
-	require.NoError(t, err)
 
 	var collected metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(t.Context(), &collected))
@@ -42,21 +47,23 @@ func TestAllocator_RegisterMetrics(t *testing.T) {
 	assert.EqualValues(t, 1, protocolGaugeValue(t, collected, "orca.ports.used", port.ProtocolUDP))
 }
 
-// TestAllocator_RegisterMetrics_EmptyProtocols covers the case the old conversion
-// got right by accident. A protocol holding nothing has to read as zero rather than
-// as one, which is what counting the map's keys produced.
-func TestAllocator_RegisterMetrics_EmptyProtocols(t *testing.T) {
+// TestNew_Metrics_EmptyProtocols covers the case the old conversion got right by
+// accident. A protocol holding nothing has to read as zero rather than as one, which
+// is what counting the map's keys produced.
+func TestNew_Metrics_EmptyProtocols(t *testing.T) {
 	t.Parallel()
 
 	reader := sdkmetric.NewManualReader()
-	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 
-	allocator := port.New(port.Config{Min: 20000, Max: 20009})
-
-	err := allocator.RegisterMetrics(meter, func(context.Context) (map[string][]int, error) {
-		return map[string][]int{string(port.ProtocolTCP): {20000, 20001}}, nil
+	port.New(port.Config{
+		Min:           20000,
+		Max:           20009,
+		MeterProvider: provider,
+		Allocated: func(context.Context) (map[string][]int, error) {
+			return map[string][]int{string(port.ProtocolTCP): {20000, 20001}}, nil
+		},
 	})
-	require.NoError(t, err)
 
 	var collected metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(t.Context(), &collected))

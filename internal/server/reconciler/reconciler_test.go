@@ -3108,7 +3108,7 @@ func TestReconciler_Metrics(t *testing.T) {
 
 	t.Run("counts a pass that could not observe", func(t *testing.T) {
 		reader := sdkmetric.NewManualReader()
-		meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+		provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
@@ -3128,7 +3128,8 @@ func TestReconciler_Metrics(t *testing.T) {
 			Drivers:   map[string]reconciler.Driver{docker.Name: d},
 			Workloads: repo,
 			Interval:  time.Hour,
-			Meter:     meter,
+
+			MeterProvider: provider,
 		})
 
 		ctx, cancel := context.WithCancel(t.Context())
@@ -3156,7 +3157,7 @@ func TestReconciler_Metrics(t *testing.T) {
 
 	t.Run("gauges workloads by state", func(t *testing.T) {
 		reader := sdkmetric.NewManualReader()
-		meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+		provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 
@@ -3183,7 +3184,8 @@ func TestReconciler_Metrics(t *testing.T) {
 			Drivers:   map[string]reconciler.Driver{docker.Name: d},
 			Workloads: repo,
 			Interval:  time.Hour,
-			Meter:     meter,
+
+			MeterProvider: provider,
 		})
 
 		ctx, cancel := context.WithCancel(t.Context())

@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
-// RegisterMetrics registers gauges describing the allocator's pool: the number of
+// registerMetrics registers gauges describing the allocator's pool: the number of
 // host ports in the configured range, and the number currently allocated on each
 // protocol.
 //
@@ -25,19 +26,23 @@ import (
 // The allocated function is asked once per scrape rather than once per pass, so
 // its cost lands on the reader — for the repository behind it, one read of the
 // allocations it already records.
-func (a *Allocator) RegisterMetrics(meter metric.Meter, allocated func(ctx context.Context) (map[string][]int, error)) error {
+func (a *Allocator) registerMetrics(meter metric.Meter, allocated func(ctx context.Context) (map[string][]int, error)) {
 	capacity, err := meter.Int64ObservableGauge("orca.ports.capacity",
 		metric.WithDescription("The number of host ports in the configured range."),
 		metric.WithUnit("{port}"))
 	if err != nil {
-		return fmt.Errorf("failed to build the port capacity gauge: %w", err)
+		otel.Handle(fmt.Errorf("failed to build the port capacity gauge: %w", err))
+
+		return
 	}
 
 	used, err := meter.Int64ObservableGauge("orca.ports.used",
 		metric.WithDescription("The number of host ports currently allocated to workloads."),
 		metric.WithUnit("{port}"))
 	if err != nil {
-		return fmt.Errorf("failed to build the port usage gauge: %w", err)
+		otel.Handle(fmt.Errorf("failed to build the port usage gauge: %w", err))
+
+		return
 	}
 
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
@@ -59,8 +64,6 @@ func (a *Allocator) RegisterMetrics(meter metric.Meter, allocated func(ctx conte
 		return nil
 	}, capacity, used)
 	if err != nil {
-		return fmt.Errorf("failed to register the port gauges: %w", err)
+		otel.Handle(fmt.Errorf("failed to register the port gauges: %w", err))
 	}
-
-	return nil
 }

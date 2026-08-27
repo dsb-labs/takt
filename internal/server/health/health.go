@@ -23,6 +23,10 @@ import (
 	"github.com/dsb-labs/orca/internal/server/telemetry"
 )
 
+// The name this package's telemetry is recorded under, which describes the code
+// declaring it rather than whatever assembles the server.
+const scope = "github.com/dsb-labs/orca/internal/server/health"
+
 // The Status type describes whether a workload is working.
 type Status string
 
@@ -89,9 +93,9 @@ type (
 
 	// The Config type contains fields used to construct a Checker.
 	Config struct {
-		// The meter the checker's instruments are created from. May be nil, in
+		// The provider the checker's instruments are created from. May be nil, in
 		// which case nothing is recorded.
-		Meter metric.Meter
+		MeterProvider metric.MeterProvider
 	}
 
 	// The scheduled type is one check as handed to a probe: the specification to
@@ -126,7 +130,7 @@ type (
 // New returns a Checker ready to run checks.
 func New(config Config) *Checker {
 	return &Checker{
-		instruments: newInstruments(config.Meter),
+		instruments: newInstruments(telemetry.Meter(config.MeterProvider, scope)),
 		checks:      make(map[string]*check),
 		// Buffered so that registering a check never blocks on the loop: a
 		// recomputation is already pending, which is all the signal conveys.

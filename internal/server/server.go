@@ -114,9 +114,7 @@ func Run(ctx context.Context, config Config) error {
 	volumes := database.NewVolumeRepository(db)
 	secrets := database.NewSecretRepository(db)
 	variables := database.NewVariableRepository(db)
-	checker := health.New(health.Config{
-		Meter: tel.MeterProvider().Meter("github.com/dsb-labs/orca/internal/server/health"),
-	})
+	checker := health.New(health.Config{MeterProvider: tel.MeterProvider()})
 
 	// A host that cannot confine an exec workload is reported here rather than when the
 	// first one is started, so an operator learns at startup instead of from a workload
@@ -139,12 +137,12 @@ func Run(ctx context.Context, config Config) error {
 	})
 
 	dockerDriver := docker.New(docker.Config{
-		Logger:     logger,
-		Client:     dockerClient,
-		Bind:       config.Workload.Bind,
-		ConfigFile: config.Docker.ConfigFile,
-		Meter:      tel.MeterProvider().Meter("github.com/dsb-labs/orca/internal/server/driver/docker"),
-		Tracer:     tel.TracerProvider().Tracer("github.com/dsb-labs/orca/internal/server/driver/docker"),
+		Logger:         logger,
+		Client:         dockerClient,
+		Bind:           config.Workload.Bind,
+		ConfigFile:     config.Docker.ConfigFile,
+		MeterProvider:  tel.MeterProvider(),
+		TracerProvider: tel.TracerProvider(),
 	})
 
 	// The service and the reconciler each need something from the other: the service
@@ -236,9 +234,9 @@ func Run(ctx context.Context, config Config) error {
 		Reallocate: func(ctx context.Context, workload string) (bool, error) {
 			return svc.Reallocate(ctx, workload)
 		},
-		Interval: config.Reconcile.Interval,
-		Meter:    tel.MeterProvider().Meter("github.com/dsb-labs/orca/internal/server/reconciler"),
-		Tracer:   tel.TracerProvider().Tracer("github.com/dsb-labs/orca/internal/server/reconciler"),
+		Interval:       config.Reconcile.Interval,
+		MeterProvider:  tel.MeterProvider(),
+		TracerProvider: tel.TracerProvider(),
 	})
 
 	volumeSvc := service.NewVolumeService(service.VolumeServiceConfig{
@@ -254,21 +252,16 @@ func Run(ctx context.Context, config Config) error {
 		Secrets:  secretSvc,
 	})
 
-	allocator := port.New(port.Config{Min: config.Workload.MinPort, Max: config.Workload.MaxPort})
-	claimer := port.NewClaimer(port.ClaimerConfig{Allocator: allocator, Ports: ports})
-
 	// The count of allocations is read from the repository once per scrape, so a
-	// pass never pays for it. A gauge that cannot be registered costs the metric
-	// rather than the server.
-	// The repository's own reader, with nothing in between. The conversion that used
-	// to sit here counted the protocols rather than the ports on them.
-	err = allocator.RegisterMetrics(
-		tel.MeterProvider().Meter("github.com/dsb-labs/orca/internal/server/port"),
-		ports.Allocated,
-	)
-	if err != nil {
-		logger.With("error", err).Warn("failed to register port pool gauges")
-	}
+	// pass never pays for it.
+	allocator := port.New(port.Config{
+		Min:           config.Workload.MinPort,
+		Max:           config.Workload.MaxPort,
+		MeterProvider: tel.MeterProvider(),
+		Allocated:     ports.Allocated,
+	})
+
+	claimer := port.NewClaimer(port.ClaimerConfig{Allocator: allocator, Ports: ports})
 
 	svc = service.NewWorkloadService(service.WorkloadServiceConfig{
 		Logger: logger,

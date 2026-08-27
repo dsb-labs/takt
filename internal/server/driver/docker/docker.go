@@ -32,6 +32,10 @@ import (
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
+// The name this package's telemetry is recorded under, which describes the code
+// declaring it rather than whatever assembles the server.
+const scope = "github.com/dsb-labs/orca/internal/server/driver/docker"
+
 // Name is how this driver identifies itself, and is what the server maps a
 // workload's runtime onto when deciding which driver runs it.
 const Name = "container"
@@ -93,10 +97,10 @@ type (
 		ConfigFile string
 		// The meter the driver's instruments are created from. May be nil, in
 		// which case nothing is recorded.
-		Meter metric.Meter
+		MeterProvider metric.MeterProvider
 		// The tracer spans are created from. May be nil, in which case no spans
 		// are recorded.
-		Tracer trace.Tracer
+		TracerProvider trace.TracerProvider
 	}
 )
 
@@ -125,8 +129,8 @@ func New(config Config) *Driver {
 		client:      config.Client,
 		bind:        bind,
 		configFile:  config.ConfigFile,
-		tracer:      telemetry.Tracer(config.Tracer),
-		instruments: newInstruments(config.Meter),
+		tracer:      telemetry.Tracer(config.TracerProvider, scope),
+		instruments: newInstruments(telemetry.Meter(config.MeterProvider, scope)),
 	}
 }
 

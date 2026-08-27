@@ -14,12 +14,21 @@
 package port
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net"
 	"strconv"
+
+	"go.opentelemetry.io/otel/metric"
+
+	"github.com/dsb-labs/orca/internal/server/telemetry"
 )
+
+// The name this package's instruments are recorded under, which describes the code
+// declaring them rather than whatever assembles the server.
+const scope = "github.com/dsb-labs/orca/internal/server/port"
 
 var (
 	// ErrRangeExhausted is returned when no port in the configured range is free.
@@ -44,6 +53,13 @@ type (
 		Min int
 		// The highest host port that may be allocated.
 		Max int
+		// The provider the pool gauges are recorded against. May be nil, in which
+		// case nothing is recorded.
+		MeterProvider metric.MeterProvider
+		// Reports every host port allocated to any workload, keyed by the protocol
+		// it is allocated on. Read once per scrape to report how full the range is.
+		// May be nil, in which case usage is not reported.
+		Allocated func(ctx context.Context) (map[string][]int, error)
 	}
 )
 
@@ -69,7 +85,20 @@ const (
 
 // New returns an Allocator that hands out ports from the range in config.
 func New(config Config) *Allocator {
-	return &Allocator{min: config.Min, max: config.Max}
+	allocator := &Allocator{min: config.Min, max: config.Max}
+
+	// Registered here rather than by the caller. Gauges describing the pool are the
+	// allocator's own business, and a caller that had to remember a second call
+	// after constructing one could forget it — as it could get the reader's shape
+	// wrong, which is how the usage gauge came to count protocols.
+	//
+	// A failure costs the metrics rather than the allocator, and is reported through
+	// the OpenTelemetry error handler like every other refused instrument.
+	if config.Allocated != nil {
+		allocator.registerMetrics(telemetry.Meter(config.MeterProvider, scope), config.Allocated)
+	}
+
+	return allocator
 }
 
 // Allocate returns a host port that is free on every protocol named, avoiding both

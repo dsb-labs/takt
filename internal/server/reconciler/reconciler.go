@@ -30,6 +30,10 @@ import (
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
+// The name this package's telemetry is recorded under, which describes the code
+// declaring it rather than whatever assembles the server.
+const scope = "github.com/dsb-labs/orca/internal/server/reconciler"
+
 type (
 	// The Driver interface describes the runtime operations the reconciler uses to
 	// converge a workload onto its desired state.
@@ -230,10 +234,10 @@ type (
 		Now func() time.Time
 		// The meter instruments are created from. May be nil, in which case
 		// nothing is recorded.
-		Meter metric.Meter
+		MeterProvider metric.MeterProvider
 		// The tracer spans are created from. May be nil, in which case no spans
 		// are recorded.
-		Tracer trace.Tracer
+		TracerProvider trace.TracerProvider
 	}
 
 	// The Observation type records how the most recent attempt to observe one
@@ -331,8 +335,8 @@ func New(config Config) *Reconciler {
 		restarts:     make(map[string]struct{}),
 		lastError:    make(map[string]lastError),
 		observations: observations,
-		tracer:       telemetry.Tracer(config.Tracer),
-		instruments:  newInstruments(config.Meter),
+		tracer:       telemetry.Tracer(config.TracerProvider, scope),
+		instruments:  newInstruments(telemetry.Meter(config.MeterProvider, scope)),
 		// Buffered so that a caller signalling a change never blocks: a pass is
 		// already pending, which is all the signal conveys.
 		nudge: make(chan struct{}, 1),
