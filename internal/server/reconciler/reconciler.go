@@ -641,8 +641,18 @@ func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, 
 			started := time.Now()
 
 			err := r.converge(ctx, row, observed[row.Name])
-			r.instruments.converges.Record(ctx, time.Since(started).Seconds(),
-				metric.WithAttributes(attribute.String("workload", row.Name)))
+
+			// Recorded without naming the workload. A histogram carries a series per
+			// bucket per attribute, so a name here is sixteen series per workload
+			// that outlive the workload itself: an SDK has no way to retire a series,
+			// so a node that has run a thousand workloads exports sixteen thousand
+			// describing things that no longer exist. A load test left two and a half
+			// thousand behind after deleting everything.
+			//
+			// Per-workload timing is not lost. The converge span above carries the
+			// name, and a trace is the signal built for an attribute with one value
+			// per thing rather than one per kind of thing.
+			r.instruments.converges.Record(ctx, time.Since(started).Seconds())
 			if err != nil {
 				span.SetStatus(codes.Error, err.Error())
 				r.logger.With("workload", row.Name, "error", err).Error("failed to reconcile workload")

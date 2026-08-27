@@ -43,9 +43,15 @@ func newInstruments(meter metric.Meter) instruments {
 		passDuration: telemetry.Histogram(meter, "orca.reconcile.pass.duration",
 			"How long each reconciliation pass took.", "s"),
 		converges: telemetry.Histogram(meter, "orca.workload.converge.duration",
-			"How long converging each workload took.", "s"),
+			"How long converging a workload took.", "s"),
 		workloads: telemetry.Gauge(meter, "orca.workloads",
 			"The number of workloads in each state.", "{workload}"),
+		// These two name the workload where the converge histogram does not, and the
+		// difference is deliberate. A counter is one series per workload rather than
+		// one per bucket, and these are recorded only for a workload that is failing
+		// rather than for every workload on every pass — so the set is bounded by how
+		// many have ever misbehaved. Which workload is flapping is also the whole
+		// question they answer, where a duration is useful in aggregate.
 		restarts: telemetry.Counter(meter, "orca.workload.restarts",
 			"The number of paced attempts to start a workload that keeps failing.", "{restart}"),
 		giveups: telemetry.Counter(meter, "orca.workload.giveups",
