@@ -65,7 +65,7 @@ func TestCounter(t *testing.T) {
 func TestTracer(t *testing.T) {
 	t.Parallel()
 
-	_, span := telemetry.Tracer(nil).Start(t.Context(), "test")
+	_, span := telemetry.Tracer(nil, "test").Start(t.Context(), "test")
 	defer span.End()
 
 	assert.False(t, span.IsRecording())

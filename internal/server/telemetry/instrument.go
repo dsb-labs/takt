@@ -80,15 +80,30 @@ func Gauge(meter metric.Meter, name, description, unit string) metric.Int64Gauge
 	return gauge
 }
 
-// Tracer returns the given tracer, or one that records nothing when it is nil.
-// A package taking an optional tracer calls this once instead of guarding every
-// span.
-func Tracer(tracer trace.Tracer) trace.Tracer {
-	if tracer == nil {
-		return tracenoop.NewTracerProvider().Tracer("")
+// Meter returns the named meter from provider, or one that records nothing when the
+// provider is nil. A package taking an optional provider calls this once instead of
+// guarding every instrument.
+//
+// The name describes the code the instruments are declared in, so a package asks for
+// its own meter under a scope it names itself. Whoever assembles the server has no
+// reason to hold a string identifying a package it merely constructs.
+func Meter(provider metric.MeterProvider, name string) metric.Meter {
+	if provider == nil {
+		return noop.Meter{}
 	}
 
-	return tracer
+	return provider.Meter(name)
+}
+
+// Tracer returns the named tracer from provider, or one that records nothing when the
+// provider is nil. A package taking an optional provider calls this once instead of
+// guarding every span, and names its own scope for the reason Meter does.
+func Tracer(provider trace.TracerProvider, name string) trace.Tracer {
+	if provider == nil {
+		return tracenoop.NewTracerProvider().Tracer(name)
+	}
+
+	return provider.Tracer(name)
 }
 
 // orNoop returns the given meter, or one that records nothing when it is nil.
