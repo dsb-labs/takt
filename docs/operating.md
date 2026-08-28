@@ -156,27 +156,71 @@ backup is the better answer, and then the default needs nothing.
 Every key goes in, not only the one sealing secrets now. A key that `orca admin rekey`
 replaced still opens the archives taken before it was replaced.
 
-### Putting one back
+## Restoring a node
 
-There is no `orca admin restore` yet, and the procedure has parts a command could not
-cover anyway. With the server stopped:
+Written for the case that matters: the host is gone, and a replacement has to come
+back holding what the old one held. A corrupted file on a host that still exists is
+the same procedure with more of it already in place.
 
-1. Extract `state.db` into the data directory. **Remove any `state.db-wal` and
-   `state.db-shm` first.** SQLite reads a stale log against the restored database and
-   the result is silently wrong.
-2. Put the `keys/` directory back, each file `chmod 600`. The server refuses to start
-   on a key that is readable by anyone else. Without the keyring every workload
-   reading a secret fails to start, with nothing pointing at the cause. Restore the
-   whole directory rather than one key: the database names the key it needs, and that
-   may not be the newest one if the archive predates a rekey.
-3. Restore volume data under the paths `orca volume list` reported. A volume is found
-   by the identifier it was assigned, so recreating one by name gives an empty volume
-   and a row pointing at nothing.
-4. Do not restore `exec/state/`. It records process identifiers for a host that may no
-   longer exist, and the liveness check exists to prevent exactly the mistaken identity
-   that would follow.
+```sh
+orca admin restore /backups/orca.zip /etc/orca/config.toml
+```
 
-Start the server. The first pass re-derives everything else.
+**With the server stopped.** This is the one command that talks to no server: it
+reads the configuration file `orca serve` reads, works over the data directory
+directly, and refuses to run while anything is listening on the configured address.
+A restore under a running server writes a database out from under the connections
+reading it.
+
+It writes `state.db` into the data directory and the keyring into wherever
+`secrets.keys` puts it, and removes any stale `state.db-wal` and `state.db-shm`
+first. That last part is what goes wrong by hand: SQLite replays a stale log against
+a restored database perfectly happily, and the node comes up holding state that is
+quietly not what was backed up.
+
+A database already in the data directory is refused rather than replaced. Move it
+aside first, deliberately.
+
+### The part that is yours
+
+Volume data is not in a backup, so the restore cannot put it back. What it does
+instead is tell you exactly what is missing:
+
+```json
+{
+  "Restored": ["/var/lib/orca/state.db", "/var/lib/orca/keys/da8lt98hpe2jmgmjl9fg.key"],
+  "MissingKeys": null,
+  "MissingVolumes": [
+    {
+      "ID": "da8ltc8hpe2jmgmjl9g0",
+      "Name": "example-data",
+      "Path": "/var/lib/orca/volumes/da8ltc8hpe2jmgmjl9g0"
+    }
+  ]
+}
+```
+
+Copy each volume's backed-up contents to the path named there, and start the server.
+
+**Restore the data under the identifier, not under a new volume of the same name.** A
+volume is found by the identifier it was assigned. Creating one called
+`example-data` on the restored node gives it a fresh identifier, so the row and the
+data end up in different directories — and nothing reads as an error. The workload
+starts, mounts its volume, and finds it empty.
+
+`MissingKeys` is the other half. It names every key the secrets are sealed under that
+the keyring does not hold, which is what an archive taken without `--include-keys`
+leaves behind. Restore the keyring's own backup before starting the server. Without
+it every workload reading a secret fails to start, and nothing at the workload says
+why.
+
+### What is deliberately not restored
+
+`exec/state/` and `mounts/` are not in the archive and must not be copied across from
+an old host. The first records process identifiers, which on a new host name whatever
+happens to hold those numbers now — the liveness check exists to prevent exactly that
+mistaken identity. The second is rewritten as a workload starts. The first
+reconciliation pass re-derives both.
 
 ## Exec workload directories
 

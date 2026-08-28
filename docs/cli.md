@@ -28,6 +28,7 @@ orca variable get <name>                Show a single variable
 orca variable delete <name>             Delete a variable                    (alias: rm)
 
 orca admin backup <destination>         Write a backup of the node to a file
+orca admin restore <archive> [config]   Put a node back from a backup archive
 orca admin rekey                        Re-encrypt every secret under a new key
 ```
 
@@ -436,8 +437,58 @@ secret the node holds, and it keeps opening them long after it was taken. Settin
 Every key goes in, not only the one sealing secrets now. A key that `orca admin rekey`
 replaced still opens the archives taken before it was replaced.
 
-Restoring is not yet a command. See [Backups](operating.md#backups) for what the
-archive holds and what has to be put back beside it.
+See [`admin restore`](#admin-restore) for putting one back, and
+[Restoring a node](operating.md#restoring-a-node) for the whole procedure.
+
+## admin restore
+
+```sh
+orca admin restore /backups/orca.zip /etc/orca/config.toml
+```
+
+Reads a backup archive back into the data directory a configuration file names.
+
+**Run this with the server stopped.** Unlike everything else under `admin`, this
+command talks to no server. It reads the same configuration file `orca serve` does,
+works over the data directory directly, and refuses to run while anything is
+listening on the configured address — a restore under a running server writes a
+database out from under the connections reading it. The configuration file may be
+left out, in which case the defaults apply, exactly as for `orca serve`.
+
+It writes `state.db` into the data directory and the keyring into wherever
+`secrets.keys` puts it, both readable only by their owner, and removes any stale
+`state.db-wal` and `state.db-shm` first. SQLite replays a stale log against a
+restored database perfectly happily, and the node then comes up holding state that is
+quietly not what was backed up.
+
+Nothing else in the data directory is touched. An archive holding an entry this
+command has nowhere to put is refused in full, before anything is written.
+
+A database already in the data directory is refused rather than replaced, as is a key
+the keyring already answers to under the same identifier. Move a database aside
+first, deliberately.
+
+What was written is printed as JSON, along with what the restored node still needs:
+
+| Field | Meaning |
+|---|---|
+| `Restored` | The files written. |
+| `MissingKeys` | Keys the secrets are sealed under that the keyring does not hold. |
+| `MissingVolumes` | Volumes whose data is not on this host, with the path it belongs at. |
+
+Both of the last two are also printed to standard error, so the two do not mix when
+the output is piped.
+
+**Volume data is not in a backup and is not restored here.** Copy each volume's
+contents to the path `MissingVolumes` names. That path ends in the identifier the
+volume was assigned, which is what it is found by: creating a volume of the same name
+on the restored node gives it a fresh identifier, and the row and the data end up in
+different directories. Nothing reads as an error — the workload starts and its
+storage is empty.
+
+A restore that reports something missing still succeeded, and exits zero. Copying
+volume data after the database is a reasonable order to work in. See
+[Restoring a node](operating.md#restoring-a-node).
 
 ## admin rekey
 
