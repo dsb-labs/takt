@@ -428,6 +428,66 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v1/workloads/{name}/dry-run:
+    parameters:
+      - $ref: "#/components/parameters/WorkloadName"
+
+    post:
+      operationId: dryRunWorkload
+      tags: [workloads]
+      summary: Report what applying a workload would do
+      description: |
+        Resolves the given specification exactly as an apply resolves it, reports
+        what applying it would change, and writes nothing.
+
+        Everything an apply refuses this refuses too, with the same status code: a
+        volume, secret, variable or workload the specification names and nothing
+        holds, a pinned host port another workload has, a workload being torn down,
+        and a specification that is not runnable. A dry run that passes is therefore
+        a statement about the apply rather than about the request.
+
+        A separate route rather than a flag on the apply. A "do not actually write"
+        branch through the write path is the version of this that eventually writes
+        something by accident.
+
+        Nothing is allocated. A port mapping that needs a host port allocated is
+        reported without one, and its path is listed in `unknown`, because allocating
+        would consume a port or move a workload's address while reporting that
+        nothing had changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkloadSpec"
+      responses:
+        "200":
+          description: What applying the specification would do.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DryRunWorkloadResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: |
+            The workload is being deleted, or the specification pins a host port
+            another workload holds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: |
+            The specification is well-formed but names a runtime the server cannot
+            run yet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /api/v1/volumes:
     get:
       operationId: listVolumes
@@ -2187,6 +2247,54 @@ components:
       properties:
         workload:
           $ref: "#/components/schemas/Workload"
+
+    DryRunWorkloadResult:
+      type: object
+      description: |
+        What applying a specification would do, none of it having been done.
+      required: [spec, created, replaced]
+      properties:
+        spec:
+          $ref: "#/components/schemas/WorkloadSpec"
+        specHash:
+          type: string
+          description: |
+            The hash the apply would store, which is what the server compares to
+            decide whether a running instance is replaced.
+
+            Absent when a host port has yet to be allocated. The host ports reach the
+            hash, so one computed before they are settled is a hash the apply never
+            stores.
+        created:
+          type: boolean
+          description: |
+            Whether nothing holds the name, so applying creates the workload.
+        replaced:
+          type: boolean
+          description: |
+            Whether applying moves the stored hash, so the running instances are
+            replaced.
+
+            This is the field an operator cannot work out by reading their manifest.
+            The hash covers the resolved specification along with the revision of
+            every secret and the value of every variable the workload reads, so an
+            apply can replace an instance because a variable moved, with nothing in
+            the file to say so.
+
+            False for a workload that does not exist, which has nothing running to
+            replace.
+        unknown:
+          type: array
+          description: |
+            The paths into `spec` whose values the server settles only as it applies.
+            A host port it has yet to allocate is the only one, reported rather than
+            invented.
+
+            The paths are written in the syntax the workload list query uses, so
+            `$.ports[0].from` names the host port of the first mapping.
+          items:
+            type: string
+            examples: ["$.ports[0].from"]
 
     ListVolumesResult:
       type: object

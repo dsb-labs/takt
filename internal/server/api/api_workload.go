@@ -23,6 +23,9 @@ type (
 		// Apply should store the given specification as desired state, reporting
 		// whether the workload was newly created.
 		Apply(ctx context.Context, spec manifest.Spec) (service.Workload, bool, error)
+		// DryRun should report what applying the given specification would do,
+		// without applying it.
+		DryRun(ctx context.Context, spec manifest.Spec) (service.DryRun, error)
 		// Get should return the workload with the given name.
 		Get(ctx context.Context, name string) (service.Workload, error)
 		// List should return the workloads matching every one of the given queries,
@@ -99,31 +102,40 @@ func (a *WorkloadAPI) internalError(operation string, err error) string {
 	return "failed to " + operation
 }
 
-// ApplyWorkload stores the given specification as the desired state for the named
-// workload.
-func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorkloadRequestObject) (api.ApplyWorkloadResponseObject, error) {
-	if request.Body == nil {
-		return api.ApplyWorkload400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: "request body is required"},
-		}, nil
+// submitted returns the specification a request body describes, holding it to the
+// name in the request path.
+//
+// The two endpoints taking a specification read it the same way, because a dry run
+// that accepted a body the apply refuses would report on an apply that could not
+// happen.
+func (a *WorkloadAPI) submitted(body *api.WorkloadSpec, name string) (manifest.Spec, error) {
+	if body == nil {
+		return manifest.Spec{}, errors.New("request body is required")
 	}
 
 	// Converted to the canonical shape here, at the edge, so that everything below
 	// this package reasons about a manifest.Spec rather than about the wire format.
-	spec, err := wire.ToSpec(*request.Body)
+	spec, err := wire.ToSpec(*body)
 	if err != nil {
-		return api.ApplyWorkload400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
-		}, nil
+		return manifest.Spec{}, err
 	}
 
 	// The name appears in both the path and the body, so a mismatch is ambiguous
 	// rather than something to silently resolve in favour of either one.
-	if spec.Name != request.Name {
+	if spec.Name != name {
+		return manifest.Spec{}, fmt.Errorf("workload name %q does not match name %q in the request path", spec.Name, name)
+	}
+
+	return spec, nil
+}
+
+// ApplyWorkload stores the given specification as the desired state for the named
+// workload.
+func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorkloadRequestObject) (api.ApplyWorkloadResponseObject, error) {
+	spec, err := a.submitted(request.Body, request.Name)
+	if err != nil {
 		return api.ApplyWorkload400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{
-				Error: fmt.Sprintf("workload name %q does not match name %q in the request path", spec.Name, request.Name),
-			},
+			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
 		}, nil
 	}
 
@@ -176,6 +188,67 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 	}
 
 	return api.ApplyWorkload200JSONResponse{Workload: newWorkload(workload)}, nil
+}
+
+// DryRunWorkload reports what applying the given specification would do, and
+// applies nothing.
+func (a *WorkloadAPI) DryRunWorkload(ctx context.Context, request api.DryRunWorkloadRequestObject) (api.DryRunWorkloadResponseObject, error) {
+	spec, err := a.submitted(request.Body, request.Name)
+	if err != nil {
+		return api.DryRunWorkload400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+		}, nil
+	}
+
+	run, err := a.workloads.DryRun(ctx, spec)
+	switch {
+	case errors.Is(err, service.ErrWorkloadDeleting):
+		return api.DryRunWorkload409JSONResponse{
+			Error: fmt.Sprintf("workload %q is being deleted", request.Name),
+		}, nil
+	case errors.Is(err, port.ErrHostPortTaken):
+		return api.DryRunWorkload409JSONResponse{Error: err.Error()}, nil
+	case errors.Is(err, service.ErrUnsupportedRuntime):
+		return api.DryRunWorkload422JSONResponse{Error: err.Error()}, nil
+	case errors.Is(err, service.ErrVolumeNotFound),
+		errors.Is(err, service.ErrSecretNotFound),
+		errors.Is(err, service.ErrVariableNotFound),
+		errors.Is(err, service.ErrWorkloadNotFound),
+		errors.Is(err, service.ErrPortNotPublished),
+		errors.Is(err, service.ErrInvalidSpec),
+		errors.Is(err, manifest.ErrNoRuntime),
+		errors.Is(err, manifest.ErrAmbiguousRuntime):
+		// Reported exactly as the apply reports it, so that a dry run which passes
+		// is a statement about the apply rather than about the request.
+		return api.DryRunWorkload400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+		}, nil
+	case err != nil:
+		return api.DryRunWorkload500JSONResponse{
+			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
+				Error: a.internalError("dry run workload", err),
+			},
+		}, nil
+	}
+
+	result := api.DryRunWorkload200JSONResponse{
+		Spec:     wire.FromSpec(run.Spec),
+		Created:  run.Created,
+		Replaced: run.Replaced,
+	}
+
+	// Both are absent rather than empty when there is nothing to report. A hash of
+	// "" would read as a hash, and a caller checking whether anything is unknown
+	// should not have to distinguish an empty list from a missing one.
+	if run.SpecHash != "" {
+		result.SpecHash = &run.SpecHash
+	}
+
+	if len(run.Unknown) > 0 {
+		result.Unknown = &run.Unknown
+	}
+
+	return result, nil
 }
 
 // GetWorkload returns the workload with the given name.

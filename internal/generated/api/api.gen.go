@@ -353,6 +353,45 @@ type DeleteWorkloadResult struct {
 	Workload Workload `json:"workload"`
 }
 
+// DryRunWorkloadResult What applying a specification would do, none of it having been done.
+type DryRunWorkloadResult struct {
+	// Created Whether nothing holds the name, so applying creates the workload.
+	Created bool `json:"created"`
+
+	// Replaced Whether applying moves the stored hash, so the running instances are
+	// replaced.
+	//
+	// This is the field an operator cannot work out by reading their manifest.
+	// The hash covers the resolved specification along with the revision of
+	// every secret and the value of every variable the workload reads, so an
+	// apply can replace an instance because a variable moved, with nothing in
+	// the file to say so.
+	//
+	// False for a workload that does not exist, which has nothing running to
+	// replace.
+	Replaced bool `json:"replaced"`
+
+	// Spec The desired state of a workload. Exactly one runtime block must be present;
+	// which one it is selects the driver that runs the workload.
+	Spec WorkloadSpec `json:"spec"`
+
+	// SpecHash The hash the apply would store, which is what the server compares to
+	// decide whether a running instance is replaced.
+	//
+	// Absent when a host port has yet to be allocated. The host ports reach the
+	// hash, so one computed before they are settled is a hash the apply never
+	// stores.
+	SpecHash *string `json:"specHash,omitempty"`
+
+	// Unknown The paths into `spec` whose values the server settles only as it applies.
+	// A host port it has yet to allocate is the only one, reported rather than
+	// invented.
+	//
+	// The paths are written in the syntax the workload list query uses, so
+	// `$.ports[0].from` names the host port of the first mapping.
+	Unknown *[]string `json:"unknown,omitempty"`
+}
+
 // ErrorResponse The body returned for any unsuccessful request.
 type ErrorResponse struct {
 	// Error A human-readable description of what went wrong.
@@ -1606,6 +1645,9 @@ type UpdateVolumeJSONRequestBody = VolumeSpec
 // ApplyWorkloadJSONRequestBody defines body for ApplyWorkload for application/json ContentType.
 type ApplyWorkloadJSONRequestBody = WorkloadSpec
 
+// DryRunWorkloadJSONRequestBody defines body for DryRunWorkload for application/json ContentType.
+type DryRunWorkloadJSONRequestBody = WorkloadSpec
+
 // RestartWorkloadJSONRequestBody defines body for RestartWorkload for application/json ContentType.
 type RestartWorkloadJSONRequestBody = RestartWorkloadRequest
 
@@ -2088,6 +2130,56 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
 	ApplyWorkload(ctx context.Context, name WorkloadName, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DryRunWorkloadWithBody Report what applying a workload would do
+	//
+	// Resolves the given specification exactly as an apply resolves it, reports
+	// what applying it would change, and writes nothing.
+	//
+	// Everything an apply refuses this refuses too, with the same status code: a
+	// volume, secret, variable or workload the specification names and nothing
+	// holds, a pinned host port another workload has, a workload being torn down,
+	// and a specification that is not runnable. A dry run that passes is therefore
+	// a statement about the apply rather than about the request.
+	//
+	// A separate route rather than a flag on the apply. A "do not actually write"
+	// branch through the write path is the version of this that eventually writes
+	// something by accident.
+	//
+	// Nothing is allocated. A port mapping that needs a host port allocated is
+	// reported without one, and its path is listed in `unknown`, because allocating
+	// would consume a port or move a workload's address while reporting that
+	// nothing had changed.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
+	DryRunWorkloadWithBody(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DryRunWorkload Report what applying a workload would do
+	//
+	// Resolves the given specification exactly as an apply resolves it, reports
+	// what applying it would change, and writes nothing.
+	//
+	// Everything an apply refuses this refuses too, with the same status code: a
+	// volume, secret, variable or workload the specification names and nothing
+	// holds, a pinned host port another workload has, a workload being torn down,
+	// and a specification that is not runnable. A dry run that passes is therefore
+	// a statement about the apply rather than about the request.
+	//
+	// A separate route rather than a flag on the apply. A "do not actually write"
+	// branch through the write path is the version of this that eventually writes
+	// something by accident.
+	//
+	// Nothing is allocated. A port mapping that needs a host port allocated is
+	// reported without one, and its path is listed in `unknown`, because allocating
+	// would consume a port or move a workload's address while reporting that
+	// nothing had changed.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
+	DryRunWorkload(ctx context.Context, name WorkloadName, body DryRunWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetWorkloadLogs Read a workload's logs
 	//
@@ -2894,6 +2986,76 @@ func (c *Client) ApplyWorkloadWithBody(ctx context.Context, name WorkloadName, c
 // Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
 func (c *Client) ApplyWorkload(ctx context.Context, name WorkloadName, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewApplyWorkloadRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DryRunWorkloadWithBody Report what applying a workload would do
+//
+// Resolves the given specification exactly as an apply resolves it, reports
+// what applying it would change, and writes nothing.
+//
+// Everything an apply refuses this refuses too, with the same status code: a
+// volume, secret, variable or workload the specification names and nothing
+// holds, a pinned host port another workload has, a workload being torn down,
+// and a specification that is not runnable. A dry run that passes is therefore
+// a statement about the apply rather than about the request.
+//
+// A separate route rather than a flag on the apply. A "do not actually write"
+// branch through the write path is the version of this that eventually writes
+// something by accident.
+//
+// Nothing is allocated. A port mapping that needs a host port allocated is
+// reported without one, and its path is listed in `unknown`, because allocating
+// would consume a port or move a workload's address while reporting that
+// nothing had changed.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
+func (c *Client) DryRunWorkloadWithBody(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDryRunWorkloadRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DryRunWorkload Report what applying a workload would do
+//
+// Resolves the given specification exactly as an apply resolves it, reports
+// what applying it would change, and writes nothing.
+//
+// Everything an apply refuses this refuses too, with the same status code: a
+// volume, secret, variable or workload the specification names and nothing
+// holds, a pinned host port another workload has, a workload being torn down,
+// and a specification that is not runnable. A dry run that passes is therefore
+// a statement about the apply rather than about the request.
+//
+// A separate route rather than a flag on the apply. A "do not actually write"
+// branch through the write path is the version of this that eventually writes
+// something by accident.
+//
+// Nothing is allocated. A port mapping that needs a host port allocated is
+// reported without one, and its path is listed in `unknown`, because allocating
+// would consume a port or move a workload's address while reporting that
+// nothing had changed.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
+func (c *Client) DryRunWorkload(ctx context.Context, name WorkloadName, body DryRunWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDryRunWorkloadRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4005,6 +4167,53 @@ func NewApplyWorkloadRequestWithBody(server string, name WorkloadName, contentTy
 	return req, nil
 }
 
+// NewDryRunWorkloadRequest calls the generic DryRunWorkload builder with application/json body
+func NewDryRunWorkloadRequest(server string, name WorkloadName, body DryRunWorkloadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewDryRunWorkloadRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewDryRunWorkloadRequestWithBody constructs an http.Request for the DryRunWorkload method, with any body, and a specified content type
+func NewDryRunWorkloadRequestWithBody(server string, name WorkloadName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/workloads/%s/dry-run", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetWorkloadLogsRequest constructs an http.Request for the GetWorkloadLogs method
 func NewGetWorkloadLogsRequest(server string, name WorkloadName, params *GetWorkloadLogsParams) (*http.Request, error) {
 	var err error
@@ -4793,6 +5002,56 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
 	ApplyWorkloadWithResponse(ctx context.Context, name WorkloadName, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyWorkloadResponse, error)
+
+	// DryRunWorkloadWithBodyWithResponse Report what applying a workload would do
+	//
+	// Resolves the given specification exactly as an apply resolves it, reports
+	// what applying it would change, and writes nothing.
+	//
+	// Everything an apply refuses this refuses too, with the same status code: a
+	// volume, secret, variable or workload the specification names and nothing
+	// holds, a pinned host port another workload has, a workload being torn down,
+	// and a specification that is not runnable. A dry run that passes is therefore
+	// a statement about the apply rather than about the request.
+	//
+	// A separate route rather than a flag on the apply. A "do not actually write"
+	// branch through the write path is the version of this that eventually writes
+	// something by accident.
+	//
+	// Nothing is allocated. A port mapping that needs a host port allocated is
+	// reported without one, and its path is listed in `unknown`, because allocating
+	// would consume a port or move a workload's address while reporting that
+	// nothing had changed.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
+	DryRunWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DryRunWorkloadResponse, error)
+
+	// DryRunWorkloadWithResponse Report what applying a workload would do
+	//
+	// Resolves the given specification exactly as an apply resolves it, reports
+	// what applying it would change, and writes nothing.
+	//
+	// Everything an apply refuses this refuses too, with the same status code: a
+	// volume, secret, variable or workload the specification names and nothing
+	// holds, a pinned host port another workload has, a workload being torn down,
+	// and a specification that is not runnable. A dry run that passes is therefore
+	// a statement about the apply rather than about the request.
+	//
+	// A separate route rather than a flag on the apply. A "do not actually write"
+	// branch through the write path is the version of this that eventually writes
+	// something by accident.
+	//
+	// Nothing is allocated. A port mapping that needs a host port allocated is
+	// reported without one, and its path is listed in `unknown`, because allocating
+	// would consume a port or move a workload's address while reporting that
+	// nothing had changed.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
+	DryRunWorkloadWithResponse(ctx context.Context, name WorkloadName, body DryRunWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*DryRunWorkloadResponse, error)
 
 	// GetWorkloadLogsWithResponse Read a workload's logs
 	//
@@ -6054,6 +6313,75 @@ func (r ApplyWorkloadResponse) ContentType() string {
 	return ""
 }
 
+type DryRunWorkloadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DryRunWorkloadResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DryRunWorkloadResponse) GetJSON200() *DryRunWorkloadResult {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r DryRunWorkloadResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DryRunWorkloadResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r DryRunWorkloadResponse) GetJSON422() *ErrorResponse {
+	return r.JSON422
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r DryRunWorkloadResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r DryRunWorkloadResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DryRunWorkloadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DryRunWorkloadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DryRunWorkloadResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetWorkloadLogsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7013,6 +7341,68 @@ func (c *ClientWithResponses) ApplyWorkloadWithResponse(ctx context.Context, nam
 		return nil, err
 	}
 	return ParseApplyWorkloadResponse(rsp)
+}
+
+// DryRunWorkloadWithBodyWithResponse Report what applying a workload would do
+//
+// Resolves the given specification exactly as an apply resolves it, reports
+// what applying it would change, and writes nothing.
+//
+// Everything an apply refuses this refuses too, with the same status code: a
+// volume, secret, variable or workload the specification names and nothing
+// holds, a pinned host port another workload has, a workload being torn down,
+// and a specification that is not runnable. A dry run that passes is therefore
+// a statement about the apply rather than about the request.
+//
+// A separate route rather than a flag on the apply. A "do not actually write"
+// branch through the write path is the version of this that eventually writes
+// something by accident.
+//
+// Nothing is allocated. A port mapping that needs a host port allocated is
+// reported without one, and its path is listed in `unknown`, because allocating
+// would consume a port or move a workload's address while reporting that
+// nothing had changed.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
+func (c *ClientWithResponses) DryRunWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DryRunWorkloadResponse, error) {
+	rsp, err := c.DryRunWorkloadWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDryRunWorkloadResponse(rsp)
+}
+
+// DryRunWorkloadWithResponse Report what applying a workload would do
+//
+// Resolves the given specification exactly as an apply resolves it, reports
+// what applying it would change, and writes nothing.
+//
+// Everything an apply refuses this refuses too, with the same status code: a
+// volume, secret, variable or workload the specification names and nothing
+// holds, a pinned host port another workload has, a workload being torn down,
+// and a specification that is not runnable. A dry run that passes is therefore
+// a statement about the apply rather than about the request.
+//
+// A separate route rather than a flag on the apply. A "do not actually write"
+// branch through the write path is the version of this that eventually writes
+// something by accident.
+//
+// Nothing is allocated. A port mapping that needs a host port allocated is
+// reported without one, and its path is listed in `unknown`, because allocating
+// would consume a port or move a workload's address while reporting that
+// nothing had changed.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
+func (c *ClientWithResponses) DryRunWorkloadWithResponse(ctx context.Context, name WorkloadName, body DryRunWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*DryRunWorkloadResponse, error) {
+	rsp, err := c.DryRunWorkload(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDryRunWorkloadResponse(rsp)
 }
 
 // GetWorkloadLogsWithResponse Read a workload's logs
@@ -8049,6 +8439,60 @@ func ParseApplyWorkloadResponse(rsp *http.Response) (*ApplyWorkloadResponse, err
 	return response, nil
 }
 
+// ParseDryRunWorkloadResponse parses an HTTP response from a DryRunWorkloadWithResponse call
+func ParseDryRunWorkloadResponse(rsp *http.Response) (*DryRunWorkloadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DryRunWorkloadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DryRunWorkloadResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetWorkloadLogsResponse parses an HTTP response from a GetWorkloadLogsWithResponse call
 func ParseGetWorkloadLogsResponse(rsp *http.Response) (*GetWorkloadLogsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -8388,6 +8832,9 @@ type ServerInterface interface {
 	// ApplyWorkload Create or update a workload
 	// (PUT /api/v1/workloads/{name})
 	ApplyWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
+	// DryRunWorkload Report what applying a workload would do
+	// (POST /api/v1/workloads/{name}/dry-run)
+	DryRunWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
 	// GetWorkloadLogs Read a workload's logs
 	// (GET /api/v1/workloads/{name}/logs)
 	GetWorkloadLogs(w http.ResponseWriter, r *http.Request, name WorkloadName, params GetWorkloadLogsParams)
@@ -8932,6 +9379,32 @@ func (siw *ServerInterfaceWrapper) ApplyWorkload(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// DryRunWorkload operation middleware
+func (siw *ServerInterfaceWrapper) DryRunWorkload(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DryRunWorkload(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetWorkloadLogs operation middleware
 func (siw *ServerInterfaceWrapper) GetWorkloadLogs(w http.ResponseWriter, r *http.Request) {
 
@@ -9261,6 +9734,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/stop", wrapper.StopWorkload)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/start", wrapper.StartWorkload)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/restart", wrapper.RestartWorkload)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/dry-run", wrapper.DryRunWorkload)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/volumes", wrapper.ListVolumes)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/volumes", wrapper.CreateVolume)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.DeleteVolume)
@@ -10386,6 +10860,87 @@ func (response ApplyWorkload503JSONResponse) VisitApplyWorkloadResponse(w http.R
 	return err
 }
 
+type DryRunWorkloadRequestObject struct {
+	Name WorkloadName `json:"name"`
+	Body *DryRunWorkloadJSONRequestBody
+}
+
+type DryRunWorkloadResponseObject interface {
+	VisitDryRunWorkloadResponse(w http.ResponseWriter) error
+}
+
+type DryRunWorkload200JSONResponse DryRunWorkloadResult
+
+func (response DryRunWorkload200JSONResponse) VisitDryRunWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DryRunWorkload400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response DryRunWorkload400JSONResponse) VisitDryRunWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DryRunWorkload409JSONResponse ErrorResponse
+
+func (response DryRunWorkload409JSONResponse) VisitDryRunWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DryRunWorkload422JSONResponse ErrorResponse
+
+func (response DryRunWorkload422JSONResponse) VisitDryRunWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(422)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DryRunWorkload500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response DryRunWorkload500JSONResponse) VisitDryRunWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetWorkloadLogsRequestObject struct {
 	Name   WorkloadName `json:"name"`
 	Params GetWorkloadLogsParams
@@ -10832,6 +11387,9 @@ type StrictServerInterface interface {
 	// ApplyWorkload Create or update a workload
 	// (PUT /api/v1/workloads/{name})
 	ApplyWorkload(ctx context.Context, request ApplyWorkloadRequestObject) (ApplyWorkloadResponseObject, error)
+	// DryRunWorkload Report what applying a workload would do
+	// (POST /api/v1/workloads/{name}/dry-run)
+	DryRunWorkload(ctx context.Context, request DryRunWorkloadRequestObject) (DryRunWorkloadResponseObject, error)
 	// GetWorkloadLogs Read a workload's logs
 	// (GET /api/v1/workloads/{name}/logs)
 	GetWorkloadLogs(ctx context.Context, request GetWorkloadLogsRequestObject) (GetWorkloadLogsResponseObject, error)
@@ -11417,6 +11975,39 @@ func (sh *strictHandler) ApplyWorkload(w http.ResponseWriter, r *http.Request, n
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ApplyWorkloadResponseObject); ok {
 		if err := validResponse.VisitApplyWorkloadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DryRunWorkload operation middleware
+func (sh *strictHandler) DryRunWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName) {
+	var request DryRunWorkloadRequestObject
+
+	request.Name = name
+
+	var body DryRunWorkloadJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DryRunWorkload(ctx, request.(DryRunWorkloadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DryRunWorkload")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DryRunWorkloadResponseObject); ok {
+		if err := validResponse.VisitDryRunWorkloadResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

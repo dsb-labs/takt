@@ -1458,6 +1458,72 @@ func (_c *MockWorkloadService_Delete_Call) RunAndReturn(run func(ctx context.Con
 	return _c
 }
 
+// DryRun provides a mock function for the type MockWorkloadService
+func (_mock *MockWorkloadService) DryRun(ctx context.Context, spec manifest.Spec) (service.DryRun, error) {
+	ret := _mock.Called(ctx, spec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DryRun")
+	}
+
+	var r0 service.DryRun
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Spec) (service.DryRun, error)); ok {
+		return returnFunc(ctx, spec)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Spec) service.DryRun); ok {
+		r0 = returnFunc(ctx, spec)
+	} else {
+		r0 = ret.Get(0).(service.DryRun)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Spec) error); ok {
+		r1 = returnFunc(ctx, spec)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockWorkloadService_DryRun_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DryRun'
+type MockWorkloadService_DryRun_Call struct {
+	*mock.Call
+}
+
+// DryRun is a helper method to define mock.On call
+//   - ctx context.Context
+//   - spec manifest.Spec
+func (_e *MockWorkloadService_Expecter) DryRun(ctx any, spec any) *MockWorkloadService_DryRun_Call {
+	return &MockWorkloadService_DryRun_Call{Call: _e.mock.On("DryRun", ctx, spec)}
+}
+
+func (_c *MockWorkloadService_DryRun_Call) Run(run func(ctx context.Context, spec manifest.Spec)) *MockWorkloadService_DryRun_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 manifest.Spec
+		if args[1] != nil {
+			arg1 = args[1].(manifest.Spec)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWorkloadService_DryRun_Call) Return(dryRun service.DryRun, err error) *MockWorkloadService_DryRun_Call {
+	_c.Call.Return(dryRun, err)
+	return _c
+}
+
+func (_c *MockWorkloadService_DryRun_Call) RunAndReturn(run func(ctx context.Context, spec manifest.Spec) (service.DryRun, error)) *MockWorkloadService_DryRun_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Get provides a mock function for the type MockWorkloadService
 func (_mock *MockWorkloadService) Get(ctx context.Context, name string) (service.Workload, error) {
 	ret := _mock.Called(ctx, name)

@@ -254,6 +254,147 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 	}
 }
 
+func TestWorkloadAPI_DryRunWorkload(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name         string
+		Path         string
+		Body         any
+		SetupMocks   func(*MockWorkloadService)
+		ExpectStatus int
+		Assert       func(*testing.T, generated.DryRunWorkloadResult)
+	}{
+		{
+			Name: "reports a workload that would be created",
+			Path: "/api/v1/workloads/example/dry-run",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().DryRun(mock.Anything, mock.MatchedBy(func(spec manifest.Spec) bool {
+					return spec.Name == "example" && spec.Container != nil
+				})).Return(service.DryRun{
+					Spec:     canonicalSpec("example"),
+					SpecHash: "hash-one",
+					Created:  true,
+				}, nil).Once()
+			},
+			ExpectStatus: http.StatusOK,
+			Assert: func(t *testing.T, result generated.DryRunWorkloadResult) {
+				assert.Equal(t, "example", result.Spec.Name)
+				assert.True(t, result.Created)
+				assert.False(t, result.Replaced)
+				require.NotNil(t, result.SpecHash)
+				assert.Equal(t, "hash-one", *result.SpecHash)
+				assert.Nil(t, result.Unknown)
+			},
+		},
+		{
+			Name: "reports a host port it has yet to allocate",
+			Path: "/api/v1/workloads/example/dry-run",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				spec := canonicalSpec("example")
+				spec.Ports = []manifest.Port{{To: 8080, Protocol: manifest.ProtocolTCP}}
+
+				svc.EXPECT().DryRun(mock.Anything, mock.Anything).Return(service.DryRun{
+					Spec:     spec,
+					Replaced: true,
+					Unknown:  []string{"$.ports[0].from"},
+				}, nil).Once()
+			},
+			ExpectStatus: http.StatusOK,
+			Assert: func(t *testing.T, result generated.DryRunWorkloadResult) {
+				// Absent rather than empty: a hash of "" would read as a hash.
+				assert.Nil(t, result.SpecHash)
+				require.NotNil(t, result.Unknown)
+				assert.Equal(t, []string{"$.ports[0].from"}, *result.Unknown)
+				assert.True(t, result.Replaced)
+			},
+		},
+		{
+			Name: "rejects a name that disagrees with the path",
+			Path: "/api/v1/workloads/other/dry-run",
+			Body: containerSpec("example"),
+			// A mismatch is ambiguous, so the service is never called.
+			SetupMocks:   func(*MockWorkloadService) {},
+			ExpectStatus: http.StatusBadRequest,
+		},
+		{
+			// Every refusal is reported as the apply reports it, so a dry run that
+			// passes is a statement about the apply rather than about the request.
+			Name: "reports a secret the workload reads but does not exist",
+			Path: "/api/v1/workloads/example/dry-run",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().DryRun(mock.Anything, mock.Anything).
+					Return(service.DryRun{}, fmt.Errorf("%w: db-password", service.ErrSecretNotFound)).Once()
+			},
+			ExpectStatus: http.StatusBadRequest,
+		},
+		{
+			Name: "reports a specification that fails validation",
+			Path: "/api/v1/workloads/example/dry-run",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().DryRun(mock.Anything, mock.Anything).
+					Return(service.DryRun{}, service.ErrInvalidSpec).Once()
+			},
+			ExpectStatus: http.StatusBadRequest,
+		},
+		{
+			Name: "reports an unsupported runtime",
+			Path: "/api/v1/workloads/example/dry-run",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().DryRun(mock.Anything, mock.Anything).
+					Return(service.DryRun{}, service.ErrUnsupportedRuntime).Once()
+			},
+			ExpectStatus: http.StatusUnprocessableEntity,
+		},
+		{
+			Name: "reports a workload that is being deleted",
+			Path: "/api/v1/workloads/example/dry-run",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().DryRun(mock.Anything, mock.Anything).
+					Return(service.DryRun{}, service.ErrWorkloadDeleting).Once()
+			},
+			ExpectStatus: http.StatusConflict,
+		},
+		{
+			Name: "reports a pinned host port another workload holds",
+			Path: "/api/v1/workloads/example/dry-run",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().DryRun(mock.Anything, mock.Anything).
+					Return(service.DryRun{}, port.ErrHostPortTaken).Once()
+			},
+			ExpectStatus: http.StatusConflict,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			svc := NewMockWorkloadService(t)
+			tc.SetupMocks(svc)
+
+			body, err := json.Marshal(tc.Body)
+			require.NoError(t, err)
+
+			resp := do(t, svc, http.MethodPost, tc.Path, bytes.NewReader(body))
+			require.Equal(t, tc.ExpectStatus, resp.Code)
+
+			if tc.Assert == nil {
+				return
+			}
+
+			var result generated.DryRunWorkloadResult
+			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+			tc.Assert(t, result)
+		})
+	}
+}
+
 // TestWorkloadAPI_HidesInternalFailures covers every endpoint's unexpected-failure
 // path, since that is the one branch a caller can reach without the server having
 // decided what to tell them.
@@ -280,6 +421,15 @@ func TestWorkloadAPI_HidesInternalFailures(t *testing.T) {
 			SetupMocks: func(svc *MockWorkloadService) {
 				svc.EXPECT().Apply(mock.Anything, mock.Anything).
 					Return(service.Workload{}, false, internal).Once()
+			},
+		},
+		{
+			Name:   "dry run",
+			Method: http.MethodPost,
+			Target: "/api/v1/workloads/example/dry-run",
+			Body:   containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().DryRun(mock.Anything, mock.Anything).Return(service.DryRun{}, internal).Once()
 			},
 		},
 		{
