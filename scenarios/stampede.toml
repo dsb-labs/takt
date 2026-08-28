@@ -1,0 +1,57 @@
+name = "stampede"
+description = "A thousand workloads with every feature at once, churned hard."
+
+# The scenario for finding out where the system stops being comfortable. Everything a
+# scenario can ask for is on at once, so a pass has to do every kind of work it knows
+# how to do, on a fleet larger than anything a single node is expected to hold.
+#
+# Weighted towards exec rather than containers on purpose. An exec workload is orca's
+# own runtime with no daemon in front of it, so a fleet of them measures the
+# reconciler, the database and the API. A thousand containers would measure the Docker
+# daemon, which is not the thing under test.
+#
+# What to watch while this runs, none of which the report says:
+#
+#   orca_reconcile_pass_duration_seconds   a pass taking longer than the reconcile
+#                                          interval means the loop is falling behind
+#   db_sql_connection_wait_duration        SQLite write contention, which should stay
+#                                          at zero
+#   go_goroutine_count                     unbounded growth here is a leak
+#   orca_workloads{state="failed"}         should settle at the failing share
+
+[fleet]
+containers = 200
+exec = 800
+dynamic-ports = 0.20
+fixed-ports = 0.05
+health-checks = 0.15
+scheduled = 0.05
+failing = 0.05
+references = 0.15
+reads-secret = 0.80
+reads-variable = 0.80
+mounts-secret = 0.30
+mounts-variable = 0.30
+mounts-volume = 0.10
+
+[resources]
+secrets = 50
+variables = 50
+volumes = 20
+
+[churn]
+duration = "4m"
+workers = 48
+
+# Rotation is weighted highest because it is the one operation that does work
+# proportional to the fleet: setting a secret redeploys every workload reading it, so
+# fifty secrets read by eight hundred workloads means every rotation replaces about
+# sixteen of them.
+[churn.weights]
+rotate-secret = 4
+rotate-variable = 2
+reapply = 3
+list = 1
+get = 3
+logs = 2
+restart = 1
