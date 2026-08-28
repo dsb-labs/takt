@@ -85,6 +85,16 @@ A value read either way is taken exactly as given, including a trailing newline.
 An empty value is a value. A workload reading it gets an empty environment variable
 rather than none.
 
+Labels are attached with `--label`, repeatable:
+
+```sh
+orca variable set log-level debug -l app=web -l team=platform
+```
+
+They replace rather than merge, so setting a value without `--label` removes the ones
+the variable had. Labelling a variable replaces no workload: what redeploys a reader is
+the value it reads.
+
 ## Changing a value
 
 Setting a variable to a new value moves the specification hash of every workload

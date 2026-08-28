@@ -77,7 +77,15 @@ Keys starting with `orca.` are refused. The server writes its own labels under t
 prefix, and refusing yours is better than silently overwriting it.
 
 A value is free text without control characters, up to 256 bytes. An empty value
-is allowed. A workload may carry up to 32 labels.
+is allowed. Up to 32 labels may be carried.
+
+Volumes, secrets and variables carry labels under the same rules, so there is one
+answer to what a label may be. A volume's are in its manifest; a secret's and a
+variable's are set with `--label`, since neither is described by a manifest.
+
+**A label is readable wherever the thing it is on is.** That matters most for a
+secret, whose value deliberately is not: a label on one is as public as its name, and
+is no place to put a credential.
 
 ## Runtimes
 
@@ -456,13 +464,20 @@ orca volume create volume.yaml
 orca workload apply example.yaml
 ```
 
-The volume manifest is a name and nothing else, since a volume holds data and has
-nothing to configure:
+The volume manifest is a name, and labels if you want them. A volume holds data and
+has nothing else to configure:
 
 ```yaml
 version: v1
 name: example-data
+labels:
+  app: web
+  team: platform
 ```
+
+Labels follow the rules in [Labels](#labels), unchanged. `orca volume update` replaces
+them; nothing mounting the volume is redeployed, because a label says nothing about
+the storage.
 
 A volume outlives the workloads that mount it. Deleting a workload leaves its volumes
 alone, and `orca volume delete` is the only thing in orca that removes stored data. See

@@ -13,6 +13,7 @@ orca workload start <name>              Start a stopped workload
 orca workload restart <name>            Replace a workload's running instances
 
 orca volume create <manifest>           Create a volume from a manifest file
+orca volume update <manifest>           Update a volume's labels from a manifest
 orca volume list                        List volumes                         (alias: ls)
 orca volume get <name>                  Show a single volume
 orca volume delete <name>               Delete a volume and the data it holds (alias: rm)
@@ -223,17 +224,39 @@ yet is lost with the server, and can simply be sent again.
 orca volume create volume.yaml
 ```
 
-Creates a volume and the directory backing it. The manifest is a name and nothing else:
+Creates a volume and the directory backing it. The manifest is a name, and labels if
+you want them:
 
 ```yaml
 version: v1
 name: example-data
+labels:
+  app: web
+  team: platform
 ```
 
 A volume has to exist before a workload can mount it, so that a mistyped name is
 reported rather than becoming a second empty volume. Creating one that already exists
 is refused, because a volume holds data and the caller may well have meant a name they
 have not used yet.
+
+## volume update
+
+```sh
+orca volume update volume.yaml
+```
+
+Replaces the labels on the volume the manifest names.
+
+Labels are the whole of what this changes, and the whole of what a volume has to
+change. Its name identifies it, the directory holding its data is named for the
+identifier it was assigned, and its contents are the workloads' to write.
+
+The labels in the manifest replace the ones stored, the way applying a workload
+manifest replaces a workload's. A manifest carrying none removes them all.
+
+Nothing mounting the volume is redeployed. A label says nothing about the storage, so
+no specification hash moves.
 
 ## volume list
 
@@ -290,6 +313,7 @@ printf %s hunter2 | orca secret set db-password
 | Flag | Description |
 |---|---|
 | `--from-file`, `-f` | Read the value from this file rather than standard input. |
+| `--label`, `-l` | A `key=value` label to attach. Repeatable. |
 
 Stores a value, encrypted. There is deliberately no flag that takes the value:
 arguments are visible to anything that can list processes on the host, and they land
@@ -297,6 +321,17 @@ in shell history.
 
 The value is taken exactly as given, including a trailing newline. `printf %s` rather
 than `echo` is what keeps one out of it.
+
+**Labels replace rather than merge.** Setting a value without `--label` removes the
+labels the secret had, the way applying a workload manifest without them does. There
+is one desired state, and the request carries all of it.
+
+Labelling a secret is not rotating it. The revision stays put, so nothing reading the
+secret is replaced — the same reasoning that keeps `orca admin rekey` from redeploying
+the fleet.
+
+**A label is as readable as the secret's name.** The value is not, and a label is no
+place to put one.
 
 Setting a secret to the value it already holds does nothing, so a script that sets
 every secret on every run does not restart the workloads reading them. A value that
@@ -349,6 +384,7 @@ printf %s debug | orca variable set log-level
 | Flag | Description |
 |---|---|
 | `--from-file`, `-f` | Read the value from this file rather than the argument or standard input. |
+| `--label`, `-l` | A `key=value` label to attach. Repeatable. |
 
 Stores a value as given. The value may be an argument here, where a secret's may not:
 arguments are visible to anything that can list processes and they land in shell
@@ -356,6 +392,10 @@ history, which a variable has no reason to avoid.
 
 A value read from a file or from standard input is taken exactly as given, including
 a trailing newline. Giving both an argument and `--from-file` is refused.
+
+**Labels replace rather than merge.** Setting a value without `--label` removes the
+labels the variable had. Labelling one replaces no workload: what redeploys a reader
+is the value it reads.
 
 Setting a variable to the value it already holds does nothing, so a script that sets
 every variable on every run does not restart the workloads reading them. A value that

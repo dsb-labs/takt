@@ -53,6 +53,11 @@ Reaching orca's API is already enough to run code on the host, so an attacker wh
 reach it can start a workload that reads any secret. Encryption at rest protects the
 database file, not the API. See [Exposure](operating.md#exposure).
 
+**Labels are not covered either.** A secret carries labels so an operator can record
+which service owns it, and they are read back by the API the way its name is. A label
+on a secret is as public as the secret's name. Put nothing in one you would not put in
+the other.
+
 ## Setting a value
 
 The value is read from a file or from standard input:
@@ -72,6 +77,19 @@ whitespace is not orca's to correct.
 
 An empty value is a value. A workload reading it gets an empty variable rather than
 none.
+
+Labels are attached with `--label`, repeatable:
+
+```sh
+printf %s hunter2 | orca secret set db-password -l app=web -l team=platform
+```
+
+They replace rather than merge, so setting a value without `--label` removes the ones
+the secret had. There is one desired state and the request carries all of it, the way
+a workload manifest does.
+
+Labelling a secret is not rotating it. The revision stays put, so nothing reading the
+secret is replaced. See [Rotation](#rotation).
 
 ## Mounting a secret as a file
 
