@@ -12,7 +12,18 @@ const (
 	// has run the end-to-end suite, so a run measures orca rather than a pull.
 	image = "busybox:latest"
 	// What a workload does while it is up, which is as little as possible.
-	idle = "while true; do echo tick; sleep 5; done"
+	//
+	// The trap is what makes it stop promptly. A container's PID 1 does not receive
+	// a signal it has no handler for, so a workload without one ignores the SIGTERM
+	// that docker stop sends and is killed when the grace period expires instead —
+	// ten seconds later, by default. Measured: ten seconds to stop without this,
+	// nine hundredths of a second with it.
+	//
+	// That matters because teardown is the slowest thing a run does, and a run
+	// measuring the daemon's grace period is not measuring orca. The sleep is
+	// backgrounded and waited on for the same reason: a shell does not act on a trap
+	// until the command in front of it returns.
+	idle = `trap "exit 0" TERM INT; while true; do echo tick; sleep 5 & wait $!; done`
 	// What a workload that is meant to fail does, which is fail immediately. This
 	// is what puts the restart backoff and the decision to give up under load.
 	fail = "exit 1"
