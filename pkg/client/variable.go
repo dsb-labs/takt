@@ -25,6 +25,8 @@ type (
 		// Empty for a variable nothing reads, which is one that can be deleted without
 		// forcing.
 		UsedBy []string
+		// Arbitrary key-value pairs attached to the variable.
+		Labels map[string]string
 		// The time the variable was created.
 		CreatedAt time.Time
 		// The time the variable last changed, by its value or its labels.
@@ -65,12 +67,12 @@ func checkVariableName(name string) error {
 // Setting a variable to the value it already holds does nothing, so a caller that
 // sets every variable on every run does not restart the workloads reading them. A
 // value that did change replaces those workloads, and reaches them as they start.
-func (c *Client) SetVariable(ctx context.Context, name, value string) (Variable, bool, error) {
+func (c *Client) SetVariable(ctx context.Context, name, value string, labels map[string]string) (Variable, bool, error) {
 	if err := checkVariableName(name); err != nil {
 		return Variable{}, false, err
 	}
 
-	resp, err := c.api.SetVariableWithResponse(ctx, name, api.VariableSpec{Value: value})
+	resp, err := c.api.SetVariableWithResponse(ctx, name, api.VariableSpec{Value: value, Labels: wireLabels(labels)})
 	if err != nil {
 		return Variable{}, false, fmt.Errorf("failed to set variable: %w", err)
 	}
@@ -184,6 +186,10 @@ func newVariable(variable api.Variable) Variable {
 		Value:     variable.Value,
 		CreatedAt: variable.CreatedAt,
 		UpdatedAt: variable.UpdatedAt,
+	}
+
+	if variable.Labels != nil {
+		out.Labels = *variable.Labels
 	}
 
 	if variable.UsedBy != nil {

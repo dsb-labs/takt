@@ -23,6 +23,7 @@ const maxValue = 1 << 20
 func Command() *cobra.Command {
 	var address string
 	var file string
+	var labels map[string]string
 
 	cmd := &cobra.Command{
 		Use:   "set <name>",
@@ -38,7 +39,13 @@ func Command() *cobra.Command {
 			"The value is taken exactly as given, including any trailing newline. Use\n" +
 			"--from-file to read a file, or pipe the value in:\n\n" +
 			"  orca secret set db-password --from-file ./password\n" +
-			"  printf %s hunter2 | orca secret set db-password",
+			"  printf %s hunter2 | orca secret set db-password\n\n" +
+			"Labels are replaced, not merged, the way a workload manifest replaces a\n" +
+			"workload's. Setting a value without --label removes the labels the secret\n" +
+			"had. Labelling one is not a rotation: the revision stays put and nothing\n" +
+			"reading the secret is replaced.\n\n" +
+			"A label is as readable as the secret's name. The value is not, and a label\n" +
+			"is no place to put one.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			value, err := read(cmd, file)
@@ -51,7 +58,7 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			secret, _, err := c.SetSecret(cmd.Context(), args[0], value)
+			secret, _, err := c.SetSecret(cmd.Context(), args[0], value, labels)
 			if err != nil {
 				return fmt.Errorf("failed to set secret: %w", err)
 			}
@@ -66,6 +73,8 @@ func Command() *cobra.Command {
 	flags := cmd.Flags()
 	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 	flags.StringVarP(&file, "from-file", "f", "", "read the value from this file rather than standard input")
+	flags.StringToStringVarP(&labels, "label", "l", nil,
+		"a key=value label to attach, repeatable. The labels given replace the ones stored")
 
 	return cmd
 }

@@ -27,6 +27,8 @@ type (
 		// for a secret nothing reads, which is one that can be deleted without
 		// forcing.
 		UsedBy []string
+		// Arbitrary key-value pairs attached to the secret.
+		Labels map[string]string
 		// The time the secret was created.
 		CreatedAt time.Time
 		// The time the secret last changed, by its value or its labels. The revision
@@ -68,12 +70,12 @@ func checkSecretName(name string) error {
 // Setting a secret to the value it already holds does nothing, so a caller that sets
 // every secret on every run does not restart the workloads reading them. A value that
 // did change replaces those workloads, and reaches them as they start.
-func (c *Client) SetSecret(ctx context.Context, name string, value []byte) (Secret, bool, error) {
+func (c *Client) SetSecret(ctx context.Context, name string, value []byte, labels map[string]string) (Secret, bool, error) {
 	if err := checkSecretName(name); err != nil {
 		return Secret{}, false, err
 	}
 
-	resp, err := c.api.SetSecretWithResponse(ctx, name, api.SecretSpec{Value: string(value)})
+	resp, err := c.api.SetSecretWithResponse(ctx, name, api.SecretSpec{Value: string(value), Labels: wireLabels(labels)})
 	if err != nil {
 		return Secret{}, false, fmt.Errorf("failed to set secret: %w", err)
 	}
@@ -186,6 +188,10 @@ func newSecret(secret api.Secret) Secret {
 		Revision:  secret.Revision,
 		CreatedAt: secret.CreatedAt,
 		UpdatedAt: secret.UpdatedAt,
+	}
+
+	if secret.Labels != nil {
+		out.Labels = *secret.Labels
 	}
 
 	if secret.UsedBy != nil {

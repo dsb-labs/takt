@@ -123,7 +123,7 @@ func setup(ctx context.Context, config Config, collected *collector, names Names
 	for i, name := range names.Secrets {
 		group.Go(func() error {
 			return collected.measure("secret.set", func() error {
-				_, _, err := config.Client.SetSecret(ctx, name, fmt.Appendf(nil, "value-%d", i))
+				_, _, err := config.Client.SetSecret(ctx, name, fmt.Appendf(nil, "value-%d", i), nil)
 
 				return err
 			})
@@ -133,7 +133,7 @@ func setup(ctx context.Context, config Config, collected *collector, names Names
 	for i, name := range names.Variables {
 		group.Go(func() error {
 			return collected.measure("variable.set", func() error {
-				_, _, err := config.Client.SetVariable(ctx, name, fmt.Sprintf("value-%d", i))
+				_, _, err := config.Client.SetVariable(ctx, name, fmt.Sprintf("value-%d", i), nil)
 
 				return err
 			})
@@ -305,11 +305,11 @@ func perform(ctx context.Context, config Config, collected *collector, names Nam
 	_ = collected.measure(op, func() error {
 		switch op {
 		case "secret.rotate":
-			_, _, err := c.SetSecret(ctx, choose(names.Secrets, rng), fmt.Appendf(nil, "rotated-%d", rng.Int64()))
+			_, _, err := c.SetSecret(ctx, choose(names.Secrets, rng), fmt.Appendf(nil, "rotated-%d", rng.Int64()), nil)
 
 			return err
 		case "variable.rotate":
-			_, _, err := c.SetVariable(ctx, choose(names.Variables, rng), fmt.Sprintf("rotated-%d", rng.Int64()))
+			_, _, err := c.SetVariable(ctx, choose(names.Variables, rng), fmt.Sprintf("rotated-%d", rng.Int64()), nil)
 
 			return err
 		case "workload.reapply":

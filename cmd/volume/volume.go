@@ -9,6 +9,7 @@ import (
 	delcmd "github.com/dsb-labs/orca/cmd/volume/delete"
 	"github.com/dsb-labs/orca/cmd/volume/get"
 	"github.com/dsb-labs/orca/cmd/volume/list"
+	"github.com/dsb-labs/orca/cmd/volume/update"
 )
 
 // Command returns the "volume" command, which does nothing on its own and holds the
@@ -26,6 +27,7 @@ func Command() *cobra.Command {
 	cmd.AddCommand(
 		create.Command(),
 		list.Command(),
+		update.Command(),
 		get.Command(),
 		delcmd.Command(),
 	)

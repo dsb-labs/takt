@@ -70,7 +70,7 @@ func TestClient_SetVariable(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
 			variable, created, err := newTestClient(t, tc.Handler).
-				SetVariable(t.Context(), "log-level", "debug")
+				SetVariable(t.Context(), "log-level", "debug", nil)
 			if tc.ExpectErr != nil {
 				assert.True(t, tc.ExpectErr(err), "unexpected error: %v", err)
 				return

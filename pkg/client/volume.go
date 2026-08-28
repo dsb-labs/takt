@@ -22,6 +22,8 @@ type Volume struct {
 	// The names of the workloads whose specifications mount this volume. Empty for a
 	// volume nothing is using, which is one that can be deleted without forcing.
 	UsedBy []string
+	// Arbitrary key-value pairs attached to the volume.
+	Labels map[string]string
 	// The time the volume was created.
 	CreatedAt time.Time
 }
@@ -49,6 +51,7 @@ func (c *Client) CreateVolume(ctx context.Context, volume manifest.Volume) (Volu
 	resp, err := c.api.CreateVolumeWithResponse(ctx, api.VolumeSpec{
 		Version: volume.Version,
 		Name:    volume.Name,
+		Labels:  wireLabels(volume.Labels),
 	})
 	if err != nil {
 		return Volume{}, fmt.Errorf("failed to create volume: %w", err)
@@ -59,6 +62,43 @@ func (c *Client) CreateVolume(ctx context.Context, volume manifest.Volume) (Volu
 		return newVolume(resp.JSON201.Volume), nil
 	case resp.JSON409 != nil:
 		return Volume{}, fmt.Errorf("%s: %w", resp.JSON409.Error, ErrVolumeExists)
+	case resp.JSON400 != nil:
+		return Volume{}, newError(http.StatusBadRequest, resp.JSON400)
+	case resp.JSON500 != nil:
+		return Volume{}, newError(http.StatusInternalServerError, resp.JSON500)
+	default:
+		return Volume{}, newError(resp.StatusCode(), nil)
+	}
+}
+
+// UpdateVolume replaces the labels on the volume the manifest names, returning it as
+// it now stands. Returns ErrVolumeNotFound when no such volume exists.
+//
+// The labels in the manifest replace the ones stored, as applying a workload
+// manifest replaces a workload's. A manifest carrying none removes them all.
+//
+// Labels are the whole of what this changes. A volume's name identifies it, the
+// directory holding its data is named for the identifier it was assigned, and its
+// contents are the workloads' to write.
+func (c *Client) UpdateVolume(ctx context.Context, volume manifest.Volume) (Volume, error) {
+	if err := checkName(volume.Name); err != nil {
+		return Volume{}, err
+	}
+
+	resp, err := c.api.UpdateVolumeWithResponse(ctx, volume.Name, api.VolumeSpec{
+		Version: volume.Version,
+		Name:    volume.Name,
+		Labels:  wireLabels(volume.Labels),
+	})
+	if err != nil {
+		return Volume{}, fmt.Errorf("failed to update volume: %w", err)
+	}
+
+	switch {
+	case resp.JSON200 != nil:
+		return newVolume(resp.JSON200.Volume), nil
+	case resp.JSON404 != nil:
+		return Volume{}, fmt.Errorf("%s: %w", resp.JSON404.Error, ErrVolumeNotFound)
 	case resp.JSON400 != nil:
 		return Volume{}, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON500 != nil:
@@ -187,6 +227,10 @@ func newVolume(volume api.Volume) Volume {
 
 	if volume.UsedBy != nil {
 		out.UsedBy = *volume.UsedBy
+	}
+
+	if volume.Labels != nil {
+		out.Labels = *volume.Labels
 	}
 
 	return out

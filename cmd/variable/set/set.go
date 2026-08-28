@@ -23,6 +23,7 @@ const maxValue = 1 << 20
 func Command() *cobra.Command {
 	var address string
 	var file string
+	var labels map[string]string
 
 	cmd := &cobra.Command{
 		Use:   "set <name> [value]",
@@ -41,7 +42,11 @@ func Command() *cobra.Command {
 			"including any trailing newline:\n\n" +
 			"  orca variable set log-level debug\n" +
 			"  orca variable set motd --from-file ./motd.txt\n" +
-			"  printf %s debug | orca variable set log-level",
+			"  printf %s debug | orca variable set log-level\n\n" +
+			"Labels are replaced, not merged, the way a workload manifest replaces a\n" +
+			"workload's. Setting a value without --label removes the labels the variable\n" +
+			"had. Labelling one replaces no workload: what redeploys a reader is the\n" +
+			"value it reads.",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			value, err := read(cmd, args, file)
@@ -54,7 +59,7 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			variable, _, err := c.SetVariable(cmd.Context(), args[0], value)
+			variable, _, err := c.SetVariable(cmd.Context(), args[0], value, labels)
 			if err != nil {
 				return fmt.Errorf("failed to set variable: %w", err)
 			}
@@ -69,6 +74,8 @@ func Command() *cobra.Command {
 	flags := cmd.Flags()
 	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 	flags.StringVarP(&file, "from-file", "f", "", "read the value from this file rather than the argument or standard input")
+	flags.StringToStringVarP(&labels, "label", "l", nil,
+		"a key=value label to attach, repeatable. The labels given replace the ones stored")
 
 	return cmd
 }

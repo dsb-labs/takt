@@ -69,7 +69,7 @@ func TestClient_SetSecret(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
 			secret, created, err := newTestClient(t, tc.Handler).
-				SetSecret(t.Context(), "db-password", []byte("hunter2"))
+				SetSecret(t.Context(), "db-password", []byte("hunter2"), nil)
 			if tc.ExpectErr != nil {
 				assert.True(t, tc.ExpectErr(err), "unexpected error: %v", err)
 				return

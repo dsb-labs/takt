@@ -153,3 +153,15 @@ func newError(status int, message *api.ErrorResponse) error {
 
 	return err
 }
+
+// wireLabels puts labels on a request, absent rather than an empty object when there
+// are none.
+func wireLabels(labels map[string]string) *api.Labels {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	wire := api.Labels(labels)
+
+	return &wire
+}
