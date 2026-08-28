@@ -260,8 +260,31 @@ func LoadConfig(path string) (Config, error) {
 	return config, nil
 }
 
-// Validate the configuration fields.
+// Validate the configuration fields, resolving the data directory before anything
+// reads it.
+//
+// The directory is made absolute here rather than left as written. A relative one
+// produces workloads that cannot start: Landlock is given the path of a workload's
+// own directory and docker is given the path of a volume, and both refuse a path that
+// is not absolute. The failure then surfaces as a workload that never converges,
+// which says nothing about the configuration that caused it.
+//
+// This is the ordinary case rather than an exotic one. The development configuration
+// in the repository names ./data, and the fallback used when the home directory
+// cannot be read is "data".
+//
+// An empty directory is left alone so that the check below reports it as missing.
+// Resolving it would silently turn it into the working directory.
 func (c *Config) Validate() error {
+	if c.Data.Directory != "" {
+		directory, err := filepath.Abs(c.Data.Directory)
+		if err != nil {
+			return fmt.Errorf("failed to resolve the data directory: %w", err)
+		}
+
+		c.Data.Directory = directory
+	}
+
 	return errors.Join(
 		c.HTTP.validate(),
 		c.Data.validate(),

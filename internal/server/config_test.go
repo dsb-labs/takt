@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/netip"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -275,6 +276,57 @@ func TestConfig_Validate(t *testing.T) {
 			assert.NoError(t, err)
 		})
 	}
+}
+
+// TestConfig_Validate_ResolvesDataDirectory covers the one thing validation changes
+// rather than checks.
+//
+// A relative data directory produces workloads that cannot start: Landlock is given a
+// workload's own directory and docker is given a volume's, and both refuse a path that
+// is not absolute. The development configuration in the repository names ./data, so
+// this is the ordinary case.
+func TestConfig_Validate_ResolvesDataDirectory(t *testing.T) {
+	t.Parallel()
+
+	t.Run("makes a relative directory absolute", func(t *testing.T) {
+		config := server.DefaultConfig()
+		config.Data.Directory = "./data"
+
+		require.NoError(t, config.Validate())
+
+		assert.True(t, filepath.IsAbs(config.Data.Directory),
+			"the data directory is still relative: %s", config.Data.Directory)
+		assert.True(t, strings.HasSuffix(config.Data.Directory, "/data"))
+	})
+
+	t.Run("leaves an absolute directory alone", func(t *testing.T) {
+		config := server.DefaultConfig()
+		config.Data.Directory = "/var/lib/orca"
+
+		require.NoError(t, config.Validate())
+		assert.Equal(t, "/var/lib/orca", config.Data.Directory)
+	})
+
+	// Resolving an empty directory would silently turn it into the working
+	// directory, and the operator would never learn they had not set one.
+	t.Run("leaves an empty directory to be reported as missing", func(t *testing.T) {
+		config := server.DefaultConfig()
+		config.Data.Directory = ""
+
+		err := config.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "data directory is required")
+	})
+
+	// The keyring and the database are derived from the directory, so both follow it
+	// once it has been resolved.
+	t.Run("carries the resolved directory into what derives from it", func(t *testing.T) {
+		config := server.DefaultConfig()
+		config.Data.Directory = "./data"
+
+		require.NoError(t, config.Validate())
+		assert.True(t, filepath.IsAbs(config.KeysPath()))
+	})
 }
 
 func TestConfig_KeysPath(t *testing.T) {
