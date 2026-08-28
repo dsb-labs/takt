@@ -476,9 +476,6 @@ What was written is printed as JSON, along with what the restored node still nee
 | `MissingKeys` | Keys the secrets are sealed under that the keyring does not hold. |
 | `MissingVolumes` | Volumes whose data is not on this host, with the path it belongs at. |
 
-Both of the last two are also printed to standard error, so the two do not mix when
-the output is piped.
-
 **Volume data is not in a backup and is not restored here.** Copy each volume's
 contents to the path `MissingVolumes` names. That path ends in the identifier the
 volume was assigned, which is what it is found by: creating a volume of the same name

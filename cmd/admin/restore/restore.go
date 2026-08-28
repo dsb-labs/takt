@@ -73,8 +73,6 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			warn(cmd, report)
-
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
 
@@ -104,23 +102,4 @@ func stopped(address string) error {
 	defer conn.Close()
 
 	return fmt.Errorf("something is listening on %s: stop the server before restoring over its data directory", address)
-}
-
-// warn says what the restore could not do, on stderr so that stdout stays a document
-// something else can read.
-//
-// Both of these are already in the report. They are said again here because they are
-// the difference between a node that comes back and one that comes back broken, and
-// an operator reading a command's output is not necessarily parsing it.
-func warn(cmd *cobra.Command, report restore.Report) {
-	out := cmd.ErrOrStderr()
-
-	for _, volume := range report.MissingVolumes {
-		fmt.Fprintf(out, "Volume %q has no data on this host. Restore it to %s.\n", volume.Name, volume.Path)
-	}
-
-	if len(report.MissingKeys) > 0 {
-		fmt.Fprintln(out, "The keyring does not hold every key the secrets are sealed under.")
-		fmt.Fprintln(out, "Restore the keyring's own backup, or every workload reading a secret fails to start.")
-	}
 }
