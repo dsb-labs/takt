@@ -15,7 +15,9 @@ type (
 	VolumeService interface {
 		// Create should create a volume with the given name, along with the
 		// directory backing it.
-		Create(ctx context.Context, name string) (service.Volume, error)
+		Create(ctx context.Context, name string, labels map[string]string) (service.Volume, error)
+		// Update should replace the volume's mutable fields, which are its labels.
+		Update(ctx context.Context, name string, labels map[string]string) (service.Volume, error)
 		// Get should return the volume with the given name.
 		Get(ctx context.Context, name string) (service.Volume, error)
 		// List should return every volume the server holds.
@@ -65,7 +67,7 @@ func (a *VolumeAPI) CreateVolume(ctx context.Context, request api.CreateVolumeRe
 		}, nil
 	}
 
-	volume, err := a.volumes.Create(ctx, request.Body.Name)
+	volume, err := a.volumes.Create(ctx, request.Body.Name, labelsOf(request.Body.Labels))
 	switch {
 	case errors.Is(err, service.ErrInvalidVolume):
 		return api.CreateVolume400JSONResponse{
@@ -87,6 +89,37 @@ func (a *VolumeAPI) CreateVolume(ctx context.Context, request api.CreateVolumeRe
 	}
 
 	return api.CreateVolume201JSONResponse{Volume: newVolume(volume)}, nil
+}
+
+// UpdateVolume replaces the labels on a volume.
+func (a *VolumeAPI) UpdateVolume(ctx context.Context, request api.UpdateVolumeRequestObject) (api.UpdateVolumeResponseObject, error) {
+	if request.Body == nil {
+		return api.UpdateVolume400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: "request body is required"},
+		}, nil
+	}
+
+	volume, err := a.volumes.Update(ctx, request.Name, labelsOf(request.Body.Labels))
+	switch {
+	case errors.Is(err, service.ErrInvalidVolume):
+		return api.UpdateVolume400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+		}, nil
+	case errors.Is(err, service.ErrVolumeNotFound):
+		return api.UpdateVolume404JSONResponse{
+			NotFoundJSONResponse: api.NotFoundJSONResponse{
+				Error: fmt.Sprintf("volume %q does not exist", request.Name),
+			},
+		}, nil
+	case err != nil:
+		return api.UpdateVolume500JSONResponse{
+			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
+				Error: a.internalError("update volume", err),
+			},
+		}, nil
+	}
+
+	return api.UpdateVolume200JSONResponse{Volume: newVolume(volume)}, nil
 }
 
 // GetVolume returns the volume with the given name.
@@ -173,6 +206,8 @@ func newVolume(volume service.Volume) api.Volume {
 	if len(volume.UsedBy) > 0 {
 		wire.UsedBy = &volume.UsedBy
 	}
+
+	wire.Labels = wireLabels(volume.Labels)
 
 	return wire
 }

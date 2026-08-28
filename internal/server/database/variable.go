@@ -33,9 +33,11 @@ type (
 		// Read on every path that reads a variable at all, unlike a secret's, which is
 		// left behind by everything but a workload starting.
 		Value string
+		// Arbitrary key-value pairs attached to the variable.
+		Labels map[string]string
 		// The time the variable was created.
 		CreatedAt time.Time
-		// The time the variable's value last changed.
+		// The time the variable last changed, by its value or its labels.
 		UpdatedAt time.Time
 	}
 
@@ -56,22 +58,29 @@ func NewVariableRepository(db *sql.DB) *VariableRepository {
 //
 // The creation time is preserved on a variable that already existed, so changing one
 // does not read as creating it again.
-func (r *VariableRepository) Upsert(ctx context.Context, name, value string) (Variable, error) {
+func (r *VariableRepository) Upsert(ctx context.Context, name, value string, labels map[string]string) (Variable, error) {
 	const q = `
-		INSERT INTO variable (id, name, value, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO variable (id, name, value, labels, created_at, updated_at)
+		VALUES (?, ?, ?, jsonb(?), ?, ?)
 		ON CONFLICT (name) DO UPDATE SET
 			value = excluded.value,
+			labels = excluded.labels,
 			updated_at = excluded.updated_at
 		RETURNING id, created_at, updated_at
 	`
 
 	timestamp := formatTime(time.Now().UTC())
 
+	encoded, err := marshalLabels(labels)
+	if err != nil {
+		return Variable{}, err
+	}
+
 	variable := Variable{
-		ID:    xid.New().String(),
-		Name:  name,
-		Value: value,
+		ID:     xid.New().String(),
+		Name:   name,
+		Value:  value,
+		Labels: labels,
 	}
 
 	var (
@@ -79,7 +88,7 @@ func (r *VariableRepository) Upsert(ctx context.Context, name, value string) (Va
 		updatedAt string
 	)
 
-	err := r.db.QueryRowContext(ctx, q, variable.ID, name, value, timestamp, timestamp).
+	err = r.db.QueryRowContext(ctx, q, variable.ID, name, value, encoded, timestamp, timestamp).
 		Scan(&variable.ID, &createdAt, &updatedAt)
 	if err != nil {
 		return Variable{}, fmt.Errorf("failed to upsert variable: %w", err)
@@ -99,21 +108,26 @@ func (r *VariableRepository) Upsert(ctx context.Context, name, value string) (Va
 // Get returns the variable with the given name, reporting ErrVariableNotFound when
 // no such variable exists.
 func (r *VariableRepository) Get(ctx context.Context, name string) (Variable, error) {
-	const q = `SELECT id, name, value, created_at, updated_at FROM variable WHERE name = ?`
+	const q = `SELECT id, name, value, json(labels), created_at, updated_at FROM variable WHERE name = ?`
 
 	var (
 		variable  Variable
+		labels    string
 		createdAt string
 		updatedAt string
 	)
 
 	err := r.db.QueryRowContext(ctx, q, name).
-		Scan(&variable.ID, &variable.Name, &variable.Value, &createdAt, &updatedAt)
+		Scan(&variable.ID, &variable.Name, &variable.Value, &labels, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Variable{}, fmt.Errorf("%w: %s", ErrVariableNotFound, name)
 	case err != nil:
 		return Variable{}, fmt.Errorf("failed to query variable: %w", err)
+	}
+
+	if variable.Labels, err = unmarshalLabels(labels); err != nil {
+		return Variable{}, err
 	}
 
 	if variable.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
@@ -134,7 +148,7 @@ func (r *VariableRepository) Get(ctx context.Context, name string) (Variable, er
 // that does not carry one cannot leak one; a variable's value is reported by the API
 // anyway, so withholding it here would only mean reading each one again.
 func (r *VariableRepository) List(ctx context.Context) ([]Variable, error) {
-	const q = `SELECT id, name, value, created_at, updated_at FROM variable ORDER BY name ASC`
+	const q = `SELECT id, name, value, json(labels), created_at, updated_at FROM variable ORDER BY name ASC`
 
 	rows, err := r.db.QueryContext(ctx, q)
 	if err != nil {
@@ -147,12 +161,17 @@ func (r *VariableRepository) List(ctx context.Context) ([]Variable, error) {
 	for rows.Next() {
 		var (
 			variable  Variable
+			labels    string
 			createdAt string
 			updatedAt string
 		)
 
-		if err = rows.Scan(&variable.ID, &variable.Name, &variable.Value, &createdAt, &updatedAt); err != nil {
+		if err = rows.Scan(&variable.ID, &variable.Name, &variable.Value, &labels, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan variable: %w", err)
+		}
+
+		if variable.Labels, err = unmarshalLabels(labels); err != nil {
+			return nil, err
 		}
 
 		if variable.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {

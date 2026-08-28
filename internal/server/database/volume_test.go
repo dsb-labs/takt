@@ -18,7 +18,7 @@ func TestVolumeRepository_Insert(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		stored, err := volumes.Insert(t.Context(), "example-data")
+		stored, err := volumes.Insert(t.Context(), "example-data", nil)
 		require.NoError(t, err)
 
 		assert.Equal(t, "example-data", stored.Name)
@@ -33,10 +33,10 @@ func TestVolumeRepository_Insert(t *testing.T) {
 		// caller who meant a new name somebody else's storage.
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		_, err := volumes.Insert(t.Context(), "example-data")
+		_, err := volumes.Insert(t.Context(), "example-data", nil)
 		require.NoError(t, err)
 
-		_, err = volumes.Insert(t.Context(), "example-data")
+		_, err = volumes.Insert(t.Context(), "example-data", nil)
 		assert.ErrorIs(t, err, database.ErrVolumeExists)
 	})
 }
@@ -49,7 +49,7 @@ func TestVolumeRepository_Get(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		stored, err := volumes.Insert(t.Context(), "example-data")
+		stored, err := volumes.Insert(t.Context(), "example-data", nil)
 		require.NoError(t, err)
 
 		got, err := volumes.Get(t.Context(), "example-data")
@@ -79,7 +79,7 @@ func TestVolumeRepository_List(t *testing.T) {
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
 		for _, name := range []string{"charlie", "alpha", "bravo"} {
-			_, err := volumes.Insert(t.Context(), name)
+			_, err := volumes.Insert(t.Context(), name, nil)
 			require.NoError(t, err)
 		}
 
@@ -111,7 +111,7 @@ func TestVolumeRepository_Delete(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		_, err := volumes.Insert(t.Context(), "example-data")
+		_, err := volumes.Insert(t.Context(), "example-data", nil)
 		require.NoError(t, err)
 
 		require.NoError(t, volumes.Delete(t.Context(), "example-data"))

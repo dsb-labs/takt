@@ -21,11 +21,11 @@ func TestVariableService_Set(t *testing.T) {
 
 		variables.EXPECT().Get(mock.Anything, "log-level").
 			Return(database.Variable{}, database.ErrVariableNotFound).Once()
-		variables.EXPECT().Upsert(mock.Anything, "log-level", "debug").
+		variables.EXPECT().Upsert(mock.Anything, "log-level", "debug", mock.Anything).
 			Return(database.Variable{Name: "log-level", Value: "debug"}, nil).Once()
 		variables.EXPECT().UsedBy(mock.Anything, "log-level").Return(nil, nil).Once()
 
-		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "debug")
+		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "debug", nil)
 		require.NoError(t, err)
 		assert.True(t, created)
 		assert.Equal(t, "log-level", stored.Name)
@@ -37,11 +37,11 @@ func TestVariableService_Set(t *testing.T) {
 
 		variables.EXPECT().Get(mock.Anything, "log-level").
 			Return(database.Variable{Name: "log-level", Value: "debug"}, nil).Once()
-		variables.EXPECT().Upsert(mock.Anything, "log-level", "info").
+		variables.EXPECT().Upsert(mock.Anything, "log-level", "info", mock.Anything).
 			Return(database.Variable{Name: "log-level", Value: "info"}, nil).Once()
 		variables.EXPECT().UsedBy(mock.Anything, "log-level").Return(nil, nil).Once()
 
-		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "info")
+		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "info", nil)
 		require.NoError(t, err)
 		assert.False(t, created)
 		assert.Equal(t, "info", stored.Value)
@@ -57,7 +57,7 @@ func TestVariableService_Set(t *testing.T) {
 		// Setting a variable to what it already holds writes nothing, so a tool that
 		// sets every variable on every run does not restart the fleet each time. The
 		// mock asserts no Upsert, since it was never told to expect one.
-		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "debug")
+		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "debug", nil)
 		require.NoError(t, err)
 		assert.False(t, created)
 		assert.Equal(t, "debug", stored.Value)
@@ -68,13 +68,13 @@ func TestVariableService_Set(t *testing.T) {
 
 		variables.EXPECT().Get(mock.Anything, "empty").
 			Return(database.Variable{}, database.ErrVariableNotFound).Once()
-		variables.EXPECT().Upsert(mock.Anything, "empty", "").
+		variables.EXPECT().Upsert(mock.Anything, "empty", "", mock.Anything).
 			Return(database.Variable{Name: "empty"}, nil).Once()
 		variables.EXPECT().UsedBy(mock.Anything, "empty").Return(nil, nil).Once()
 
 		// An empty value is a value, and setting one is not the same as leaving the
 		// variable unset.
-		_, created, err := newTestVariableService(t, variables).Set(t.Context(), "empty", "")
+		_, created, err := newTestVariableService(t, variables).Set(t.Context(), "empty", "", nil)
 		require.NoError(t, err)
 		assert.True(t, created)
 	})
@@ -84,7 +84,7 @@ func TestVariableService_Set(t *testing.T) {
 
 		variables.EXPECT().Get(mock.Anything, "log-level").
 			Return(database.Variable{}, database.ErrVariableNotFound).Once()
-		variables.EXPECT().Upsert(mock.Anything, "log-level", "debug").
+		variables.EXPECT().Upsert(mock.Anything, "log-level", "debug", mock.Anything).
 			Return(database.Variable{Name: "log-level", Value: "debug"}, nil).Once()
 		variables.EXPECT().UsedBy(mock.Anything, "log-level").
 			Return([]string{"one", "two"}, nil).Twice()
@@ -100,7 +100,7 @@ func TestVariableService_Set(t *testing.T) {
 			},
 		})
 
-		_, _, err := svc.Set(t.Context(), "log-level", "debug")
+		_, _, err := svc.Set(t.Context(), "log-level", "debug", nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"one", "two"}, rehashed)
 	})
@@ -125,14 +125,14 @@ func TestVariableService_Set(t *testing.T) {
 
 		// The single UsedBy is the one hydrate makes for the response. Nothing is
 		// rehashed, because nothing about what the workload reads moved.
-		_, _, err := svc.Set(t.Context(), "log-level", "debug")
+		_, _, err := svc.Set(t.Context(), "log-level", "debug", nil)
 		require.NoError(t, err)
 		assert.Empty(t, rehashed)
 	})
 
 	t.Run("refuses a name orca would not accept", func(t *testing.T) {
 		_, _, err := newTestVariableService(t, NewMockVariableRepository(t)).
-			Set(t.Context(), "LOG_LEVEL", "debug")
+			Set(t.Context(), "LOG_LEVEL", "debug", nil)
 		assert.ErrorIs(t, err, service.ErrInvalidVariable)
 	})
 }

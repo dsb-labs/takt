@@ -29,5 +29,6 @@ CREATE INDEX IF NOT EXISTS idx_workload_port_workload_id ON workload_port (workl
 CREATE TABLE IF NOT EXISTS volume (
     id         TEXT NOT NULL PRIMARY KEY,
     name       TEXT NOT NULL UNIQUE,
+    labels     BLOB NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL
 );

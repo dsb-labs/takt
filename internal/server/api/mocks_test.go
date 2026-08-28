@@ -389,8 +389,8 @@ func (_c *MockSecretService_List_Call) RunAndReturn(run func(ctx context.Context
 }
 
 // Set provides a mock function for the type MockSecretService
-func (_mock *MockSecretService) Set(ctx context.Context, name string, value []byte) (service.Secret, bool, error) {
-	ret := _mock.Called(ctx, name, value)
+func (_mock *MockSecretService) Set(ctx context.Context, name string, value []byte, labels map[string]string) (service.Secret, bool, error) {
+	ret := _mock.Called(ctx, name, value, labels)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Set")
@@ -399,21 +399,21 @@ func (_mock *MockSecretService) Set(ctx context.Context, name string, value []by
 	var r0 service.Secret
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte) (service.Secret, bool, error)); ok {
-		return returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, map[string]string) (service.Secret, bool, error)); ok {
+		return returnFunc(ctx, name, value, labels)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte) service.Secret); ok {
-		r0 = returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, map[string]string) service.Secret); ok {
+		r0 = returnFunc(ctx, name, value, labels)
 	} else {
 		r0 = ret.Get(0).(service.Secret)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []byte) bool); ok {
-		r1 = returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []byte, map[string]string) bool); ok {
+		r1 = returnFunc(ctx, name, value, labels)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, string, []byte) error); ok {
-		r2 = returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, []byte, map[string]string) error); ok {
+		r2 = returnFunc(ctx, name, value, labels)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -429,11 +429,12 @@ type MockSecretService_Set_Call struct {
 //   - ctx context.Context
 //   - name string
 //   - value []byte
-func (_e *MockSecretService_Expecter) Set(ctx any, name any, value any) *MockSecretService_Set_Call {
-	return &MockSecretService_Set_Call{Call: _e.mock.On("Set", ctx, name, value)}
+//   - labels map[string]string
+func (_e *MockSecretService_Expecter) Set(ctx any, name any, value any, labels any) *MockSecretService_Set_Call {
+	return &MockSecretService_Set_Call{Call: _e.mock.On("Set", ctx, name, value, labels)}
 }
 
-func (_c *MockSecretService_Set_Call) Run(run func(ctx context.Context, name string, value []byte)) *MockSecretService_Set_Call {
+func (_c *MockSecretService_Set_Call) Run(run func(ctx context.Context, name string, value []byte, labels map[string]string)) *MockSecretService_Set_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -447,10 +448,15 @@ func (_c *MockSecretService_Set_Call) Run(run func(ctx context.Context, name str
 		if args[2] != nil {
 			arg2 = args[2].([]byte)
 		}
+		var arg3 map[string]string
+		if args[3] != nil {
+			arg3 = args[3].(map[string]string)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -461,7 +467,7 @@ func (_c *MockSecretService_Set_Call) Return(secret service.Secret, b bool, err 
 	return _c
 }
 
-func (_c *MockSecretService_Set_Call) RunAndReturn(run func(ctx context.Context, name string, value []byte) (service.Secret, bool, error)) *MockSecretService_Set_Call {
+func (_c *MockSecretService_Set_Call) RunAndReturn(run func(ctx context.Context, name string, value []byte, labels map[string]string) (service.Secret, bool, error)) *MockSecretService_Set_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -836,8 +842,8 @@ func (_c *MockVariableService_List_Call) RunAndReturn(run func(ctx context.Conte
 }
 
 // Set provides a mock function for the type MockVariableService
-func (_mock *MockVariableService) Set(ctx context.Context, name string, value string) (service.Variable, bool, error) {
-	ret := _mock.Called(ctx, name, value)
+func (_mock *MockVariableService) Set(ctx context.Context, name string, value string, labels map[string]string) (service.Variable, bool, error) {
+	ret := _mock.Called(ctx, name, value, labels)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Set")
@@ -846,21 +852,21 @@ func (_mock *MockVariableService) Set(ctx context.Context, name string, value st
 	var r0 service.Variable
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (service.Variable, bool, error)); ok {
-		return returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string) (service.Variable, bool, error)); ok {
+		return returnFunc(ctx, name, value, labels)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) service.Variable); ok {
-		r0 = returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string) service.Variable); ok {
+		r0 = returnFunc(ctx, name, value, labels)
 	} else {
 		r0 = ret.Get(0).(service.Variable)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) bool); ok {
-		r1 = returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, map[string]string) bool); ok {
+		r1 = returnFunc(ctx, name, value, labels)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string) error); ok {
-		r2 = returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, map[string]string) error); ok {
+		r2 = returnFunc(ctx, name, value, labels)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -876,11 +882,12 @@ type MockVariableService_Set_Call struct {
 //   - ctx context.Context
 //   - name string
 //   - value string
-func (_e *MockVariableService_Expecter) Set(ctx any, name any, value any) *MockVariableService_Set_Call {
-	return &MockVariableService_Set_Call{Call: _e.mock.On("Set", ctx, name, value)}
+//   - labels map[string]string
+func (_e *MockVariableService_Expecter) Set(ctx any, name any, value any, labels any) *MockVariableService_Set_Call {
+	return &MockVariableService_Set_Call{Call: _e.mock.On("Set", ctx, name, value, labels)}
 }
 
-func (_c *MockVariableService_Set_Call) Run(run func(ctx context.Context, name string, value string)) *MockVariableService_Set_Call {
+func (_c *MockVariableService_Set_Call) Run(run func(ctx context.Context, name string, value string, labels map[string]string)) *MockVariableService_Set_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -894,10 +901,15 @@ func (_c *MockVariableService_Set_Call) Run(run func(ctx context.Context, name s
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
+		var arg3 map[string]string
+		if args[3] != nil {
+			arg3 = args[3].(map[string]string)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -908,7 +920,7 @@ func (_c *MockVariableService_Set_Call) Return(variable service.Variable, b bool
 	return _c
 }
 
-func (_c *MockVariableService_Set_Call) RunAndReturn(run func(ctx context.Context, name string, value string) (service.Variable, bool, error)) *MockVariableService_Set_Call {
+func (_c *MockVariableService_Set_Call) RunAndReturn(run func(ctx context.Context, name string, value string, labels map[string]string) (service.Variable, bool, error)) *MockVariableService_Set_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -941,8 +953,8 @@ func (_m *MockVolumeService) EXPECT() *MockVolumeService_Expecter {
 }
 
 // Create provides a mock function for the type MockVolumeService
-func (_mock *MockVolumeService) Create(ctx context.Context, name string) (service.Volume, error) {
-	ret := _mock.Called(ctx, name)
+func (_mock *MockVolumeService) Create(ctx context.Context, name string, labels map[string]string) (service.Volume, error) {
+	ret := _mock.Called(ctx, name, labels)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
@@ -950,16 +962,16 @@ func (_mock *MockVolumeService) Create(ctx context.Context, name string) (servic
 
 	var r0 service.Volume
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (service.Volume, error)); ok {
-		return returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) (service.Volume, error)); ok {
+		return returnFunc(ctx, name, labels)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) service.Volume); ok {
-		r0 = returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) service.Volume); ok {
+		r0 = returnFunc(ctx, name, labels)
 	} else {
 		r0 = ret.Get(0).(service.Volume)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, map[string]string) error); ok {
+		r1 = returnFunc(ctx, name, labels)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -974,11 +986,12 @@ type MockVolumeService_Create_Call struct {
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
-func (_e *MockVolumeService_Expecter) Create(ctx any, name any) *MockVolumeService_Create_Call {
-	return &MockVolumeService_Create_Call{Call: _e.mock.On("Create", ctx, name)}
+//   - labels map[string]string
+func (_e *MockVolumeService_Expecter) Create(ctx any, name any, labels any) *MockVolumeService_Create_Call {
+	return &MockVolumeService_Create_Call{Call: _e.mock.On("Create", ctx, name, labels)}
 }
 
-func (_c *MockVolumeService_Create_Call) Run(run func(ctx context.Context, name string)) *MockVolumeService_Create_Call {
+func (_c *MockVolumeService_Create_Call) Run(run func(ctx context.Context, name string, labels map[string]string)) *MockVolumeService_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -988,9 +1001,14 @@ func (_c *MockVolumeService_Create_Call) Run(run func(ctx context.Context, name 
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 map[string]string
+		if args[2] != nil {
+			arg2 = args[2].(map[string]string)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -1001,7 +1019,7 @@ func (_c *MockVolumeService_Create_Call) Return(volume service.Volume, err error
 	return _c
 }
 
-func (_c *MockVolumeService_Create_Call) RunAndReturn(run func(ctx context.Context, name string) (service.Volume, error)) *MockVolumeService_Create_Call {
+func (_c *MockVolumeService_Create_Call) RunAndReturn(run func(ctx context.Context, name string, labels map[string]string) (service.Volume, error)) *MockVolumeService_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1193,6 +1211,78 @@ func (_c *MockVolumeService_List_Call) Return(volumes []service.Volume, err erro
 }
 
 func (_c *MockVolumeService_List_Call) RunAndReturn(run func(ctx context.Context) ([]service.Volume, error)) *MockVolumeService_List_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Update provides a mock function for the type MockVolumeService
+func (_mock *MockVolumeService) Update(ctx context.Context, name string, labels map[string]string) (service.Volume, error) {
+	ret := _mock.Called(ctx, name, labels)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Update")
+	}
+
+	var r0 service.Volume
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) (service.Volume, error)); ok {
+		return returnFunc(ctx, name, labels)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) service.Volume); ok {
+		r0 = returnFunc(ctx, name, labels)
+	} else {
+		r0 = ret.Get(0).(service.Volume)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, map[string]string) error); ok {
+		r1 = returnFunc(ctx, name, labels)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockVolumeService_Update_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Update'
+type MockVolumeService_Update_Call struct {
+	*mock.Call
+}
+
+// Update is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+//   - labels map[string]string
+func (_e *MockVolumeService_Expecter) Update(ctx any, name any, labels any) *MockVolumeService_Update_Call {
+	return &MockVolumeService_Update_Call{Call: _e.mock.On("Update", ctx, name, labels)}
+}
+
+func (_c *MockVolumeService_Update_Call) Run(run func(ctx context.Context, name string, labels map[string]string)) *MockVolumeService_Update_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 map[string]string
+		if args[2] != nil {
+			arg2 = args[2].(map[string]string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockVolumeService_Update_Call) Return(volume service.Volume, err error) *MockVolumeService_Update_Call {
+	_c.Call.Return(volume, err)
+	return _c
+}
+
+func (_c *MockVolumeService_Update_Call) RunAndReturn(run func(ctx context.Context, name string, labels map[string]string) (service.Volume, error)) *MockVolumeService_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }

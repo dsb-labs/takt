@@ -16,7 +16,7 @@ func TestVariableRepository_Upsert(t *testing.T) {
 	t.Run("stores a variable on first write", func(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 
-		stored, err := variables.Upsert(t.Context(), "log-level", "debug")
+		stored, err := variables.Upsert(t.Context(), "log-level", "debug", nil)
 		require.NoError(t, err)
 
 		assert.Equal(t, "log-level", stored.Name)
@@ -29,10 +29,10 @@ func TestVariableRepository_Upsert(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		first, err := variables.Upsert(ctx, "log-level", "debug")
+		first, err := variables.Upsert(ctx, "log-level", "debug", nil)
 		require.NoError(t, err)
 
-		second, err := variables.Upsert(ctx, "log-level", "info")
+		second, err := variables.Upsert(ctx, "log-level", "info", nil)
 		require.NoError(t, err)
 
 		// The identity and creation time survive, so changing a variable does not read
@@ -46,7 +46,7 @@ func TestVariableRepository_Upsert(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "empty", "")
+		_, err := variables.Upsert(ctx, "empty", "", nil)
 		require.NoError(t, err)
 
 		// An empty value is a value. A workload reading it gets an empty environment
@@ -64,7 +64,7 @@ func TestVariableRepository_Get(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug")
+		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
 		require.NoError(t, err)
 
 		stored, err := variables.Get(ctx, "log-level")
@@ -87,10 +87,10 @@ func TestVariableRepository_List(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug")
+		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
 		require.NoError(t, err)
 
-		_, err = variables.Upsert(ctx, "db-host", "localhost")
+		_, err = variables.Upsert(ctx, "db-host", "localhost", nil)
 		require.NoError(t, err)
 
 		listed, err := variables.List(ctx)
@@ -119,7 +119,7 @@ func TestVariableRepository_Delete(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug")
+		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
 		require.NoError(t, err)
 
 		require.NoError(t, variables.Delete(ctx, "log-level"))
@@ -140,7 +140,7 @@ func TestVariableRepository_Delete(t *testing.T) {
 		variables := database.NewVariableRepository(db)
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug")
+		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
 		require.NoError(t, err)
 
 		linkVariableWorkload(t, db, "example", "log-level")
@@ -162,10 +162,10 @@ func TestVariableRepository_Values(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug")
+		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
 		require.NoError(t, err)
 
-		_, err = variables.Upsert(ctx, "db-host", "localhost")
+		_, err = variables.Upsert(ctx, "db-host", "localhost", nil)
 		require.NoError(t, err)
 
 		values, err := variables.Values(ctx, []string{"log-level", "db-host"})
@@ -177,7 +177,7 @@ func TestVariableRepository_Values(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug")
+		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
 		require.NoError(t, err)
 
 		// The caller knows what it asked about, so what a missing variable means is
@@ -191,7 +191,7 @@ func TestVariableRepository_Values(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "empty", "")
+		_, err := variables.Upsert(ctx, "empty", "", nil)
 		require.NoError(t, err)
 
 		// Present with an empty value rather than absent, since these values reach a

@@ -554,6 +554,21 @@ type InstanceHealth struct {
 // driver observed. Completed adds what the policy makes of that.
 type InstanceState string
 
+// Labels Key-value pairs attached to a workload, volume, secret or variable, which
+// the list query filter matches against.
+//
+// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+// underscores or slashes, up to 63 characters, so a key like
+// app.example.com/name works. Keys with the "orca." prefix are refused: the
+// server writes its own labels under it.
+//
+// Values are free text without control characters, up to 256 bytes. An empty
+// value is allowed.
+//
+// The same rules everywhere. A label on a secret is as readable as the
+// secret's name, which is worth knowing before putting anything in one.
+type Labels map[string]string
+
 // ListSecretsResult The body returned when secrets are listed.
 //
 // An object rather than a bare array, for the same reason listing volumes
@@ -877,6 +892,21 @@ type Secret struct {
 	// CreatedAt When the secret was created.
 	CreatedAt time.Time `json:"createdAt"`
 
+	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
+	// the list query filter matches against.
+	//
+	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+	// underscores or slashes, up to 63 characters, so a key like
+	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// server writes its own labels under it.
+	//
+	// Values are free text without control characters, up to 256 bytes. An empty
+	// value is allowed.
+	//
+	// The same rules everywhere. A label on a secret is as readable as the
+	// secret's name, which is worth knowing before putting anything in one.
+	Labels *Labels `json:"labels,omitempty"`
+
 	// Name The name that identifies the secret, and which a manifest references.
 	Name string `json:"name"`
 
@@ -891,8 +921,11 @@ type Secret struct {
 	// Examples: 9f2c4a1e8b7d3f6002a5c8e1b4d7f0a3
 	Revision string `json:"revision"`
 
-	// UpdatedAt When the secret's value last changed. Equal to createdAt for a secret that
-	// has never been rotated.
+	// UpdatedAt When the secret last changed, by its value or its labels. Equal to
+	// createdAt for one that has never been touched since.
+	//
+	// The revision is what says the value moved. A relabel changes this and
+	// leaves that alone, so nothing reading the secret is replaced.
 	UpdatedAt time.Time `json:"updatedAt"`
 
 	// UsedBy The names of the workloads whose specifications reference this secret.
@@ -908,6 +941,21 @@ type Secret struct {
 // to write down but the value, and writing that down is what a secret exists to
 // avoid.
 type SecretSpec struct {
+	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
+	// the list query filter matches against.
+	//
+	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+	// underscores or slashes, up to 63 characters, so a key like
+	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// server writes its own labels under it.
+	//
+	// Values are free text without control characters, up to 256 bytes. An empty
+	// value is allowed.
+	//
+	// The same rules everywhere. A label on a secret is as readable as the
+	// secret's name, which is worth knowing before putting anything in one.
+	Labels *Labels `json:"labels,omitempty"`
+
 	// Value The value to store. Stored encrypted and never returned by this API.
 	//
 	// An empty string is a valid value. A workload reading it gets an empty
@@ -963,6 +1011,12 @@ type StopWorkloadResult struct {
 	Workload Workload `json:"workload"`
 }
 
+// UpdateVolumeResult The body returned when a volume is updated.
+type UpdateVolumeResult struct {
+	// Volume A volume, together with the workloads currently mounting it.
+	Volume Volume `json:"volume"`
+}
+
 // Variable A variable, together with its value and the workloads currently reading it.
 //
 // The value is on this schema and there is no revision, which is where a
@@ -974,11 +1028,26 @@ type Variable struct {
 	// CreatedAt When the variable was created.
 	CreatedAt time.Time `json:"createdAt"`
 
+	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
+	// the list query filter matches against.
+	//
+	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+	// underscores or slashes, up to 63 characters, so a key like
+	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// server writes its own labels under it.
+	//
+	// Values are free text without control characters, up to 256 bytes. An empty
+	// value is allowed.
+	//
+	// The same rules everywhere. A label on a secret is as readable as the
+	// secret's name, which is worth knowing before putting anything in one.
+	Labels *Labels `json:"labels,omitempty"`
+
 	// Name The name that identifies the variable, and which a manifest references.
 	Name string `json:"name"`
 
-	// UpdatedAt When the variable's value last changed. Equal to createdAt for a variable
-	// that has never been changed.
+	// UpdatedAt When the variable last changed, by its value or its labels. Equal to
+	// createdAt for one that has never been touched since.
 	UpdatedAt time.Time `json:"updatedAt"`
 
 	// UsedBy The names of the workloads whose specifications reference this variable.
@@ -996,6 +1065,21 @@ type Variable struct {
 // workload or a volume a variable is not described by a manifest: there is
 // nothing to write down but the value.
 type VariableSpec struct {
+	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
+	// the list query filter matches against.
+	//
+	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+	// underscores or slashes, up to 63 characters, so a key like
+	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// server writes its own labels under it.
+	//
+	// Values are free text without control characters, up to 256 bytes. An empty
+	// value is allowed.
+	//
+	// The same rules everywhere. A label on a secret is as readable as the
+	// secret's name, which is worth knowing before putting anything in one.
+	Labels *Labels `json:"labels,omitempty"`
+
 	// Value The value to store. Returned by this API, unlike a secret's.
 	//
 	// An empty string is a valid value. A workload reading it gets an empty
@@ -1007,6 +1091,21 @@ type VariableSpec struct {
 type Volume struct {
 	// CreatedAt When the volume was created.
 	CreatedAt time.Time `json:"createdAt"`
+
+	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
+	// the list query filter matches against.
+	//
+	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+	// underscores or slashes, up to 63 characters, so a key like
+	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// server writes its own labels under it.
+	//
+	// Values are free text without control characters, up to 256 bytes. An empty
+	// value is allowed.
+	//
+	// The same rules everywhere. A label on a secret is as readable as the
+	// secret's name, which is worth knowing before putting anything in one.
+	Labels *Labels `json:"labels,omitempty"`
 
 	// Name The name that identifies the volume.
 	Name string `json:"name"`
@@ -1125,6 +1224,21 @@ type VolumeMount struct {
 // VolumeSpec The desired state of a volume, which is no more than its name. A volume holds
 // data and has nothing to configure.
 type VolumeSpec struct {
+	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
+	// the list query filter matches against.
+	//
+	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+	// underscores or slashes, up to 63 characters, so a key like
+	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// server writes its own labels under it.
+	//
+	// Values are free text without control characters, up to 256 bytes. An empty
+	// value is allowed.
+	//
+	// The same rules everywhere. A label on a secret is as readable as the
+	// secret's name, which is worth knowing before putting anything in one.
+	Labels *Labels `json:"labels,omitempty"`
+
 	// Name The name that identifies the volume.
 	//
 	// Examples: example-data
@@ -1261,17 +1375,20 @@ type WorkloadSpec struct {
 	// rather than ignored.
 	Health *HealthSpec `json:"health,omitempty"`
 
-	// Labels Key-value pairs attached to the workload, which the list query filter
-	// matches against.
+	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
+	// the list query filter matches against.
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
-	// app.example.com/name works. Keys with the "orca." prefix are
-	// refused: the server writes its own labels under it.
+	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// server writes its own labels under it.
 	//
-	// Values are free text without control characters, up to 256 bytes. An
-	// empty value is allowed.
-	Labels *map[string]string `json:"labels,omitempty"`
+	// Values are free text without control characters, up to 256 bytes. An empty
+	// value is allowed.
+	//
+	// The same rules everywhere. A label on a secret is as readable as the
+	// secret's name, which is worth knowing before putting anything in one.
+	Labels *Labels `json:"labels,omitempty"`
 
 	// Name The name that identifies the workload.
 	//
@@ -1482,6 +1599,9 @@ type SetVariableJSONRequestBody = VariableSpec
 
 // CreateVolumeJSONRequestBody defines body for CreateVolume for application/json ContentType.
 type CreateVolumeJSONRequestBody = VolumeSpec
+
+// UpdateVolumeJSONRequestBody defines body for UpdateVolume for application/json ContentType.
+type UpdateVolumeJSONRequestBody = VolumeSpec
 
 // ApplyWorkloadJSONRequestBody defines body for ApplyWorkload for application/json ContentType.
 type ApplyWorkloadJSONRequestBody = WorkloadSpec
@@ -1856,6 +1976,44 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/volumes/{name} (the `GetVolume` operationId).
 	GetVolume(ctx context.Context, name VolumeName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateVolumeWithBody Update a volume's labels
+	//
+	// Replaces the labels on the volume with the given name.
+	//
+	// The labels are the whole of what a volume has to change. Its name identifies
+	// it, the directory holding its data is named for the identifier it was
+	// assigned, and its contents are the workloads' to write.
+	//
+	// The labels given replace the ones stored, as applying a workload manifest
+	// replaces a workload's. Sending none removes them all.
+	//
+	// Nothing mounting the volume is redeployed. A label says nothing about the
+	// storage, so no specification hash moves.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
+	UpdateVolumeWithBody(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateVolume Update a volume's labels
+	//
+	// Replaces the labels on the volume with the given name.
+	//
+	// The labels are the whole of what a volume has to change. Its name identifies
+	// it, the directory holding its data is named for the identifier it was
+	// assigned, and its contents are the workloads' to write.
+	//
+	// The labels given replace the ones stored, as applying a workload manifest
+	// replaces a workload's. Sending none removes them all.
+	//
+	// Nothing mounting the volume is redeployed. A label says nothing about the
+	// storage, so no specification hash moves.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
+	UpdateVolume(ctx context.Context, name VolumeName, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListWorkloads List workloads
 	//
@@ -2554,6 +2712,64 @@ func (c *Client) DeleteVolume(ctx context.Context, name VolumeName, params *Dele
 // Corresponds with GET /api/v1/volumes/{name} (the `GetVolume` operationId).
 func (c *Client) GetVolume(ctx context.Context, name VolumeName, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetVolumeRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateVolumeWithBody Update a volume's labels
+//
+// Replaces the labels on the volume with the given name.
+//
+// The labels are the whole of what a volume has to change. Its name identifies
+// it, the directory holding its data is named for the identifier it was
+// assigned, and its contents are the workloads' to write.
+//
+// The labels given replace the ones stored, as applying a workload manifest
+// replaces a workload's. Sending none removes them all.
+//
+// Nothing mounting the volume is redeployed. A label says nothing about the
+// storage, so no specification hash moves.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
+func (c *Client) UpdateVolumeWithBody(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateVolumeRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateVolume Update a volume's labels
+//
+// Replaces the labels on the volume with the given name.
+//
+// The labels are the whole of what a volume has to change. Its name identifies
+// it, the directory holding its data is named for the identifier it was
+// assigned, and its contents are the workloads' to write.
+//
+// The labels given replace the ones stored, as applying a workload manifest
+// replaces a workload's. Sending none removes them all.
+//
+// Nothing mounting the volume is redeployed. A label says nothing about the
+// storage, so no specification hash moves.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
+func (c *Client) UpdateVolume(ctx context.Context, name VolumeName, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateVolumeRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3546,6 +3762,53 @@ func NewGetVolumeRequest(server string, name VolumeName) (*http.Request, error) 
 	return req, nil
 }
 
+// NewUpdateVolumeRequest calls the generic UpdateVolume builder with application/json body
+func NewUpdateVolumeRequest(server string, name VolumeName, body UpdateVolumeJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateVolumeRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewUpdateVolumeRequestWithBody constructs an http.Request for the UpdateVolume method, with any body, and a specified content type
+func NewUpdateVolumeRequestWithBody(server string, name VolumeName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/volumes/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListWorkloadsRequest constructs an http.Request for the ListWorkloads method
 func NewListWorkloadsRequest(server string, params *ListWorkloadsParams) (*http.Request, error) {
 	var err error
@@ -4412,6 +4675,44 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /api/v1/volumes/{name} (the `GetVolume` operationId).
 	GetVolumeWithResponse(ctx context.Context, name VolumeName, reqEditors ...RequestEditorFn) (*GetVolumeResponse, error)
+
+	// UpdateVolumeWithBodyWithResponse Update a volume's labels
+	//
+	// Replaces the labels on the volume with the given name.
+	//
+	// The labels are the whole of what a volume has to change. Its name identifies
+	// it, the directory holding its data is named for the identifier it was
+	// assigned, and its contents are the workloads' to write.
+	//
+	// The labels given replace the ones stored, as applying a workload manifest
+	// replaces a workload's. Sending none removes them all.
+	//
+	// Nothing mounting the volume is redeployed. A label says nothing about the
+	// storage, so no specification hash moves.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
+	UpdateVolumeWithBodyWithResponse(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error)
+
+	// UpdateVolumeWithResponse Update a volume's labels
+	//
+	// Replaces the labels on the volume with the given name.
+	//
+	// The labels are the whole of what a volume has to change. Its name identifies
+	// it, the directory holding its data is named for the identifier it was
+	// assigned, and its contents are the workloads' to write.
+	//
+	// The labels given replace the ones stored, as applying a workload manifest
+	// replaces a workload's. Sending none removes them all.
+	//
+	// Nothing mounting the volume is redeployed. A label says nothing about the
+	// storage, so no specification hash moves.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
+	UpdateVolumeWithResponse(ctx context.Context, name VolumeName, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error)
 
 	// ListWorkloadsWithResponse List workloads
 	//
@@ -5430,6 +5731,68 @@ func (r GetVolumeResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetVolumeResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateVolumeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *UpdateVolumeResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateVolumeResponse) GetJSON200() *UpdateVolumeResult {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r UpdateVolumeResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r UpdateVolumeResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r UpdateVolumeResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateVolumeResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateVolumeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateVolumeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateVolumeResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6492,6 +6855,56 @@ func (c *ClientWithResponses) GetVolumeWithResponse(ctx context.Context, name Vo
 	return ParseGetVolumeResponse(rsp)
 }
 
+// UpdateVolumeWithBodyWithResponse Update a volume's labels
+//
+// Replaces the labels on the volume with the given name.
+//
+// The labels are the whole of what a volume has to change. Its name identifies
+// it, the directory holding its data is named for the identifier it was
+// assigned, and its contents are the workloads' to write.
+//
+// The labels given replace the ones stored, as applying a workload manifest
+// replaces a workload's. Sending none removes them all.
+//
+// Nothing mounting the volume is redeployed. A label says nothing about the
+// storage, so no specification hash moves.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
+func (c *ClientWithResponses) UpdateVolumeWithBodyWithResponse(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error) {
+	rsp, err := c.UpdateVolumeWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateVolumeResponse(rsp)
+}
+
+// UpdateVolumeWithResponse Update a volume's labels
+//
+// Replaces the labels on the volume with the given name.
+//
+// The labels are the whole of what a volume has to change. Its name identifies
+// it, the directory holding its data is named for the identifier it was
+// assigned, and its contents are the workloads' to write.
+//
+// The labels given replace the ones stored, as applying a workload manifest
+// replaces a workload's. Sending none removes them all.
+//
+// Nothing mounting the volume is redeployed. A label says nothing about the
+// storage, so no specification hash moves.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
+func (c *ClientWithResponses) UpdateVolumeWithResponse(ctx context.Context, name VolumeName, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error) {
+	rsp, err := c.UpdateVolume(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateVolumeResponse(rsp)
+}
+
 // ListWorkloadsWithResponse List workloads
 //
 // Returns the workloads known to the server, with the observed state of each
@@ -7394,6 +7807,53 @@ func ParseGetVolumeResponse(rsp *http.Response) (*GetVolumeResponse, error) {
 	return response, nil
 }
 
+// ParseUpdateVolumeResponse parses an HTTP response from a UpdateVolumeWithResponse call
+func ParseUpdateVolumeResponse(rsp *http.Response) (*UpdateVolumeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateVolumeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest UpdateVolumeResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListWorkloadsResponse parses an HTTP response from a ListWorkloadsWithResponse call
 func ParseListWorkloadsResponse(rsp *http.Response) (*ListWorkloadsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -7913,6 +8373,9 @@ type ServerInterface interface {
 	// GetVolume Get a single volume
 	// (GET /api/v1/volumes/{name})
 	GetVolume(w http.ResponseWriter, r *http.Request, name VolumeName)
+	// UpdateVolume Update a volume's labels
+	// (PUT /api/v1/volumes/{name})
+	UpdateVolume(w http.ResponseWriter, r *http.Request, name VolumeName)
 	// ListWorkloads List workloads
 	// (GET /api/v1/workloads)
 	ListWorkloads(w http.ResponseWriter, r *http.Request, params ListWorkloadsParams)
@@ -8307,6 +8770,32 @@ func (siw *ServerInterfaceWrapper) GetVolume(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetVolume(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateVolume operation middleware
+func (siw *ServerInterfaceWrapper) UpdateVolume(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name VolumeName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateVolume(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8776,6 +9265,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/volumes", wrapper.CreateVolume)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.DeleteVolume)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.GetVolume)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.UpdateVolume)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/secrets", wrapper.ListSecrets)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/secrets/{name}", wrapper.DeleteSecret)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/secrets/{name}", wrapper.GetSecret)
@@ -9549,6 +10039,73 @@ func (response GetVolume500JSONResponse) VisitGetVolumeResponse(w http.ResponseW
 	return err
 }
 
+type UpdateVolumeRequestObject struct {
+	Name VolumeName `json:"name"`
+	Body *UpdateVolumeJSONRequestBody
+}
+
+type UpdateVolumeResponseObject interface {
+	VisitUpdateVolumeResponse(w http.ResponseWriter) error
+}
+
+type UpdateVolume200JSONResponse UpdateVolumeResult
+
+func (response UpdateVolume200JSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVolume400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateVolume400JSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVolume404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateVolume404JSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateVolume500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response UpdateVolume500JSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListWorkloadsRequestObject struct {
 	Params ListWorkloadsParams
 }
@@ -10260,6 +10817,9 @@ type StrictServerInterface interface {
 	// GetVolume Get a single volume
 	// (GET /api/v1/volumes/{name})
 	GetVolume(ctx context.Context, request GetVolumeRequestObject) (GetVolumeResponseObject, error)
+	// UpdateVolume Update a volume's labels
+	// (PUT /api/v1/volumes/{name})
+	UpdateVolume(ctx context.Context, request UpdateVolumeRequestObject) (UpdateVolumeResponseObject, error)
 	// ListWorkloads List workloads
 	// (GET /api/v1/workloads)
 	ListWorkloads(ctx context.Context, request ListWorkloadsRequestObject) (ListWorkloadsResponseObject, error)
@@ -10712,6 +11272,39 @@ func (sh *strictHandler) GetVolume(w http.ResponseWriter, r *http.Request, name 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetVolumeResponseObject); ok {
 		if err := validResponse.VisitGetVolumeResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateVolume operation middleware
+func (sh *strictHandler) UpdateVolume(w http.ResponseWriter, r *http.Request, name VolumeName) {
+	var request UpdateVolumeRequestObject
+
+	request.Name = name
+
+	var body UpdateVolumeJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateVolume(ctx, request.(UpdateVolumeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateVolume")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateVolumeResponseObject); ok {
+		if err := validResponse.VisitUpdateVolumeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

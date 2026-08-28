@@ -38,7 +38,7 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 			Target: "/api/v1/secrets/db-password",
 			Body:   generated.SecretSpec{Value: "hunter2"},
 			SetupMocks: func(svc *MockSecretService) {
-				svc.EXPECT().Set(mock.Anything, "db-password", []byte("hunter2")).
+				svc.EXPECT().Set(mock.Anything, "db-password", []byte("hunter2"), mock.Anything).
 					Return(secret("db-password"), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
@@ -52,7 +52,7 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 			Target: "/api/v1/secrets/db-password",
 			Body:   generated.SecretSpec{Value: "hunter3"},
 			SetupMocks: func(svc *MockSecretService) {
-				svc.EXPECT().Set(mock.Anything, "db-password", []byte("hunter3")).
+				svc.EXPECT().Set(mock.Anything, "db-password", []byte("hunter3"), mock.Anything).
 					Return(secret("db-password"), false, nil).Once()
 			},
 			ExpectStatus: http.StatusOK,
@@ -64,7 +64,7 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 			SetupMocks: func(svc *MockSecretService) {
 				// An empty secret is a value, not a missing one: a workload reading it
 				// gets an empty variable rather than none.
-				svc.EXPECT().Set(mock.Anything, "db-password", []byte("")).
+				svc.EXPECT().Set(mock.Anything, "db-password", []byte(""), mock.Anything).
 					Return(secret("db-password"), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
@@ -75,7 +75,7 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 			Body:         generated.SecretSpec{Value: "hunter2"},
 			ExpectStatus: http.StatusBadRequest,
 			SetupMocks: func(svc *MockSecretService) {
-				svc.EXPECT().Set(mock.Anything, "DB_PASSWORD", mock.Anything).
+				svc.EXPECT().Set(mock.Anything, "DB_PASSWORD", mock.Anything, mock.Anything).
 					Return(service.Secret{}, false, service.ErrInvalidSecret).Once()
 			},
 		},
@@ -85,7 +85,7 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 			Body:         generated.SecretSpec{Value: "hunter2"},
 			ExpectStatus: http.StatusInternalServerError,
 			SetupMocks: func(svc *MockSecretService) {
-				svc.EXPECT().Set(mock.Anything, "db-password", mock.Anything).
+				svc.EXPECT().Set(mock.Anything, "db-password", mock.Anything, mock.Anything).
 					Return(service.Secret{}, false, errors.New("database is gone")).Once()
 			},
 		},
@@ -259,7 +259,7 @@ func TestSecretAPI_NeverReturnsAValue(t *testing.T) {
 			Target: "/api/v1/secrets/db-password",
 			Body:   generated.SecretSpec{Value: value},
 			SetupMocks: func(svc *MockSecretService) {
-				svc.EXPECT().Set(mock.Anything, "db-password", []byte(value)).
+				svc.EXPECT().Set(mock.Anything, "db-password", []byte(value), mock.Anything).
 					Return(secret("db-password"), true, nil).Once()
 			},
 		},
@@ -331,7 +331,7 @@ func TestSecretAPI_HidesInternalFailures(t *testing.T) {
 			Target: "/api/v1/secrets/db-password",
 			Body:   generated.SecretSpec{Value: "hunter2"},
 			SetupMocks: func(svc *MockSecretService) {
-				svc.EXPECT().Set(mock.Anything, mock.Anything, mock.Anything).
+				svc.EXPECT().Set(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 					Return(service.Secret{}, false, internal).Once()
 			},
 		},

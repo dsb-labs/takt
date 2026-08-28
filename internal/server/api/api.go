@@ -377,3 +377,25 @@ func Connection(ctx context.Context) http.ResponseWriter {
 
 	return w
 }
+
+// labelsOf reads the labels off a request body, which carries none as a nil pointer.
+func labelsOf(labels *api.Labels) map[string]string {
+	if labels == nil {
+		return nil
+	}
+
+	return *labels
+}
+
+// wireLabels reports the labels on a response, absent rather than an empty object
+// when there are none, so that "unlabelled" and "not reported" are not the same value
+// on the wire.
+func wireLabels(labels map[string]string) *api.Labels {
+	if len(labels) == 0 {
+		return nil
+	}
+
+	wire := api.Labels(labels)
+
+	return &wire
+}

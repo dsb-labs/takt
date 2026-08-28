@@ -37,7 +37,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			Target: "/api/v1/variables/log-level",
 			Body:   generated.VariableSpec{Value: "debug"},
 			SetupMocks: func(svc *MockVariableService) {
-				svc.EXPECT().Set(mock.Anything, "log-level", "debug").
+				svc.EXPECT().Set(mock.Anything, "log-level", "debug", mock.Anything).
 					Return(variable("log-level", "debug"), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
@@ -51,7 +51,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			Target: "/api/v1/variables/log-level",
 			Body:   generated.VariableSpec{Value: "info"},
 			SetupMocks: func(svc *MockVariableService) {
-				svc.EXPECT().Set(mock.Anything, "log-level", "info").
+				svc.EXPECT().Set(mock.Anything, "log-level", "info", mock.Anything).
 					Return(variable("log-level", "info"), false, nil).Once()
 			},
 			ExpectStatus: http.StatusOK,
@@ -63,7 +63,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			SetupMocks: func(svc *MockVariableService) {
 				// An empty variable is a value, not a missing one: a workload reading it
 				// gets an empty environment variable rather than none.
-				svc.EXPECT().Set(mock.Anything, "empty", "").
+				svc.EXPECT().Set(mock.Anything, "empty", "", mock.Anything).
 					Return(variable("empty", ""), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
@@ -74,7 +74,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			Body:         generated.VariableSpec{Value: "debug"},
 			ExpectStatus: http.StatusBadRequest,
 			SetupMocks: func(svc *MockVariableService) {
-				svc.EXPECT().Set(mock.Anything, "LOG_LEVEL", mock.Anything).
+				svc.EXPECT().Set(mock.Anything, "LOG_LEVEL", mock.Anything, mock.Anything).
 					Return(service.Variable{}, false, service.ErrInvalidVariable).Once()
 			},
 		},
@@ -84,7 +84,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			Body:         generated.VariableSpec{Value: "debug"},
 			ExpectStatus: http.StatusInternalServerError,
 			SetupMocks: func(svc *MockVariableService) {
-				svc.EXPECT().Set(mock.Anything, "log-level", mock.Anything).
+				svc.EXPECT().Set(mock.Anything, "log-level", mock.Anything, mock.Anything).
 					Return(service.Variable{}, false, errors.New("database is gone")).Once()
 			},
 		},

@@ -27,7 +27,7 @@ type (
 		UsedBy []string
 		// The time the variable was created.
 		CreatedAt time.Time
-		// The time the variable's value last changed.
+		// The time the variable last changed, by its value or its labels.
 		UpdatedAt time.Time
 	}
 

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
 	"github.com/dsb-labs/orca/internal/server/database"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 var (
@@ -27,7 +29,7 @@ type (
 	// variable service uses.
 	VariableRepository interface {
 		// Upsert should store the given value as the variable with the given name.
-		Upsert(ctx context.Context, name, value string) (database.Variable, error)
+		Upsert(ctx context.Context, name, value string, labels map[string]string) (database.Variable, error)
 		// Get should return the variable with the given name.
 		Get(ctx context.Context, name string) (database.Variable, error)
 		// List should return every variable.
@@ -51,9 +53,11 @@ type (
 		Value string
 		// The names of the workloads referencing the variable.
 		UsedBy []string
+		// Arbitrary key-value pairs attached to the variable.
+		Labels map[string]string
 		// The time the variable was created.
 		CreatedAt time.Time
-		// The time the variable's value last changed.
+		// The time the variable last changed, by its value or its labels.
 		UpdatedAt time.Time
 	}
 
@@ -97,9 +101,13 @@ func NewVariableService(config VariableServiceConfig) *VariableService {
 //
 // A value that did change moves the hash of every workload referencing the variable,
 // so the reconciler replaces their instances.
-func (s *VariableService) Set(ctx context.Context, name, value string) (Variable, bool, error) {
+func (s *VariableService) Set(ctx context.Context, name, value string, labels map[string]string) (Variable, bool, error) {
 	if !referenceNamePattern.MatchString(name) || len(name) > 63 {
 		return Variable{}, false, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidVariable)
+	}
+
+	if err := manifest.ValidateLabels(labels); err != nil {
+		return Variable{}, false, fmt.Errorf("%w: %v", ErrInvalidVariable, err)
 	}
 
 	existing, err := s.variables.Get(ctx, name)
@@ -107,14 +115,28 @@ func (s *VariableService) Set(ctx context.Context, name, value string) (Variable
 	case err != nil && !errors.Is(err, database.ErrVariableNotFound):
 		return Variable{}, false, fmt.Errorf("failed to load variable: %w", err)
 	case err == nil && existing.Value == value:
-		variable, err := s.hydrate(ctx, existing)
+		if maps.Equal(existing.Labels, labels) {
+			variable, err := s.hydrate(ctx, existing)
+
+			return variable, false, err
+		}
+
+		// The labels moved and the value did not. Written back through the same
+		// upsert, and nothing referencing the variable is redeployed: what redeploys
+		// a reader is the value it reads, and that is unchanged.
+		relabelled, err := s.variables.Upsert(ctx, name, value, labels)
+		if err != nil {
+			return Variable{}, false, err
+		}
+
+		variable, err := s.hydrate(ctx, relabelled)
 
 		return variable, false, err
 	}
 
 	created := errors.Is(err, database.ErrVariableNotFound)
 
-	stored, err := s.variables.Upsert(ctx, name, value)
+	stored, err := s.variables.Upsert(ctx, name, value, labels)
 	if err != nil {
 		return Variable{}, false, err
 	}
@@ -249,6 +271,7 @@ func (s *VariableService) hydrate(ctx context.Context, row database.Variable) (V
 		Name:      row.Name,
 		Value:     row.Value,
 		UsedBy:    usedBy,
+		Labels:    row.Labels,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
 	}, nil

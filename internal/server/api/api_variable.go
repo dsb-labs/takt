@@ -16,7 +16,7 @@ type (
 	VariableService interface {
 		// Set should store value as the variable with the given name, reporting
 		// whether it was newly created.
-		Set(ctx context.Context, name, value string) (service.Variable, bool, error)
+		Set(ctx context.Context, name, value string, labels map[string]string) (service.Variable, bool, error)
 		// Get should return the variable with the given name.
 		Get(ctx context.Context, name string) (service.Variable, error)
 		// List should return every variable the server holds.
@@ -70,7 +70,7 @@ func (a *VariableAPI) SetVariable(ctx context.Context, request api.SetVariableRe
 		}, nil
 	}
 
-	variable, created, err := a.variables.Set(ctx, request.Name, request.Body.Value)
+	variable, created, err := a.variables.Set(ctx, request.Name, request.Body.Value, labelsOf(request.Body.Labels))
 	switch {
 	case errors.Is(err, service.ErrInvalidVariable):
 		return api.SetVariable400JSONResponse{
@@ -179,6 +179,8 @@ func newVariable(variable service.Variable) api.Variable {
 	if len(variable.UsedBy) > 0 {
 		wire.UsedBy = &variable.UsedBy
 	}
+
+	wire.Labels = wireLabels(variable.Labels)
 
 	return wire
 }

@@ -22,12 +22,12 @@ func TestVolumeService_Create(t *testing.T) {
 		t.Parallel()
 
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data").
+		repo.EXPECT().Insert(mock.Anything, "example-data", mock.Anything).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data", CreatedAt: time.Now()}, nil).Once()
 
 		svc, root := newVolumeService(t, repo)
 
-		volume, err := svc.Create(t.Context(), "example-data")
+		volume, err := svc.Create(t.Context(), "example-data", nil)
 		require.NoError(t, err)
 
 		assert.Equal(t, "example-data", volume.Name)
@@ -52,7 +52,7 @@ func TestVolumeService_Create(t *testing.T) {
 		svc, _ := newVolumeService(t, repo)
 
 		for _, name := range []string{"Example_Data", "", "-leading", "trailing-", "a/b", ".."} {
-			_, err := svc.Create(t.Context(), name)
+			_, err := svc.Create(t.Context(), name, nil)
 			assert.ErrorIs(t, err, service.ErrInvalidVolume, "accepted the name %q", name)
 		}
 	})
@@ -63,12 +63,12 @@ func TestVolumeService_Create(t *testing.T) {
 		// A volume holds data, so handing a caller who meant a new name somebody
 		// else's storage is worse than failing.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data").
+		repo.EXPECT().Insert(mock.Anything, "example-data", mock.Anything).
 			Return(database.Volume{}, database.ErrVolumeExists).Once()
 
 		svc, _ := newVolumeService(t, repo)
 
-		_, err := svc.Create(t.Context(), "example-data")
+		_, err := svc.Create(t.Context(), "example-data", nil)
 		assert.ErrorIs(t, err, service.ErrVolumeExists)
 	})
 
@@ -79,7 +79,7 @@ func TestVolumeService_Create(t *testing.T) {
 		// volume nothing can reach, and nothing later creates the directory. Better to
 		// leave nothing behind.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data").
+		repo.EXPECT().Insert(mock.Anything, "example-data", mock.Anything).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
 		repo.EXPECT().Delete(mock.Anything, "example-data").Return(nil).Once()
 
@@ -94,7 +94,7 @@ func TestVolumeService_Create(t *testing.T) {
 			Root:    filepath.Join(root, "volumes"),
 		})
 
-		_, err := svc.Create(t.Context(), "example-data")
+		_, err := svc.Create(t.Context(), "example-data", nil)
 		assert.Error(t, err)
 	})
 }
@@ -108,7 +108,7 @@ func TestVolumeService_Delete(t *testing.T) {
 		// The only thing in orca that destroys stored data, so the directory going is
 		// worth asserting rather than assuming.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data").
+		repo.EXPECT().Insert(mock.Anything, "example-data", mock.Anything).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
 		repo.EXPECT().Get(mock.Anything, "example-data").
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
@@ -117,7 +117,7 @@ func TestVolumeService_Delete(t *testing.T) {
 
 		svc, _ := newVolumeService(t, repo)
 
-		volume, err := svc.Create(t.Context(), "example-data")
+		volume, err := svc.Create(t.Context(), "example-data", nil)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(volume.Path, "file"), []byte("data"), 0o600))
 
@@ -135,7 +135,7 @@ func TestVolumeService_Delete(t *testing.T) {
 		// what grants that, because nothing else about a permission error says why a
 		// directory orca created cannot be removed.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data").
+		repo.EXPECT().Insert(mock.Anything, "example-data", mock.Anything).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
 		repo.EXPECT().Get(mock.Anything, "example-data").
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
@@ -143,7 +143,7 @@ func TestVolumeService_Delete(t *testing.T) {
 
 		svc, _ := newVolumeService(t, repo)
 
-		volume, err := svc.Create(t.Context(), "example-data")
+		volume, err := svc.Create(t.Context(), "example-data", nil)
 		require.NoError(t, err)
 
 		// A directory this user cannot read stands in for one owned by another user,
@@ -457,6 +457,55 @@ const (
 
 // newVolumeService returns a volume service alongside the data directory it keeps
 // volumes under.
+func TestVolumeService_Update(t *testing.T) {
+	t.Parallel()
+
+	t.Run("replaces the labels", func(t *testing.T) {
+		t.Parallel()
+
+		// The only thing a volume has to change. Its name identifies it, its
+		// directory is named for its identifier, and its contents are the workloads'.
+		repo := NewMockVolumeRepository(t)
+		repo.EXPECT().Update(mock.Anything, "example-data", map[string]string{"app": "api"}).
+			Return(database.Volume{
+				ID:     testVolumeID,
+				Name:   "example-data",
+				Labels: map[string]string{"app": "api"},
+			}, nil).Once()
+		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
+
+		svc, _ := newVolumeService(t, repo)
+
+		volume, err := svc.Update(t.Context(), "example-data", map[string]string{"app": "api"})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"app": "api"}, volume.Labels)
+	})
+
+	t.Run("reports a volume that does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockVolumeRepository(t)
+		repo.EXPECT().Update(mock.Anything, "example-data", mock.Anything).
+			Return(database.Volume{}, database.ErrVolumeNotFound).Once()
+
+		svc, _ := newVolumeService(t, repo)
+
+		_, err := svc.Update(t.Context(), "example-data", nil)
+		assert.ErrorIs(t, err, service.ErrVolumeNotFound)
+	})
+
+	t.Run("refuses a label orca reserves for itself", func(t *testing.T) {
+		t.Parallel()
+
+		// Refused before the repository is reached, which the mock asserts by
+		// expecting nothing.
+		svc, _ := newVolumeService(t, NewMockVolumeRepository(t))
+
+		_, err := svc.Update(t.Context(), "example-data", map[string]string{"orca.workload": "sneaky"})
+		assert.ErrorIs(t, err, service.ErrInvalidVolume)
+	})
+}
+
 func newVolumeService(t *testing.T, repo service.VolumeRepository) (*service.VolumeService, string) {
 	t.Helper()
 

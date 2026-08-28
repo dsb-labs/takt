@@ -29,7 +29,8 @@ type (
 		UsedBy []string
 		// The time the secret was created.
 		CreatedAt time.Time
-		// The time the secret's value last changed.
+		// The time the secret last changed, by its value or its labels. The revision
+		// is what says the value moved.
 		UpdatedAt time.Time
 	}
 

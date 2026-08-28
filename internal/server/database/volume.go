@@ -32,6 +32,8 @@ type (
 		ID string
 		// The name that identifies the volume.
 		Name string
+		// Arbitrary key-value pairs attached to the volume.
+		Labels map[string]string
 		// The time the volume was created.
 		CreatedAt time.Time
 	}
@@ -54,16 +56,22 @@ func NewVolumeRepository(db *sql.DB) *VolumeRepository {
 // Returns ErrVolumeExists when a volume already holds the name. Creating one that
 // exists is an error rather than a no-op, because a volume holds data: a caller who
 // meant a name they had not used yet would otherwise be handed someone else's.
-func (r *VolumeRepository) Insert(ctx context.Context, name string) (Volume, error) {
-	const q = `INSERT INTO volume (id, name, created_at) VALUES (?, ?, ?)`
+func (r *VolumeRepository) Insert(ctx context.Context, name string, labels map[string]string) (Volume, error) {
+	const q = `INSERT INTO volume (id, name, labels, created_at) VALUES (?, ?, jsonb(?), ?)`
+
+	encoded, err := marshalLabels(labels)
+	if err != nil {
+		return Volume{}, err
+	}
 
 	volume := Volume{
 		ID:        xid.New().String(),
 		Name:      name,
+		Labels:    labels,
 		CreatedAt: time.Now().UTC(),
 	}
 
-	_, err := r.db.ExecContext(ctx, q, volume.ID, volume.Name, formatTime(volume.CreatedAt))
+	_, err = r.db.ExecContext(ctx, q, volume.ID, volume.Name, encoded, formatTime(volume.CreatedAt))
 	switch {
 	case IsUniqueError(err):
 		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeExists, name)
@@ -77,19 +85,23 @@ func (r *VolumeRepository) Insert(ctx context.Context, name string) (Volume, err
 // Get returns the volume with the given name, reporting ErrVolumeNotFound when no
 // such volume exists.
 func (r *VolumeRepository) Get(ctx context.Context, name string) (Volume, error) {
-	const q = `SELECT id, name, created_at FROM volume WHERE name = ?`
+	const q = `SELECT id, name, json(labels), created_at FROM volume WHERE name = ?`
 
 	var (
-		volume    Volume
-		createdAt string
+		volume            Volume
+		labels, createdAt string
 	)
 
-	err := r.db.QueryRowContext(ctx, q, name).Scan(&volume.ID, &volume.Name, &createdAt)
+	err := r.db.QueryRowContext(ctx, q, name).Scan(&volume.ID, &volume.Name, &labels, &createdAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeNotFound, name)
 	case err != nil:
 		return Volume{}, fmt.Errorf("failed to query volume: %w", err)
+	}
+
+	if volume.Labels, err = unmarshalLabels(labels); err != nil {
+		return Volume{}, err
 	}
 
 	volume.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
@@ -100,9 +112,40 @@ func (r *VolumeRepository) Get(ctx context.Context, name string) (Volume, error)
 	return volume, nil
 }
 
+// Update replaces the mutable fields of the volume with the given name, reporting
+// ErrVolumeNotFound when no such volume exists.
+//
+// Only the labels. A volume's name identifies it, its identifier is what its
+// directory is named for, and its contents are the workloads' to write — so the
+// labels are the whole of what an update of a volume can mean.
+func (r *VolumeRepository) Update(ctx context.Context, name string, labels map[string]string) (Volume, error) {
+	const q = `UPDATE volume SET labels = jsonb(?) WHERE name = ?`
+
+	encoded, err := marshalLabels(labels)
+	if err != nil {
+		return Volume{}, err
+	}
+
+	tag, err := r.db.ExecContext(ctx, q, encoded, name)
+	if err != nil {
+		return Volume{}, fmt.Errorf("failed to update volume: %w", err)
+	}
+
+	affected, err := tag.RowsAffected()
+	if err != nil {
+		return Volume{}, fmt.Errorf("failed to update volume: %w", err)
+	}
+
+	if affected == 0 {
+		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeNotFound, name)
+	}
+
+	return r.Get(ctx, name)
+}
+
 // List returns every volume, ordered by name so that the result is stable.
 func (r *VolumeRepository) List(ctx context.Context) ([]Volume, error) {
-	const q = `SELECT id, name, created_at FROM volume ORDER BY name ASC`
+	const q = `SELECT id, name, json(labels), created_at FROM volume ORDER BY name ASC`
 
 	rows, err := r.db.QueryContext(ctx, q)
 	if err != nil {
@@ -114,12 +157,16 @@ func (r *VolumeRepository) List(ctx context.Context) ([]Volume, error) {
 
 	for rows.Next() {
 		var (
-			volume    Volume
-			createdAt string
+			volume            Volume
+			labels, createdAt string
 		)
 
-		if err = rows.Scan(&volume.ID, &volume.Name, &createdAt); err != nil {
+		if err = rows.Scan(&volume.ID, &volume.Name, &labels, &createdAt); err != nil {
 			return nil, fmt.Errorf("failed to scan volume: %w", err)
+		}
+
+		if volume.Labels, err = unmarshalLabels(labels); err != nil {
+			return nil, err
 		}
 
 		volume.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)

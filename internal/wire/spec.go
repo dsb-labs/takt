@@ -293,7 +293,7 @@ func FromSpec(s manifest.Spec) api.WorkloadSpec {
 
 	spec.Schedule = fromSchedule(s.Schedule)
 	if len(s.Labels) > 0 {
-		spec.Labels = new(s.Labels)
+		spec.Labels = new(api.Labels(s.Labels))
 	}
 
 	spec.Restart = fromRestart(s.Restart)

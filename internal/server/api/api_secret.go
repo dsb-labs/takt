@@ -19,7 +19,7 @@ type (
 	SecretService interface {
 		// Set should store value as the secret with the given name, reporting whether
 		// it was newly created.
-		Set(ctx context.Context, name string, value []byte) (service.Secret, bool, error)
+		Set(ctx context.Context, name string, value []byte, labels map[string]string) (service.Secret, bool, error)
 		// Get should return the secret with the given name, without its value.
 		Get(ctx context.Context, name string) (service.Secret, error)
 		// List should return every secret the server holds, without their values.
@@ -73,7 +73,7 @@ func (a *SecretAPI) SetSecret(ctx context.Context, request api.SetSecretRequestO
 		}, nil
 	}
 
-	secret, created, err := a.secrets.Set(ctx, request.Name, []byte(request.Body.Value))
+	secret, created, err := a.secrets.Set(ctx, request.Name, []byte(request.Body.Value), labelsOf(request.Body.Labels))
 	switch {
 	case errors.Is(err, service.ErrInvalidSecret):
 		return api.SetSecret400JSONResponse{
@@ -185,6 +185,8 @@ func newSecret(secret service.Secret) api.Secret {
 	if len(secret.UsedBy) > 0 {
 		wire.UsedBy = &secret.UsedBy
 	}
+
+	wire.Labels = wireLabels(secret.Labels)
 
 	return wire
 }

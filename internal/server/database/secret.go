@@ -43,9 +43,15 @@ type (
 		// is not part of that hash: a hash is reported by the API, and one computed
 		// over a value would confirm a guess at it.
 		Revision string
+		// Arbitrary key-value pairs attached to the secret.
+		//
+		// Readable back, where the value deliberately is not. A label on a secret is
+		// as public as the secret's name.
+		Labels map[string]string
 		// The time the secret was created.
 		CreatedAt time.Time
-		// The time the secret's value last changed.
+		// The time the secret last changed, by its value or its labels. The revision
+		// is what says the value moved.
 		UpdatedAt time.Time
 	}
 
@@ -71,19 +77,27 @@ func NewSecretRepository(db *sql.DB) *SecretRepository {
 //
 // The creation time is preserved on a secret that already existed, so rotating one
 // does not read as creating it again.
-func (r *SecretRepository) Upsert(ctx context.Context, name string, value []byte, revision, keyID string) (Secret, error) {
+func (r *SecretRepository) Upsert(
+	ctx context.Context, name string, value []byte, revision, keyID string, labels map[string]string,
+) (Secret, error) {
 	const q = `
-		INSERT INTO secret (id, name, value, revision, key_id, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO secret (id, name, value, revision, key_id, labels, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, jsonb(?), ?, ?)
 		ON CONFLICT (name) DO UPDATE SET
 			value = excluded.value,
 			revision = excluded.revision,
 			key_id = excluded.key_id,
+			labels = excluded.labels,
 			updated_at = excluded.updated_at
 		RETURNING id, created_at, updated_at
 	`
 
 	timestamp := formatTime(time.Now().UTC())
+
+	encoded, err := marshalLabels(labels)
+	if err != nil {
+		return Secret{}, err
+	}
 
 	secret := Secret{
 		ID:       xid.New().String(),
@@ -91,6 +105,7 @@ func (r *SecretRepository) Upsert(ctx context.Context, name string, value []byte
 		Value:    value,
 		Revision: revision,
 		KeyID:    keyID,
+		Labels:   labels,
 	}
 
 	var (
@@ -98,7 +113,7 @@ func (r *SecretRepository) Upsert(ctx context.Context, name string, value []byte
 		updatedAt string
 	)
 
-	err := r.db.QueryRowContext(ctx, q, secret.ID, name, value, revision, keyID, timestamp, timestamp).
+	err = r.db.QueryRowContext(ctx, q, secret.ID, name, value, revision, keyID, encoded, timestamp, timestamp).
 		Scan(&secret.ID, &createdAt, &updatedAt)
 	if err != nil {
 		return Secret{}, fmt.Errorf("failed to upsert secret: %w", err)
@@ -118,21 +133,26 @@ func (r *SecretRepository) Upsert(ctx context.Context, name string, value []byte
 // Get returns the secret with the given name, including its encrypted value,
 // reporting ErrSecretNotFound when no such secret exists.
 func (r *SecretRepository) Get(ctx context.Context, name string) (Secret, error) {
-	const q = `SELECT id, name, value, revision, key_id, created_at, updated_at FROM secret WHERE name = ?`
+	const q = `SELECT id, name, value, revision, key_id, json(labels), created_at, updated_at FROM secret WHERE name = ?`
 
 	var (
 		secret    Secret
+		labels    string
 		createdAt string
 		updatedAt string
 	)
 
 	err := r.db.QueryRowContext(ctx, q, name).
-		Scan(&secret.ID, &secret.Name, &secret.Value, &secret.Revision, &secret.KeyID, &createdAt, &updatedAt)
+		Scan(&secret.ID, &secret.Name, &secret.Value, &secret.Revision, &secret.KeyID, &labels, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Secret{}, fmt.Errorf("%w: %s", ErrSecretNotFound, name)
 	case err != nil:
 		return Secret{}, fmt.Errorf("failed to query secret: %w", err)
+	}
+
+	if secret.Labels, err = unmarshalLabels(labels); err != nil {
+		return Secret{}, err
 	}
 
 	if secret.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
@@ -152,7 +172,7 @@ func (r *SecretRepository) Get(ctx context.Context, name string) (Secret, error)
 // exists, which needs no decryption, and a read that does not carry a value cannot
 // leak one.
 func (r *SecretRepository) List(ctx context.Context) ([]Secret, error) {
-	const q = `SELECT id, name, revision, created_at, updated_at FROM secret ORDER BY name ASC`
+	const q = `SELECT id, name, revision, json(labels), created_at, updated_at FROM secret ORDER BY name ASC`
 
 	rows, err := r.db.QueryContext(ctx, q)
 	if err != nil {
@@ -165,12 +185,17 @@ func (r *SecretRepository) List(ctx context.Context) ([]Secret, error) {
 	for rows.Next() {
 		var (
 			secret    Secret
+			labels    string
 			createdAt string
 			updatedAt string
 		)
 
-		if err = rows.Scan(&secret.ID, &secret.Name, &secret.Revision, &createdAt, &updatedAt); err != nil {
+		if err = rows.Scan(&secret.ID, &secret.Name, &secret.Revision, &labels, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan secret: %w", err)
+		}
+
+		if secret.Labels, err = unmarshalLabels(labels); err != nil {
+			return nil, err
 		}
 
 		if secret.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {

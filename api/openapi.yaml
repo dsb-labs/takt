@@ -503,6 +503,42 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+    put:
+      operationId: updateVolume
+      tags: [volumes]
+      summary: Update a volume's labels
+      description: |
+        Replaces the labels on the volume with the given name.
+
+        The labels are the whole of what a volume has to change. Its name identifies
+        it, the directory holding its data is named for the identifier it was
+        assigned, and its contents are the workloads' to write.
+
+        The labels given replace the ones stored, as applying a workload manifest
+        replaces a workload's. Sending none removes them all.
+
+        Nothing mounting the volume is redeployed. A label says nothing about the
+        storage, so no specification hash moves.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VolumeSpec"
+      responses:
+        "200":
+          description: The updated volume.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateVolumeResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
     delete:
       operationId: deleteVolume
       tags: [volumes]
@@ -1078,22 +1114,7 @@ components:
         schedule:
           $ref: "#/components/schemas/ScheduleSpec"
         labels:
-          type: object
-          description: |
-            Key-value pairs attached to the workload, which the list query filter
-            matches against.
-
-            Keys are lowercase alphanumeric, optionally separated by dots, dashes,
-            underscores or slashes, up to 63 characters, so a key like
-            app.example.com/name works. Keys with the "orca." prefix are
-            refused: the server writes its own labels under it.
-
-            Values are free text without control characters, up to 256 bytes. An
-            empty value is allowed.
-          maxProperties: 32
-          additionalProperties:
-            type: string
-            maxLength: 256
+          $ref: "#/components/schemas/Labels"
         ports:
           type: array
           description: |
@@ -1656,6 +1677,8 @@ components:
           minLength: 1
           maxLength: 63
           examples: ["example-data"]
+        labels:
+          $ref: "#/components/schemas/Labels"
 
     Volume:
       type: object
@@ -1688,6 +1711,8 @@ components:
             without forcing.
           items:
             type: string
+        labels:
+          $ref: "#/components/schemas/Labels"
 
     SecretSpec:
       type: object
@@ -1707,6 +1732,8 @@ components:
 
             An empty string is a valid value. A workload reading it gets an empty
             environment variable, which is different from one that is not set.
+        labels:
+          $ref: "#/components/schemas/Labels"
 
     Secret:
       type: object
@@ -1739,8 +1766,11 @@ components:
           type: string
           format: date-time
           description: |
-            When the secret's value last changed. Equal to createdAt for a secret that
-            has never been rotated.
+            When the secret last changed, by its value or its labels. Equal to
+            createdAt for one that has never been touched since.
+
+            The revision is what says the value moved. A relabel changes this and
+            leaves that alone, so nothing reading the secret is replaced.
         usedBy:
           type: array
           description: |
@@ -1749,6 +1779,8 @@ components:
             without forcing.
           items:
             type: string
+        labels:
+          $ref: "#/components/schemas/Labels"
 
     VariableSpec:
       type: object
@@ -1767,6 +1799,8 @@ components:
 
             An empty string is a valid value. A workload reading it gets an empty
             environment variable, which is different from one that is not set.
+        labels:
+          $ref: "#/components/schemas/Labels"
 
     Variable:
       type: object
@@ -1794,8 +1828,8 @@ components:
           type: string
           format: date-time
           description: |
-            When the variable's value last changed. Equal to createdAt for a variable
-            that has never been changed.
+            When the variable last changed, by its value or its labels. Equal to
+            createdAt for one that has never been touched since.
         usedBy:
           type: array
           description: |
@@ -1804,6 +1838,8 @@ components:
             deleted without forcing.
           items:
             type: string
+        labels:
+          $ref: "#/components/schemas/Labels"
 
     ExecSpec:
       type: object
@@ -2036,6 +2072,27 @@ components:
           type: string
           description: A human-readable description of what went wrong.
 
+    Labels:
+      type: object
+      description: |
+        Key-value pairs attached to a workload, volume, secret or variable, which
+        the list query filter matches against.
+
+        Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+        underscores or slashes, up to 63 characters, so a key like
+        app.example.com/name works. Keys with the "orca." prefix are refused: the
+        server writes its own labels under it.
+
+        Values are free text without control characters, up to 256 bytes. An empty
+        value is allowed.
+
+        The same rules everywhere. A label on a secret is as readable as the
+        secret's name, which is worth knowing before putting anything in one.
+      maxProperties: 32
+      additionalProperties:
+        type: string
+        maxLength: 256
+
     ListWorkloadsResult:
       type: object
       description: |
@@ -2157,6 +2214,14 @@ components:
     CreateVolumeResult:
       type: object
       description: The body returned when a volume is created.
+      required: [volume]
+      properties:
+        volume:
+          $ref: "#/components/schemas/Volume"
+
+    UpdateVolumeResult:
+      type: object
+      description: The body returned when a volume is updated.
       required: [volume]
       properties:
         volume:

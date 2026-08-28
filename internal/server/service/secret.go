@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/dsb-labs/orca/internal/server/database"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 var (
@@ -43,7 +45,7 @@ type (
 	SecretRepository interface {
 		// Upsert should store the given encrypted value and revision as the secret
 		// with the given name, recording which key sealed it.
-		Upsert(ctx context.Context, name string, value []byte, revision, keyID string) (database.Secret, error)
+		Upsert(ctx context.Context, name string, value []byte, revision, keyID string, labels map[string]string) (database.Secret, error)
 		// Get should return the secret with the given name, including its encrypted
 		// value.
 		Get(ctx context.Context, name string) (database.Secret, error)
@@ -88,9 +90,15 @@ type (
 		Revision string
 		// The names of the workloads referencing the secret.
 		UsedBy []string
+		// Arbitrary key-value pairs attached to the secret.
+		//
+		// Readable back, where the value deliberately is not. A label on a secret is
+		// as public as the secret's name.
+		Labels map[string]string
 		// The time the secret was created.
 		CreatedAt time.Time
-		// The time the secret's value last changed.
+		// The time the secret last changed, by its value or its labels. The revision
+		// is what says the value moved.
 		UpdatedAt time.Time
 	}
 
@@ -153,7 +161,7 @@ func NewSecretService(config SecretServiceConfig) *SecretService {
 //
 // A value that did change moves the revision, and every workload referencing the
 // secret is rehashed so the reconciler replaces its instances.
-func (s *SecretService) Set(ctx context.Context, name string, value []byte) (Secret, bool, error) {
+func (s *SecretService) Set(ctx context.Context, name string, value []byte, labels map[string]string) (Secret, bool, error) {
 	if !referenceNamePattern.MatchString(name) || len(name) > 63 {
 		return Secret{}, false, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidSecret)
 	}
@@ -164,12 +172,31 @@ func (s *SecretService) Set(ctx context.Context, name string, value []byte) (Sec
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	if err := manifest.ValidateLabels(labels); err != nil {
+		return Secret{}, false, fmt.Errorf("%w: %v", ErrInvalidSecret, err)
+	}
+
 	existing, err := s.secrets.Get(ctx, name)
 	switch {
 	case err != nil && !errors.Is(err, database.ErrSecretNotFound):
 		return Secret{}, false, fmt.Errorf("failed to load secret: %w", err)
 	case err == nil && s.unchanged(name, existing.Value, value):
-		secret, err := s.hydrate(ctx, existing)
+		if maps.Equal(existing.Labels, labels) {
+			secret, err := s.hydrate(ctx, existing)
+
+			return secret, false, err
+		}
+
+		// The labels moved and the value did not. Written back through the same
+		// upsert, but under the revision the secret already holds: the revision is
+		// what says the value changed, and moving it for a label would replace every
+		// instance reading the secret. Nothing is redeployed for the same reason.
+		relabelled, err := s.secrets.Upsert(ctx, name, existing.Value, existing.Revision, existing.KeyID, labels)
+		if err != nil {
+			return Secret{}, false, err
+		}
+
+		secret, err := s.hydrate(ctx, relabelled)
 
 		return secret, false, err
 	}
@@ -186,7 +213,7 @@ func (s *SecretService) Set(ctx context.Context, name string, value []byte) (Sec
 		return Secret{}, false, err
 	}
 
-	stored, err := s.secrets.Upsert(ctx, name, sealed, revision, s.keyID)
+	stored, err := s.secrets.Upsert(ctx, name, sealed, revision, s.keyID, labels)
 	if err != nil {
 		return Secret{}, false, err
 	}
@@ -351,6 +378,7 @@ func (s *SecretService) hydrate(ctx context.Context, row database.Secret) (Secre
 		Name:      row.Name,
 		Revision:  row.Revision,
 		UsedBy:    usedBy,
+		Labels:    row.Labels,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
 	}, nil

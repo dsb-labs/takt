@@ -22,8 +22,8 @@ func TestSecretService_Set(t *testing.T) {
 
 		secrets.EXPECT().Get(mock.Anything, "db-password").
 			Return(database.Secret{}, database.ErrSecretNotFound).Once()
-		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, name string, value []byte, revision, _ string) (database.Secret, error) {
+		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, name string, value []byte, revision, _ string, _ map[string]string) (database.Secret, error) {
 				// What reaches the database is the sealed value, never the plaintext.
 				assert.NotContains(t, string(value), "hunter2")
 
@@ -32,7 +32,7 @@ func TestSecretService_Set(t *testing.T) {
 		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return(nil, nil).Once()
 
 		stored, created, err := newTestSecretService(t, secrets, nil).
-			Set(t.Context(), "db-password", []byte("hunter2"))
+			Set(t.Context(), "db-password", []byte("hunter2"), nil)
 		require.NoError(t, err)
 		assert.True(t, created)
 		assert.Equal(t, "db-password", stored.Name)
@@ -50,8 +50,8 @@ func TestSecretService_Set(t *testing.T) {
 			Return(database.Secret{Name: "db-password", Value: sealed, Revision: "rev-one"}, nil).Once()
 
 		var revision string
-		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, name string, value []byte, rev, _ string) (database.Secret, error) {
+		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, name string, value []byte, rev, _ string, _ map[string]string) (database.Secret, error) {
 				revision = rev
 
 				return database.Secret{Name: name, Value: value, Revision: rev}, nil
@@ -59,7 +59,7 @@ func TestSecretService_Set(t *testing.T) {
 		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return(nil, nil).Once()
 
 		stored, created, err := newTestSecretService(t, secrets, cipher).
-			Set(t.Context(), "db-password", []byte("hunter3"))
+			Set(t.Context(), "db-password", []byte("hunter3"), nil)
 		require.NoError(t, err)
 		assert.False(t, created)
 		assert.NotEqual(t, "rev-one", revision)
@@ -81,10 +81,60 @@ func TestSecretService_Set(t *testing.T) {
 		// sets every secret on every run does not restart the fleet each time. The
 		// mock asserts no Upsert, since it was never told to expect one.
 		stored, created, err := newTestSecretService(t, secrets, cipher).
-			Set(t.Context(), "db-password", []byte("hunter2"))
+			Set(t.Context(), "db-password", []byte("hunter2"), nil)
 		require.NoError(t, err)
 		assert.False(t, created)
 		assert.Equal(t, "rev-one", stored.Revision)
+	})
+
+	t.Run("writes labels without moving the revision", func(t *testing.T) {
+		secrets := NewMockSecretRepository(t)
+		cipher := newTestCipher(t)
+
+		sealed, err := cipher.Seal("db-password", []byte("hunter2"))
+		require.NoError(t, err)
+
+		existing := database.Secret{
+			Name:     "db-password",
+			Value:    sealed,
+			Revision: "rev-one",
+			KeyID:    "key-one",
+			Labels:   map[string]string{"app": "web"},
+		}
+
+		secrets.EXPECT().Get(mock.Anything, "db-password").Return(existing, nil).Once()
+
+		// The revision it already holds goes back in. It is what moves the
+		// specification hash of every workload reading the secret, and labelling one
+		// is bookkeeping — replacing instances across the node for that would be
+		// absurd.
+		secrets.EXPECT().
+			Upsert(mock.Anything, "db-password", sealed, "rev-one", "key-one", map[string]string{"app": "api"}).
+			Return(database.Secret{
+				Name:     "db-password",
+				Value:    sealed,
+				Revision: "rev-one",
+				KeyID:    "key-one",
+				Labels:   map[string]string{"app": "api"},
+			}, nil).Once()
+		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return(nil, nil).Once()
+
+		// Nothing is redeployed, which the mock asserts by never being told to
+		// expect a rehash.
+		stored, created, err := newTestSecretService(t, secrets, cipher).
+			Set(t.Context(), "db-password", []byte("hunter2"), map[string]string{"app": "api"})
+		require.NoError(t, err)
+		assert.False(t, created)
+		assert.Equal(t, "rev-one", stored.Revision)
+		assert.Equal(t, map[string]string{"app": "api"}, stored.Labels)
+	})
+
+	t.Run("refuses a label orca reserves for itself", func(t *testing.T) {
+		// The rules are the workload's rules. The repository is never reached, which
+		// the mock asserts by expecting nothing.
+		_, _, err := newTestSecretService(t, NewMockSecretRepository(t), nil).
+			Set(t.Context(), "db-password", []byte("hunter2"), map[string]string{"orca.workload": "sneaky"})
+		assert.ErrorIs(t, err, service.ErrInvalidSecret)
 	})
 
 	t.Run("redeploys the workloads reading it", func(t *testing.T) {
@@ -92,7 +142,7 @@ func TestSecretService_Set(t *testing.T) {
 
 		secrets.EXPECT().Get(mock.Anything, "db-password").
 			Return(database.Secret{}, database.ErrSecretNotFound).Once()
-		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything).
+		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(database.Secret{Name: "db-password", Revision: "rev-one"}, nil).Once()
 		secrets.EXPECT().UsedBy(mock.Anything, "db-password").
 			Return([]string{"one", "two"}, nil).Twice()
@@ -109,14 +159,14 @@ func TestSecretService_Set(t *testing.T) {
 			},
 		})
 
-		_, _, err := svc.Set(t.Context(), "db-password", []byte("hunter2"))
+		_, _, err := svc.Set(t.Context(), "db-password", []byte("hunter2"), nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"one", "two"}, rehashed)
 	})
 
 	t.Run("refuses a name orca would not accept", func(t *testing.T) {
 		_, _, err := newTestSecretService(t, NewMockSecretRepository(t), nil).
-			Set(t.Context(), "DB_PASSWORD", []byte("hunter2"))
+			Set(t.Context(), "DB_PASSWORD", []byte("hunter2"), nil)
 		assert.ErrorIs(t, err, service.ErrInvalidSecret)
 	})
 
@@ -125,13 +175,13 @@ func TestSecretService_Set(t *testing.T) {
 
 		secrets.EXPECT().Get(mock.Anything, "db-password").
 			Return(database.Secret{Name: "db-password", Value: []byte("sealed under a key that is gone")}, nil).Once()
-		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything).
+		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(database.Secret{Name: "db-password", Revision: "rev-two"}, nil).Once()
 		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return(nil, nil).Once()
 
 		// A key rotated out from under the database leaves a value nothing can read.
 		// Re-sealing under the current key is more useful than refusing to move.
-		_, _, err := newTestSecretService(t, secrets, nil).Set(t.Context(), "db-password", []byte("hunter2"))
+		_, _, err := newTestSecretService(t, secrets, nil).Set(t.Context(), "db-password", []byte("hunter2"), nil)
 		require.NoError(t, err)
 	})
 }

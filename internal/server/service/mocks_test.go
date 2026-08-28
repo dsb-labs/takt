@@ -1076,8 +1076,8 @@ func (_c *MockSecretRepository_Rekey_Call) RunAndReturn(run func(ctx context.Con
 }
 
 // Upsert provides a mock function for the type MockSecretRepository
-func (_mock *MockSecretRepository) Upsert(ctx context.Context, name string, value []byte, revision string, keyID string) (database.Secret, error) {
-	ret := _mock.Called(ctx, name, value, revision, keyID)
+func (_mock *MockSecretRepository) Upsert(ctx context.Context, name string, value []byte, revision string, keyID string, labels map[string]string) (database.Secret, error) {
+	ret := _mock.Called(ctx, name, value, revision, keyID, labels)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
@@ -1085,16 +1085,16 @@ func (_mock *MockSecretRepository) Upsert(ctx context.Context, name string, valu
 
 	var r0 database.Secret
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, string, string) (database.Secret, error)); ok {
-		return returnFunc(ctx, name, value, revision, keyID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, string, string, map[string]string) (database.Secret, error)); ok {
+		return returnFunc(ctx, name, value, revision, keyID, labels)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, string, string) database.Secret); ok {
-		r0 = returnFunc(ctx, name, value, revision, keyID)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, string, string, map[string]string) database.Secret); ok {
+		r0 = returnFunc(ctx, name, value, revision, keyID, labels)
 	} else {
 		r0 = ret.Get(0).(database.Secret)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []byte, string, string) error); ok {
-		r1 = returnFunc(ctx, name, value, revision, keyID)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []byte, string, string, map[string]string) error); ok {
+		r1 = returnFunc(ctx, name, value, revision, keyID, labels)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1112,11 +1112,12 @@ type MockSecretRepository_Upsert_Call struct {
 //   - value []byte
 //   - revision string
 //   - keyID string
-func (_e *MockSecretRepository_Expecter) Upsert(ctx any, name any, value any, revision any, keyID any) *MockSecretRepository_Upsert_Call {
-	return &MockSecretRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, name, value, revision, keyID)}
+//   - labels map[string]string
+func (_e *MockSecretRepository_Expecter) Upsert(ctx any, name any, value any, revision any, keyID any, labels any) *MockSecretRepository_Upsert_Call {
+	return &MockSecretRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, name, value, revision, keyID, labels)}
 }
 
-func (_c *MockSecretRepository_Upsert_Call) Run(run func(ctx context.Context, name string, value []byte, revision string, keyID string)) *MockSecretRepository_Upsert_Call {
+func (_c *MockSecretRepository_Upsert_Call) Run(run func(ctx context.Context, name string, value []byte, revision string, keyID string, labels map[string]string)) *MockSecretRepository_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1138,12 +1139,17 @@ func (_c *MockSecretRepository_Upsert_Call) Run(run func(ctx context.Context, na
 		if args[4] != nil {
 			arg4 = args[4].(string)
 		}
+		var arg5 map[string]string
+		if args[5] != nil {
+			arg5 = args[5].(map[string]string)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
 			arg4,
+			arg5,
 		)
 	})
 	return _c
@@ -1154,7 +1160,7 @@ func (_c *MockSecretRepository_Upsert_Call) Return(secret database.Secret, err e
 	return _c
 }
 
-func (_c *MockSecretRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, name string, value []byte, revision string, keyID string) (database.Secret, error)) *MockSecretRepository_Upsert_Call {
+func (_c *MockSecretRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, name string, value []byte, revision string, keyID string, labels map[string]string) (database.Secret, error)) *MockSecretRepository_Upsert_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1603,8 +1609,8 @@ func (_c *MockVariableRepository_List_Call) RunAndReturn(run func(ctx context.Co
 }
 
 // Upsert provides a mock function for the type MockVariableRepository
-func (_mock *MockVariableRepository) Upsert(ctx context.Context, name string, value string) (database.Variable, error) {
-	ret := _mock.Called(ctx, name, value)
+func (_mock *MockVariableRepository) Upsert(ctx context.Context, name string, value string, labels map[string]string) (database.Variable, error) {
+	ret := _mock.Called(ctx, name, value, labels)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
@@ -1612,16 +1618,16 @@ func (_mock *MockVariableRepository) Upsert(ctx context.Context, name string, va
 
 	var r0 database.Variable
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (database.Variable, error)); ok {
-		return returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string) (database.Variable, error)); ok {
+		return returnFunc(ctx, name, value, labels)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) database.Variable); ok {
-		r0 = returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string) database.Variable); ok {
+		r0 = returnFunc(ctx, name, value, labels)
 	} else {
 		r0 = ret.Get(0).(database.Variable)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
-		r1 = returnFunc(ctx, name, value)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, map[string]string) error); ok {
+		r1 = returnFunc(ctx, name, value, labels)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1637,11 +1643,12 @@ type MockVariableRepository_Upsert_Call struct {
 //   - ctx context.Context
 //   - name string
 //   - value string
-func (_e *MockVariableRepository_Expecter) Upsert(ctx any, name any, value any) *MockVariableRepository_Upsert_Call {
-	return &MockVariableRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, name, value)}
+//   - labels map[string]string
+func (_e *MockVariableRepository_Expecter) Upsert(ctx any, name any, value any, labels any) *MockVariableRepository_Upsert_Call {
+	return &MockVariableRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, name, value, labels)}
 }
 
-func (_c *MockVariableRepository_Upsert_Call) Run(run func(ctx context.Context, name string, value string)) *MockVariableRepository_Upsert_Call {
+func (_c *MockVariableRepository_Upsert_Call) Run(run func(ctx context.Context, name string, value string, labels map[string]string)) *MockVariableRepository_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1655,10 +1662,15 @@ func (_c *MockVariableRepository_Upsert_Call) Run(run func(ctx context.Context, 
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
+		var arg3 map[string]string
+		if args[3] != nil {
+			arg3 = args[3].(map[string]string)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -1669,7 +1681,7 @@ func (_c *MockVariableRepository_Upsert_Call) Return(variable database.Variable,
 	return _c
 }
 
-func (_c *MockVariableRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, name string, value string) (database.Variable, error)) *MockVariableRepository_Upsert_Call {
+func (_c *MockVariableRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, name string, value string, labels map[string]string) (database.Variable, error)) *MockVariableRepository_Upsert_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1893,8 +1905,8 @@ func (_c *MockVolumeRepository_Get_Call) RunAndReturn(run func(ctx context.Conte
 }
 
 // Insert provides a mock function for the type MockVolumeRepository
-func (_mock *MockVolumeRepository) Insert(ctx context.Context, name string) (database.Volume, error) {
-	ret := _mock.Called(ctx, name)
+func (_mock *MockVolumeRepository) Insert(ctx context.Context, name string, labels map[string]string) (database.Volume, error) {
+	ret := _mock.Called(ctx, name, labels)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Insert")
@@ -1902,16 +1914,16 @@ func (_mock *MockVolumeRepository) Insert(ctx context.Context, name string) (dat
 
 	var r0 database.Volume
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (database.Volume, error)); ok {
-		return returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) (database.Volume, error)); ok {
+		return returnFunc(ctx, name, labels)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) database.Volume); ok {
-		r0 = returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) database.Volume); ok {
+		r0 = returnFunc(ctx, name, labels)
 	} else {
 		r0 = ret.Get(0).(database.Volume)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, map[string]string) error); ok {
+		r1 = returnFunc(ctx, name, labels)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1926,11 +1938,12 @@ type MockVolumeRepository_Insert_Call struct {
 // Insert is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
-func (_e *MockVolumeRepository_Expecter) Insert(ctx any, name any) *MockVolumeRepository_Insert_Call {
-	return &MockVolumeRepository_Insert_Call{Call: _e.mock.On("Insert", ctx, name)}
+//   - labels map[string]string
+func (_e *MockVolumeRepository_Expecter) Insert(ctx any, name any, labels any) *MockVolumeRepository_Insert_Call {
+	return &MockVolumeRepository_Insert_Call{Call: _e.mock.On("Insert", ctx, name, labels)}
 }
 
-func (_c *MockVolumeRepository_Insert_Call) Run(run func(ctx context.Context, name string)) *MockVolumeRepository_Insert_Call {
+func (_c *MockVolumeRepository_Insert_Call) Run(run func(ctx context.Context, name string, labels map[string]string)) *MockVolumeRepository_Insert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1940,9 +1953,14 @@ func (_c *MockVolumeRepository_Insert_Call) Run(run func(ctx context.Context, na
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 map[string]string
+		if args[2] != nil {
+			arg2 = args[2].(map[string]string)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -1953,7 +1971,7 @@ func (_c *MockVolumeRepository_Insert_Call) Return(volume database.Volume, err e
 	return _c
 }
 
-func (_c *MockVolumeRepository_Insert_Call) RunAndReturn(run func(ctx context.Context, name string) (database.Volume, error)) *MockVolumeRepository_Insert_Call {
+func (_c *MockVolumeRepository_Insert_Call) RunAndReturn(run func(ctx context.Context, name string, labels map[string]string) (database.Volume, error)) *MockVolumeRepository_Insert_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2016,6 +2034,78 @@ func (_c *MockVolumeRepository_List_Call) Return(volumes []database.Volume, err 
 }
 
 func (_c *MockVolumeRepository_List_Call) RunAndReturn(run func(ctx context.Context) ([]database.Volume, error)) *MockVolumeRepository_List_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Update provides a mock function for the type MockVolumeRepository
+func (_mock *MockVolumeRepository) Update(ctx context.Context, name string, labels map[string]string) (database.Volume, error) {
+	ret := _mock.Called(ctx, name, labels)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Update")
+	}
+
+	var r0 database.Volume
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) (database.Volume, error)); ok {
+		return returnFunc(ctx, name, labels)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) database.Volume); ok {
+		r0 = returnFunc(ctx, name, labels)
+	} else {
+		r0 = ret.Get(0).(database.Volume)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, map[string]string) error); ok {
+		r1 = returnFunc(ctx, name, labels)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockVolumeRepository_Update_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Update'
+type MockVolumeRepository_Update_Call struct {
+	*mock.Call
+}
+
+// Update is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+//   - labels map[string]string
+func (_e *MockVolumeRepository_Expecter) Update(ctx any, name any, labels any) *MockVolumeRepository_Update_Call {
+	return &MockVolumeRepository_Update_Call{Call: _e.mock.On("Update", ctx, name, labels)}
+}
+
+func (_c *MockVolumeRepository_Update_Call) Run(run func(ctx context.Context, name string, labels map[string]string)) *MockVolumeRepository_Update_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 map[string]string
+		if args[2] != nil {
+			arg2 = args[2].(map[string]string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockVolumeRepository_Update_Call) Return(volume database.Volume, err error) *MockVolumeRepository_Update_Call {
+	_c.Call.Return(volume, err)
+	return _c
+}
+
+func (_c *MockVolumeRepository_Update_Call) RunAndReturn(run func(ctx context.Context, name string, labels map[string]string) (database.Volume, error)) *MockVolumeRepository_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS secret (
     -- seals a secret would delete the secret, which is the loss this column exists
     -- to prevent.
     key_id     TEXT NOT NULL REFERENCES encryption_key (id) ON DELETE RESTRICT,
+    labels     BLOB NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

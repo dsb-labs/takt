@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dsb-labs/orca/internal/server/database"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 var (
@@ -37,7 +38,9 @@ type (
 	// service uses.
 	VolumeRepository interface {
 		// Insert should record a new volume with the given name.
-		Insert(ctx context.Context, name string) (database.Volume, error)
+		Insert(ctx context.Context, name string, labels map[string]string) (database.Volume, error)
+		// Update should replace the volume's mutable fields, which are its labels.
+		Update(ctx context.Context, name string, labels map[string]string) (database.Volume, error)
 		// Get should return the volume with the given name.
 		Get(ctx context.Context, name string) (database.Volume, error)
 		// List should return every volume.
@@ -61,6 +64,8 @@ type (
 		Path string
 		// The names of the workloads whose specifications mount the volume.
 		UsedBy []string
+		// Arbitrary key-value pairs attached to the volume.
+		Labels map[string]string
 		// The time the volume was created.
 		CreatedAt time.Time
 	}
@@ -99,12 +104,16 @@ func NewVolumeService(config VolumeServiceConfig) *VolumeService {
 // would be created again under a new identifier, where a row with no directory is
 // reported as a volume whose data cannot be reached — so the failure that leaves
 // nothing behind is the one to prefer.
-func (s *VolumeService) Create(ctx context.Context, name string) (Volume, error) {
+func (s *VolumeService) Create(ctx context.Context, name string, labels map[string]string) (Volume, error) {
 	if !volumeNamePattern.MatchString(name) || len(name) > 63 {
 		return Volume{}, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidVolume)
 	}
 
-	stored, err := s.volumes.Insert(ctx, name)
+	if err := manifest.ValidateLabels(labels); err != nil {
+		return Volume{}, fmt.Errorf("%w: %v", ErrInvalidVolume, err)
+	}
+
+	stored, err := s.volumes.Insert(ctx, name, labels)
 	switch {
 	case errors.Is(err, database.ErrVolumeExists):
 		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeExists, name)
@@ -246,6 +255,33 @@ func (s *VolumeService) Path(ctx context.Context, name string) (string, error) {
 	return s.path(stored.ID)
 }
 
+// Update replaces the mutable fields of the volume with the given name, returning it
+// as it now stands. Returns ErrVolumeNotFound when no such volume exists.
+//
+// The labels are the whole of what a volume has to change. Its name identifies it,
+// its identifier is what its directory is named for, and its contents are the
+// workloads' to write — so there is nothing else an update of a volume could mean.
+func (s *VolumeService) Update(ctx context.Context, name string, labels map[string]string) (Volume, error) {
+	if err := manifest.ValidateLabels(labels); err != nil {
+		return Volume{}, fmt.Errorf("%w: %v", ErrInvalidVolume, err)
+	}
+
+	stored, err := s.volumes.Update(ctx, name, labels)
+	switch {
+	case errors.Is(err, database.ErrVolumeNotFound):
+		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeNotFound, name)
+	case err != nil:
+		return Volume{}, err
+	}
+
+	usedBy, err := s.volumes.UsedBy(ctx, name)
+	if err != nil {
+		return Volume{}, err
+	}
+
+	return s.hydrate(stored, usedBy)
+}
+
 func (s *VolumeService) hydrate(row database.Volume, usedBy []string) (Volume, error) {
 	path, err := s.path(row.ID)
 	if err != nil {
@@ -256,6 +292,7 @@ func (s *VolumeService) hydrate(row database.Volume, usedBy []string) (Volume, e
 		Name:      row.Name,
 		Path:      path,
 		UsedBy:    usedBy,
+		Labels:    row.Labels,
 		CreatedAt: row.CreatedAt,
 	}, nil
 }

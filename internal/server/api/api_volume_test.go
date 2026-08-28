@@ -35,7 +35,7 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 			Name: "creates a volume",
 			Body: generated.VolumeSpec{Version: "v1", Name: "example-data"},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, "example-data").
+				svc.EXPECT().Create(mock.Anything, "example-data", mock.Anything).
 					Return(testVolume("example-data"), nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
@@ -51,7 +51,7 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 			Name: "reports a name another volume holds",
 			Body: generated.VolumeSpec{Version: "v1", Name: "example-data"},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, "example-data").
+				svc.EXPECT().Create(mock.Anything, "example-data", mock.Anything).
 					Return(service.Volume{}, service.ErrVolumeExists).Once()
 			},
 			// A volume holds data, so a repeated create is reported rather than
@@ -62,7 +62,7 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 			Name: "reports a name orca will not accept",
 			Body: generated.VolumeSpec{Version: "v1", Name: "Example_Data"},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, "Example_Data").
+				svc.EXPECT().Create(mock.Anything, "Example_Data", mock.Anything).
 					Return(service.Volume{}, service.ErrInvalidVolume).Once()
 			},
 			ExpectStatus: http.StatusBadRequest,
@@ -77,7 +77,7 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 			Name: "reports an unexpected failure",
 			Body: generated.VolumeSpec{Version: "v1", Name: "example-data"},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, "example-data").
+				svc.EXPECT().Create(mock.Anything, "example-data", mock.Anything).
 					Return(service.Volume{}, errors.New("disk is full")).Once()
 			},
 			ExpectStatus: http.StatusInternalServerError,
@@ -346,7 +346,7 @@ func TestVolumeAPI_HidesInternalFailures(t *testing.T) {
 			Target: "/api/v1/volumes",
 			Body:   generated.VolumeSpec{Version: "v1", Name: "example-data"},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, mock.Anything).
+				svc.EXPECT().Create(mock.Anything, mock.Anything, mock.Anything).
 					Return(service.Volume{}, internal).Once()
 			},
 		},
