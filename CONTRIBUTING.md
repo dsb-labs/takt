@@ -121,8 +121,9 @@ build rather than a run.
 
 ### Reading a run
 
-The report is JSON on stdout and a table on stderr, so a run can be read and piped at
-the same time.
+The report is JSON on stdout, and the command says nothing else. It carries the
+scenario's name and description, so a report read on its own says which run produced
+it and what that run was for.
 
 ```sh
 go run . dev loadtest scenarios/churn.toml > report.json
