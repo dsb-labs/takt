@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/orca/cmd/admin"
+	"github.com/dsb-labs/orca/cmd/dev"
 	"github.com/dsb-labs/orca/cmd/secret"
 	"github.com/dsb-labs/orca/cmd/serve"
 	"github.com/dsb-labs/orca/cmd/variable"
@@ -53,6 +54,7 @@ func main() {
 		secret.Command(),
 		variable.Command(),
 		admin.Command(),
+		dev.Command(),
 	)
 
 	if err := cmd.ExecuteContext(ctx); err != nil {
