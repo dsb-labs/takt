@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -38,8 +37,6 @@ type Config struct {
 	// one, the run also reports what was left on disk after teardown — which is the
 	// only way to see a leak the API does not expose.
 	DataDir string
-	// Where progress is written as the run goes. May be nil.
-	Progress io.Writer
 	// Leaves the fleet in place instead of removing it, for a run somebody wants to
 	// poke at afterwards.
 	Keep bool
@@ -54,11 +51,13 @@ func Run(ctx context.Context, config Config) (report Report, err error) {
 	scenario := config.Scenario
 
 	workloads, names := Build(scenario, config.Prefix)
-	report = Report{Scenario: scenario.Name, Workloads: len(workloads)}
-	collected := newCollector()
+	report = Report{
+		Scenario:    scenario.Name,
+		Description: scenario.Description,
+		Workloads:   len(workloads),
+	}
 
-	config.log("setting up %d secrets, %d variables, %d volumes",
-		len(names.Secrets), len(names.Variables), len(names.Volumes))
+	collected := newCollector()
 
 	if err = setup(ctx, config, collected, names); err != nil {
 		return Report{}, err
@@ -71,8 +70,6 @@ func Run(ctx context.Context, config Config) (report Report, err error) {
 		// Torn down even when the run failed, or a scenario that broke halfway
 		// leaves a server full of workloads for the next run to trip over.
 		if !config.Keep {
-			config.log("tearing down")
-
 			// Deliberately not the run's context: a cancelled run still has to
 			// remove what it created, and every call below would refuse to start.
 			teardown(context.WithoutCancel(ctx), config, collected, names)
@@ -92,8 +89,6 @@ func Run(ctx context.Context, config Config) (report Report, err error) {
 		}
 	}()
 
-	config.log("applying %d workloads", len(workloads))
-
 	started := time.Now()
 	if err = apply(ctx, config, collected, workloads); err != nil {
 		return Report{}, err
@@ -101,14 +96,11 @@ func Run(ctx context.Context, config Config) (report Report, err error) {
 
 	report.Applied = Duration(time.Since(started))
 
-	config.log("waiting for the fleet to converge")
-
 	started = time.Now()
 	report.Running, report.Unconverged = converge(ctx, config, workloads)
 	report.Converged = Duration(time.Since(started))
 
 	if scenario.Churn.Duration > 0 {
-		config.log("churning for %s with %d workers", scenario.Churn.Duration, scenario.Churn.Workers)
 		churn(ctx, config, collected, names)
 	}
 
@@ -285,10 +277,7 @@ func churn(ctx context.Context, config Config, collected *collector, names Names
 
 	choices := weighted(scenario.Churn.Weights)
 
-	var (
-		wg  sync.WaitGroup
-		ops atomic.Int64
-	)
+	var wg sync.WaitGroup
 
 	for worker := range scenario.Churn.Workers {
 		wg.Add(1)
@@ -301,15 +290,12 @@ func churn(ctx context.Context, config Config, collected *collector, names Names
 			rng := rand.New(rand.NewPCG(uint64(worker), uint64(time.Now().UnixNano())))
 
 			for ctx.Err() == nil {
-				ops.Add(1)
 				perform(ctx, config, collected, names, choices[rng.IntN(len(choices))], rng)
 			}
 		}()
 	}
 
 	wg.Wait()
-
-	config.log("  %d operations", ops.Load())
 }
 
 // perform runs one operation of the named kind.
@@ -417,14 +403,6 @@ func teardown(ctx context.Context, config Config, collected *collector, names Na
 			return config.Client.DeleteVolume(ctx, name)
 		})
 	}
-}
-
-func (c Config) log(format string, args ...any) {
-	if c.Progress == nil {
-		return
-	}
-
-	fmt.Fprintf(c.Progress, format+"\n", args...)
 }
 
 func choose(names []string, rng *rand.Rand) string {

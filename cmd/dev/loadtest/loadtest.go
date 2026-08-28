@@ -29,8 +29,9 @@ func Command() *cobra.Command {
 			"proportion of them publish ports, mount secrets, fail, or are checked.\n" +
 			"The workloads themselves are this command's own and do as little as\n" +
 			"possible, so a run measures orca rather than what it was asked to run.\n\n" +
-			"The report is JSON on standard output. Progress goes to standard error,\n" +
-			"so the two do not mix when the output is piped.\n\n" +
+			"The report is JSON on standard output, and the command says nothing\n" +
+			"else. A run that found problems says so through its exit status, and\n" +
+			"what it found is in the report.\n\n" +
 			"Exits non-zero when a request failed, a workload never ran, or something\n" +
 			"was left behind. Latency is reported rather than judged: how fast a\n" +
 			"machine is says nothing about whether the code is right.\n\n" +
@@ -55,16 +56,11 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			out := cmd.ErrOrStderr()
-
-			fmt.Fprintf(out, "%s: %s\n", scenario.Name, scenario.Description)
-
 			report, err := loadtest.Run(cmd.Context(), loadtest.Config{
 				Scenario: scenario,
 				Client:   c,
 				Prefix:   prefix,
 				DataDir:  dataDir,
-				Progress: out,
 				Keep:     keep,
 			})
 			if err != nil {

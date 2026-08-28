@@ -22,6 +22,22 @@ func TestDuration_MarshalJSON(t *testing.T) {
 	assert.JSONEq(t, `"1.403ms"`, string(encoded))
 }
 
+// TestReport_CarriesTheScenario covers a report saying which run produced it. Read on
+// its own — out of an artifact, or a week later — a report with no name and no purpose
+// is a page of numbers.
+func TestReport_CarriesTheScenario(t *testing.T) {
+	t.Parallel()
+
+	encoded, err := json.Marshal(loadtest.Report{
+		Scenario:    "smoke",
+		Description: "A few of everything, in seconds.",
+	})
+	require.NoError(t, err)
+
+	assert.Contains(t, string(encoded), `"Scenario":"smoke"`)
+	assert.Contains(t, string(encoded), `"Description":"A few of everything, in seconds."`)
+}
+
 func TestReport_Failed(t *testing.T) {
 	t.Parallel()
 

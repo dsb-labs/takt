@@ -19,8 +19,11 @@ type (
 	// The Report type is what a run produces: how long each operation took, what
 	// failed, and what was left behind.
 	Report struct {
-		// The scenario that produced the report.
-		Scenario string
+		// The scenario that produced the report, and what it says it is for. Both
+		// are here so that a report read on its own says which run produced it and
+		// what that run was trying to do.
+		Scenario    string
+		Description string
 		// How many workloads it applied.
 		Workloads int
 		// How long applying the whole fleet took.
