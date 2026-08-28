@@ -458,14 +458,32 @@ func instanceUp(instance Instance) bool {
 // deleted.
 //
 // Starting is asynchronous: the server starts the workload's instances on its
-// next pass. Pass WithWait to block until the workload has left pending — for a
-// scheduled workload that is its next occurrence, so waiting on one blocks until
-// the schedule next fires. Starting a workload that is not suspended changes
-// nothing.
+// next pass. Pass WithWait to block until something is up for the workload that
+// was not up before — for a scheduled workload that is its next occurrence, so
+// waiting on one blocks until the schedule next fires. Starting a workload that is
+// not suspended changes nothing, and waiting on one returns as soon as it is read.
 func (c *Client) Start(ctx context.Context, name string, options ...LifecycleOption) (Workload, error) {
 	config := defaultLifecycleConfig()
 	for _, option := range options {
 		option(config)
+	}
+
+	// The instances are read before the request, for the same reason a restart reads
+	// them. Stopping a workload keeps its last container so the output stays
+	// readable, and that container is still reported once the suspension clears. A
+	// wait that only asked whether the workload had left pending would be satisfied
+	// by it and return before anything had started.
+	var before map[string]struct{}
+	if config.wait {
+		current, err := c.Get(ctx, name)
+		if err != nil {
+			return Workload{}, err
+		}
+
+		before = make(map[string]struct{}, len(current.Instances))
+		for _, instance := range current.Instances {
+			before[instance.ID] = struct{}{}
+		}
 	}
 
 	resp, err := c.api.StartWorkloadWithResponse(ctx, name, api.StartWorkloadJSONRequestBody{})
@@ -494,7 +512,18 @@ func (c *Client) Start(ctx context.Context, name string, options ...LifecycleOpt
 	}
 
 	return c.waitFor(ctx, name, config.interval, func(w Workload) bool {
-		return !w.Suspended && w.State != WorkloadStatePending
+		if w.Suspended {
+			return false
+		}
+
+		// An instance that was not there before is the start having happened. One
+		// that was there and is running covers starting a workload that was never
+		// suspended, where nothing new appears because nothing had to.
+		return slices.ContainsFunc(w.Instances, func(instance Instance) bool {
+			_, existed := before[instance.ID]
+
+			return !existed || instance.State == InstanceStateRunning
+		})
 	})
 }
 

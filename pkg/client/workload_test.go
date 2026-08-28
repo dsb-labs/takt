@@ -603,22 +603,61 @@ func TestClient_Start(t *testing.T) {
 		assert.Equal(t, client.WorkloadStatePending, got.State)
 	})
 
-	t.Run("waits for the workload to leave pending", func(t *testing.T) {
+	t.Run("waits for an instance that was not there before", func(t *testing.T) {
 		var gets int
 
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPost {
-				writeJSON(t, w, http.StatusAccepted, api.StartWorkloadResult{Workload: workload("example", api.WorkloadStatePending)})
+				writeJSON(t, w, http.StatusAccepted, api.StartWorkloadResult{Workload: workload("example", api.WorkloadStateSuspended)})
 				return
 			}
 
-			// Nothing has started the moment the mark clears, so waiting has to
-			// keep polling through pending and stop once something is up.
+			// The first read is the client's snapshot of what exists before the
+			// request. Stopping a workload keeps its last container so the output
+			// stays readable, so the suspension clears while that container is still
+			// reported — and a wait that stopped at "no longer pending" would be
+			// satisfied by it and return before anything had started.
 			gets++
 			if gets < 3 {
-				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStatePending)})
+				down := workload("example", api.WorkloadStateStopped)
+				down.Instances = &[]api.Instance{
+					{ID: "container-one", State: api.InstanceStateExited, SpecHash: "hash-one"},
+				}
+
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: down})
+
 				return
 			}
+
+			up := workload("example", api.WorkloadStateRunning)
+			up.Instances = &[]api.Instance{
+				{ID: "container-one", State: api.InstanceStateExited, SpecHash: "hash-one"},
+				{ID: "container-two", State: api.InstanceStateRunning, SpecHash: "hash-one"},
+			}
+
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: up})
+		})
+
+		got, err := c.Start(t.Context(), "example", client.WithWaitInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, gets)
+		assert.Equal(t, client.WorkloadStateRunning, got.State)
+	})
+
+	t.Run("returns for a workload that was already running", func(t *testing.T) {
+		var gets int
+
+		// Starting a workload that is not suspended changes nothing, so no instance
+		// appears that was not there before. The one already up is what the wait
+		// settles on, or waiting here would never end.
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				writeJSON(t, w, http.StatusAccepted, api.StartWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+				return
+			}
+
+			gets++
 
 			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
 		})
@@ -626,7 +665,7 @@ func TestClient_Start(t *testing.T) {
 		got, err := c.Start(t.Context(), "example", client.WithWaitInterval(time.Millisecond))
 		require.NoError(t, err)
 
-		assert.Equal(t, 3, gets)
+		assert.Equal(t, 2, gets)
 		assert.Equal(t, client.WorkloadStateRunning, got.State)
 	})
 
