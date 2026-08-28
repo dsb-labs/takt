@@ -30,6 +30,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/dsb-labs/orca/internal/restore"
 	execdriver "github.com/dsb-labs/orca/internal/server/driver/exec"
 	"github.com/dsb-labs/orca/pkg/client"
 	"github.com/dsb-labs/orca/pkg/manifest"
@@ -2572,7 +2573,7 @@ func (s *Suite) TestBackupRestoresANode() {
 	s.Require().NoError(s.client.Backup(s.ctx(), &archive, client.WithKeys()))
 
 	restored := s.T().TempDir()
-	s.extract(archive.Bytes(), restored)
+	s.restore(archive.Bytes(), restored)
 
 	s.restart(withDataDirectory(restored))
 
@@ -2587,7 +2588,9 @@ func (s *Suite) TestBackupRestoresANode() {
 
 	// And the value opens under the key that came out of the archive, which only a
 	// workload reading it can show.
-	reader := s.workloadName()
+	// A name of its own. Every name helper answers per test, so reusing one would
+	// replace the workload under test rather than add a second one beside it.
+	reader := s.workloadName() + "-reader"
 	s.T().Cleanup(func() { s.cleanup(reader) })
 
 	spec := s.jobSpec(reader, manifest.RestartNever, 0)
@@ -2602,6 +2605,88 @@ func (s *Suite) TestBackupRestoresANode() {
 	var out bytes.Buffer
 	s.Require().NoError(s.client.Logs(s.ctx(), &out, reader, client.WithTail(10)))
 	s.Contains(out.String(), "[survives-a-restore]")
+}
+
+// TestRestoreBringsBackVolumeData covers the part of a restore no archive can carry
+// and no server can perform, which is the part that fails silently when it is got
+// wrong.
+//
+// Volume data is arbitrary user data and is not in a backup, so it is copied by hand.
+// A volume is found by the identifier it was assigned rather than by its name, so
+// creating one of the same name on the restored node would give a fresh identifier,
+// an empty volume, and a row pointing at nothing. Nothing about that reads as an
+// error: the workload starts and its storage is empty.
+//
+// The workload writing into the volume runs on the host rather than in a container,
+// so the files it leaves belong to the user running the test and copying them needs
+// no privileges.
+func (s *Suite) TestRestoreBringsBackVolumeData() {
+	directory := s.T().TempDir()
+	s.restart(withDataDirectory(directory))
+
+	name, volume := s.workloadName(), s.volumeName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupVolume(volume) })
+
+	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
+	s.Require().NoError(err)
+
+	writer := s.execSpec(name, "sh", "-c", "echo precious > var/lib/example/file; exit 0")
+	writer.Restart = &manifest.Restart{Policy: manifest.RestartNever}
+	writer.Volumes = []manifest.VolumeMount{{Name: volume, To: "/var/lib/example"}}
+
+	_, _, err = s.client.Apply(s.ctx(), writer)
+	s.Require().NoError(err)
+	s.awaitState(name, client.WorkloadStateCompleted)
+
+	s.Require().Equal("precious\n", s.volumeFile(created.Path, "file"))
+
+	var archive bytes.Buffer
+	s.Require().NoError(s.client.Backup(s.ctx(), &archive, client.WithKeys()))
+
+	restored := s.T().TempDir()
+	report := s.restore(archive.Bytes(), restored)
+
+	// The restore says what it could not do, naming the identifier and the directory
+	// the data belongs in. Without that an operator has a row and no way to work out
+	// which directory answers to it.
+	s.Empty(report.MissingKeys)
+	s.Equal([]restore.Volume{{
+		ID:   filepath.Base(created.Path),
+		Name: volume,
+		Path: filepath.Join(restored, "volumes", filepath.Base(created.Path)),
+	}}, report.MissingVolumes)
+
+	s.Require().NoError(os.MkdirAll(filepath.Join(restored, "volumes"), 0o700))
+	s.Require().NoError(os.CopyFS(report.MissingVolumes[0].Path, os.DirFS(created.Path)))
+
+	s.restart(withDataDirectory(restored))
+
+	// The row still names the same directory, which is what the copy relied on.
+	after, err := s.client.GetVolume(s.ctx(), volume)
+	s.Require().NoError(err)
+	s.Equal(report.MissingVolumes[0].Path, after.Path)
+	s.Equal("precious\n", s.volumeFile(after.Path, "file"))
+
+	// And a workload mounting it by name reaches the data, which is the whole chain:
+	// the name resolves to the identifier, the identifier to the directory, and the
+	// directory holds what was backed up.
+	// A name of its own. Every name helper answers per test, so reusing one would
+	// replace the workload under test rather than add a second one beside it.
+	reader := s.workloadName() + "-reader"
+	s.T().Cleanup(func() { s.cleanup(reader) })
+
+	spec := s.execSpec(reader, "sh", "-c", "cat var/lib/example/file; exit 0")
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartNever}
+	spec.Volumes = []manifest.VolumeMount{{Name: volume, To: "/var/lib/example"}}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.awaitState(reader, client.WorkloadStateCompleted)
+
+	var out bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, reader, client.WithTail(10)))
+	s.Contains(out.String(), "precious")
 }
 
 // TestBackupLeavesTheKeyringOut proves the default keeps the database and the keys

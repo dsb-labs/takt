@@ -1,14 +1,12 @@
 package e2e_test
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -24,6 +22,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/dsb-labs/orca/internal/restore"
 	"github.com/dsb-labs/orca/internal/server"
 	"github.com/dsb-labs/orca/pkg/client"
 	"github.com/dsb-labs/orca/pkg/manifest"
@@ -612,27 +611,27 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// extract writes the contents of a backup archive into a data directory, following
-// the restore procedure in docs/operating.md.
-func (s *Suite) extract(archive []byte, directory string) {
-	reader, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+// restore puts a backup archive into a data directory and returns what the restore
+// reported it could not do.
+//
+// Through the same code "orca admin restore" runs, rather than by unpacking the
+// archive here. A helper of its own would be a second implementation of the
+// procedure, and the one that had never been run is the one under test.
+func (s *Suite) restore(archive []byte, directory string) restore.Report {
+	path := filepath.Join(s.T().TempDir(), "backup.zip")
+	s.Require().NoError(os.WriteFile(path, archive, 0o600))
+
+	config := server.DefaultConfig()
+	config.Data.Directory = directory
+	s.Require().NoError(config.Validate())
+
+	report, err := restore.Run(s.ctx(), restore.Config{
+		Archive:  path,
+		Database: config.DatabasePath(),
+		Keys:     config.KeysPath(),
+		Volumes:  config.VolumesPath(),
+	})
 	s.Require().NoError(err)
 
-	for _, entry := range reader.File {
-		f, err := entry.Open()
-		s.Require().NoError(err)
-
-		contents, err := io.ReadAll(f)
-		s.Require().NoError(f.Close())
-		s.Require().NoError(err)
-
-		// The keyring's entries carry their directory with them, so it has to exist
-		// before the key inside it is written.
-		path := filepath.Join(directory, entry.Name)
-		s.Require().NoError(os.MkdirAll(filepath.Dir(path), 0o700))
-
-		// Only the owner, for both. The server refuses to start on a key anything
-		// else can read, and the database holds every workload's specification.
-		s.Require().NoError(os.WriteFile(path, contents, 0o600))
-	}
+	return report
 }
