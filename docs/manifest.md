@@ -65,6 +65,11 @@ container:
 The name is the workload's identity. Applying the same name again updates that
 workload rather than creating a second one.
 
+To find out what applying a manifest would do without doing it, use
+`orca workload apply --dry-run`. It reports whether the workload would be created,
+whether its running instances would be replaced, and everything it names that does
+not exist. See [Command line](cli.md#workload-apply---dry-run).
+
 ## Labels
 
 Labels are how a workload is found: `orca workload list -q '$.labels.app=web'`

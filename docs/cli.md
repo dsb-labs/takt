@@ -4,6 +4,7 @@
 orca serve [config-file]                Run the orca server
 
 orca workload apply <manifest>          Create or update a workload from a manifest file
+orca workload apply --dry-run <file>    Report what applying a manifest would do
 orca workload list                      List workloads                       (alias: ls)
 orca workload get <name>                Show a single workload
 orca workload logs <name>               Read a workload's recent output
@@ -57,6 +58,10 @@ describe what it changes. See [Configuration](configuration.md).
 orca workload apply example.yaml
 ```
 
+| Flag | Description |
+|---|---|
+| `--dry-run` | Report what applying the manifest would do, and apply nothing. |
+
 Parses the manifest, submits it, and prints the resulting workload.
 
 Applying the same file twice is a no-op. A workload's version changes only when its
@@ -64,6 +69,72 @@ specification does, so a repeated apply never restarts healthy work.
 
 Applying a workload that is still terminating is rejected rather than resurrecting it
 half torn down.
+
+### workload apply --dry-run
+
+```sh
+orca workload apply --dry-run example.yaml
+```
+
+Resolves the manifest exactly as an apply resolves it, prints what applying it would
+do, and writes nothing.
+
+```json
+{
+  "Spec": {
+    "version": "v1",
+    "name": "example",
+    "ports": [
+      { "to": 80, "from": 30993, "protocol": "tcp" }
+    ],
+    "restart": { "policy": "always", "delay": 1000000000 },
+    "container": { "image": "nginx:1.27-alpine" }
+  },
+  "SpecHash": "75d5b0a6ab6944e4f893bc133806cf0b0c46f88daac26dcb76e289e440b722cd",
+  "Created": false,
+  "Replaced": true,
+  "Unknown": null
+}
+```
+
+Everything an apply refuses this refuses too, with the same error: a volume, secret,
+variable or workload the manifest names and nothing holds, a pinned host port another
+workload has, a workload being torn down, and a manifest that is not runnable. A dry
+run that passes is therefore a statement about the apply rather than about the file.
+
+`Replaced` is the field worth reading. A workload is replaced when its specification
+hash moves, and the hash covers the resolved specification along with the revision of
+every secret and the value of every variable the workload reads. An apply can
+therefore replace a running instance because something outside the file moved, with
+nothing in the manifest to say so.
+
+`Created` is true when nothing holds the name yet. Such a workload has nothing
+running, so `Replaced` is false for it.
+
+Nothing is allocated. A port mapping with no `from` needs a host port, and allocating
+one would consume a port or move a workload's address while reporting that nothing
+had changed. Such a port is printed without a `from`, and its path is listed in
+`Unknown`:
+
+```json
+{
+  "Spec": {
+    "ports": [
+      { "to": 80, "protocol": "tcp" }
+    ]
+  },
+  "SpecHash": "",
+  "Unknown": ["$.ports[0].from"]
+}
+```
+
+The paths are written in the syntax `orca workload list --query` uses. A port the
+workload already holds is reported with the host port it holds, because that is
+settled and needs no allocation.
+
+`SpecHash` is empty whenever `Unknown` is not. The host ports reach the hash, so one
+computed before they are settled would be a hash the apply never stores. Such an
+apply still replaces what is running, and says so.
 
 ## workload list
 
