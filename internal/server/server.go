@@ -70,7 +70,7 @@ func Run(ctx context.Context, config Config) error {
 
 	db, err := database.Open(ctx, database.Config{
 		Logger:         logger,
-		Path:           databasePath(config),
+		Path:           config.DatabasePath(),
 		MeterProvider:  tel.MeterProvider(),
 		TracerProvider: tel.TracerProvider(),
 	})
@@ -247,7 +247,7 @@ func Run(ctx context.Context, config Config) error {
 
 	adminSvc := service.NewAdminService(service.AdminServiceConfig{
 		Logger:   logger,
-		Database: databasePath(config),
+		Database: config.DatabasePath(),
 		Keys:     keys,
 		Secrets:  secretSvc,
 	})
@@ -392,12 +392,6 @@ func newLogger(config LoggingConfig, extra slog.Handler) *slog.Logger {
 	}
 
 	return slog.New(handler)
-}
-
-// databasePath returns the SQLite database file inside the configured data
-// directory.
-func databasePath(config Config) string {
-	return filepath.Join(config.Data.Directory, "state.db")
 }
 
 // currentKey returns the identifier of the key secrets are sealed under, generating

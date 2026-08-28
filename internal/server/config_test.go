@@ -326,7 +326,20 @@ func TestConfig_Validate_ResolvesDataDirectory(t *testing.T) {
 
 		require.NoError(t, config.Validate())
 		assert.True(t, filepath.IsAbs(config.KeysPath()))
+		assert.True(t, filepath.IsAbs(config.DatabasePath()))
 	})
+}
+
+func TestConfig_DatabasePath(t *testing.T) {
+	t.Parallel()
+
+	// Derived from the configuration rather than known only to the server, because
+	// restoring a node has to write the database back and has the configuration and
+	// nothing else to go on.
+	config := server.DefaultConfig()
+	config.Data.Directory = "/var/lib/orca"
+
+	assert.Equal(t, filepath.Join("/var/lib/orca", "state.db"), config.DatabasePath())
 }
 
 func TestConfig_KeysPath(t *testing.T) {

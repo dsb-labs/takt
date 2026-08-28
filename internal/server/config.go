@@ -224,6 +224,18 @@ func DefaultConfig() Config {
 	}
 }
 
+// DatabasePath returns the SQLite database file inside the configured data
+// directory.
+//
+// On the configuration rather than beside the server that reads it, because the
+// server is not the only thing that needs to find it. Restoring a node writes the
+// database back, and it has the configuration and nothing else to go on. A second
+// copy of this join would be a second definition of where a node keeps its state,
+// and the two drifting apart puts the database somewhere the server does not look.
+func (c Config) DatabasePath() string {
+	return filepath.Join(c.Data.Directory, "state.db")
+}
+
 // KeysPath returns the directory holding the secret encryption keys.
 //
 // Resolved here rather than defaulted in DefaultConfig, because the default sits
