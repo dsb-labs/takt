@@ -232,6 +232,186 @@ func TestWorkloadService_Apply(t *testing.T) {
 	}
 }
 
+// TestWorkloadService_DryRun covers what a dry run reports and, as much as a mock
+// can show it, what it does not do.
+//
+// Nothing here allows Upsert. A dry run that wrote would fail these tests on the
+// call rather than on an assertion about it, which is the point: the feature is as
+// much about what does not happen as about what is returned.
+func TestWorkloadService_DryRun(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports a workload that does not exist as created", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		run, err := svc.DryRun(t.Context(), containerSpec("example", "example/example:latest"))
+		require.NoError(t, err)
+		assert.True(t, run.Created)
+		// Nothing is running under a name nothing holds, so there is nothing to
+		// replace.
+		assert.False(t, run.Replaced)
+		assert.NotEmpty(t, run.SpecHash)
+		assert.Empty(t, run.Unknown)
+	})
+
+	t.Run("reports an unchanged specification as replacing nothing", func(t *testing.T) {
+		t.Parallel()
+
+		// The hash the apply would store is read from a dry run against a workload
+		// that does not exist, rather than written down here. A fixture would pin the
+		// hash into this test and fail whenever the encoding legitimately moved.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		spec := containerSpec("example", "example/example:latest")
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		first, err := svc.DryRun(t.Context(), spec)
+		require.NoError(t, err)
+
+		stored := storedWorkload("example")
+		stored.SpecHash = first.SpecHash
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(stored, nil).Once()
+
+		second, err := svc.DryRun(t.Context(), spec)
+		require.NoError(t, err)
+		assert.False(t, second.Created)
+		assert.False(t, second.Replaced)
+		assert.Equal(t, first.SpecHash, second.SpecHash)
+	})
+
+	t.Run("reports a changed specification as replacing what is running", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		run, err := svc.DryRun(t.Context(), containerSpec("example", "example/example:2"))
+		require.NoError(t, err)
+		assert.False(t, run.Created)
+		assert.True(t, run.Replaced)
+	})
+
+	t.Run("leaves a host port it has yet to allocate unknown", func(t *testing.T) {
+		t.Parallel()
+
+		// The whole reason a dry run has its own path through the port code. An
+		// allocation is a write, so the port is reported as not yet known rather
+		// than invented.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = []manifest.Port{{To: 8080}}
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		run, err := svc.DryRun(t.Context(), spec)
+		require.NoError(t, err)
+		require.Len(t, run.Spec.Ports, 1)
+		assert.Zero(t, run.Spec.Ports[0].From)
+		assert.Equal(t, []string{"$.ports[0].from"}, run.Unknown)
+		// The host port reaches the hash, so one computed now would be a hash the
+		// apply never stores.
+		assert.Empty(t, run.SpecHash)
+	})
+
+	t.Run("reports the host port a workload already holds", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		stored := storedWorkload("example")
+		stored.ID = "workload-id"
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(stored, nil).Once()
+		ports.EXPECT().List(mock.Anything, "workload-id").Return([]database.Port{
+			{Container: 8080, Host: 20005, Protocol: string(port.ProtocolTCP), Dynamic: true},
+		}, nil).Once()
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = []manifest.Port{{To: 8080}}
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		run, err := svc.DryRun(t.Context(), spec)
+		require.NoError(t, err)
+		require.Len(t, run.Spec.Ports, 1)
+		assert.Equal(t, 20005, run.Spec.Ports[0].From)
+		assert.Empty(t, run.Unknown)
+		assert.NotEmpty(t, run.SpecHash)
+	})
+
+	t.Run("refuses a pinned host port another workload holds", func(t *testing.T) {
+		t.Parallel()
+
+		// A dry run reporting this apply as fine would be worse than no dry run.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		ports.EXPECT().HolderOf(mock.Anything, 4141, "tcp").Return("other", true, nil).Once()
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = []manifest.Port{{To: 8080, From: 4141}}
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]service.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Claimer:   newTestClaimer(ports, allocatorStub{}),
+		})
+
+		_, err := svc.DryRun(t.Context(), spec)
+		assert.ErrorIs(t, err, port.ErrHostPortTaken)
+	})
+
+	t.Run("refuses what an apply refuses", func(t *testing.T) {
+		t.Parallel()
+
+		// The two share their resolution, so this covers that they still do rather
+		// than every rule twice.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.DryRun(t.Context(), containerSpec("example", ""))
+		assert.ErrorIs(t, err, service.ErrInvalidSpec)
+	})
+
+	t.Run("refuses a workload being torn down", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		deleting := storedWorkload("example")
+		deleting.DeletedAt = time.Now()
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(deleting, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.DryRun(t.Context(), containerSpec("example", "example/example:latest"))
+		assert.ErrorIs(t, err, service.ErrWorkloadDeleting)
+	})
+}
+
 func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 	t.Parallel()
 

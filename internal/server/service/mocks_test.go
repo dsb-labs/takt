@@ -3560,6 +3560,92 @@ func (_m *MockClaimer) EXPECT() *MockClaimer_Expecter {
 	return &MockClaimer_Expecter{mock: &_m.Mock}
 }
 
+// Preview provides a mock function for the type MockClaimer
+func (_mock *MockClaimer) Preview(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, bool, error) {
+	ret := _mock.Called(ctx, workload, held, mappings)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Preview")
+	}
+
+	var r0 []port.Claim
+	var r1 bool
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []port.Claim, []manifest.Port) ([]port.Claim, bool, error)); ok {
+		return returnFunc(ctx, workload, held, mappings)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []port.Claim, []manifest.Port) []port.Claim); ok {
+		r0 = returnFunc(ctx, workload, held, mappings)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]port.Claim)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []port.Claim, []manifest.Port) bool); ok {
+		r1 = returnFunc(ctx, workload, held, mappings)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, []port.Claim, []manifest.Port) error); ok {
+		r2 = returnFunc(ctx, workload, held, mappings)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockClaimer_Preview_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Preview'
+type MockClaimer_Preview_Call struct {
+	*mock.Call
+}
+
+// Preview is a helper method to define mock.On call
+//   - ctx context.Context
+//   - workload string
+//   - held []port.Claim
+//   - mappings []manifest.Port
+func (_e *MockClaimer_Expecter) Preview(ctx any, workload any, held any, mappings any) *MockClaimer_Preview_Call {
+	return &MockClaimer_Preview_Call{Call: _e.mock.On("Preview", ctx, workload, held, mappings)}
+}
+
+func (_c *MockClaimer_Preview_Call) Run(run func(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port)) *MockClaimer_Preview_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 []port.Claim
+		if args[2] != nil {
+			arg2 = args[2].([]port.Claim)
+		}
+		var arg3 []manifest.Port
+		if args[3] != nil {
+			arg3 = args[3].([]manifest.Port)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockClaimer_Preview_Call) Return(claims []port.Claim, b bool, err error) *MockClaimer_Preview_Call {
+	_c.Call.Return(claims, b, err)
+	return _c
+}
+
+func (_c *MockClaimer_Preview_Call) RunAndReturn(run func(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, bool, error)) *MockClaimer_Preview_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Resolve provides a mock function for the type MockClaimer
 func (_mock *MockClaimer) Resolve(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, error) {
 	ret := _mock.Called(ctx, workload, held, mappings)

@@ -148,6 +148,9 @@ type (
 		// Resolve should settle every mapping on a host port, keeping the
 		// allocations the workload already holds.
 		Resolve(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, error)
+		// Preview should settle every mapping it can without allocating anything,
+		// reporting whether any of them still needs a host port.
+		Preview(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, bool, error)
 	}
 
 	// The Checker interface describes how the service reads the health of
@@ -186,6 +189,29 @@ type (
 		// Whether the host port was allocated by the server rather than pinned by
 		// the specification.
 		Dynamic bool
+	}
+
+	// The DryRun type reports what applying a specification would do, having done
+	// none of it.
+	DryRun struct {
+		// The specification as it would be stored: defaults in place, volumes
+		// resolved to the paths they live at, and every port settled that could be
+		// settled without allocating one.
+		Spec manifest.Spec
+		// The hash the apply would store. Empty when a host port has yet to be
+		// allocated, since the allocation reaches the hash and nothing has chosen
+		// one.
+		SpecHash string
+		// Whether nothing holds the name, so applying creates the workload.
+		Created bool
+		// Whether applying moves the stored hash, so the reconciler replaces
+		// whatever is running. False for a workload that does not exist, which has
+		// nothing to replace.
+		Replaced bool
+		// The paths into the reported specification whose values orca settles only
+		// as it applies. A host port it has yet to allocate is the only one, and it
+		// is reported rather than invented.
+		Unknown []string
 	}
 
 	// The Health type reports what orca established about a workload's health,
@@ -553,6 +579,76 @@ func (s *WorkloadService) resolve(ctx context.Context, spec manifest.Spec) (reso
 	}
 
 	return resolved, nil
+}
+
+// DryRun reports what applying spec would do, and writes nothing.
+//
+// The specification is resolved exactly as an apply resolves it, so everything an
+// apply refuses this refuses too: a volume, secret, variable or workload the
+// specification names and nothing holds, a pinned host port another workload has,
+// a workload mid-teardown, and a specification that is not runnable.
+//
+// Ports are settled against the allocations the workload already holds and nothing
+// else. A mapping that would need one allocated is reported with no host port and
+// its path named in Unknown, because allocating is a write: one that claimed a port,
+// or moved a sticky allocation, would change the node while reporting that it had
+// not.
+//
+// A pending allocation also leaves the hash empty. The host ports reach the hash, so
+// one computed before they are settled would be a hash the apply never stores. Such
+// an apply still replaces whatever is running, since an allocation it does not yet
+// hold is a specification that changed.
+func (s *WorkloadService) DryRun(ctx context.Context, spec manifest.Spec) (DryRun, error) {
+	resolved, err := s.resolve(ctx, spec)
+	if err != nil {
+		return DryRun{}, err
+	}
+
+	claims, pending, err := s.claims.Preview(ctx, resolved.spec.Name, heldClaims(resolved.held), resolved.spec.Ports)
+	if err != nil {
+		return DryRun{}, err
+	}
+
+	settled := port.Resolved(resolved.spec, claims)
+
+	run := DryRun{
+		Spec:     settled,
+		Created:  !resolved.exists,
+		Replaced: resolved.exists,
+		Unknown:  unknown(settled.Ports),
+	}
+
+	if pending {
+		return run, nil
+	}
+
+	_, hash, err := spechash.Compute(settled, resolved.read.hashInputs(resolved.digest))
+	if err != nil {
+		return DryRun{}, fmt.Errorf("failed to hash specification: %w", err)
+	}
+
+	run.SpecHash = hash
+	run.Replaced = resolved.exists && hash != resolved.existing.SpecHash
+
+	return run, nil
+}
+
+// unknown names the ports orca settles only as it applies, as paths into the
+// specification it reports.
+//
+// Paths rather than a flag on each port, because the question is which values are
+// not yet known rather than which ports are dynamic. They are written in the syntax
+// a list query already uses, so an operator meets one path syntax rather than two.
+func unknown(mappings []manifest.Port) []string {
+	var paths []string
+
+	for i, mapping := range mappings {
+		if mapping.From == 0 {
+			paths = append(paths, fmt.Sprintf("$.ports[%d].from", i))
+		}
+	}
+
+	return paths
 }
 
 // store resolves the specification's ports, writes it, and claims the ports it
