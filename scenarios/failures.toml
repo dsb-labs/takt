@@ -1,0 +1,31 @@
+name = "failures"
+description = "A fleet that mostly fails, exercising restart backoff and giving up."
+
+# A workload that exits non-zero is restarted on a widening delay until its policy
+# stops asking. Doing that to most of a fleet at once is what puts the reconciler's
+# backoff bookkeeping under load, and nothing else here reaches it.
+#
+# The failing share is left out of the check that the fleet converged, because a
+# workload built to fail never reaches running.
+
+[fleet]
+containers = 30
+exec = 30
+failing = 0.75
+health-checks = 0.0
+reads-variable = 1.0
+
+[resources]
+secrets = 0
+variables = 4
+volumes = 0
+
+[churn]
+duration = "1m"
+workers = 8
+
+[churn.weights]
+list = 3
+get = 3
+logs = 2
+rotate-variable = 1

@@ -1,0 +1,28 @@
+name = "ports"
+description = "Contends the host port allocator with pinned and allocated ports."
+
+# Every workload publishes something, so the allocator is asked for a port as often
+# as it can be. The pinned share is what a crowded range collides over: a pinned port
+# cannot be moved, where an allocated one can.
+
+[fleet]
+containers = 60
+exec = 20
+dynamic-ports = 0.6
+fixed-ports = 0.4
+health-checks = 0.5
+
+[resources]
+secrets = 0
+variables = 0
+volumes = 0
+
+[churn]
+duration = "1m"
+workers = 16
+
+[churn.weights]
+reapply = 3
+list = 2
+get = 2
+restart = 1

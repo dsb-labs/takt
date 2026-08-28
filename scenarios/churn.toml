@@ -1,0 +1,33 @@
+name = "churn"
+description = "A mixed fleet of 160, rotating secrets and variables under load."
+
+# The scenario the load-test findings were measured against. Keep the numbers here
+# still, or a later run cannot be compared with an earlier one.
+
+[fleet]
+containers = 80
+exec = 80
+dynamic-ports = 0.33
+health-checks = 0.25
+reads-secret = 1.0
+reads-variable = 1.0
+mounts-secret = 0.25
+mounts-variable = 0.25
+mounts-volume = 0.25
+
+[resources]
+secrets = 30
+variables = 30
+volumes = 15
+
+[churn]
+duration = "2m"
+workers = 24
+
+[churn.weights]
+rotate-secret = 2
+rotate-variable = 1
+reapply = 2
+list = 2
+get = 1
+logs = 1
