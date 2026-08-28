@@ -1432,6 +1432,132 @@ func (s *Suite) TestApplyDuringTeardownIsRejected() {
 	s.True(client.IsConflict(err), "expected a conflict error, got %v", err)
 }
 
+// TestDryRunWritesNothing covers the property the whole feature rests on: a dry run
+// reports what an apply would do and changes nothing about the node.
+//
+// It runs against the live server rather than a mock because that is the only place
+// the claim can be tested. Nothing was written is a statement about the database and
+// the port allocations, not about which functions were called.
+func (s *Suite) TestDryRunWritesNothing() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name, manifest.Port{To: 80})
+
+	// A workload nothing holds, with a port nothing has allocated. The host port is
+	// reported as not yet known rather than invented, and the hash is withheld for
+	// the same reason.
+	planned, err := s.client.DryRun(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.True(planned.Created)
+	s.False(planned.Replaced)
+	s.Empty(planned.SpecHash)
+	s.Equal([]string{"$.ports[0].from"}, planned.Unknown)
+	s.Require().Len(planned.Spec.Ports, 1)
+	s.Zero(planned.Spec.Ports[0].From)
+
+	// Reporting on a workload did not create one.
+	_, err = s.client.Get(s.ctx(), name)
+	s.ErrorIs(err, client.ErrWorkloadNotFound)
+
+	applied, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.Require().Len(applied.Ports, 1)
+
+	allocated := applied.Ports[0].From
+	instance := s.awaitInstance(name)
+
+	// The same manifest against the workload it created. Nothing moved, so nothing
+	// would be replaced, and the allocation it holds is reported rather than a
+	// second one being taken.
+	unchanged, err := s.client.DryRun(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.False(unchanged.Created)
+	s.False(unchanged.Replaced)
+	s.NotEmpty(unchanged.SpecHash)
+	s.Empty(unchanged.Unknown)
+	s.Require().Len(unchanged.Spec.Ports, 1)
+	s.Equal(allocated, unchanged.Spec.Ports[0].From)
+
+	// A changed manifest is reported as replacing the instance, and still does not.
+	changed := s.containerSpec(name, manifest.Port{To: 80})
+	changed.Env = map[string]string{"EXAMPLE": "CHANGED"}
+
+	replaced, err := s.client.DryRun(s.ctx(), changed)
+	s.Require().NoError(err)
+	s.True(replaced.Replaced)
+	s.NotEqual(unchanged.SpecHash, replaced.SpecHash)
+
+	// The workload is where it was: same version, same allocation, same container.
+	after, err := s.client.Get(s.ctx(), name)
+	s.Require().NoError(err)
+	s.Equal(applied.Version, after.Version)
+	s.Require().Len(after.Ports, 1)
+	s.Equal(allocated, after.Ports[0].From)
+	s.Equal(instance, s.instanceID(name))
+}
+
+// TestDryRunOfAWorkloadReadingAVariable covers a workload whose hash depends on
+// something its manifest does not contain.
+//
+// Setting a variable rehashes every workload reading it, so by the time the write
+// returns the stored hash already accounts for the new value. A dry run of the same
+// manifest reports no replacement either side of the move, which is the honest
+// answer: the redeploy is already recorded, and reporting it again would have an
+// operator expect a second one.
+func (s *Suite) TestDryRunOfAWorkloadReadingAVariable() {
+	name, variable := s.workloadName(), s.variableName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupVariable(variable) })
+
+	_, _, err := s.client.SetVariable(s.ctx(), variable, "first", nil)
+	s.Require().NoError(err)
+
+	spec := s.containerSpec(name)
+	spec.Env = map[string]string{"VALUE": "${var:" + variable + "}"}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitInstance(name)
+
+	before, err := s.client.DryRun(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.False(before.Replaced)
+
+	_, _, err = s.client.SetVariable(s.ctx(), variable, "second", nil)
+	s.Require().NoError(err)
+
+	after, err := s.client.DryRun(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.False(after.Replaced)
+
+	// The value reaches the hash, so the hash moved even though the manifest did
+	// not. That is what the workload is being replaced for.
+	s.NotEqual(before.SpecHash, after.SpecHash)
+
+	// The reported specification carries the reference rather than the value, as
+	// the stored one does.
+	s.Equal("${var:"+variable+"}", after.Spec.Env["VALUE"])
+}
+
+// TestDryRunRefusesWhatAnApplyRefuses covers the reason a dry run is worth running at
+// all: a reference that cannot be resolved is reported now rather than as a workload
+// in a restart loop.
+func (s *Suite) TestDryRunRefusesWhatAnApplyRefuses() {
+	name := s.workloadName()
+
+	spec := s.containerSpec(name)
+	spec.Env = map[string]string{"VALUE": "${secret:does-not-exist}"}
+
+	_, err := s.client.DryRun(s.ctx(), spec)
+	s.True(client.IsBadRequest(err), "expected a bad request error, got %v", err)
+
+	// Nothing was stored on the way to refusing it.
+	_, err = s.client.Get(s.ctx(), name)
+	s.ErrorIs(err, client.ErrWorkloadNotFound)
+}
+
 // TestMissingWorkload covers the not-found path on every endpoint that takes a name.
 func (s *Suite) TestMissingWorkload() {
 	_, err := s.client.Get(s.ctx(), "does-not-exist")
