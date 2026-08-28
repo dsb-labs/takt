@@ -142,10 +142,7 @@ func Requested(mappings []manifest.Port, held []Claim) []manifest.Port {
 // and UDP are separate address spaces: what is taken on one says nothing about the
 // other, and resolving them against a single set would refuse ports that are free.
 func (c *Claimer) Resolve(ctx context.Context, workload string, existing []Claim, mappings []manifest.Port) ([]Claim, error) {
-	held := make(map[key]Claim, len(existing))
-	for _, claim := range existing {
-		held[key{claim.Container, claim.Protocol}] = claim
-	}
+	held := heldBy(existing)
 
 	// Ports already promised to any workload are off limits, along with the ones
 	// resolved so far in this specification.
@@ -184,6 +181,54 @@ func (c *Claimer) Resolve(ctx context.Context, workload string, existing []Claim
 	}
 
 	return resolved, nil
+}
+
+// Preview settles every mapping it can without allocating anything, and reports
+// whether any mapping still needs a host port. A mapping that does is returned with
+// no host port rather than with an invented one.
+//
+// This is what a caller reporting on an apply it is not performing uses. Allocation
+// writes: it reads what is promised, chooses from what is left, and the caller then
+// claims it. A preview that allocated would move a workload's address, or consume a
+// port, while claiming to change nothing.
+//
+// The mappings are settled through the same code the real resolution uses, so the two
+// cannot disagree about which port a workload keeps or which pinned port is refused.
+// A pinned port another workload holds is still an error here, because that is the
+// answer the caller asked for.
+func (c *Claimer) Preview(ctx context.Context, workload string, existing []Claim, mappings []manifest.Port) ([]Claim, bool, error) {
+	held := heldBy(existing)
+
+	var pending bool
+
+	claims := make([]Claim, 0, len(mappings))
+	for _, mapping := range mappings {
+		// No allocations, so a mapping that is neither pinned nor already held is
+		// settled on nothing.
+		claim, err := c.resolve(ctx, workload, held, nil, mapping)
+		if err != nil {
+			return nil, false, err
+		}
+
+		if claim.Host == 0 {
+			pending = true
+		}
+
+		claims = append(claims, claim)
+	}
+
+	return claims, pending, nil
+}
+
+// heldBy reports the claims a workload already holds, keyed by the port and protocol
+// each one settles.
+func heldBy(existing []Claim) map[key]Claim {
+	held := make(map[key]Claim, len(existing))
+	for _, claim := range existing {
+		held[key{claim.Container, claim.Protocol}] = claim
+	}
+
+	return held
 }
 
 // allocate chooses a host port for every mapping that needs one, reporting them by

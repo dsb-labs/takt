@@ -213,6 +213,110 @@ func TestClaimer_Resolve(t *testing.T) {
 	}
 }
 
+func TestClaimer_Preview(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name       string
+		Held       []port.Claim
+		Mappings   []manifest.Port
+		SetupMocks func(*MockRepository)
+		Assert     func(*testing.T, []port.Claim, bool)
+		ExpectErr  error
+	}{
+		{
+			// The whole point of previewing: nothing is allocated, so a mapping that
+			// needs a port is reported without one.
+			Name:       "settles a mapping naming no host port on nothing",
+			Mappings:   []manifest.Port{{To: 8080}},
+			SetupMocks: func(*MockRepository) {},
+			Assert: func(t *testing.T, claims []port.Claim, pending bool) {
+				require.Len(t, claims, 1)
+				assert.Zero(t, claims[0].Host)
+				assert.True(t, claims[0].Dynamic)
+				assert.True(t, pending, "a mapping was left without a host port")
+			},
+		},
+		{
+			Name:       "keeps the host port a workload already holds",
+			Held:       []port.Claim{{Container: 8080, Host: 20005, Protocol: port.ProtocolTCP, Dynamic: true}},
+			Mappings:   []manifest.Port{{To: 8080}},
+			SetupMocks: func(*MockRepository) {},
+			Assert: func(t *testing.T, claims []port.Claim, pending bool) {
+				require.Len(t, claims, 1)
+				assert.Equal(t, 20005, claims[0].Host)
+				assert.False(t, pending, "every mapping was settled")
+			},
+		},
+		{
+			Name:     "uses a pinned host port as given",
+			Mappings: []manifest.Port{{To: 8080, From: 4141}},
+			SetupMocks: func(ports *MockRepository) {
+				ports.EXPECT().HolderOf(mock.Anything, 4141, "tcp").Return("", false, nil).Once()
+			},
+			Assert: func(t *testing.T, claims []port.Claim, pending bool) {
+				require.Len(t, claims, 1)
+				assert.Equal(t, 4141, claims[0].Host)
+				assert.False(t, claims[0].Dynamic)
+				assert.False(t, pending)
+			},
+		},
+		{
+			// The answer the caller asked for. A preview that reported this apply as
+			// fine would be worse than no preview at all.
+			Name:     "refuses a pinned port another workload holds",
+			Mappings: []manifest.Port{{To: 8080, From: 4141}},
+			SetupMocks: func(ports *MockRepository) {
+				ports.EXPECT().HolderOf(mock.Anything, 4141, "tcp").Return("other", true, nil).Once()
+			},
+			ExpectErr: port.ErrHostPortTaken,
+		},
+		{
+			// One mapping settled and one not is still pending, since applying would
+			// allocate.
+			Name: "reports a pending mapping alongside a settled one",
+			Held: []port.Claim{{Container: 8080, Host: 20005, Protocol: port.ProtocolTCP, Dynamic: true}},
+			Mappings: []manifest.Port{
+				{To: 8080},
+				{To: 9090},
+			},
+			SetupMocks: func(*MockRepository) {},
+			Assert: func(t *testing.T, claims []port.Claim, pending bool) {
+				require.Len(t, claims, 2)
+				assert.Equal(t, 20005, claims[0].Host)
+				assert.Zero(t, claims[1].Host)
+				assert.True(t, pending)
+			},
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			ports := NewMockRepository(t)
+			tc.SetupMocks(ports)
+
+			claimer := port.NewClaimer(port.ClaimerConfig{
+				// No allocator, which is what makes an allocation a panic rather
+				// than something a passing test could hide.
+				Ports: ports,
+			})
+
+			claims, pending, err := claimer.Preview(t.Context(), "example", tc.Held, tc.Mappings)
+			if tc.Assert == nil {
+				assert.Error(t, err)
+				if tc.ExpectErr != nil {
+					assert.ErrorIs(t, err, tc.ExpectErr)
+				}
+
+				return
+			}
+
+			require.NoError(t, err)
+			tc.Assert(t, claims, pending)
+		})
+	}
+}
+
 func TestRequested(t *testing.T) {
 	t.Parallel()
 
