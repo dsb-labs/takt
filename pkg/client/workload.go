@@ -68,6 +68,27 @@ type (
 		LastErrorAt time.Time
 	}
 
+	// The DryRun type reports what applying a specification would do, none of it
+	// having been done.
+	DryRun struct {
+		// The specification as the server would store it: defaults in place,
+		// volumes resolved to the paths they live at, and every port settled that
+		// could be settled without allocating one.
+		Spec manifest.Spec
+		// The hash the apply would store. Empty when a host port has yet to be
+		// allocated, since the allocation reaches the hash and nothing has chosen
+		// one.
+		SpecHash string
+		// Whether nothing holds the name, so applying creates the workload.
+		Created bool
+		// Whether applying moves the stored hash, so the running instances are
+		// replaced. False for a workload that does not exist.
+		Replaced bool
+		// The paths into Spec whose values the server settles only as it applies. A
+		// host port it has yet to allocate is the only one.
+		Unknown []string
+	}
+
 	// The ResolvedPort type is a port mapping as the server applied it.
 	ResolvedPort struct {
 		// What the specification called the port, which is how the rest of a
@@ -203,6 +224,38 @@ func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool,
 		return Workload{}, false, newError(http.StatusInternalServerError, resp.JSON500)
 	default:
 		return Workload{}, false, newError(resp.StatusCode(), nil)
+	}
+}
+
+// DryRun reports what applying spec would do, without applying it.
+//
+// The server resolves the specification exactly as an apply resolves it, so
+// everything an apply refuses this refuses too: a volume, secret, variable or
+// workload the specification names and nothing holds, a pinned host port another
+// workload has, a workload being torn down, and a specification that is not
+// runnable. A dry run that returns is therefore a statement about the apply.
+//
+// Nothing is allocated, so a port mapping needing a host port comes back without
+// one and its path is named in Unknown.
+func (c *Client) DryRun(ctx context.Context, spec manifest.Spec) (DryRun, error) {
+	resp, err := c.api.DryRunWorkloadWithResponse(ctx, spec.Name, wire.FromSpec(spec))
+	if err != nil {
+		return DryRun{}, fmt.Errorf("failed to dry run workload: %w", err)
+	}
+
+	switch {
+	case resp.JSON200 != nil:
+		return newDryRun(*resp.JSON200)
+	case resp.JSON400 != nil:
+		return DryRun{}, newError(http.StatusBadRequest, resp.JSON400)
+	case resp.JSON409 != nil:
+		return DryRun{}, newError(http.StatusConflict, resp.JSON409)
+	case resp.JSON422 != nil:
+		return DryRun{}, newError(http.StatusUnprocessableEntity, resp.JSON422)
+	case resp.JSON500 != nil:
+		return DryRun{}, newError(http.StatusInternalServerError, resp.JSON500)
+	default:
+		return DryRun{}, newError(resp.StatusCode(), nil)
 	}
 }
 
@@ -747,6 +800,31 @@ func (c *Client) logsError(resp *http.Response) error {
 	}
 
 	return newError(resp.StatusCode, &body)
+}
+
+// newDryRun converts what the server reported about an apply into the client's own
+// shape.
+func newDryRun(result api.DryRunWorkloadResult) (DryRun, error) {
+	spec, err := wire.ToSpec(result.Spec)
+	if err != nil {
+		return DryRun{}, fmt.Errorf("failed to read the reported specification: %w", err)
+	}
+
+	run := DryRun{
+		Spec:     spec,
+		Created:  result.Created,
+		Replaced: result.Replaced,
+	}
+
+	if result.SpecHash != nil {
+		run.SpecHash = *result.SpecHash
+	}
+
+	if result.Unknown != nil {
+		run.Unknown = *result.Unknown
+	}
+
+	return run, nil
 }
 
 // newWorkload maps a workload the server reported onto the shape the client returns.

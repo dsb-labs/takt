@@ -250,6 +250,90 @@ func TestClient_Apply(t *testing.T) {
 	}
 }
 
+func TestClient_DryRun(t *testing.T) {
+	t.Parallel()
+
+	spec := manifest.Spec{
+		Version:   "v1",
+		Name:      "example",
+		Container: &manifest.Container{Image: "example/example:latest"},
+	}
+
+	t.Run("reports what applying would do", func(t *testing.T) {
+		t.Parallel()
+
+		hash := "hash-one"
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/api/v1/workloads/example/dry-run", r.URL.Path)
+
+			var got api.WorkloadSpec
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+			assert.Equal(t, "example", got.Name)
+
+			writeJSON(t, w, http.StatusOK, api.DryRunWorkloadResult{
+				Spec:     got,
+				SpecHash: &hash,
+				Created:  true,
+			})
+		})
+
+		run, err := c.DryRun(t.Context(), spec)
+		require.NoError(t, err)
+		assert.Equal(t, "example", run.Spec.Name)
+		assert.Equal(t, hash, run.SpecHash)
+		assert.True(t, run.Created)
+		assert.False(t, run.Replaced)
+		assert.Empty(t, run.Unknown)
+	})
+
+	t.Run("reports a host port the server has yet to allocate", func(t *testing.T) {
+		t.Parallel()
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			var got api.WorkloadSpec
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+
+			writeJSON(t, w, http.StatusOK, api.DryRunWorkloadResult{
+				Spec:     got,
+				Replaced: true,
+				Unknown:  &[]string{"$.ports[0].from"},
+			})
+		})
+
+		run, err := c.DryRun(t.Context(), spec)
+		require.NoError(t, err)
+		// Absent on the wire rather than empty, so the client reports no hash
+		// rather than one nothing computed.
+		assert.Empty(t, run.SpecHash)
+		assert.Equal(t, []string{"$.ports[0].from"}, run.Unknown)
+		assert.True(t, run.Replaced)
+	})
+
+	t.Run("reports a rejected specification", func(t *testing.T) {
+		t.Parallel()
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusBadRequest, api.ErrorResponse{Error: "secret not found: db-password"})
+		})
+
+		_, err := c.DryRun(t.Context(), spec)
+		assert.True(t, client.IsBadRequest(err))
+	})
+
+	t.Run("reports a workload that is being deleted", func(t *testing.T) {
+		t.Parallel()
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusConflict, api.ErrorResponse{Error: "workload is being deleted"})
+		})
+
+		_, err := c.DryRun(t.Context(), spec)
+		assert.True(t, client.IsConflict(err))
+	})
+}
+
 func TestClient_Get(t *testing.T) {
 	t.Parallel()
 
