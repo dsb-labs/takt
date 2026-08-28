@@ -67,6 +67,87 @@ rather than reconstructed from assertion messages. A test that restarts its serv
 accumulates both runs' output in one bundle. The directory is not tracked, and the
 nightly workflow uploads it when a run fails.
 
+## Load testing
+
+```sh
+go run . dev loadtest scenarios/smoke.toml
+```
+
+`orca dev loadtest` drives a running server through a scenario: it creates the
+secrets, variables and volumes the scenario names, applies the fleet at once, waits
+for it to converge, churns against it, tears it down and reports. The command is
+hidden, because it is for working on orca rather than for operating it.
+
+Run `smoke.toml` before a commit. It is a few of everything and takes seconds.
+
+### What a scenario says
+
+A scenario describes the **shape of a fleet** rather than the workloads in it. What a
+measurement depends on is that eighty workloads exist and that a third of them publish
+a port, not what the eighty are running — so the workload body belongs to the tool and
+does as little as possible. A scenario that could name an image would eventually name
+a large one, and the run would measure the daemon's network rather than orca.
+
+```toml
+[fleet]
+containers = 80
+exec       = 80
+
+# Proportions, so a scenario scales by changing the counts alone.
+dynamic-ports = 0.33
+health-checks = 0.25
+failing       = 0.05
+mounts-secret = 0.25
+```
+
+Every proportion names a subsystem it stresses, so a scenario can be read to see what
+it covers. Unknown keys are refused: a mistyped proportion that silently did nothing
+would leave a scenario claiming coverage it does not have.
+
+The scenarios live in `scenarios/`:
+
+| Scenario | What it stresses |
+|---|---|
+| `smoke.toml` | a few of everything, in seconds |
+| `churn.toml` | the mixed fleet of 160 the published numbers were measured against |
+| `ports.toml` | the host port allocator, pinned and allocated together |
+| `secrets.toml` | rotation, which redeploys every workload reading the value |
+| `failures.toml` | restart backoff and giving up |
+
+Add one by adding a file. The package's tests parse every scenario in the directory
+and build each into specifications, checked against the same validation an operator's
+manifest gets — so a scenario describing a fleet the server would refuse fails the
+build rather than a run.
+
+### Reading a run
+
+The report is JSON on stdout and a table on stderr, so a run can be read and piped at
+the same time.
+
+```sh
+go run . dev loadtest scenarios/churn.toml > report.json
+```
+
+The command exits non-zero when a request failed, a workload never ran, or something
+was left behind. Latency is reported rather than judged: how fast a machine is says
+nothing about whether the code is right, so there are no thresholds to go stale.
+
+`--data-dir` points at the server's data directory and adds a check of what was left
+on disk after teardown. That only works when the load test runs on the server's own
+host, and it is the only way to see a leak the API does not expose — a directory
+holding a secret's plaintext is not something any endpoint reports.
+
+```sh
+go run . dev loadtest scenarios/secrets.toml --data-dir ./data
+```
+
+Everything a run creates is named after `--prefix`, which defaults to something unique
+to the run, so two load tests against one server neither collide nor tear down each
+other's work. `--keep` leaves the fleet in place to poke at.
+
+**Do not run a load test while the end-to-end suite is running.** Both drive the same
+Docker daemon, and a teardown removes containers by orca's label.
+
 ## Running a server
 
 ```sh
@@ -104,6 +185,7 @@ refuses unprivileged user namespaces — the `pam_cap` grant covers that case to
 main.go                   the root command
 api/openapi.yaml          the wire format, and the source of the generated code
 cmd/                      one directory per subcommand
+scenarios/                load test scenarios
 internal/generated/       the code generated from the wire format
 internal/wire/            mapping between the wire and canonical specifications
 internal/server/          the server and everything it wires together
@@ -120,6 +202,7 @@ internal/server/          the server and everything it wires together
   telemetry/              traces and metrics
   database/               SQLite, and desired state
 internal/e2e/             the end-to-end suite
+internal/loadtest/        the load test scenarios are run from here
 pkg/manifest/             the canonical specification, and parsing one
 pkg/client/               the Go client
 docs/                     documentation
