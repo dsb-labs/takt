@@ -290,6 +290,32 @@ type (
 		refreshed []manifest.Reference
 	}
 
+	// The resolution type carries what resolving a specification established, from
+	// the one pass that reads everything it names to the caller that acts on it.
+	//
+	// The ports are the workload's existing allocations rather than the ones it will
+	// be reached at. Settling those allocates, and what resolving establishes is
+	// exactly what can be established without writing.
+	resolution struct {
+		// The specification, with its defaults in place and its volumes resolved to
+		// the paths they live at.
+		spec manifest.Spec
+		// Which runtime the specification names.
+		runtime manifest.Runtime
+		// The workload as it currently stands, meaningful only when it exists.
+		existing database.Workload
+		// Whether a workload of this name is already stored.
+		exists bool
+		// The port allocations the workload already holds. Empty for one that is
+		// not stored yet.
+		held []database.Port
+		// What the specification reads, and what each of those currently holds.
+		read references
+		// The digest the image resolves to, empty for a workload whose pull policy
+		// is not always.
+		digest string
+	}
+
 	// The WorkloadService type orchestrates the persistence layer and the driver
 	// that runs workloads.
 	WorkloadService struct {
@@ -394,103 +420,12 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 // specification names no runtime, or ErrUnsupportedRuntime when it names one the
 // server cannot run.
 func (s *WorkloadService) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool, error) {
-	// Resolved here rather than trusted from the caller, so that what gets stored and
-	// hashed is the specification with its defaults in place however it arrived. A
-	// caller that already resolved them changes nothing by asking again.
-	spec.Defaults()
-
-	// The runtime is resolved first so that naming none or naming two is reported as
-	// exactly that, rather than as a general validation failure.
-	runtime, err := manifest.RuntimeOf(spec)
+	resolved, err := s.resolve(ctx, spec)
 	if err != nil {
 		return Workload{}, false, err
 	}
 
-	// Everything else is validated here rather than only in the client that parsed a
-	// manifest. The rules are what make a workload runnable at all — a name the
-	// runtime can represent, an image to run, a schedule that parses — so a caller
-	// that skips the CLI has to be held to them too. Without this the server accepted
-	// an unknown schema version, a name breaking its own documented rules, and an
-	// empty image that could only ever fail to start.
-	if err = manifest.Validate(spec); err != nil {
-		return Workload{}, false, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
-	}
-
-	// A workload mid-teardown cannot be resurrected by re-applying it: the
-	// reconciler is still removing its work, so accepting the change would race
-	// that teardown and could leave the new instance being torn down instead.
-	existing, err := s.workloads.Get(ctx, spec.Name)
-	switch {
-	case err != nil && !errors.Is(err, database.ErrWorkloadNotFound):
-		return Workload{}, false, fmt.Errorf("failed to load workload: %w", err)
-	case err == nil && !existing.DeletedAt.IsZero():
-		return Workload{}, false, ErrWorkloadDeleting
-	}
-
-	// Ports are resolved before the specification is hashed, so the host ports orca
-	// settled on are part of what the reconciler compares against. A reallocation
-	// then reads as an ordinary specification change and replaces the container
-	// bound to the old port.
-	var held []database.Port
-	if err == nil {
-		if held, err = s.ports.List(ctx, existing.ID); err != nil {
-			return Workload{}, false, fmt.Errorf("failed to read workload ports: %w", err)
-		}
-	}
-
-	// Volumes are resolved to the paths they live at before the specification is
-	// hashed, for the same reason ports are: the runtime is then handed a path rather
-	// than a name to look up, and a volume whose path changed reads as an ordinary
-	// change and replaces the instances bound to the old one.
-	//
-	// Resolved here rather than inside store, since unlike a port allocation there is
-	// no race to lose: a volume either exists or it does not.
-	spec, err = s.resolveVolumes(ctx, spec)
-	if err != nil {
-		return Workload{}, false, err
-	}
-
-	// The secrets the workload reads are resolved to their revisions rather than their
-	// values, and the variables to their values. Either reaches the hash so that
-	// changing one replaces the instances reading it. A secret's value stays out of
-	// both the hash and the stored specification, and is read only as the workload
-	// starts.
-	//
-	// A reference to something that does not exist is refused here rather than at
-	// start. The workload could never run, and the operator asking for it is the one
-	// who can fix the name.
-	read, err := s.resolveReferences(ctx, spec)
-	if err != nil {
-		return Workload{}, false, err
-	}
-
-	if absent := missing(read.secrets, read.revisions); len(absent) > 0 {
-		return Workload{}, false, fmt.Errorf("%w: %s", ErrSecretNotFound, strings.Join(absent, ", "))
-	}
-
-	if absent := missing(read.variables, read.values); len(absent) > 0 {
-		return Workload{}, false, fmt.Errorf("%w: %s", ErrVariableNotFound, strings.Join(absent, ", "))
-	}
-
-	// A workload that does not exist is refused here rather than at start, as a secret
-	// is. The workload could never run, and the operator asking for it is the one who
-	// can fix the name or apply the workload it names first.
-	if len(read.unknown) > 0 {
-		return Workload{}, false, fmt.Errorf("%w: %s", ErrWorkloadNotFound, strings.Join(read.unknown, ", "))
-	}
-
-	if len(read.absentPorts) > 0 {
-		return Workload{}, false, fmt.Errorf("%w: %s", ErrPortNotPublished, strings.Join(read.absentPorts, ", "))
-	}
-
-	// Resolved here rather than inside store, whose port retries would repeat the
-	// registry round-trip for nothing: the digest does not depend on the ports.
-	digest, err := s.resolveDigest(ctx, spec)
-	if err != nil {
-		return Workload{}, false, err
-	}
-
-	stored, created, err := s.store(ctx, spec, runtime, held, read, digest)
+	stored, created, err := s.store(ctx, resolved)
 	if err != nil {
 		return Workload{}, false, err
 	}
@@ -510,6 +445,116 @@ func (s *WorkloadService) Apply(ctx context.Context, spec manifest.Spec) (Worklo
 	return workload, created, nil
 }
 
+// resolve establishes everything an apply depends on, and writes nothing.
+//
+// It sits on its own because two callers need it. An apply resolves and then
+// stores. A dry run resolves and then reports what storing would do. A dry run
+// resolving a specification its own way would drift from the apply and report
+// confidently wrong answers, which is worse than having no dry run.
+//
+// Ports are the one thing left unsettled here, because settling them allocates and
+// allocating writes. Each caller does that for itself.
+func (s *WorkloadService) resolve(ctx context.Context, spec manifest.Spec) (resolution, error) {
+	// Resolved here rather than trusted from the caller, so that what gets stored and
+	// hashed is the specification with its defaults in place however it arrived. A
+	// caller that already resolved them changes nothing by asking again.
+	spec.Defaults()
+
+	// The runtime is resolved first so that naming none or naming two is reported as
+	// exactly that, rather than as a general validation failure.
+	runtime, err := manifest.RuntimeOf(spec)
+	if err != nil {
+		return resolution{}, err
+	}
+
+	// Everything else is validated here rather than only in the client that parsed a
+	// manifest. The rules are what make a workload runnable at all — a name the
+	// runtime can represent, an image to run, a schedule that parses — so a caller
+	// that skips the CLI has to be held to them too. Without this the server accepted
+	// an unknown schema version, a name breaking its own documented rules, and an
+	// empty image that could only ever fail to start.
+	if err = manifest.Validate(spec); err != nil {
+		return resolution{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+	}
+
+	// A workload mid-teardown cannot be resurrected by re-applying it: the
+	// reconciler is still removing its work, so accepting the change would race
+	// that teardown and could leave the new instance being torn down instead.
+	existing, err := s.workloads.Get(ctx, spec.Name)
+	switch {
+	case err != nil && !errors.Is(err, database.ErrWorkloadNotFound):
+		return resolution{}, fmt.Errorf("failed to load workload: %w", err)
+	case err == nil && !existing.DeletedAt.IsZero():
+		return resolution{}, ErrWorkloadDeleting
+	}
+
+	resolved := resolution{runtime: runtime, existing: existing, exists: err == nil}
+
+	// The ports the workload already holds are read here so that settling them keeps
+	// the allocations it has. They are part of what gets hashed, so a reallocation
+	// reads as an ordinary specification change and replaces the container bound to
+	// the old port.
+	if resolved.exists {
+		if resolved.held, err = s.ports.List(ctx, existing.ID); err != nil {
+			return resolution{}, fmt.Errorf("failed to read workload ports: %w", err)
+		}
+	}
+
+	// Volumes are resolved to the paths they live at before the specification is
+	// hashed, for the same reason ports are: the runtime is then handed a path rather
+	// than a name to look up, and a volume whose path changed reads as an ordinary
+	// change and replaces the instances bound to the old one.
+	//
+	// Resolved here rather than while storing, since unlike a port allocation there
+	// is no race to lose: a volume either exists or it does not.
+	if resolved.spec, err = s.resolveVolumes(ctx, spec); err != nil {
+		return resolution{}, err
+	}
+
+	// The secrets the workload reads are resolved to their revisions rather than their
+	// values, and the variables to their values. Either reaches the hash so that
+	// changing one replaces the instances reading it. A secret's value stays out of
+	// both the hash and the stored specification, and is read only as the workload
+	// starts.
+	//
+	// A reference to something that does not exist is refused here rather than at
+	// start. The workload could never run, and the operator asking for it is the one
+	// who can fix the name.
+	read, err := s.resolveReferences(ctx, resolved.spec)
+	if err != nil {
+		return resolution{}, err
+	}
+
+	if absent := missing(read.secrets, read.revisions); len(absent) > 0 {
+		return resolution{}, fmt.Errorf("%w: %s", ErrSecretNotFound, strings.Join(absent, ", "))
+	}
+
+	if absent := missing(read.variables, read.values); len(absent) > 0 {
+		return resolution{}, fmt.Errorf("%w: %s", ErrVariableNotFound, strings.Join(absent, ", "))
+	}
+
+	// A workload that does not exist is refused here rather than at start, as a secret
+	// is. The workload could never run, and the operator asking for it is the one who
+	// can fix the name or apply the workload it names first.
+	if len(read.unknown) > 0 {
+		return resolution{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, strings.Join(read.unknown, ", "))
+	}
+
+	if len(read.absentPorts) > 0 {
+		return resolution{}, fmt.Errorf("%w: %s", ErrPortNotPublished, strings.Join(read.absentPorts, ", "))
+	}
+
+	resolved.read = read
+
+	// Resolved here rather than while storing, whose port retries would repeat the
+	// registry round-trip for nothing: the digest does not depend on the ports.
+	if resolved.digest, err = s.resolveDigest(ctx, resolved.spec); err != nil {
+		return resolution{}, err
+	}
+
+	return resolved, nil
+}
+
 // store resolves the specification's ports, writes it, and claims the ports it
 // settled on.
 //
@@ -519,19 +564,13 @@ func (s *WorkloadService) Apply(ctx context.Context, spec manifest.Spec) (Worklo
 // caller's, so a dynamic port is simply resolved again against what is now allocated.
 // A pinned port that collides is a different matter entirely: the caller asked for
 // something specific and has to be told it isn't available.
-func (s *WorkloadService) store(
-	ctx context.Context,
-	spec manifest.Spec,
-	runtime manifest.Runtime,
-	held []database.Port,
-	read references,
-	digest string,
-) (database.Workload, bool, error) {
+func (s *WorkloadService) store(ctx context.Context, resolved resolution) (database.Workload, bool, error) {
 	// Bounded because a caller waiting on a request would rather hear that orca
 	// couldn't settle its ports than wait indefinitely for a quiet moment.
 	const attempts = 5
 
-	current := heldClaims(held)
+	spec := resolved.spec
+	current := heldClaims(resolved.held)
 
 	for attempt := range attempts {
 		claims, err := s.claims.Resolve(ctx, spec.Name, current, spec.Ports)
@@ -541,19 +580,19 @@ func (s *WorkloadService) store(
 
 		ports := allocations(claims, "")
 
-		encoded, hash, err := spechash.Compute(port.Resolved(spec, claims), read.hashInputs(digest))
+		encoded, hash, err := spechash.Compute(port.Resolved(spec, claims), resolved.read.hashInputs(resolved.digest))
 		if err != nil {
 			return database.Workload{}, false, err
 		}
 
 		row := database.Workload{
 			Name:      spec.Name,
-			Runtime:   string(runtime),
+			Runtime:   string(resolved.runtime),
 			Spec:      encoded,
 			SpecHash:  hash,
-			Secrets:   read.secrets,
-			Variables: read.variables,
-			Workloads: read.workloads,
+			Secrets:   resolved.read.secrets,
+			Variables: resolved.read.variables,
+			Workloads: resolved.read.workloads,
 		}
 
 		row.Labels = spec.Labels
