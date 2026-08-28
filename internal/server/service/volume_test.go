@@ -22,12 +22,17 @@ func TestVolumeService_Create(t *testing.T) {
 		t.Parallel()
 
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data", mock.Anything).
-			Return(database.Volume{ID: testVolumeID, Name: "example-data", CreatedAt: time.Now()}, nil).Once()
+		repo.EXPECT().Insert(mock.Anything, "example-data", map[string]string{"app": "web"}).
+			Return(database.Volume{
+				ID:        testVolumeID,
+				Name:      "example-data",
+				Labels:    map[string]string{"app": "web"},
+				CreatedAt: time.Now(),
+			}, nil).Once()
 
 		svc, root := newVolumeService(t, repo)
 
-		volume, err := svc.Create(t.Context(), "example-data", nil)
+		volume, err := svc.Create(t.Context(), "example-data", map[string]string{"app": "web"})
 		require.NoError(t, err)
 
 		assert.Equal(t, "example-data", volume.Name)
@@ -35,6 +40,7 @@ func TestVolumeService_Create(t *testing.T) {
 		// The directory is named for the identifier rather than the name, which is
 		// the operator's handle and never a path component.
 		assert.Equal(t, filepath.Join(root, "volumes", testVolumeID), volume.Path)
+		assert.Equal(t, map[string]string{"app": "web"}, volume.Labels)
 
 		info, err := os.Stat(volume.Path)
 		require.NoError(t, err, "the directory backing the volume was not created")

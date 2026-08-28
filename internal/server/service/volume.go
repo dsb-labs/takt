@@ -142,7 +142,7 @@ func (s *VolumeService) Create(ctx context.Context, name string, labels map[stri
 
 	s.logger.With("volume", name).Debug("volume created")
 
-	return Volume{Name: stored.Name, Path: path, CreatedAt: stored.CreatedAt}, nil
+	return Volume{Name: stored.Name, Path: path, Labels: stored.Labels, CreatedAt: stored.CreatedAt}, nil
 }
 
 // Get returns the volume with the given name, along with the workloads mounting it.
