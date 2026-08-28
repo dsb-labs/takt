@@ -2,6 +2,7 @@ package loadtest_test
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -222,6 +223,62 @@ func TestBuild(t *testing.T) {
 			for _, volume := range workload.Spec.Volumes {
 				assert.Empty(t, volume.Name, "%s mounts a volume", workload.Spec.Name)
 			}
+		}
+	})
+
+	// A referrer applied before its target is refused, so the runner needs to know
+	// which workloads have to go first.
+	t.Run("points references at a workload that publishes a port", func(t *testing.T) {
+		scenario := base()
+		scenario.Fleet.Containers = 20
+		scenario.Fleet.DynamicPorts = 0.25
+		scenario.Fleet.References = 0.25
+
+		workloads, _ := loadtest.Build(scenario, "run")
+
+		ported := map[string]bool{}
+		for _, workload := range workloads {
+			if len(workload.Spec.Ports) > 0 {
+				ported[workload.Spec.Name] = true
+			}
+		}
+
+		var referrers, referenced int
+
+		for _, workload := range workloads {
+			if workload.Referenced {
+				referenced++
+			}
+
+			address, ok := workload.Spec.Env["ADDRESS"]
+			if !ok {
+				continue
+			}
+
+			referrers++
+
+			// ${workload:<name>:<port>}, so the name is the middle field.
+			target := strings.Split(address, ":")[1]
+			assert.True(t, ported[target], "%s reads %s, which publishes nothing", workload.Spec.Name, target)
+			assert.NotEqual(t, workload.Spec.Name, target, "%s reads its own address", workload.Spec.Name)
+		}
+
+		assert.Equal(t, 5, referrers)
+		assert.NotZero(t, referenced, "nothing was marked as needing to be applied first")
+	})
+
+	// A fleet with nothing publishing a port has nothing to point at. Validate
+	// refuses that scenario, but Build has to be safe on its own.
+	t.Run("skips references when nothing publishes a port", func(t *testing.T) {
+		scenario := base()
+		scenario.Fleet.Containers = 10
+		scenario.Fleet.References = 1
+
+		workloads, _ := loadtest.Build(scenario, "run")
+
+		for _, workload := range workloads {
+			assert.NotContains(t, workload.Spec.Env, "ADDRESS")
+			assert.False(t, workload.Referenced)
 		}
 	})
 

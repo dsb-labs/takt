@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/dsb-labs/orca/pkg/client"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -114,10 +116,10 @@ func Run(ctx context.Context, config Config) (report Report, err error) {
 }
 
 func setup(ctx context.Context, config Config, collected *collector, names Names) error {
-	var group errGroup
+	var group errgroup.Group
 
 	for _, name := range names.Volumes {
-		group.go_(func() error {
+		group.Go(func() error {
 			return collected.measure("volume.create", func() error {
 				_, err := config.Client.CreateVolume(ctx, manifest.Volume{Version: "v1", Name: name})
 
@@ -127,7 +129,7 @@ func setup(ctx context.Context, config Config, collected *collector, names Names
 	}
 
 	for i, name := range names.Secrets {
-		group.go_(func() error {
+		group.Go(func() error {
 			return collected.measure("secret.set", func() error {
 				_, _, err := config.Client.SetSecret(ctx, name, fmt.Appendf(nil, "value-%d", i))
 
@@ -137,7 +139,7 @@ func setup(ctx context.Context, config Config, collected *collector, names Names
 	}
 
 	for i, name := range names.Variables {
-		group.go_(func() error {
+		group.Go(func() error {
 			return collected.measure("variable.set", func() error {
 				_, _, err := config.Client.SetVariable(ctx, name, fmt.Sprintf("value-%d", i))
 
@@ -146,24 +148,50 @@ func setup(ctx context.Context, config Config, collected *collector, names Names
 		})
 	}
 
-	if err := group.wait(); err != nil {
+	if err := group.Wait(); err != nil {
 		return fmt.Errorf("failed to set up the scenario's resources: %w", err)
 	}
 
 	return nil
 }
 
-// apply submits the whole fleet at once, which is what puts the apply path and the
-// port allocator under contention.
+// apply submits the fleet, which is what puts the apply path and the port allocator
+// under contention.
 //
 // A refused apply fails the run rather than being counted. The fleet is what
 // everything after this measures, so a scenario that cannot apply its own workloads
 // has nothing to say and should report that rather than measure a smaller fleet.
+//
+// The workloads another one reads an address from go first, and the rest follow once
+// they exist. An apply naming a workload that does not exist is refused, so a fleet
+// with references applied all at once would lose every referrer that raced its
+// target. The burst is preserved where it matters: each wave still goes out at once,
+// and a scenario without references has one wave.
 func apply(ctx context.Context, config Config, collected *collector, workloads []Workload) error {
-	var group errGroup
+	var referenced, rest []Workload
 
 	for _, workload := range workloads {
-		group.go_(func() error {
+		if workload.Referenced {
+			referenced = append(referenced, workload)
+
+			continue
+		}
+
+		rest = append(rest, workload)
+	}
+
+	if err := applyAll(ctx, config, collected, referenced); err != nil {
+		return err
+	}
+
+	return applyAll(ctx, config, collected, rest)
+}
+
+func applyAll(ctx context.Context, config Config, collected *collector, workloads []Workload) error {
+	var group errgroup.Group
+
+	for _, workload := range workloads {
+		group.Go(func() error {
 			return collected.measure(operation("workload.apply", workload), func() error {
 				_, _, err := config.Client.Apply(ctx, workload.Spec)
 
@@ -172,7 +200,7 @@ func apply(ctx context.Context, config Config, collected *collector, workloads [
 		})
 	}
 
-	if err := group.wait(); err != nil {
+	if err := group.Wait(); err != nil {
 		return fmt.Errorf("failed to apply the fleet: %w", err)
 	}
 
@@ -354,19 +382,22 @@ func teardown(ctx context.Context, config Config, collected *collector, names Na
 	ctx, cancel := context.WithTimeout(ctx, convergeTimeout)
 	defer cancel()
 
-	var group errGroup
+	var group errgroup.Group
 
+	// Forced, because a workload another one reads an address from is otherwise
+	// refused. Teardown removes everything the run created, so the order between a
+	// referrer and its target is arbitrary and waiting for one would deadlock.
 	for _, name := range names.Workloads {
-		group.go_(func() error {
+		group.Go(func() error {
 			return collected.measure("workload.delete", func() error {
-				_, err := config.Client.Delete(ctx, name, client.WithWait())
+				_, err := config.Client.Delete(ctx, name, client.WithWait(), client.WithForceDeleteWorkload())
 
 				return err
 			})
 		})
 	}
 
-	_ = group.wait()
+	_ = group.Wait()
 
 	// After the workloads, because a secret a workload still reads is refused.
 	for _, name := range names.Secrets {
@@ -429,32 +460,6 @@ func cancelled(err error) bool {
 		strings.Contains(message, context.DeadlineExceeded.Error())
 }
 
-// The errGroup type runs work concurrently and keeps the first failure, which is all
-// a caller needs to know that the fleet did not go up.
-type errGroup struct {
-	wg   sync.WaitGroup
-	once sync.Once
-	err  error
-}
-
-func (g *errGroup) go_(fn func() error) {
-	g.wg.Add(1)
-
-	go func() {
-		defer g.wg.Done()
-
-		if err := fn(); err != nil {
-			g.once.Do(func() { g.err = err })
-		}
-	}()
-}
-
-func (g *errGroup) wait() error {
-	g.wg.Wait()
-
-	return g.err
-}
-
 // leaks reports what a run left on disk, for a run given somewhere to look.
 //
 // Only meaningful on the server's own host. The API cannot report a directory holding
@@ -471,14 +476,16 @@ func leaks(ctx context.Context, config Config, names Names) []string {
 		return []string{err.Error()}
 	}
 
-	var found []string
-
-	for _, tree := range []string{
+	trees := []string{
 		filepath.Join("mounts", "files"),
 		filepath.Join("mounts", "state"),
 		filepath.Join("exec", "state"),
 		filepath.Join("exec", "workloads"),
-	} {
+	}
+
+	var found []string
+
+	for _, tree := range trees {
 		entries, err := os.ReadDir(filepath.Join(config.DataDir, tree))
 		if err != nil {
 			// Nothing was ever written here, which is not a leak.

@@ -71,8 +71,6 @@ func Command() *cobra.Command {
 				return fmt.Errorf("failed to run the scenario: %w", err)
 			}
 
-			report.Summarise(out)
-
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
 

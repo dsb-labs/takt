@@ -1,0 +1,31 @@
+name = "references"
+description = "Workloads reading each other's addresses, which move when a port does."
+
+# A workload reading ${workload:other:http} is refused at apply time if the workload
+# it names does not exist, so the fleet is applied in two waves: the targets first,
+# then the readers. It is also redeployed whenever the address it read moves, which is
+# what makes a restart of a target expensive for everything pointing at it.
+
+[fleet]
+containers = 50
+exec = 10
+dynamic-ports = 0.3
+references = 0.5
+health-checks = 0.2
+reads-variable = 1.0
+
+[resources]
+secrets = 0
+variables = 4
+volumes = 0
+
+[churn]
+duration = "1m"
+workers = 12
+
+[churn.weights]
+restart = 3
+reapply = 2
+list = 2
+get = 2
+rotate-variable = 1

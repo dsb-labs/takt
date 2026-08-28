@@ -3,8 +3,6 @@ package loadtest
 import (
 	"cmp"
 	"encoding/json"
-	"fmt"
-	"io"
 	"slices"
 	"sync"
 	"time"
@@ -220,41 +218,4 @@ func truncate(reason string) string {
 	}
 
 	return reason[:limit]
-}
-
-// Summarise writes the report as a table, for the person watching rather than for
-// whatever is parsing the JSON.
-//
-// The two go to different streams, so a run can be read and piped at the same time.
-func (r Report) Summarise(w io.Writer) {
-	fmt.Fprintf(w, "\n%s: %d workloads applied in %s, %d running after %s\n",
-		r.Scenario, r.Workloads, r.Applied, r.Running, r.Converged)
-
-	if r.Operations > 0 {
-		fmt.Fprintf(w, "%d operations\n", r.Operations)
-	}
-
-	fmt.Fprintln(w)
-
-	for _, latency := range r.Latencies {
-		fmt.Fprintf(w, "  %-26s n=%-7d fail=%-6d cancel=%-6d p50=%-10s p95=%-10s p99=%-10s max=%s\n",
-			latency.Operation, latency.Count, latency.Failed, latency.Cancelled,
-			latency.P50, latency.P95, latency.P99, latency.Max)
-
-		for _, reason := range latency.Reasons {
-			fmt.Fprintf(w, "      %s\n", reason)
-		}
-	}
-
-	// Printed even when empty, because "nothing was left behind" is the answer the
-	// check exists to give and its absence would read as the check not having run.
-	fmt.Fprintf(w, "\nunconverged: %d\n", len(r.Unconverged))
-	for _, name := range r.Unconverged {
-		fmt.Fprintf(w, "  %s\n", name)
-	}
-
-	fmt.Fprintf(w, "leaks: %d\n", len(r.Leaks))
-	for _, leak := range r.Leaks {
-		fmt.Fprintf(w, "  %s\n", leak)
-	}
 }

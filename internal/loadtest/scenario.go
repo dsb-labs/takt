@@ -83,6 +83,14 @@ type (
 		MountsVariable float64 `toml:"mounts-variable"`
 		// The proportion mounting a volume.
 		MountsVolume float64 `toml:"mounts-volume"`
+		// The proportion reading another workload's address from their
+		// environment, which is what exercises resolving one workload against
+		// another and redeploying a reader when the address it read moves.
+		//
+		// Only a container publishing a port can be referenced, because the
+		// address is the host port orca published on the workload's behalf. A
+		// scenario asking for this without ports has nothing to point at.
+		References float64 `toml:"references"`
 	}
 
 	// The Resources type describes what a scenario creates for its fleet to read.
@@ -212,6 +220,19 @@ func (s Scenario) readable() error {
 		return fmt.Errorf("%w: mounts-volume needs at least one volume", ErrInvalidScenario)
 	}
 
+	// An address is the host port orca published for a container, so a fleet with
+	// nothing publishing one has nothing to reference. The apply would be refused
+	// rather than producing a workload that cannot start.
+	if s.Fleet.References > 0 {
+		if s.Fleet.Containers == 0 {
+			return fmt.Errorf("%w: references needs at least one container to point at", ErrInvalidScenario)
+		}
+
+		if s.Fleet.DynamicPorts+s.Fleet.FixedPorts == 0 {
+			return fmt.Errorf("%w: references needs a workload publishing a port", ErrInvalidScenario)
+		}
+	}
+
 	return nil
 }
 
@@ -253,6 +274,7 @@ func (f Fleet) proportions() map[string]float64 {
 		"mounts-secret":   f.MountsSecret,
 		"mounts-variable": f.MountsVariable,
 		"mounts-volume":   f.MountsVolume,
+		"references":      f.References,
 	}
 }
 

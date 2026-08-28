@@ -1,7 +1,6 @@
 package loadtest_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"testing"
 	"time"
@@ -81,51 +80,4 @@ func TestReport_Failed(t *testing.T) {
 			assert.Equal(t, tc.Failed, tc.Report.Failed())
 		})
 	}
-}
-
-func TestReport_Summarise(t *testing.T) {
-	t.Parallel()
-
-	report := loadtest.Report{
-		Scenario:    "example",
-		Workloads:   8,
-		Applied:     loadtest.Duration(13 * time.Millisecond),
-		Converged:   loadtest.Duration(2 * time.Second),
-		Running:     7,
-		Unconverged: []string{"example-container-0007"},
-		Operations:  120,
-		Latencies: []loadtest.Latency{{
-			Operation: "workload.get",
-			Count:     100,
-			Failed:    2,
-			Reasons:   []string{"server responded with Internal Server Error"},
-			Cancelled: 1,
-			P50:       loadtest.Duration(500 * time.Microsecond),
-		}},
-		Leaks: []string{"mounts/files holds 3 entries after teardown"},
-	}
-
-	var out bytes.Buffer
-	report.Summarise(&out)
-
-	summary := out.String()
-
-	assert.Contains(t, summary, "example: 8 workloads applied in 13ms")
-	assert.Contains(t, summary, "workload.get")
-	assert.Contains(t, summary, "server responded with Internal Server Error")
-	assert.Contains(t, summary, "example-container-0007")
-	assert.Contains(t, summary, "mounts/files holds 3 entries after teardown")
-}
-
-// TestReport_Summarise_Clean covers the counts being printed when they are zero. Their
-// absence would read as the checks not having run, which is the opposite of what a
-// clean run means.
-func TestReport_Summarise_Clean(t *testing.T) {
-	t.Parallel()
-
-	var out bytes.Buffer
-	loadtest.Report{Scenario: "example"}.Summarise(&out)
-
-	assert.Contains(t, out.String(), "unconverged: 0")
-	assert.Contains(t, out.String(), "leaks: 0")
 }

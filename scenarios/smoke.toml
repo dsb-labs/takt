@@ -6,6 +6,11 @@ containers = 4
 exec = 4
 dynamic-ports = 0.5
 health-checks = 0.25
+# The ports come off the front of the fleet and the references off the back, so this
+# is an exec workload reading a container's address. Here rather than only in
+# references.toml because applying a fleet in two waves is the path a reference adds,
+# and it is worth running before every commit rather than when somebody remembers.
+references = 0.25
 reads-secret = 1.0
 reads-variable = 1.0
 mounts-secret = 0.25

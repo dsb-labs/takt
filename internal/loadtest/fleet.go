@@ -2,6 +2,7 @@ package loadtest
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -21,11 +22,16 @@ const (
 	// from. Every workload publishing a port uses the same one, because the host
 	// port is what has to differ and orca is what chooses it.
 	port = 8080
+	// What that port is called, which is how a health check and another workload's
+	// reference both name it.
+	portName = "http"
+	// The environment variable a workload reads another's address from.
+	addressVariable = "ADDRESS"
 )
 
 type (
 	// The Workload type is one member of a fleet: the specification to apply, and
-	// whether it was built to fail.
+	// what the run has to know about it beyond that.
 	Workload struct {
 		// The specification to apply.
 		Spec manifest.Spec
@@ -34,6 +40,10 @@ type (
 		// running, so counting it as unconverged would report the scenario working
 		// as the scenario failing.
 		Fails bool
+		// Whether another workload reads this one's address, which means it has to
+		// be applied before them. An apply naming a workload that does not exist is
+		// refused, so a fleet applied all at once would lose the referrers.
+		Referenced bool
 	}
 
 	// The Names type holds what a run created, so that churn can pick from them and
@@ -66,12 +76,13 @@ func Build(scenario Scenario, prefix string) ([]Workload, Names) {
 	}
 
 	total := scenario.Workloads()
+	targets := targetsOf(scenario, prefix)
 	workloads := make([]Workload, 0, total)
 
 	for i := range scenario.Fleet.Containers {
 		name := fmt.Sprintf("%s-container-%04d", prefix, i)
 		names.Workloads = append(names.Workloads, name)
-		workloads = append(workloads, build(scenario, names, name, i, total, true))
+		workloads = append(workloads, build(scenario, names, targets, name, i, total, true))
 	}
 
 	for i := range scenario.Fleet.Exec {
@@ -82,13 +93,70 @@ func Build(scenario Scenario, prefix string) ([]Workload, Names) {
 		// across the whole fleet rather than restarting for each runtime. Without it
 		// a scenario asking for a tenth of anything would put all of it in the
 		// containers and none in the exec workloads.
-		workloads = append(workloads, build(scenario, names, name, scenario.Fleet.Containers+i, total, false))
+		workloads = append(workloads, build(scenario, names, targets, name, scenario.Fleet.Containers+i, total, false))
+	}
+
+	// Marked after the fleet is built, because whether a workload is referenced
+	// depends on what the rest of it ended up pointing at.
+	referenced := make(map[string]struct{})
+	for _, workload := range workloads {
+		if target := reads(workload.Spec); target != "" {
+			referenced[target] = struct{}{}
+		}
+	}
+
+	for i := range workloads {
+		_, ok := referenced[workloads[i].Spec.Name]
+		workloads[i].Referenced = ok
 	}
 
 	return workloads, names
 }
 
-func build(scenario Scenario, names Names, name string, index, total int, container bool) Workload {
+// targetsOf names the workloads a reference can point at: the containers publishing a
+// port.
+//
+// An address is the host port orca published on a workload's behalf, which is
+// something it does for a container. An exec workload binds its own port, so orca has
+// no address to report for one.
+func targetsOf(scenario Scenario, prefix string) []string {
+	fleet := scenario.Fleet
+	total := scenario.Workloads()
+
+	var targets []string
+
+	for i := range fleet.Containers {
+		if ported(i, total, fleet) {
+			targets = append(targets, fmt.Sprintf("%s-container-%04d", prefix, i))
+		}
+	}
+
+	return targets
+}
+
+// ported reports whether the workload at index publishes a port, on either share.
+func ported(index, total int, fleet Fleet) bool {
+	return has(index, total, fleet.DynamicPorts) ||
+		within(index, total, fleet.DynamicPorts, fleet.DynamicPorts+fleet.FixedPorts)
+}
+
+// reads returns the workload a specification takes an address from, or empty when it
+// takes none.
+func reads(spec manifest.Spec) string {
+	address, ok := spec.Env[addressVariable]
+	if !ok {
+		return ""
+	}
+
+	name, _, found := strings.Cut(strings.TrimPrefix(address, "${workload:"), ":")
+	if !found {
+		return ""
+	}
+
+	return name
+}
+
+func build(scenario Scenario, names Names, targets []string, name string, index, total int, container bool) Workload {
 	fleet := scenario.Fleet
 
 	spec := manifest.Spec{
@@ -125,11 +193,11 @@ func build(scenario Scenario, names Names, name string, index, total int, contai
 	// rather than tested separately. The scenario refuses a pair that overlaps.
 	switch {
 	case has(index, total, fleet.DynamicPorts):
-		spec.Ports = []manifest.Port{{Name: "http", To: port}}
+		spec.Ports = []manifest.Port{{Name: portName, To: port}}
 	case within(index, total, fleet.DynamicPorts, fleet.DynamicPorts+fleet.FixedPorts):
 		// Pinned above the range orca allocates from, so a scenario's fixed ports
 		// collide with each other rather than with what the allocator hands out.
-		spec.Ports = []manifest.Port{{Name: "http", To: port, From: 40000 + index}}
+		spec.Ports = []manifest.Port{{Name: portName, To: port, From: 40000 + index}}
 	}
 
 	// Only a workload that publishes something can be checked, since a check reaches
@@ -137,7 +205,7 @@ func build(scenario Scenario, names Names, name string, index, total int, contai
 	// between runs. The manifest refuses both, so a fleet that built them would be
 	// one the server would not accept.
 	if len(spec.Ports) > 0 && !scheduled && has(index, total, fleet.HealthChecks) {
-		spec.Health = &manifest.Health{TCP: true, Port: "http"}
+		spec.Health = &manifest.Health{TCP: true, Port: portName}
 	}
 
 	if len(names.Secrets) > 0 && has(index, total, fleet.ReadsSecret) {
@@ -168,6 +236,16 @@ func build(scenario Scenario, names Names, name string, index, total int, contai
 		})
 	}
 
+	// Taken from the end of the fleet, where the ports are taken from the front, so
+	// that a referrer is usually not also a target. A workload that reads its own
+	// address is skipped rather than built: it is a cycle, and the fleet could never
+	// be applied in an order that satisfied it.
+	if within(index, total, 1-fleet.References, 1) {
+		if target := chooseTarget(targets, name, index); target != "" {
+			spec.Env[addressVariable] = fmt.Sprintf("${workload:%s:%s}", target, portName)
+		}
+	}
+
 	spec.Defaults()
 	workload.Spec = spec
 
@@ -191,6 +269,19 @@ func within(index, total int, from, to float64) bool {
 	}
 
 	return index >= int(from*float64(total)) && index < int(to*float64(total))
+}
+
+// chooseTarget returns the workload a referrer reads an address from, skipping itself.
+// Returns empty when there is nothing else to point at.
+func chooseTarget(targets []string, self string, index int) string {
+	for offset := range targets {
+		target := targets[(index+offset)%len(targets)]
+		if target != self {
+			return target
+		}
+	}
+
+	return ""
 }
 
 // pick returns one of the names, chosen by index so that a fleet spreads itself
