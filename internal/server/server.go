@@ -240,9 +240,9 @@ func Run(ctx context.Context, config Config) error {
 	})
 
 	volumeSvc := service.NewVolumeService(service.VolumeServiceConfig{
-		Logger:    logger,
-		Volumes:   volumes,
-		Directory: config.Data.Directory,
+		Logger:  logger,
+		Volumes: volumes,
+		Root:    config.VolumesPath(),
 	})
 
 	adminSvc := service.NewAdminService(service.AdminServiceConfig{

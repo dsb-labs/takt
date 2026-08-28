@@ -236,6 +236,16 @@ func (c Config) DatabasePath() string {
 	return filepath.Join(c.Data.Directory, "state.db")
 }
 
+// VolumesPath returns the directory holding every volume, one per identifier.
+//
+// Beside DatabasePath for the same reason. A volume is found by the identifier it
+// was assigned, so restoring a node has to report which of those directories are
+// not there — and it cannot ask the service that owns the layout, because that
+// service only exists once a server is running.
+func (c Config) VolumesPath() string {
+	return filepath.Join(c.Data.Directory, "volumes")
+}
+
 // KeysPath returns the directory holding the secret encryption keys.
 //
 // Resolved here rather than defaulted in DefaultConfig, because the default sits

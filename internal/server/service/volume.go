@@ -32,9 +32,6 @@ var (
 // held to the same shape rather than to whatever a filesystem would tolerate.
 var volumeNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
-// The directory beneath the data directory holding every volume.
-const volumeDir = "volumes"
-
 type (
 	// The VolumeRepository interface describes the persistence operations the volume
 	// service uses.
@@ -82,9 +79,8 @@ type (
 		Logger *slog.Logger
 		// The repository holding the volumes.
 		Volumes VolumeRepository
-		// The directory orca keeps its state in. Volumes live in a subdirectory of
-		// it.
-		Directory string
+		// The directory holding every volume, one per identifier.
+		Root string
 	}
 )
 
@@ -93,7 +89,7 @@ func NewVolumeService(config VolumeServiceConfig) *VolumeService {
 	return &VolumeService{
 		logger:  config.Logger.With("component", "service"),
 		volumes: config.Volumes,
-		root:    filepath.Join(config.Directory, volumeDir),
+		root:    config.Root,
 	}
 }
 

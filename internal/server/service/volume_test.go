@@ -89,9 +89,9 @@ func TestVolumeService_Create(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(root, "volumes"), nil, 0o600))
 
 		svc := service.NewVolumeService(service.VolumeServiceConfig{
-			Logger:    newTestLogger(t),
-			Volumes:   repo,
-			Directory: root,
+			Logger:  newTestLogger(t),
+			Volumes: repo,
+			Root:    filepath.Join(root, "volumes"),
 		})
 
 		_, err := svc.Create(t.Context(), "example-data")
@@ -463,8 +463,8 @@ func newVolumeService(t *testing.T, repo service.VolumeRepository) (*service.Vol
 	root := t.TempDir()
 
 	return service.NewVolumeService(service.VolumeServiceConfig{
-		Logger:    newTestLogger(t),
-		Volumes:   repo,
-		Directory: root,
+		Logger:  newTestLogger(t),
+		Volumes: repo,
+		Root:    filepath.Join(root, "volumes"),
 	}), root
 }
