@@ -281,6 +281,12 @@ type (
 		Version string `json:"version"`
 		// The name that identifies the volume.
 		Name string `json:"name"`
+		// Arbitrary key-value pairs attached to the volume.
+		//
+		// Held to the same rules as a workload's, because an operator sorting
+		// storage by which service owns it is doing the same thing they do with
+		// workloads and should not have to learn a second answer.
+		Labels map[string]string `json:"labels,omitempty"`
 	}
 )
 

@@ -675,8 +675,24 @@ func TestParseVolume(t *testing.T) {
 			Expected: manifest.Volume{Version: "v1", Name: "example-data"},
 		},
 		{
+			Name: "a volume manifest with labels",
+			File: "volume_labels.yaml",
+			Expected: manifest.Volume{
+				Version: "v1",
+				Name:    "example-data",
+				Labels:  map[string]string{"app": "web", "app.kubernetes.io/name": "example"},
+			},
+		},
+		{
 			Name:         "rejects a name orca would not accept",
 			File:         "volume_bad_name.yaml",
+			ExpectsError: true,
+		},
+		{
+			// A volume's labels answer to the same rules a workload's do, reserved
+			// prefix included, so an operator learns them once.
+			Name:         "rejects a label orca reserves for itself",
+			File:         "volume_bad_label.yaml",
 			ExpectsError: true,
 		},
 		{

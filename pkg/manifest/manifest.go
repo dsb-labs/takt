@@ -153,7 +153,7 @@ func ValidateVolume(volume Volume) error {
 		return fmt.Errorf("invalid manifest: %w", err)
 	}
 
-	return nil
+	return ValidateLabels(volume.Labels)
 }
 
 // Validate reports whether spec is a usable workload specification.
@@ -181,7 +181,7 @@ func Validate(spec Spec) error {
 		return err
 	}
 
-	if err = validateLabels(spec.Labels); err != nil {
+	if err = ValidateLabels(spec.Labels); err != nil {
 		return err
 	}
 
@@ -268,7 +268,7 @@ func validateSchedule(spec Spec) error {
 	return nil
 }
 
-// validateLabels reports whether the workload's labels are ones orca will attach.
+// ValidateLabels reports whether the labels are ones orca will attach.
 //
 // Keys are held to the shape operators arrive with rather than to the workload
 // name pattern, so app.kubernetes.io/name passes. Values are freer still — any
@@ -279,7 +279,11 @@ func validateSchedule(spec Spec) error {
 // The orca. prefix is refused for feedback rather than safety. The docker driver
 // writes its own labels after copying these, so a spoofed key could never stick —
 // but silently overwriting an operator's value is worse than telling them no.
-func validateLabels(labels map[string]string) error {
+//
+// Exported because a secret and a variable carry labels too, and neither arrives
+// through a manifest. Two answers to what a label may be would be worse than one
+// answer in a package the other one has to import.
+func ValidateLabels(labels map[string]string) error {
 	if len(labels) > maxLabels {
 		return fmt.Errorf("invalid labels: %d labels exceeds the maximum of %d", len(labels), maxLabels)
 	}
