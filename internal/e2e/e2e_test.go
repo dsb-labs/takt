@@ -1716,6 +1716,93 @@ func (s *Suite) TestUnchangedSecretIsNotRedeployed() {
 	}
 }
 
+// TestRelabellingASecretDoesNotRedeployIt covers the constraint that makes labels
+// safe to put on a secret: filing one is not rotating it.
+//
+// A secret's revision is mixed into the specification hash of every workload reading
+// it, so moving the revision replaces instances across the node. That is right for a
+// value that changed and absurd for a piece of bookkeeping.
+func (s *Suite) TestRelabellingASecretDoesNotRedeployIt() {
+	name, secret := s.workloadName(), s.secretName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+	s.T().Cleanup(func() { s.cleanupSecret(secret) })
+
+	first, _, err := s.client.SetSecret(s.ctx(), secret, []byte("unchanged"), map[string]string{"app": "web"})
+	s.Require().NoError(err)
+	s.Equal(map[string]string{"app": "web"}, first.Labels)
+
+	spec := s.containerSpec(name)
+	spec.Env = map[string]string{"VALUE": "${secret:" + secret + "}"}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	before := s.awaitState(name, client.WorkloadStateRunning)
+	instance := s.awaitInstance(name)
+
+	// The same value under different labels. The labels land and the revision does
+	// not move.
+	relabelled, created, err := s.client.SetSecret(s.ctx(), secret,
+		[]byte("unchanged"), map[string]string{"app": "api", "team": "platform"})
+	s.Require().NoError(err)
+	s.False(created)
+	s.Equal(first.Revision, relabelled.Revision)
+	s.Equal(map[string]string{"app": "api", "team": "platform"}, relabelled.Labels)
+
+	// Labels replace rather than merge, so setting the value with none removes them.
+	// The revision still holds.
+	cleared, _, err := s.client.SetSecret(s.ctx(), secret, []byte("unchanged"), nil)
+	s.Require().NoError(err)
+	s.Equal(first.Revision, cleared.Revision)
+	s.Empty(cleared.Labels)
+
+	// And nothing reading the secret was replaced by any of it. Watched over several
+	// reconciliation passes, since a redeploy would take a moment to appear and an
+	// immediate check would pass whether or not one was coming.
+	for range 10 {
+		time.Sleep(time.Second)
+
+		workload, err := s.client.Get(s.ctx(), name)
+		s.Require().NoError(err)
+		s.Require().Len(workload.Instances, 1)
+		s.Require().Equal(before.Version, workload.Version,
+			"relabelling a secret bumped its workload's version")
+		s.Require().Equal(instance, workload.Instances[0].ID,
+			"relabelling a secret replaced its workload's instance")
+	}
+}
+
+// TestVolumeLabelsSurviveAnUpdate covers the write path a volume gained for its
+// labels, which is the only thing about a volume that can change.
+func (s *Suite) TestVolumeLabelsSurviveAnUpdate() {
+	volume := s.volumeName()
+	s.T().Cleanup(func() { s.cleanupVolume(volume) })
+
+	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{
+		Version: "v1",
+		Name:    volume,
+		Labels:  map[string]string{"app": "web"},
+	})
+	s.Require().NoError(err)
+	s.Equal(map[string]string{"app": "web"}, created.Labels)
+
+	updated, err := s.client.UpdateVolume(s.ctx(), manifest.Volume{
+		Version: "v1",
+		Name:    volume,
+		Labels:  map[string]string{"app": "api"},
+	})
+	s.Require().NoError(err)
+	s.Equal(map[string]string{"app": "api"}, updated.Labels)
+
+	// The identifier the data is stored under is untouched, which is what makes this
+	// safe to run against a volume holding something.
+	s.Equal(created.Path, updated.Path)
+
+	read, err := s.client.GetVolume(s.ctx(), volume)
+	s.Require().NoError(err)
+	s.Equal(map[string]string{"app": "api"}, read.Labels)
+}
+
 // TestDeletingASecretInUseIsRefused covers the refusal naming the workloads, and what
 // forcing it does to them.
 func (s *Suite) TestDeletingASecretInUseIsRefused() {
