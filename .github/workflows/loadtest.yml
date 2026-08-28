@@ -1,0 +1,106 @@
+name: loadtest
+
+concurrency:
+  group: ${{ github.workflow }}/${{ github.ref_name }}
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**.go'
+      - '**.mod'
+      - '**.sum'
+      - 'api/openapi.yaml'
+      - 'api/oapi-codegen.yaml'
+      - '.mockery.yml'
+      - 'scenarios/**'
+      - '.github/workflows/loadtest.yml'
+  pull_request:
+    paths:
+      - '**.go'
+      - '**.mod'
+      - '**.sum'
+      - 'api/openapi.yaml'
+      - 'api/oapi-codegen.yaml'
+      - '.mockery.yml'
+      - 'scenarios/**'
+      - '.github/workflows/loadtest.yml'
+  schedule:
+    - cron: '43 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  loadtest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build orca
+        run: go build -o orca .
+
+      # A directory of its own, so the load test's data directory is somewhere the
+      # run can read afterwards and somewhere nothing else writes.
+      #
+      # Absolute, because a relative data directory produces workloads that cannot
+      # start: Landlock and the Docker daemon both refuse a path that is not.
+      - name: Configure the server
+        run: |
+          mkdir -p "${{ github.workspace }}/loadtest/data"
+          cat > loadtest/config.toml <<EOF
+          [http]
+          address = "127.0.0.1:7373"
+
+          [data]
+          directory = "${{ github.workspace }}/loadtest/data"
+
+          [logging]
+          level = "debug"
+          EOF
+
+      # Started in the background rather than as a service container, because the
+      # load test drives the build under test. A released image would measure
+      # whatever was last published.
+      - name: Start the server
+        run: |
+          ./orca serve loadtest/config.toml > loadtest/server.log 2>&1 &
+          for _ in $(seq 30); do
+            if curl -sf http://localhost:7373/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "the server did not become healthy" >&2
+          cat loadtest/server.log >&2
+          exit 1
+
+      # The smoke scenario, which is a few of every feature and takes seconds. The
+      # larger scenarios are for running by hand: they measure how fast a machine is
+      # as much as anything else, and a shared runner is not a machine worth
+      # measuring.
+      #
+      # The data directory is passed so that the run also reports what was left on
+      # disk after teardown. That check is the only one that sees a leaked mount
+      # directory, and it needs the server's own host.
+      - name: Run the smoke load test
+        run: ./orca dev loadtest scenarios/smoke.toml --data-dir "${{ github.workspace }}/loadtest/data" > loadtest/report.json
+
+      - name: Report
+        if: always()
+        run: cat loadtest/report.json || true
+
+      - name: Upload the report and server log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: loadtest-output
+          path: |
+            loadtest/report.json
+            loadtest/server.log
