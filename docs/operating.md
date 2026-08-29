@@ -315,6 +315,39 @@ the same user, so granting it would let one workload read what another wrote the
 workload needing scratch space has its own working directory, and `TMPDIR` will point
 a command at it.
 
+## Delegation
+
+An `exec` workload naming `resources:` runs in a cgroup of its own, which is what
+enforces the limits. Writing below `/sys/fs/cgroup` needs either root or a subtree
+delegated to orca's user, so enforcement needs the host's help where confinement does
+not. orca derives the subtree from the cgroup it was started in — there is nothing to
+configure.
+
+Running the server under systemd with `Delegate=yes` on its unit grants a subtree.
+Setting `DelegateSubgroup=main` as well is recommended: it places the server in a
+leaf of the subtree, which orca otherwise has to arrange for itself, and it keeps a
+restart working when processes survive the old server. A bare `orca serve` from a
+shell may or may not sit in a delegated cgroup, and the startup log says which.
+
+A host without a delegated subtree refuses an apply that names limits on an `exec`
+workload, and says so at startup. There is no reduced mode, for the reason
+confinement has none: a limit that did nothing on some hosts would be a guarantee
+nobody could rely on. In particular orca does not fall back to rlimits — they cap
+address space rather than memory used and count the user's processes rather than the
+workload's, so the same manifest field would mean something different per runtime.
+Container workloads are unaffected, and so is every `exec` workload naming no limits.
+
+Inside the subtree, orca keeps a `main` cgroup holding the server and every unlimited
+workload, and one `orca-<id>-<version>` cgroup per limited workload. The limits are
+written before the command starts, so it never runs outside them, and the cgroup is
+removed when the workload stops.
+
+One interaction with the service manager is worth knowing. A limited workload's
+processes necessarily live inside the unit's subtree, and systemd's default
+`KillMode=control-group` kills everything in it when the unit stops. A limited
+workload outlives a server restart only under `KillMode=process`, which signals the
+server alone. An unlimited workload is unaffected by the limits work either way.
+
 ## Volumes
 
 Each volume gets a directory named for the identifier orca assigned it:

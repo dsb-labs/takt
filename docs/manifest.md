@@ -58,7 +58,7 @@ container:
 | `restart` | no | What happens when the workload ends. |
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
 | `health` | no | How orca decides the workload is working. |
-| `resources` | no | The resource limits the workload runs under. Container workloads only. |
+| `resources` | no | The resource limits the workload runs under. |
 | `container` | one of | Run the workload as a Docker container. |
 | `exec` | one of | Run the workload as a command on the host. |
 
@@ -701,10 +701,12 @@ rather than allowed to swap past it, so the limit means what it says. The restar
 policy then treats the kill as any other failure.
 
 Resources sit beside the runtime blocks because how much a workload may consume is a
-question about the workload — but only the container runtime can honour them. An exec
-workload naming them is rejected rather than ignored: enforcing limits on a host
-process needs cgroup privileges orca has not got, so accepting them would silently do
-nothing.
+question about the workload, and the limits mean the same thing on either runtime. A
+container's are enforced by its own runtime. An exec workload's are enforced with a
+cgroup of its own, which needs the host to delegate a cgroup subtree to orca —
+running the server under systemd with `Delegate=yes` grants one, and
+[operating](operating.md#delegation) describes it. A host without one refuses the
+apply rather than accepting limits that would silently never apply.
 
 ## Schedule
 
