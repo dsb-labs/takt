@@ -1476,6 +1476,7 @@ func (s *Suite) TestDryRunWritesNothing() {
 	s.False(unchanged.Replaced)
 	s.NotEmpty(unchanged.SpecHash)
 	s.Empty(unchanged.Unknown)
+	s.Empty(unchanged.Changed)
 	s.Require().Len(unchanged.Spec.Ports, 1)
 	s.Equal(allocated, unchanged.Spec.Ports[0].From)
 
@@ -1487,6 +1488,11 @@ func (s *Suite) TestDryRunWritesNothing() {
 	s.Require().NoError(err)
 	s.True(replaced.Replaced)
 	s.NotEqual(unchanged.SpecHash, replaced.SpecHash)
+	// What moved, named to the field rather than to the block holding it.
+	s.Equal([]string{"$.env.EXAMPLE"}, replaced.Changed)
+	// The host port the workload holds is settled and reported, so nothing about it
+	// reads as a change the operator made.
+	s.NotContains(replaced.Changed, "$.ports[0].from")
 
 	// The workload is where it was: same version, same allocation, same container.
 	after, err := s.client.Get(s.ctx(), name)
