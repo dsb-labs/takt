@@ -87,6 +87,14 @@ type (
 		// The paths into Spec whose values the server settles only as it applies. A
 		// host port it has yet to allocate is the only one.
 		Unknown []string
+		// The paths into Spec that differ from the specification the server stores.
+		// Empty for a workload that does not exist, which has nothing to differ
+		// from.
+		//
+		// A workload can be replaced with none of these set. The hash covers what a
+		// workload reads as well as what it says, so an image rebuilt under the same
+		// tag replaces an instance with the manifest untouched.
+		Changed []string
 	}
 
 	// The ResolvedPort type is a port mapping as the server applied it.
@@ -237,6 +245,10 @@ func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool,
 //
 // Nothing is allocated, so a port mapping needing a host port comes back without
 // one and its path is named in Unknown.
+//
+// The fields that differ from the stored specification are named in Changed. They
+// say what about the workload would move, where the hash says only that something
+// would.
 func (c *Client) DryRun(ctx context.Context, spec manifest.Spec) (DryRun, error) {
 	resp, err := c.api.DryRunWorkloadWithResponse(ctx, spec.Name, wire.FromSpec(spec))
 	if err != nil {
@@ -822,6 +834,10 @@ func newDryRun(result api.DryRunWorkloadResult) (DryRun, error) {
 
 	if result.Unknown != nil {
 		run.Unknown = *result.Unknown
+	}
+
+	if result.Changed != nil {
+		run.Changed = *result.Changed
 	}
 
 	return run, nil

@@ -311,6 +311,29 @@ func TestClient_DryRun(t *testing.T) {
 		assert.True(t, run.Replaced)
 	})
 
+	t.Run("reports the fields that would change", func(t *testing.T) {
+		t.Parallel()
+
+		hash := "hash-two"
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			var got api.WorkloadSpec
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+
+			writeJSON(t, w, http.StatusOK, api.DryRunWorkloadResult{
+				Spec:     got,
+				SpecHash: &hash,
+				Replaced: true,
+				Changed:  &[]string{"$.container.image"},
+			})
+		})
+
+		run, err := c.DryRun(t.Context(), spec)
+		require.NoError(t, err)
+		assert.True(t, run.Replaced)
+		assert.Equal(t, []string{"$.container.image"}, run.Changed)
+	})
+
 	t.Run("reports a rejected specification", func(t *testing.T) {
 		t.Parallel()
 
