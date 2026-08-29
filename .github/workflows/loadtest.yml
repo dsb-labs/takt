@@ -63,15 +63,10 @@ jobs:
       - name: Start the server
         run: |
           make dev > server.log 2>&1 &
-          for _ in $(seq 30); do
-            if curl -sf http://localhost:7373/health > /dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "the server did not become healthy" >&2
-          cat server.log >&2
-          exit 1
+          if ! ./orca admin health --wait 30s; then
+            cat server.log >&2
+            exit 1
+          fi
 
       # The smoke scenario, which is a few of every feature and takes seconds. The
       # larger scenarios are for running by hand: they measure how fast a machine is
