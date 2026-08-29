@@ -73,8 +73,8 @@ A workload names exactly one runtime block. `container:` runs an image and `exec
 runs a command on the host. Everything else applies to either, except `resources:`,
 which only the container runtime can enforce and the exec runtime rejects.
 
-A `volumes` entry names a volume, a secret or a variable. A volume is storage; the other
-two are files holding what orca holds under that name.
+A `volumes` entry names a volume, a secret or a variable. A volume is storage. The
+other two are files holding the value orca stores under that name.
 
 A volume is created before the workload that mounts it and outlives that workload, so
 deleting a workload never destroys what it stored. Its manifest is a name and nothing
@@ -116,8 +116,9 @@ volumes:
 ```
 
 `signal` asks orca to rewrite the file and signal the workload when the value changes,
-rather than replacing it. Leave it out to have the workload replaced. Mounting a secret
-writes it to the host filesystem, which [Secrets](docs/secrets.md) covers.
+rather than replacing the workload. Leave it out to have the workload replaced.
+Mounting a secret writes it to the host filesystem, which
+[Secrets](docs/secrets.md) covers.
 
 A variable is the same thing for a value worth reading back — a hostname, a log level,
 a feature flag:

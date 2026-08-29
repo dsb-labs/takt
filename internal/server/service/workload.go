@@ -283,7 +283,7 @@ type (
 	//
 	// The names travel alongside what was read because the two answer different
 	// questions. The names are stored, so that finding the workloads to redeploy when
-	// something moves does not depend on parsing every specification; what was read
+	// something moves does not depend on parsing every specification. What was read
 	// reaches the hash and is then discarded.
 	references struct {
 		// The names of the secrets the specification references.
@@ -377,8 +377,8 @@ const (
 	// WorkloadStateTerminating is a workload being torn down, or one whose instance
 	// is on its way out.
 	WorkloadStateTerminating WorkloadState = "terminating"
-	// WorkloadStateStopped is a workload whose instance ended cleanly and will not
-	// be started again.
+	// WorkloadStateStopped is a workload whose instance ended cleanly and whose
+	// restart policy will run it again.
 	WorkloadStateStopped WorkloadState = "stopped"
 	// WorkloadStateCompleted is a workload whose run finished, which is the end a
 	// job is meant to reach.
@@ -677,7 +677,7 @@ func unknown(mappings []manifest.Port) []string {
 // settled on.
 //
 // Allocation reads the ports already promised and then claims one, so two applies
-// racing each other can choose the same free port; the unique constraint on the
+// racing each other can choose the same free port. The unique constraint on the
 // claim means one of them loses. That collision is orca's to resolve rather than the
 // caller's, so a dynamic port is simply resolved again against what is now allocated.
 // A pinned port that collides is a different matter entirely: the caller asked for

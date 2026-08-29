@@ -1,7 +1,7 @@
 // Package api provides the HTTP API surface of the orca server.
 //
 // The routes, request decoding and response marshalling are generated from
-// api/openapi.yaml; this package implements the generated interface and holds the
+// api/openapi.yaml. This package implements the generated interface and holds the
 // middleware that wraps it.
 package api
 
@@ -23,7 +23,8 @@ type (
 	// The ErrorResponse type is the JSON shape returned for error responses, and
 	// implements the error interface so that clients can return it directly.
 	ErrorResponse struct {
-		// The HTTP status code. Set when writing the response; not sent on the wire.
+		// The HTTP status code. It is set when writing the response and not sent on
+		// the wire.
 		Status int `json:"-"`
 		// The human-readable error message.
 		Message string `json:"error"`

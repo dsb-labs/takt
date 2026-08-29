@@ -1923,7 +1923,7 @@ func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 	passes.wait(t, 1)
 
 	// Nudges are coalesced, so each one is requested only after the previous pass has
-	// been accounted for; otherwise a burst would collapse into a single pass and
+	// been accounted for. Otherwise a burst would collapse into a single pass and
 	// prove nothing about the window.
 	for i := 2; i <= 4; i++ {
 		r.Notify()

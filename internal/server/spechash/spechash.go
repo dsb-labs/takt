@@ -69,7 +69,7 @@ type (
 		//
 		// The value rather than a revision, unlike a secret. A secret is held at arm's
 		// length because the hash is reported and one computed over a value would
-		// confirm a guess at it; a variable's value is reported by the API anyway, so
+		// confirm a guess at it. A variable's value is reported by the API anyway, so
 		// the indirection would protect nothing and cost a column.
 		Variables map[string]string `json:"variables,omitempty"`
 		// The address each workload reference resolved to, keyed by the reference as

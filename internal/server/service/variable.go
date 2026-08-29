@@ -44,7 +44,7 @@ type (
 	// The Variable type describes a variable as it is reported to a caller.
 	//
 	// The value is on it, which is what separates a variable from a Secret. A secret
-	// is not readable back, so an operator cannot confirm what one holds; a variable
+	// is not readable back, so an operator cannot confirm what one holds. A variable
 	// exists for the cases where being able to is worth more than hiding it.
 	Variable struct {
 		// The name that identifies the variable.

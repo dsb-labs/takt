@@ -3,7 +3,7 @@
 //
 // Allocation lives above the driver boundary rather than inside a driver. A host
 // port that orca chose is a decision it can record, report and keep stable, which is
-// what makes it usable as an address; leaving the choice to the runtime would mean
+// what makes it usable as an address. Leaving the choice to the runtime would mean
 // only discovering the address afterwards, and would have to be reimplemented by
 // every driver whose runtime has no allocator of its own.
 //

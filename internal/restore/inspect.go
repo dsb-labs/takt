@@ -18,7 +18,7 @@ import (
 // is the whole reason for this being a command rather than a paragraph.
 func inspect(ctx context.Context, config Config, report *Report) error {
 	// Read-only, and deliberately not through the server's own Open, which migrates.
-	// A restore reports on the archive as it was taken; migrating it here would make
+	// A restore reports on the archive as it was taken. Migrating it here would make
 	// the answer depend on which binary happened to run the restore.
 	db, err := sql.Open("sqlite", config.Database+"?_pragma=busy_timeout(5000)&mode=ro")
 	if err != nil {

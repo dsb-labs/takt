@@ -428,7 +428,7 @@ func (s *SecretService) Rekey(ctx context.Context, cipher Cipher, keyID string) 
 		opened, err := s.cipher.Open(secret.Name, secret.Value)
 		if err != nil {
 			// Named without its value, and counted without its name elsewhere. That
-			// a particular secret will not open is what an operator needs; what is
+			// a particular secret will not open is what an operator needs. What is
 			// in it is not.
 			return 0, "", fmt.Errorf("failed to decrypt secret %s: %w", secret.Name, err)
 		}

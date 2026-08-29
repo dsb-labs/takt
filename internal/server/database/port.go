@@ -36,7 +36,7 @@ type (
 		Protocol string
 		// Whether the host port was allocated by the server rather than pinned by
 		// the specification. A dynamic port may be reallocated if it proves
-		// unusable; a pinned one may not.
+		// unusable. A pinned one may not.
 		Dynamic bool
 	}
 

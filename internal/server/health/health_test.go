@@ -238,7 +238,7 @@ func TestChecker_Run_DoesNotOverlapProbes(t *testing.T) {
 
 	awaitStatus(t, checker, "example", health.StatusHealthy)
 
-	// Not waiting for probes is what removed the barrier between workloads; a
+	// Not waiting for probes is what removed the barrier between workloads. A
 	// workload must still not accumulate probes faster than it answers them.
 	assert.Equal(t, int64(1), worst.Load(), "a workload was probed while its previous probe was still running")
 }

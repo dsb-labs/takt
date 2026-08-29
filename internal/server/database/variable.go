@@ -143,9 +143,9 @@ func (r *VariableRepository) Get(ctx context.Context, name string) (Variable, er
 
 // List returns every variable, ordered by name so that the result is stable.
 //
-// The values come with them, which is where this parts company with the secret
+// The values come with them, which is where this differs from the secret
 // repository. Listing secrets deliberately leaves the values behind because a read
-// that does not carry one cannot leak one; a variable's value is reported by the API
+// that does not carry one cannot leak one. A variable's value is reported by the API
 // anyway, so withholding it here would only mean reading each one again.
 func (r *VariableRepository) List(ctx context.Context) ([]Variable, error) {
 	const q = `SELECT id, name, value, json(labels), created_at, updated_at FROM variable ORDER BY name ASC`

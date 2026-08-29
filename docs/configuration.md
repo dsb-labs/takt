@@ -44,7 +44,7 @@ level = "info"
 | `address` | `127.0.0.1:7373` | The address the API listens on. |
 | `hosts` | empty | The host names a request may name. |
 
-Loopback by default. Reaching the API is enough to run code on the host, so read
+The default is loopback. Reaching the API is enough to run code on the host, so read
 [Operating orca](operating.md) before binding it to a network.
 
 `hosts` names the host names orca accepts a request for. An address literal and
@@ -149,7 +149,8 @@ It must be an address rather than a name, and it cannot be left empty. A name wo
 have to be resolved, and what it resolved to could change under a workload already
 published on it.
 
-`0.0.0.0` publishes everywhere and names nowhere, so it cannot be dialled. A workload
+`0.0.0.0` publishes on every interface, but it is not itself an address anything can
+dial. A workload
 referencing another is given the address of the interface carrying the default route
 instead, which is how anything on this host reaches the host.
 
@@ -193,9 +194,9 @@ directory. Which paths are opened is the operator's decision.
 Empty puts the keyring at `keys/` inside the data directory. A key is generated on
 first start, 32 random bytes, readable only by the user running the server.
 
-A directory rather than a file because `orca admin rekey` writes a new key before
-anything points at it. Each key is named by an identifier the database records, so
-which one is current is a question the database answers. The keyring keeps the keys
+It is a directory rather than a single file because `orca admin rekey` writes a new
+key before anything points at it. Each key is named by an identifier the database
+records, so which one is current is a question the database answers. The keyring keeps the keys
 it has replaced, since they still open the backups taken before the rekey.
 
 Set this to keep the keyring off the same disk as the database:
@@ -216,7 +217,7 @@ can read every secret sealed under it. See
 |---|---|---|
 | `otlp-endpoint` | empty | The OTLP endpoint traces and logs are exported to. |
 
-Empty exports nothing, which is the default. Metrics need no configuration at all:
+Empty is the default, and exports nothing. Metrics need no configuration at all:
 the server always collects them and serves them at `/metrics`. See
 [Operating](operating.md#observability).
 

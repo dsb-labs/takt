@@ -76,7 +76,7 @@ const (
 // instead of silently doing nothing.
 //
 // YAML keys are matched against the lowercased Go field names of Spec. That holds
-// while every manifest key is a single word, as they all are today; a multi-word
+// while every manifest key is a single word, as they all are today. A multi-word
 // field would need an explicit yaml tag, and the tests pin the current mapping.
 func Parse(r io.Reader) (Spec, error) {
 	decoder := yaml.NewDecoder(r)

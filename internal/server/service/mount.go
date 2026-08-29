@@ -133,7 +133,7 @@ func (s *MountService) Deliver(ctx context.Context, id string, version int, spec
 
 	// Readable only by the user running the server. The files inside are readable by
 	// anyone who can reach them, so that a container running as a user of its own can
-	// read what it mounts; this directory is what stops anything else on the host
+	// read what it mounts. This directory is what stops anything else on the host
 	// reaching them at all.
 	if err = os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create mount directory: %w", pathless(err))

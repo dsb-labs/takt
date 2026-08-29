@@ -197,7 +197,7 @@ func Expand(value string, resolve func(reference Reference) (string, bool)) (str
 //
 // A mounted secret or variable is included whatever its delivery mode. This is what
 // records that the workload reads it, so deleting one still reports the workloads
-// holding it; whether a change replaces the instance or refreshes the file is a
+// holding it. Whether a change replaces the instance or refreshes the file is a
 // separate question, which Refreshed answers.
 func References(spec Spec) ([]Reference, error) {
 	var references []Reference
@@ -244,7 +244,7 @@ func References(spec Spec) ([]Reference, error) {
 //
 // A reference read anywhere else as well is absent from the result. An environment
 // variable is fixed once a process has started and another mount may ask to be
-// replaced, so a reference with any such reading has to move the hash; refreshing the
+// replaced, so a reference with any such reading has to move the hash. Refreshing the
 // file it also appears at costs nothing and happens anyway.
 func Refreshed(spec Spec) ([]Reference, error) {
 	// Nothing can be refreshed without a mount asking for it, so a workload with no

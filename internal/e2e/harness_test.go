@@ -91,7 +91,7 @@ func (s *Suite) start(options ...option) {
 	config.Data.Directory = s.T().TempDir()
 	config.Logging.Level = "error"
 	// Short enough that a test waiting for convergence isn't mostly waiting on the
-	// ticker; driver events already cover the prompt cases.
+	// ticker. Driver events already cover the prompt cases.
 	config.Reconcile.Interval = time.Second
 
 	if testing.Verbose() {

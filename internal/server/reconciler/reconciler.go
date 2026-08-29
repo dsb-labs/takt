@@ -1183,7 +1183,7 @@ func lastRun(instances []driver.Instance) time.Time {
 // state once the driver reports nothing is left.
 //
 // The row is the last thing to go. While it exists the workload reads as
-// terminating, so the teardown is observable; once the driver is empty there is
+// terminating, so the teardown is observable. Once the driver is empty there is
 // nothing left for the row to describe, and removing it is what finally makes the
 // workload disappear. Ordering it this way means a failure at any point leaves a
 // workload that will be torn down again on the next pass, rather than running work
@@ -1264,7 +1264,7 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 // up. The row, the retained instance and its output all stay, so what the
 // workload last did remains readable while it is down.
 func (r *Reconciler) suspend(ctx context.Context, row database.Workload, instances []driver.Instance) error {
-	// Already on its way out from an earlier pass; stopping it again would just
+	// Already on its way out from an earlier pass. Stopping it again would just
 	// race the runtime finishing the job.
 	if slices.ContainsFunc(instances, terminating) {
 		r.logger.With("workload", row.Name).Debug("waiting for suspended workload to finish terminating")

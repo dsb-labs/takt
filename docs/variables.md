@@ -67,7 +67,7 @@ The value is an argument:
 orca variable set log-level debug
 ```
 
-This is where a variable parts company with a secret, which has no such flag. Arguments
+This is where a variable differs from a secret, which cannot take one. Arguments
 are visible to anything that can list processes on the host and they land in shell
 history — exactly what a secret has to avoid, and what a variable has no reason to.
 

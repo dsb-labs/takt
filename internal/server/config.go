@@ -119,7 +119,7 @@ type (
 	// The ReconcileConfig type contains configuration for the reconciliation loop.
 	ReconcileConfig struct {
 		// How often a full reconciliation pass runs regardless of driver events.
-		// Events make convergence prompt; this bounds how long a missed one can
+		// Events make convergence prompt. This bounds how long a missed one can
 		// go unnoticed.
 		Interval time.Duration `toml:"interval"`
 	}
@@ -166,7 +166,7 @@ type (
 		OTLPEndpoint string `toml:"otlp-endpoint"`
 
 		// Replaces the OTLP span exporter when set. Never read from the
-		// configuration file; tests use it to write spans somewhere they can
+		// configuration file. Tests use it to write spans somewhere they can
 		// read.
 		SpanExporter sdktrace.SpanExporter `toml:"-"`
 		// Replaces the OTLP log exporter when set, under the same rules as

@@ -21,10 +21,10 @@ read back from a label or a record is treated as a value rather than as a path. 
 directories the exec runtime keeps are named for the identifier orca assigned, and a
 name is read from inside a record rather than from the directory holding it.
 
-One thing a driver reports is not work it is doing. Replacing a workload means stopping
-it and starting it again, which would destroy the output of the attempt being replaced —
-so a driver keeps that attempt rather than removing it, and `orca workload logs
---previous` reads it.
+One thing a driver reports is not running work: the attempt it keeps for its output.
+Replacing a workload means stopping it and starting it again, which would destroy the
+output of the attempt being replaced — so a driver keeps that attempt rather than
+removing it, and `orca workload logs --previous` reads it.
 
 Such an instance has ended and nothing will restart it, so it is reported as retained
 and left out of every decision about what to run. Counted as an instance it would read
@@ -60,7 +60,7 @@ never overlap, so a burst of events collapses into one pass rather than racing.
 
 Workloads inside a pass are converged several at a time. They are independent of one
 another, and most of what converging one costs is waiting. Handling them in turn made
-the slowest workload the rate at which any of them could be handled.
+the slowest workload set the pace for all of the others.
 
 ## Replacing rather than mutating
 
@@ -241,19 +241,19 @@ Two workloads used to talk only through a host port an operator read back and pa
 into a manifest — a number orca chose, and one it revises if the workload fails to
 start on it. There was no way to write the dependency down.
 
-A reference is that way. `${workload:name:port}` resolves to the address the named
+A reference writes it down. `${workload:name:port}` resolves to the address the named
 workload is reached at, and the resolved address is mixed into the hash of the
 workload reading it. A port that moves is then an ordinary specification change: the
 consumers are replaced, and each resolves the new address as it starts.
 
-Templating rather than a shared container network, because the machinery already
-existed and already had the property this needed. A reference reaching the hash is
+It is templating rather than a shared container network, because the machinery
+already existed and already had the property this needed. A reference reaching the hash is
 what makes a changed value redeploy the instances reading it, and pointing the same
 mechanism at an address gets the redeployment for free. It also works for both
 runtimes, where a network would have been a manifest field that silently meant nothing
 for `exec`.
 
-The reference is resolved twice and stored never. It is hashed when the specification
+The reference is resolved twice and never stored. It is hashed when the specification
 is written and expanded again as the workload starts, so a workload never holds an
 address that has since moved.
 
@@ -282,13 +282,13 @@ specification alone, exactly as submitted, with the reference text still in it. 
 resolved value there would be readable through the API, which echoes a specification
 back.
 
-A workload that reads no secret hashes exactly as it would if none of this existed.
-That is deliberate rather than incidental: any other choice would replace every
-running instance the first time an operator upgraded orca.
+A workload that reads no secret is hashed exactly as it would be if none of this
+existed. That is deliberate rather than incidental: any other choice would replace
+every running instance the first time an operator upgraded orca.
 
 The revision is random rather than a counter. A counter would restart at one for a
-secret deleted and created again, so a workload would hash the same as it did against
-the value that is gone, and would keep running against a secret orca no longer holds.
+secret deleted and created again, so a workload would produce the hash it had for the
+value that is gone, and would keep running against a secret orca no longer holds.
 
 ## A variable's value is hashed, and a secret's is not
 
@@ -303,15 +303,16 @@ there is nothing left for the indirection to protect, and a revision column woul
 be a second thing to keep in step with the value.
 
 Hashing the value is also better behaved. A variable deleted and created again with the
-same value hashes as it did before, so the workloads reading it are left alone — which
-is correct, because nothing they read has changed. A random revision would have
+same value contributes what it did before, so the workloads reading it are left
+alone — which is correct, because nothing they read has changed. A random revision would have
 replaced them all. This is the one place where a secret's design is a compromise the
 variable does not have to make.
 
 Both contributions are omitted from the hash when there are none. A workload reading
-neither hashes exactly as it would if none of this existed, and a workload reading only
-secrets hashes exactly as it did before variables were added. Without that, adding this
-feature would have replaced every running instance that reads a secret.
+neither is hashed exactly as it would be if none of this existed, and a workload
+reading only secrets is hashed exactly as it was before variables were added. Without
+that, adding this feature would have replaced every running instance that reads a
+secret.
 
 ## A pull-always image's digest is hashed, and resolved rather than remembered
 
@@ -338,7 +339,7 @@ unchanged when nothing checked, and the failure names the workload whose registr
 could not be asked.
 
 Every other pull policy contributes nothing, so a workload that never asked for any
-of this hashes exactly as it did before the policy existed — the same property the
+of this is hashed exactly as it was before the policy existed — the same property the
 secret and variable contributions hold to, and for the same reason.
 
 ## Registry credentials are docker's, not orca's

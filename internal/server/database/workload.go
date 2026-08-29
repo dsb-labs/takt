@@ -25,7 +25,7 @@ type (
 	Workload struct {
 		// The identifier the server assigns to the workload. It exists so that rows
 		// referring to a workload do not depend on its name, which is the operator's
-		// handle and could otherwise never change; it is not exposed by the API.
+		// handle and could otherwise never change. It is not exposed by the API.
 		ID string
 		// The name that identifies the workload.
 		Name string
@@ -67,7 +67,7 @@ type (
 		// reconciler is the only thing that removes running work.
 		DeletedAt time.Time
 		// The time the workload was suspended, or the zero time when it is not.
-		// A suspended workload keeps its row and its specification; the reconciler
+		// A suspended workload keeps its row and its specification. The reconciler
 		// stops its instances and starts nothing until the mark is cleared.
 		SuspendedAt time.Time
 	}
@@ -105,7 +105,7 @@ func NewWorkloadRepository(db *sql.DB) *WorkloadRepository {
 // bumps the version nor moves UpdatedAt. When the hash differs the version is
 // incremented, which is what causes the reconciler to replace running instances.
 //
-// The Version, CreatedAt and UpdatedAt fields of w are ignored; the repository
+// The Version, CreatedAt and UpdatedAt fields of w are ignored. The repository
 // assigns them.
 func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Port) (Workload, bool, error) {
 	labels, err := marshalLabels(w.Labels)

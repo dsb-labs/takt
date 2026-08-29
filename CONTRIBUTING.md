@@ -144,7 +144,7 @@ go run . dev loadtest scenarios/secrets.toml --data-dir ./data
 
 Everything a run creates is named after `--prefix`, which defaults to something unique
 to the run, so two load tests against one server neither collide nor tear down each
-other's work. `--keep` leaves the fleet in place to poke at.
+other's work. `--keep` leaves the fleet in place to inspect.
 
 **Do not run a load test while the end-to-end suite is running.** Both drive the same
 Docker daemon, and a teardown removes containers by orca's label.
@@ -176,7 +176,8 @@ After that, volume deletion works under `go run` and in the tests, with nothing
 to redo when the binary is rebuilt.
 
 One test watches the confinement trampoline strip this capability from a workload.
-It grants itself one inside a user namespace, so it runs without any of the above.
+The test grants itself a capability inside a user namespace, so it runs without any
+of the above.
 It skips only where the test process holds no ambient capability and the host also
 refuses unprivileged user namespaces — the `pam_cap` grant covers that case too.
 
@@ -219,7 +220,7 @@ parses into, what the server stores, and what the hash covers. The generated wir
 types stay in the three packages with business in them: `internal/server/api`,
 `pkg/client`, and `internal/wire`, which maps between the two.
 
-A change below the HTTP API works on `manifest.Spec`. Reaching for
+A change below the HTTP API works on `manifest.Spec`. Importing
 `internal/generated/api` anywhere else means the conversion is happening too late.
 
 ## Commits

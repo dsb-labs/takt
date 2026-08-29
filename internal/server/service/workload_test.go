@@ -1059,7 +1059,7 @@ func TestWorkloadService_List(t *testing.T) {
 			storedWorkload("bravo"),
 		}, nil).Once()
 
-		// One observation covers every workload; asking per row would scale badly.
+		// One observation covers every workload. Asking per row would scale badly.
 		d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
 			{ID: "container-one", Workload: "alpha", State: driver.StateRunning},
 		}, nil).Once()

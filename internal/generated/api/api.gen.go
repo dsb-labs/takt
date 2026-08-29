@@ -463,8 +463,8 @@ type GetVariableResult struct {
 	// Variable A variable, together with its value and the workloads currently reading it.
 	//
 	// The value is on this schema and there is no revision, which is where a
-	// variable parts company with a secret. A secret reports a revision so that a
-	// rotation can be confirmed without revealing anything; a variable has nothing
+	// variable differs from a secret. A secret reports a revision so that a
+	// rotation can be confirmed without revealing anything. A variable has nothing
 	// to hide, so its value serves that purpose directly. That also makes it the
 	// wrong place for anything damaging to report — a secret is what that is for.
 	Variable Variable `json:"variable"`
@@ -688,7 +688,7 @@ type MountSignal string
 type OverlapPolicy string
 
 // PortMapping A port to publish. The `to` port is the one the workload listens on inside
-// its runtime; the `from` port is the one on the host that reaches it.
+// its runtime. The `from` port is the one on the host that reaches it.
 //
 // Leaving `from` unset asks the server to allocate a host port, which is the
 // usual case: the workload keeps a fixed port of its own and callers discover
@@ -1032,8 +1032,8 @@ type SetVariableResult struct {
 	// Variable A variable, together with its value and the workloads currently reading it.
 	//
 	// The value is on this schema and there is no revision, which is where a
-	// variable parts company with a secret. A secret reports a revision so that a
-	// rotation can be confirmed without revealing anything; a variable has nothing
+	// variable differs from a secret. A secret reports a revision so that a
+	// rotation can be confirmed without revealing anything. A variable has nothing
 	// to hide, so its value serves that purpose directly. That also makes it the
 	// wrong place for anything damaging to report — a secret is what that is for.
 	Variable Variable `json:"variable"`
@@ -1074,8 +1074,8 @@ type UpdateVolumeResult struct {
 // Variable A variable, together with its value and the workloads currently reading it.
 //
 // The value is on this schema and there is no revision, which is where a
-// variable parts company with a secret. A secret reports a revision so that a
-// rotation can be confirmed without revealing anything; a variable has nothing
+// variable differs from a secret. A secret reports a revision so that a
+// rotation can be confirmed without revealing anything. A variable has nothing
 // to hide, so its value serves that purpose directly. That also makes it the
 // wrong place for anything damaging to report — a secret is what that is for.
 type Variable struct {
@@ -1168,9 +1168,9 @@ type Volume struct {
 	// backup needs.
 	//
 	// Reported to a caller of this API and not to the workloads mounting the
-	// volume. An operator asking orca where data lives has a reason to know; a
-	// workload told where it sits inside orca's data directory could walk out of
-	// it.
+	// volume. An operator asking orca where data lives has a reason to know.
+	// A workload told where it sits inside orca's data directory could walk
+	// out of it.
 	Path *string `json:"path,omitempty"`
 
 	// UsedBy The names of the workloads whose specifications mount this volume. Empty
@@ -1450,7 +1450,7 @@ type WorkloadSpec struct {
 	Name string `json:"name"`
 
 	// Ports The ports to publish. Each entry names a port inside the workload and,
-	// optionally, the host port that should reach it; when the host port is
+	// optionally, the host port that should reach it. When the host port is
 	// omitted the server allocates one.
 	//
 	// The ports sit alongside the runtime blocks because reaching a workload is
@@ -1493,9 +1493,10 @@ type WorkloadSpec struct {
 	// Volumes What the workload mounts, and where it finds each one.
 	//
 	// An entry names a volume, a secret or a variable. A volume is storage that
-	// outlives the workload; a mounted secret or variable is a file holding that
-	// value. One list rather than two, because a workload saying what appears in
-	// its filesystem is one question however the contents are produced.
+	// outlives the workload. A mounted secret or variable is a file holding that
+	// value. It is one list rather than two, because a workload saying what
+	// appears in its filesystem is one question however the contents are
+	// produced.
 	//
 	// Each names something that must already exist. A specification naming what
 	// does not is rejected, so a mistyped name is reported rather than quietly

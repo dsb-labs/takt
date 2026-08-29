@@ -69,7 +69,7 @@ func Command() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Report what applying the manifest would do, and apply nothing")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what applying the manifest would do, and apply nothing")
 
 	return cmd
 }

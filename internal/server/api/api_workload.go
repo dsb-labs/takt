@@ -461,7 +461,7 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 
 	// A missing workload is established before anything is written, because once the
 	// first byte of a 200 has been sent there is no way to report a failure. Reading
-	// the logs can still fail midway through; nothing can be done about that but stop
+	// the logs can still fail midway through. Nothing can be done about that but stop
 	// writing, which is exactly why the cheap check happens first.
 	if _, err := a.workloads.Get(ctx, request.Name); err != nil {
 		switch {
@@ -676,7 +676,7 @@ func newWorkload(w service.Workload) api.Workload {
 			Health:   instanceHealth(w.Health, instance),
 		}
 
-		// An exit code is only meaningful once the instance has stopped; reporting
+		// An exit code is only meaningful once the instance has stopped. Reporting
 		// zero for something still running would read as a clean exit.
 		if instance.State == driver.StateExited || instance.State == driver.StateFailed {
 			mapped.ExitCode = new(instance.ExitCode)

@@ -289,7 +289,7 @@ func (d *Driver) Stop(ctx context.Context, _, workload string) error {
 //
 // This is what a delete and an orphan take, where Stop is what a replacement takes. A
 // retained container exists so that an operator can read why the previous attempt
-// failed; a workload nobody asked for has no such reader, and one left behind is a
+// failed. A workload nobody asked for has no such reader, and one left behind is a
 // container the orphan sweep would find on every pass forever.
 func (d *Driver) Discard(ctx context.Context, _, workload string) error {
 	containers, err := d.containers(ctx, workload)

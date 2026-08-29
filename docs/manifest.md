@@ -85,12 +85,12 @@ A value is free text without control characters, up to 256 bytes. An empty value
 is allowed. Up to 32 labels may be carried.
 
 Volumes, secrets and variables carry labels under the same rules, so there is one
-answer to what a label may be. A volume's are in its manifest; a secret's and a
-variable's are set with `--label`, since neither is described by a manifest.
+answer to what a label may be. A volume carries its labels in its manifest. A secret
+and a variable take theirs from `--label`, since neither is described by a manifest.
 
-**A label is readable wherever the thing it is on is.** That matters most for a
-secret, whose value deliberately is not: a label on one is as public as its name, and
-is no place to put a credential.
+**A label is as readable as the thing that carries it.** That matters most for a
+secret, whose value is deliberately unreadable: a label on a secret is as public as
+its name, and is no place to put a credential.
 
 ## Runtimes
 
@@ -146,8 +146,9 @@ where to split it, and no shell is involved unless the command names one. Leavin
 out runs what the image declares.
 
 Every container is created with the `no-new-privileges` option set, so a process
-inside cannot gain privileges through a setuid binary. It is not a field: it breaks
-essentially nothing that is not already doing something suspect.
+inside cannot gain privileges through a setuid binary. There is no field to turn it
+off, because it breaks essentially nothing that is not already doing something
+suspect.
 
 The other hardening fields are opt-in. `user` takes any form Docker accepts — a name,
 a numeric identifier, or a `user:group` pair. Many stock images run as root unless
@@ -231,7 +232,7 @@ health:
 ```
 
 A name follows the rules a workload name does: lowercase letters, digits and dashes.
-It may not read as a number, because a port is also selected by the port itself, and
+It may not read as a number, because a port may also be selected by its number, and
 `8080` would otherwise be two different ports written the same way.
 
 Two ports may share a name only when they publish the same `to` on different
@@ -451,8 +452,8 @@ path:
 | `secret` | A file holding the secret's value. |
 | `var` | A file holding the variable's value. |
 
-Naming none, or naming two, is an error. One list rather than two, because what a
-workload finds in its filesystem is one question however the contents are produced.
+Naming none, or naming two, is an error. It is one list rather than two, because what
+a workload finds in its filesystem is one question however the contents are produced.
 
 `to` is where the workload finds it, and works the same way for all three. The rest of
 this section is about mounting a volume. [Mounting a value](#mounting-a-value) covers
@@ -481,7 +482,7 @@ labels:
 ```
 
 Labels follow the rules in [Labels](#labels), unchanged. `orca volume update` replaces
-them; nothing mounting the volume is redeployed, because a label says nothing about
+them. Nothing mounting the volume is redeployed, because a label says nothing about
 the storage.
 
 A volume outlives the workloads that mount it. Deleting a workload leaves its volumes
@@ -615,8 +616,8 @@ restart:
 `always` is what a long-running service wants. `on-failure` is what a one-off job
 wants: a job that exits cleanly has finished its work.
 
-A workload orca will not restart reads as `completed` when it exited cleanly and
-`failed` when it did not. The policy decides whether to run it again. The exit code
+A workload that orca will not restart reads as `completed` when it exited cleanly and
+as `failed` when it did not. The policy decides whether to run it again. The exit code
 decides whether it worked, so a workload retired under `never` still reports that it
 failed.
 
@@ -665,7 +666,7 @@ going to pass yet, and passing one check ends the grace early.
 checks would overlap itself, and the failure count would stop meaning consecutive
 failures.
 
-`port` takes either the name a port was given or the port itself, so `port: http` and
+`port` takes either the name a port was given or its number, so `port: http` and
 `port: 8080` select the same port of a workload publishing `http` on 8080. Naming it
 is worth preferring: the number is restated in two places otherwise, and a manifest
 that changes one and not the other still applies.
@@ -729,8 +730,9 @@ The expression is read in the server's local time.
 | `replace` | Stop the running instance and start the occurrence. |
 | `skip` | Leave the running instance alone and miss the occurrence. |
 
-`replace` keeps the schedule honest, so a run that outlasts its interval never
-finishes. `skip` is for a job that must not be interrupted. Either way the workload
+`replace` keeps the schedule honest: a run that outlasts its interval is stopped so
+that the next occurrence starts on time, which means a run that always outlasts it
+never finishes. `skip` is for a job that must not be interrupted. Either way the workload
 runs one instance at a time.
 
 The schedule outranks the restart policy. An occurrence coming due starts the workload

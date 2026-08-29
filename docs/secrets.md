@@ -120,7 +120,7 @@ exactly what that costs:
   cannot read what another mounts even though both run as the same user. See
   [Confinement](operating.md#confinement).
 - The file is written as the workload starts and removed once nothing is running for it.
-  A `orca workload delete` takes it off the disk.
+  `orca workload delete` removes it from the disk.
 - A backup of the data directory includes it, in the clear. This is the one place a
   secret's value is not encrypted at rest.
 

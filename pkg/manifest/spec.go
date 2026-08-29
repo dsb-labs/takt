@@ -120,7 +120,7 @@ type (
 
 	// The Health type describes how to tell whether a workload is working.
 	//
-	// The timing fields mean the same thing for any runtime; the probe fields do not,
+	// The timing fields mean the same thing for any runtime. The probe fields do not,
 	// and one a runtime cannot perform is rejected rather than ignored.
 	Health struct {
 		// The path to request, when the workload should be checked over HTTP.

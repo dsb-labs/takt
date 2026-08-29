@@ -931,7 +931,7 @@ func TestDriver_Observe(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, instances, 1)
 
-		// Nothing orca does will move a dead container on; docker retries it when
+		// Nothing orca does will move a dead container on. Docker retries it when
 		// the daemon restarts, so it stays a failure rather than terminating.
 		assert.Equal(t, driver.StateFailed, instances[0].State)
 	})

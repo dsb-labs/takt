@@ -158,15 +158,15 @@ replaced still opens the archives taken before it was replaced.
 
 ## Restoring a node
 
-Written for the case that matters: the host is gone, and a replacement has to come
-back holding what the old one held. A corrupted file on a host that still exists is
+This section is written for the case that matters: the host is gone, and a
+replacement has to come back holding what the old one held. A corrupted file on a host that still exists is
 the same procedure with more of it already in place.
 
 ```sh
 orca admin restore /backups/orca.zip /etc/orca/config.toml
 ```
 
-**With the server stopped.** This is the one command that talks to no server: it
+**Run it with the server stopped.** This is the one command that talks to no server: it
 reads the configuration file `orca serve` reads, works over the data directory
 directly, and refuses to run while anything is listening on the configured address.
 A restore under a running server writes a database out from under the connections
@@ -266,10 +266,11 @@ output survives for as long as the workload does.
 
 ## Confinement
 
-An `exec` workload runs as the same user as the server. File permissions therefore
-stop it reaching nothing that user can reach, which includes the keyring, the
-database, and every other workload's mounted plaintext. Running workloads as a
-separate user would need privileges orca deliberately does not ask for.
+An `exec` workload runs as the same user as the server, so file permissions draw no
+boundary around it: everything that user can reach, it can reach, including the
+keyring, the database, and every other workload's mounted plaintext. Running
+workloads as a separate user would need privileges orca deliberately does not ask
+for.
 
 The kernel is what draws the boundary instead. orca confines every `exec` workload with
 [Landlock](https://landlock.io), which lets an unprivileged process restrict itself

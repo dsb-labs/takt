@@ -30,7 +30,7 @@ orca variable get <name>                Show a single variable
 orca variable delete <name>             Delete a variable                    (alias: rm)
 
 orca admin backup <destination>         Write a backup of the node to a file
-orca admin restore <archive> [config]   Put a node back from a backup archive
+orca admin restore <archive> [config]   Restore a node from a backup archive
 orca admin rekey                        Re-encrypt every secret under a new key
 ```
 
@@ -651,7 +651,7 @@ opens nothing the node holds. See
 | `pending` | Nothing is running yet. |
 | `running` | The workload's instances are up. |
 | `terminating` | The workload is being torn down. |
-| `stopped` | Nothing is running, and orca intends to fix that. |
+| `stopped` | An instance ended cleanly, and the restart policy will run it again. |
 | `completed` | The workload ended, and its restart policy asks for nothing more. |
 | `failed` | An instance exited non-zero, or a health check is failing. |
 | `suspended` | The workload was stopped by an operator, and stays down until it is started again. |

@@ -435,7 +435,7 @@ func TestParse(t *testing.T) {
 		},
 		{
 			// The same field, written the same way, for the other runtime. What it
-			// resolves to differs; what a manifest may say does not.
+			// resolves to differs. What a manifest may say does not.
 			Name: "mounts a volume in an exec workload",
 			File: "volumes_exec.yaml",
 			Assert: func(t *testing.T, spec manifest.Spec) {

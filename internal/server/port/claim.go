@@ -34,8 +34,8 @@ type (
 		// The transport protocol the port is published on.
 		Protocol Protocol
 		// Whether the host port was allocated here rather than pinned by the
-		// specification. A dynamic port may be reallocated if it proves unusable; a
-		// pinned one may not.
+		// specification. A dynamic port may be reallocated if it proves unusable.
+		// A pinned one may not.
 		Dynamic bool
 	}
 
@@ -111,7 +111,7 @@ func Pinned(mappings []manifest.Port) bool {
 
 // Requested recovers what a specification originally asked for from the stored one,
 // whose host ports have already been resolved. A mapping whose host port was
-// allocated is returned without it, so resolution allocates afresh; a pinned one
+// allocated is returned without it, so resolution allocates afresh. A pinned one
 // keeps it.
 func Requested(mappings []manifest.Port, held []Claim) []manifest.Port {
 	allocated := make(map[key]struct{}, len(held))
