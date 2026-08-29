@@ -32,7 +32,6 @@ import (
 
 	"github.com/dsb-labs/orca/internal/restore"
 	execdriver "github.com/dsb-labs/orca/internal/server/driver/exec"
-	"github.com/dsb-labs/orca/internal/server/driver/exec/exectest"
 	"github.com/dsb-labs/orca/pkg/client"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -53,11 +52,12 @@ const (
 // confined exec workload is this one. Without this the workload would run the suite a
 // second time instead of confining itself and becoming the command.
 //
-// It also asks the host for a delegated cgroup subtree, so the server the suite runs
-// can enforce resource limits on exec workloads rather than refuse them.
+// The server the suite runs also assumes a delegated cgroup subtree, so it can
+// enforce resource limits on exec workloads rather than refuse them. That is a
+// property of how the suite was started: run it through "make e2e" or
+// scripts/delegated.sh, which grant one.
 func TestMain(m *testing.M) {
 	execdriver.Confine()
-	exectest.Redelegate()
 
 	os.Exit(m.Run())
 }

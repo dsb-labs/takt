@@ -20,7 +20,6 @@ import (
 
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/driver/exec"
-	"github.com/dsb-labs/orca/internal/server/driver/exec/exectest"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/pkg/manifest"
@@ -40,12 +39,11 @@ var (
 // of the binary they run in: started as a trampoline it has to confine itself and
 // become the command, rather than run the suite a second time inside the workload.
 //
-// It also asks the host for a delegated cgroup subtree, which is what lets the
-// tests that enforce resource limits assume one the way every test here assumes
-// confinement works.
+// The tests that enforce resource limits also assume a delegated cgroup subtree,
+// which is a property of how the suite was started rather than of the binary. Run
+// the suite through "make test" or scripts/delegated.sh, which grant one.
 func TestMain(m *testing.M) {
 	exec.Confine()
-	exectest.Redelegate()
 
 	os.Exit(m.Run())
 }

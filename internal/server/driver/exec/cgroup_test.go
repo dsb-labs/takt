@@ -18,12 +18,12 @@ import (
 func TestEnforceable(t *testing.T) {
 	t.Parallel()
 
-	// TestMain asked systemd for a delegated subtree when the host had not already
-	// delegated one, so by the time this runs the answer should be yes — and every
-	// other test in this file enforces something successfully on the strength of
-	// it. Asserted rather than skipped for the reason TestConfinable asserts: a
-	// host this fails on fails the rest of the file too.
-	assert.NoError(t, exec.Enforceable(), "this host does not delegate a cgroup subtree, so no other test here is meaningful")
+	// Every other test in this file enforces something successfully, so the suite
+	// has to have been started inside a delegated subtree — which is what running
+	// it through "make test" or scripts/delegated.sh does. Asserted rather than
+	// skipped for the reason TestConfinable asserts: a host this fails on fails
+	// the rest of the file too.
+	assert.NoError(t, exec.Enforceable(), `no delegated cgroup subtree: run the suite through "make test" or scripts/delegated.sh`)
 }
 
 func TestDriver_ResourceLimits(t *testing.T) {
