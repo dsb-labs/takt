@@ -32,14 +32,37 @@ delegated() {
 	[ -w "$root" ] && [ -w "$root/cgroup.subtree_control" ]
 }
 
+# Asks systemd for a scope with a command that does nothing, so a host that
+# cannot grant one fails here with the message below rather than as a failing
+# command.
+grantable() {
+	systemd-run --user --scope --quiet -p Delegate=yes true 2>/dev/null
+}
+
 if delegated; then
 	exec "$@"
 fi
 
-# Asked with a command that does nothing, so a host without a systemd user
-# session fails here with the message below rather than as a failing command.
-if systemd-run --user --scope --quiet -p Delegate=yes true 2>/dev/null; then
+if grantable; then
 	exec systemd-run --user --scope --quiet -p Delegate=yes "$@"
+fi
+
+# A user with no login session has no user manager for systemd-run to talk to,
+# which is what a CI runner is. Lingering starts one. Attempted with sudo -n so
+# this acts only where sudo needs no password, and never prompts a person in
+# the middle of a make target.
+if sudo -n loginctl enable-linger "$(whoami)" 2>/dev/null; then
+	export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+	export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+
+	for _ in $(seq 1 20); do
+		[ -S "${XDG_RUNTIME_DIR}/bus" ] && break
+		sleep 0.5
+	done
+
+	if grantable; then
+		exec systemd-run --user --scope --quiet -p Delegate=yes "$@"
+	fi
 fi
 
 echo "this shell has no delegated cgroup subtree and systemd cannot grant one" >&2
