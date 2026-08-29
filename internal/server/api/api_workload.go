@@ -237,15 +237,19 @@ func (a *WorkloadAPI) DryRunWorkload(ctx context.Context, request api.DryRunWork
 		Replaced: run.Replaced,
 	}
 
-	// Both are absent rather than empty when there is nothing to report. A hash of
-	// "" would read as a hash, and a caller checking whether anything is unknown
-	// should not have to distinguish an empty list from a missing one.
+	// Each is absent rather than empty when there is nothing to report. A hash of
+	// "" would read as a hash, and a caller checking whether anything is unknown or
+	// changed should not have to distinguish an empty list from a missing one.
 	if run.SpecHash != "" {
 		result.SpecHash = &run.SpecHash
 	}
 
 	if len(run.Unknown) > 0 {
 		result.Unknown = &run.Unknown
+	}
+
+	if len(run.Changed) > 0 {
+		result.Changed = &run.Changed
 	}
 
 	return result, nil

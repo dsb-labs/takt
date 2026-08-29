@@ -2295,6 +2295,25 @@ components:
           items:
             type: string
             examples: ["$.ports[0].from"]
+        changed:
+          type: array
+          description: |
+            The paths into `spec` that differ from the specification the server
+            stores, written in the same syntax as `unknown`.
+
+            A field is named once, at the level the difference starts, so a container
+            block that was added reads as `$.container` rather than as each field
+            inside it. A value the server settles only as it applies is never named,
+            because such a value is stored for the running workload and absent from
+            the specification being reported.
+
+            Absent for a workload that does not exist, which has nothing to differ
+            from. Absent as well when `replaced` is true and nothing in the
+            specification moved: the hash covers what a workload reads, so an image
+            rebuilt under the same tag replaces an instance with the file untouched.
+          items:
+            type: string
+            examples: ["$.container.image"]
 
     ListVolumesResult:
       type: object

@@ -312,6 +312,44 @@ func TestWorkloadAPI_DryRunWorkload(t *testing.T) {
 			},
 		},
 		{
+			Name: "reports the fields that would change",
+			Path: "/api/v1/workloads/example/dry-run",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().DryRun(mock.Anything, mock.Anything).Return(service.DryRun{
+					Spec:     canonicalSpec("example"),
+					SpecHash: "hash-two",
+					Replaced: true,
+					Changed:  []string{"$.container.image"},
+				}, nil).Once()
+			},
+			ExpectStatus: http.StatusOK,
+			Assert: func(t *testing.T, result generated.DryRunWorkloadResult) {
+				require.NotNil(t, result.Changed)
+				assert.Equal(t, []string{"$.container.image"}, *result.Changed)
+				assert.True(t, result.Replaced)
+			},
+		},
+		{
+			// A workload is replaced by what it reads as well as by what it says,
+			// so a replacement with nothing named is a report rather than a gap.
+			Name: "reports a replacement with no field to name",
+			Path: "/api/v1/workloads/example/dry-run",
+			Body: containerSpec("example"),
+			SetupMocks: func(svc *MockWorkloadService) {
+				svc.EXPECT().DryRun(mock.Anything, mock.Anything).Return(service.DryRun{
+					Spec:     canonicalSpec("example"),
+					SpecHash: "hash-two",
+					Replaced: true,
+				}, nil).Once()
+			},
+			ExpectStatus: http.StatusOK,
+			Assert: func(t *testing.T, result generated.DryRunWorkloadResult) {
+				assert.True(t, result.Replaced)
+				assert.Nil(t, result.Changed)
+			},
+		},
+		{
 			Name: "rejects a name that disagrees with the path",
 			Path: "/api/v1/workloads/other/dry-run",
 			Body: containerSpec("example"),
