@@ -79,7 +79,7 @@ func Run(ctx context.Context, config Config) error {
 	}
 	defer db.Close()
 
-	dockerClient, err := docker.NewClient(config.Docker.Host)
+	dockerClient, err := docker.NewClient(ctx, config.Docker.Host)
 	if err != nil {
 		return fmt.Errorf("failed to connect to docker: %w", err)
 	}

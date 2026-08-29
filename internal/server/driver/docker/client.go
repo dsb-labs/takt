@@ -67,7 +67,7 @@ type (
 //
 // When host is empty the environment's configuration is used, which falls back
 // to the local socket.
-func NewClient(host string) (Client, error) {
+func NewClient(ctx context.Context, host string) (Client, error) {
 	opts := []client.Opt{client.FromEnv, client.WithAPIVersionNegotiation()}
 	if host != "" {
 		opts = append(opts, client.WithHost(host))
@@ -77,6 +77,14 @@ func NewClient(host string) (Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct docker client: %w", err)
 	}
+
+	// Negotiated here rather than on the first request, because the negotiation
+	// writes the version the client then reads on every call, unsynchronised.
+	// Left to the first request, two callers arriving together — the event
+	// stream and an observation do — race that write. The outcome is the same
+	// as the lazy path's, a daemon that cannot be reached included: negotiation
+	// falls back to the client's default version either way.
+	inner.NegotiateAPIVersion(ctx)
 
 	return &engineClient{inner: inner}, nil
 }
