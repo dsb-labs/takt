@@ -15,6 +15,7 @@ on:
       - 'api/oapi-codegen.yaml'
       - '.mockery.yml'
       - 'scenarios/**'
+      - 'Makefile'
       - 'scripts/delegated.sh'
       - '.github/workflows/loadtest.yml'
   pull_request:
@@ -26,6 +27,7 @@ on:
       - 'api/oapi-codegen.yaml'
       - '.mockery.yml'
       - 'scenarios/**'
+      - 'Makefile'
       - 'scripts/delegated.sh'
       - '.github/workflows/loadtest.yml'
   schedule:
@@ -82,12 +84,12 @@ jobs:
       # load test drives the build under test. A released image would measure
       # whatever was last published.
       #
-      # Started delegated, so the server under test can enforce resource limits
-      # the way a production server under systemd can. No scenario names limits
-      # yet, but the server's shape should match the one being measured.
+      # Through make dev, so the server runs delegated and can enforce resource
+      # limits the way a production server under systemd can. No scenario names
+      # limits yet, but the server's shape should match the one being measured.
       - name: Start the server
         run: |
-          ./scripts/delegated.sh ./orca serve loadtest/config.toml > loadtest/server.log 2>&1 &
+          make dev CONFIG=loadtest/config.toml > loadtest/server.log 2>&1 &
           for _ in $(seq 30); do
             if curl -sf http://localhost:7373/health > /dev/null; then
               exit 0
