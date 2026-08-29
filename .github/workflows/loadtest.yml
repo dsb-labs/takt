@@ -15,6 +15,7 @@ on:
       - 'api/oapi-codegen.yaml'
       - '.mockery.yml'
       - 'scenarios/**'
+      - 'dev.toml'
       - 'Makefile'
       - 'scripts/delegated.sh'
       - '.github/workflows/loadtest.yml'
@@ -27,6 +28,7 @@ on:
       - 'api/oapi-codegen.yaml'
       - '.mockery.yml'
       - 'scenarios/**'
+      - 'dev.toml'
       - 'Makefile'
       - 'scripts/delegated.sh'
       - '.github/workflows/loadtest.yml'
@@ -50,35 +52,17 @@ jobs:
       - name: Build orca
         run: go build -o orca .
 
-      # A directory of its own, so the load test's data directory is somewhere the
-      # run can read afterwards and somewhere nothing else writes.
-      #
-      # Absolute, because a relative data directory produces workloads that cannot
-      # start: Landlock and the Docker daemon both refuse a path that is not.
-      - name: Configure the server
-        run: |
-          mkdir -p "${{ github.workspace }}/loadtest/data"
-          cat > loadtest/config.toml <<EOF
-          [http]
-          address = "127.0.0.1:7373"
-
-          [data]
-          directory = "${{ github.workspace }}/loadtest/data"
-
-          [logging]
-          level = "debug"
-          EOF
-
       # Started in the background rather than as a service container, because the
       # load test drives the build under test. A released image would measure
       # whatever was last published.
       #
-      # Through make dev, so the server runs delegated and can enforce resource
-      # limits the way a production server under systemd can. No scenario names
-      # limits yet, but the server's shape should match the one being measured.
+      # Through make dev and its dev.toml, so the run exercises exactly the server
+      # a developer load-tests locally: delegated, able to enforce resource limits
+      # the way a production server under systemd can, and keeping its data in the
+      # workspace's data directory. The server resolves that path and creates it.
       - name: Start the server
         run: |
-          make dev CONFIG=loadtest/config.toml > loadtest/server.log 2>&1 &
+          make dev > server.log 2>&1 &
           for _ in $(seq 30); do
             if curl -sf http://localhost:7373/health > /dev/null; then
               exit 0
@@ -86,7 +70,7 @@ jobs:
             sleep 1
           done
           echo "the server did not become healthy" >&2
-          cat loadtest/server.log >&2
+          cat server.log >&2
           exit 1
 
       # The smoke scenario, which is a few of every feature and takes seconds. The
@@ -98,11 +82,11 @@ jobs:
       # disk after teardown. That check is the only one that sees a leaked mount
       # directory, and it needs the server's own host.
       - name: Run the smoke load test
-        run: ./orca dev loadtest scenarios/smoke.toml --data-dir "${{ github.workspace }}/loadtest/data" > loadtest/report.json
+        run: ./orca dev loadtest scenarios/smoke.toml --data-dir "${{ github.workspace }}/data" > report.json
 
       - name: Report
         if: always()
-        run: cat loadtest/report.json || true
+        run: cat report.json || true
 
       - name: Upload the report and server log
         if: failure()
@@ -110,5 +94,5 @@ jobs:
         with:
           name: loadtest-output
           path: |
-            loadtest/report.json
-            loadtest/server.log
+            report.json
+            server.log
