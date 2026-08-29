@@ -51,16 +51,5 @@ jobs:
           git add .
           git diff --staged --exit-code
 
-      # The test target wraps the run in a systemd scope with a delegated cgroup
-      # subtree, which needs the runner user to have a systemd user manager and
-      # its bus. Lingering starts one for a user with no login session, which is
-      # what a runner is.
-      - name: Delegate a cgroup subtree
-        run: |
-          sudo loginctl enable-linger "$(whoami)"
-          for _ in $(seq 1 20); do [ -S "/run/user/$(id -u)/bus" ] && break; sleep 0.5; done
-          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
-          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
-
       - name: Run tests
         run: make test
