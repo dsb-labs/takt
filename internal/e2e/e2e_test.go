@@ -32,6 +32,7 @@ import (
 
 	"github.com/dsb-labs/orca/internal/restore"
 	execdriver "github.com/dsb-labs/orca/internal/server/driver/exec"
+	"github.com/dsb-labs/orca/internal/server/driver/exec/exectest"
 	"github.com/dsb-labs/orca/pkg/client"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -51,8 +52,12 @@ const (
 // The server runs inside the test process, so the binary it executes to start a
 // confined exec workload is this one. Without this the workload would run the suite a
 // second time instead of confining itself and becoming the command.
+//
+// It also asks the host for a delegated cgroup subtree, so the server the suite runs
+// can enforce resource limits on exec workloads rather than refuse them.
 func TestMain(m *testing.M) {
 	execdriver.Confine()
+	exectest.Redelegate()
 
 	os.Exit(m.Run())
 }
@@ -952,6 +957,33 @@ func (s *Suite) TestExecJobRunsAndCompletes() {
 	var out bytes.Buffer
 	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(10)))
 	s.Contains(out.String(), "did-the-work")
+}
+
+// TestExecWorkloadRunsUnderItsResourceLimits covers the exec runtime's resource
+// limits end to end: the section is accepted through the API, the workload runs, and
+// the kernel refuses it what the limit denies.
+func (s *Suite) TestExecWorkloadRunsUnderItsResourceLimits() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// Two processes: the shell and one child. The loop asks for more, and the shell
+	// reports each refused fork on stderr, which lands in the workload's log. The
+	// report is what is awaited, because which wording a shell prints varies but
+	// every one of them names the fork.
+	spec := s.execSpec(name, "sh", "-c", "for i in 1 2 3 4 5; do sleep 60 & done; wait")
+	spec.Resources = &manifest.Resources{Pids: 2}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.Require().Eventuallyf(func() bool {
+		var out bytes.Buffer
+		if err := s.client.Logs(s.ctx(), &out, name, client.WithTail(50)); err != nil {
+			return false
+		}
+
+		return strings.Contains(out.String(), "fork")
+	}, convergeTimeout, time.Second, "the workload never reported a refused fork")
 }
 
 // TestExecWorkloadPassesOnlyItsOwnEnvironment covers the environment an exec workload
