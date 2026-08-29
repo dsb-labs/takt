@@ -65,7 +65,18 @@ func TestDriver_ResourceLimits(t *testing.T) {
 		// stderr — which lands in the workload's log. The report is what is waited
 		// for, because which of them a shell prints varies but every wording names
 		// the fork.
-		w := workload("example", 1, "hash-one", "for i in 1 2 3 4 5; do sleep 30 & done; wait")
+		//
+		// The script forks nothing until it reads the limit from its own cgroup,
+		// because the limit is written as the command starts and a fast shell can
+		// fork ahead of it — the driver's trampoline allowance covers that moment.
+		// Builtins only until then: reading through redirection forks nothing, so
+		// the check cannot be refused by the limit it waits for.
+		w := workload("example", 1, "hash-one",
+			`read line < /proc/self/cgroup
+			limit="/sys/fs/cgroup${line#0::}/pids.max"
+			while read max < "$limit"; [ "$max" != "2" ]; do sleep 0.1; done
+			for i in 1 2 3 4 5; do sleep 30 & done
+			wait`)
 		w.Spec.Resources = &manifest.Resources{Pids: 2}
 
 		_, err := d.Start(t.Context(), w)

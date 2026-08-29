@@ -399,8 +399,11 @@ func limits(path string, resources *manifest.Resources) error {
 // restrictPids tightens the process limit to the one the workload asked for, once
 // the command has replaced the trampoline and holds a single thread.
 //
-// Tightening below the current count is legal — nothing dies, new forks fail — so
-// there is no race with what the command started in the meantime.
+// Tightening below the current count is legal: nothing dies, and new forks fail.
+// A command that forks in the moment before the write runs against the
+// trampoline's allowance rather than the limit, so an early fork can briefly
+// exceed the limit — bounded by that allowance — and every fork after the write
+// answers to the limit.
 func (c *cgroup) restrictPids() error {
 	if c == nil || c.pids == 0 {
 		return nil
