@@ -10,8 +10,12 @@ test:
 e2e:
 	./scripts/delegated.sh go tool gotestsum --format=testname -- -race -timeout 20m ./internal/e2e/...
 
+# The config the dev server reads. Override it for a server that serves another
+# file: make dev CONFIG=loadtest/config.toml
+CONFIG ?= dev.toml
+
 dev:
-	./scripts/delegated.sh go run . serve dev.toml
+	./scripts/delegated.sh go run . serve $(CONFIG)
 
 lint:
 	go tool staticcheck ./...
