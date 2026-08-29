@@ -126,6 +126,13 @@ func Run(ctx context.Context, config Config) error {
 		logger.With("error", err).Warn("exec workloads cannot run on this host and will be refused")
 	}
 
+	// Reported at startup for the reason confinement is, and separately from it:
+	// a host can confine without delegating a cgroup subtree, and only workloads
+	// asking for resource limits are refused by the answer here.
+	if err = exec.Enforceable(); err != nil {
+		logger.With("error", err).Warn("exec resource limits cannot be enforced on this host and will be refused")
+	}
+
 	// The exec driver keeps its own trees under the data directory, beside the
 	// database, so that everything orca owns on disk is in one place.
 	execDriver := exec.New(exec.Config{
