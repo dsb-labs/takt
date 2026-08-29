@@ -593,11 +593,14 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
-			// Enforcing limits on a host process needs cgroup privileges orca has not
-			// got, so accepting them would silently do nothing.
-			Name:         "rejects resource limits on an exec workload",
-			File:         "resources_exec.yaml",
-			ExpectsError: true,
+			// Whether the host delegates the cgroup subtree enforcement needs is the
+			// server's to answer at apply time, so the manifest is valid here.
+			Name: "an exec manifest with resource limits",
+			File: "resources_exec.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Resources)
+				assert.Equal(t, "512m", spec.Resources.Memory)
+			},
 		},
 		{
 			// An empty block asks for nothing, which leaving the section out already

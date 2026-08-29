@@ -387,13 +387,16 @@ func validateResources(spec Spec, runtime Runtime) error {
 	}
 
 	switch runtime {
-	case RuntimeContainer:
-		// A container already runs in cgroups of its own, so the limits are ones
-		// its runtime enforces as the container is created.
+	case RuntimeContainer, RuntimeExec:
+		// A container already runs in cgroups of its own, and the exec runtime
+		// puts a limited process in one. Whether the host lets it — enforcing on
+		// a host process takes a delegated cgroup subtree — is the server's to
+		// answer, because this package validates manifests on machines that are
+		// not the host.
 		return nil
 	default:
-		// A host process would need cgroup privileges orca has not got, so the
-		// limits are rejected rather than accepted and silently never applied.
+		// A runtime that cannot enforce the limits rejects them rather than
+		// accepting them and silently never applying them.
 		return fmt.Errorf("invalid resources: the %s runtime cannot enforce limits", runtime)
 	}
 }

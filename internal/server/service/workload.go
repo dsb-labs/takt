@@ -29,7 +29,8 @@ var (
 	// ErrWorkloadNotFound is returned when the requested workload does not exist.
 	ErrWorkloadNotFound = errors.New("workload not found")
 	// ErrUnsupportedRuntime is returned when a specification names a runtime the
-	// server cannot run yet.
+	// server cannot run yet, or asks one for resource limits its host cannot
+	// enforce.
 	ErrUnsupportedRuntime = errors.New("unsupported runtime")
 	// ErrWorkloadDeleting is returned when applying a workload that is currently
 	// being torn down.
@@ -67,6 +68,11 @@ type (
 		// rather than fail, since the caller does not know which runtime holds the
 		// workload.
 		Logs(ctx context.Context, out io.Writer, workload string, options driver.LogOptions) error
+		// Enforceable should report whether the host lets the driver enforce
+		// resource limits, returning an error naming what is missing when it
+		// does not. A driver whose limits need nothing of the host answers nil
+		// unconditionally, as the container runtime does.
+		Enforceable() error
 	}
 
 	// The WorkloadRepository interface describes the persistence operations the
@@ -510,6 +516,20 @@ func (s *WorkloadService) resolve(ctx context.Context, spec manifest.Spec) (reso
 	// empty image that could only ever fail to start.
 	if err = manifest.Validate(spec); err != nil {
 		return resolution{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+	}
+
+	// Validation proved the limits are well formed, but whether they can be
+	// enforced is a fact about this host that the manifest rules cannot know: the
+	// exec driver needs a delegated cgroup subtree. Refused here rather than at
+	// start, because the operator applying the manifest is the one who can act on
+	// the refusal — a workload accepted and never started would fail where nobody
+	// is looking. A dry run shares this resolve, so it reports the same refusal.
+	if spec.Resources != nil {
+		if d, ok := s.drivers[string(runtime)]; ok {
+			if err = d.Enforceable(); err != nil {
+				return resolution{}, fmt.Errorf("%w: %v", ErrUnsupportedRuntime, err)
+			}
+		}
 	}
 
 	// A workload mid-teardown cannot be resurrected by re-applying it: the

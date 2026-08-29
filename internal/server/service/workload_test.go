@@ -24,6 +24,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
+	"github.com/dsb-labs/orca/internal/server/driver/exec"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/service"
@@ -139,19 +140,6 @@ func TestWorkloadService_Apply(t *testing.T) {
 			ExpectErr:  service.ErrInvalidSpec,
 		},
 		{
-			// The CLI rejects this too, but a caller that skips the CLI must not be
-			// able to store limits the exec runtime would silently never apply.
-			Name: "rejects resource limits on an exec workload",
-			Spec: manifest.Spec{
-				Version:   "v1",
-				Name:      "example",
-				Resources: &manifest.Resources{Memory: "512m"},
-				Exec:      &manifest.Exec{Command: []string{"echo", "hello world"}},
-			},
-			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
-			ExpectErr:  service.ErrInvalidSpec,
-		},
-		{
 			// The CLI checks this, but a caller that skips the CLI must not be able
 			// to store a label key orca's own documented rules refuse.
 			Name: "rejects a label using the reserved orca. prefix",
@@ -230,6 +218,90 @@ func TestWorkloadService_Apply(t *testing.T) {
 			tc.Assert(t, got, created)
 		})
 	}
+}
+
+// TestWorkloadService_ExecResourceLimits covers the apply-time refusal of resource
+// limits the host cannot enforce. The manifest rules accept limits on an exec
+// workload, so this refusal is the only thing standing between an operator and a
+// limit that would silently never apply.
+func TestWorkloadService_ExecResourceLimits(t *testing.T) {
+	t.Parallel()
+
+	spec := manifest.Spec{
+		Version:   "v1",
+		Name:      "example",
+		Resources: &manifest.Resources{Memory: "512m"},
+		Exec:      &manifest.Exec{Command: []string{"echo", "hello world"}},
+	}
+
+	t.Run("refuses an apply the host cannot enforce", func(t *testing.T) {
+		t.Parallel()
+
+		// No expectations on the repository: the refusal has to come before
+		// anything is read or written, so an unexpected call fails the test.
+		svc := newLimitedService(t, exec.ErrNotEnforceable, NewMockWorkloadRepository(t))
+
+		_, _, err := svc.Apply(t.Context(), spec)
+		assert.ErrorIs(t, err, service.ErrUnsupportedRuntime)
+	})
+
+	t.Run("reports the same refusal from a dry run", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newLimitedService(t, exec.ErrNotEnforceable, NewMockWorkloadRepository(t))
+
+		_, err := svc.DryRun(t.Context(), spec)
+		assert.ErrorIs(t, err, service.ErrUnsupportedRuntime)
+	})
+
+	t.Run("accepts limits the host can enforce", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockWorkloadRepository(t)
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				w.Version = 1
+
+				return w, true, nil
+			}).Once()
+
+		svc := newLimitedService(t, nil, repo)
+
+		got, created, err := svc.Apply(t.Context(), spec)
+		require.NoError(t, err)
+		assert.True(t, created)
+		assert.Equal(t, manifest.RuntimeExec, got.Runtime)
+	})
+}
+
+// newLimitedService builds a service whose exec driver answers the enforceability
+// question with enforce, which is what the apply-time refusal turns on.
+func newLimitedService(t *testing.T, enforce error, repo *MockWorkloadRepository) *service.WorkloadService {
+	t.Helper()
+
+	d := NewMockDriver(t)
+	d.EXPECT().Name().Return(exec.Name).Maybe()
+	d.EXPECT().Enforceable().Return(enforce).Maybe()
+	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+	ports := NewMockPortRepository(t)
+	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+
+	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+	return service.NewWorkloadService(service.WorkloadServiceConfig{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]service.Driver{exec.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Claimer:   newTestClaimer(ports, allocatorStub{}),
+	})
 }
 
 // TestWorkloadService_DryRun covers what a dry run reports and, as much as a mock

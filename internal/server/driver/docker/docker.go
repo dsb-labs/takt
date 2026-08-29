@@ -117,6 +117,13 @@ func (d *Driver) Name() string {
 	return Name
 }
 
+// Enforceable reports that this driver can always enforce resource limits. A
+// container runs in cgroups of its own, so the limits need nothing of the host
+// that running containers at all does not already need.
+func (d *Driver) Enforceable() error {
+	return nil
+}
+
 // New returns a Driver that runs containers through the client in config.
 func New(config Config) *Driver {
 	bind := config.Bind
