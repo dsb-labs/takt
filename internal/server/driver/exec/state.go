@@ -38,6 +38,12 @@ type state struct {
 	Version int `json:"version"`
 	// When the driver started the process.
 	StartedAt time.Time `json:"startedAt"`
+	// Where the cgroup enforcing the process's resource limits is, empty for a
+	// workload that asked for none.
+	//
+	// Recorded so that the cgroup can be removed by a server that did not create
+	// it: the process outlives the server, and its limits have to outlive it too.
+	Cgroup string `json:"cgroup,omitempty"`
 	// Whether the process has ended, and how.
 	Ended bool `json:"ended"`
 	// The exit code, meaningful only when Ended.

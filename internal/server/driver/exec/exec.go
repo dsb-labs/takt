@@ -184,6 +184,10 @@ func (d *Driver) Name() string {
 // It is also confined: the kernel refuses it every path outside its own directory, the
 // volumes it mounts, the values it mounts and the host's own files. A host whose kernel
 // cannot do that is refused here rather than running the workload unconfined.
+//
+// A workload naming resource limits runs in a cgroup of its own that enforces them,
+// which takes a delegated subtree. A host without one refuses the workload rather than
+// running it unlimited, for the reason a host that cannot confine refuses it.
 func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	spec := w.Spec.Exec
 	if spec == nil {
@@ -198,6 +202,16 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	// half-started workload behind.
 	if err := Confinable(); err != nil {
 		return "", err
+	}
+
+	// Asked with confinement, for the same reason. The server refuses a manifest
+	// asking for limits the host cannot enforce, but delegation is probed once per
+	// process: a server started without it must refuse a workload applied while an
+	// earlier server had it.
+	if w.Spec.Resources != nil {
+		if err := Enforceable(); err != nil {
+			return "", err
+		}
 	}
 
 	workload, err := d.version(d.workloads, w.ID, w.Version)
@@ -263,6 +277,13 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", fmt.Errorf("failed to locate the orca binary: %w", err)
 	}
 
+	limits, err := d.limit(w)
+	if err != nil {
+		_ = output.Close()
+
+		return "", err
+	}
+
 	cmd := exec.Command(self, confineArg)
 	cmd.Dir = cwd
 	cmd.Stdout, cmd.Stderr = output, output
@@ -276,9 +297,17 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	// The exec keeps it, so the command lands in the group the driver recorded.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
+	// Placed by the kernel as the process is cloned rather than moved in afterwards,
+	// so there is no moment the command runs outside its cgroup.
+	if limits != nil {
+		cmd.SysProcAttr.UseCgroupFD = true
+		cmd.SysProcAttr.CgroupFD = int(limits.dir.Fd())
+	}
+
 	rules, status, closePipes, err := pipes(cmd)
 	if err != nil {
 		_ = output.Close()
+		limits.discard()
 
 		return "", err
 	}
@@ -286,6 +315,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	if err = cmd.Start(); err != nil {
 		_ = output.Close()
 		closePipes()
+		limits.discard()
 
 		return "", fmt.Errorf("failed to start command: %w", err)
 	}
@@ -296,6 +326,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	// reaching end of file, which it cannot while this process can still write to it.
 	_ = output.Close()
 	closePipes()
+	limits.close()
 
 	if err = confineWith(cmd, rules, status, ruleset{
 		Command: command,
@@ -313,6 +344,17 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		// The process is confined or it is not running, so there is nothing left to
 		// supervise either way.
 		_ = d.kill(cmd.Process.Pid)
+		limits.discard()
+
+		return "", err
+	}
+
+	// The command has replaced the trampoline, which is what makes the process limit
+	// safe to write: the kernel counts threads, and only now does the process hold
+	// the one the command started with.
+	if err = limits.restrictPids(); err != nil {
+		_ = d.kill(cmd.Process.Pid)
+		limits.discard()
 
 		return "", err
 	}
@@ -324,6 +366,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		// the same process, which is worse than failing here while the process can
 		// still be stopped cleanly.
 		_ = d.kill(cmd.Process.Pid)
+		limits.discard()
 
 		return "", fmt.Errorf("failed to read process start time: %w", err)
 	}
@@ -337,8 +380,13 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		StartedAt:  time.Now(),
 	}
 
+	if limits != nil {
+		recorded.Cgroup = limits.path
+	}
+
 	if err = writeState(recordPath, recorded); err != nil {
 		_ = d.kill(cmd.Process.Pid)
+		limits.discard()
 
 		return "", err
 	}
@@ -385,6 +433,13 @@ func (d *Driver) supervise(ctx context.Context, workload string, process *superv
 
 			if writeErr := writeState(process.state, recorded); writeErr != nil {
 				d.logger.With("workload", workload, "error", writeErr).Error("failed to record process exit")
+			}
+
+			// Best effort: the cgroup may still hold something the command started,
+			// which keeps running exactly as a process outside a cgroup would. The
+			// stop that ends the workload removes it either way.
+			if recorded.Cgroup != "" {
+				_ = os.Remove(recorded.Cgroup)
 			}
 		}
 
@@ -507,6 +562,16 @@ func (d *Driver) halt(ctx context.Context, id, workload string) ([]string, error
 		if recorded.alive() {
 			if err = d.terminate(ctx, recorded.PID); err != nil {
 				return nil, fmt.Errorf("failed to stop process: %w", err)
+			}
+		}
+
+		// After the group is stopped rather than instead of stopping it: the kill
+		// in here is what reaches a process that left the group by making a session
+		// of its own, and the removal is what a stopped workload must not leave
+		// behind.
+		if recorded.Cgroup != "" {
+			if err = discardCgroup(recorded.Cgroup); err != nil {
+				return nil, err
 			}
 		}
 	}
