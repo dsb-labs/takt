@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/orca/cmd/admin/backup"
+	"github.com/dsb-labs/orca/cmd/admin/health"
 	"github.com/dsb-labs/orca/cmd/admin/rekey"
 	"github.com/dsb-labs/orca/cmd/admin/restore"
 )
@@ -24,6 +25,7 @@ func Command() *cobra.Command {
 
 	cmd.AddCommand(
 		backup.Command(),
+		health.Command(),
 		rekey.Command(),
 		restore.Command(),
 	)
