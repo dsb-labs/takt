@@ -162,6 +162,7 @@ dependency keeps working without being re-applied.
 - [Variables](docs/variables.md) — storing a value both you and a workload can read.
 - [Configuration](docs/configuration.md) — the server's TOML file.
 - [Operating orca](docs/operating.md) — exposure, state on disk, backups, volumes, and reading logs.
+- [Upgrading](docs/upgrading.md) — replacing the binary, and what survives it.
 - [Design](docs/design.md) — how reconciliation works and why it is built this way.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers building and testing orca.
