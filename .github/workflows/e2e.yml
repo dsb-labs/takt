@@ -14,6 +14,8 @@ on:
       - 'api/openapi.yaml'
       - 'api/oapi-codegen.yaml'
       - '.mockery.yml'
+      - 'Makefile'
+      - 'scripts/delegated.sh'
       - '.github/workflows/e2e.yml'
   pull_request:
     paths:
@@ -23,6 +25,8 @@ on:
       - 'api/openapi.yaml'
       - 'api/oapi-codegen.yaml'
       - '.mockery.yml'
+      - 'Makefile'
+      - 'scripts/delegated.sh'
       - '.github/workflows/e2e.yml'
   schedule:
     - cron: '17 4 * * *'
@@ -41,10 +45,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # The exec resource limit tests re-execute the test binary under
-      # systemd-run with Delegate=yes, which needs the runner user to have a
-      # systemd user manager and its bus. Lingering starts one for a user with
-      # no login session, which is what a runner is.
+      # The e2e target wraps the run in a systemd scope with a delegated cgroup
+      # subtree, which needs the runner user to have a systemd user manager and
+      # its bus. Lingering starts one for a user with no login session, which is
+      # what a runner is.
       - name: Delegate a cgroup subtree
         run: |
           sudo loginctl enable-linger "$(whoami)"
@@ -53,7 +57,7 @@ jobs:
           echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
 
       - name: Run end-to-end tests
-        run: go tool gotestsum --format=testname -- -race -timeout 20m ./internal/e2e/...
+        run: make e2e
 
       - name: Upload debug bundles
         if: failure()

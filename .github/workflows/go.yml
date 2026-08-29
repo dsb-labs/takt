@@ -14,6 +14,8 @@ on:
       - 'api/openapi.yaml'
       - 'api/oapi-codegen.yaml'
       - '.mockery.yml'
+      - 'Makefile'
+      - 'scripts/delegated.sh'
       - '.github/workflows/go.yml'
   pull_request:
     paths:
@@ -23,6 +25,8 @@ on:
       - 'api/openapi.yaml'
       - 'api/oapi-codegen.yaml'
       - '.mockery.yml'
+      - 'Makefile'
+      - 'scripts/delegated.sh'
       - '.github/workflows/go.yml'
 
 jobs:
@@ -47,10 +51,10 @@ jobs:
           git add .
           git diff --staged --exit-code
 
-      # The exec driver's resource limit tests re-execute themselves under
-      # systemd-run with Delegate=yes, which needs the runner user to have a
-      # systemd user manager and its bus. Lingering starts one for a user with
-      # no login session, which is what a runner is.
+      # The test target wraps the run in a systemd scope with a delegated cgroup
+      # subtree, which needs the runner user to have a systemd user manager and
+      # its bus. Lingering starts one for a user with no login session, which is
+      # what a runner is.
       - name: Delegate a cgroup subtree
         run: |
           sudo loginctl enable-linger "$(whoami)"
@@ -59,4 +63,4 @@ jobs:
           echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
 
       - name: Run tests
-        run: go test -short -race ./...
+        run: make test
