@@ -813,10 +813,12 @@ type ResolvedPort struct {
 // not applied, so an empty section means what leaving it out means: unlimited.
 //
 // It sits alongside the runtime blocks because how much a workload may consume
-// is a question about the workload. Only the container runtime can honour the
-// limits, and the exec runtime rejects them rather than ignoring them:
-// enforcing memory or CPU on a host process needs cgroup privileges orca has
-// not got, so accepting the section there would silently do nothing.
+// is a question about the workload, and the limits mean the same thing on
+// either runtime. A container's are enforced by its own runtime. An exec
+// workload's are enforced with a cgroup of its own, which needs the host to
+// delegate a cgroup subtree to orca — running the server under systemd with
+// Delegate=yes grants one. A host without one refuses the apply rather than
+// accepting limits that would silently never apply.
 type ResourcesSpec struct {
 	// CPU The most CPU the workload may use, in cores. Fractions are allowed, so
 	// 0.5 is half a core.
@@ -1465,10 +1467,12 @@ type WorkloadSpec struct {
 	// not applied, so an empty section means what leaving it out means: unlimited.
 	//
 	// It sits alongside the runtime blocks because how much a workload may consume
-	// is a question about the workload. Only the container runtime can honour the
-	// limits, and the exec runtime rejects them rather than ignoring them:
-	// enforcing memory or CPU on a host process needs cgroup privileges orca has
-	// not got, so accepting the section there would silently do nothing.
+	// is a question about the workload, and the limits mean the same thing on
+	// either runtime. A container's are enforced by its own runtime. An exec
+	// workload's are enforced with a cgroup of its own, which needs the host to
+	// delegate a cgroup subtree to orca — running the server under systemd with
+	// Delegate=yes grants one. A host without one refuses the apply rather than
+	// accepting limits that would silently never apply.
 	Resources *ResourcesSpec `json:"resources,omitempty"`
 
 	// Restart What the server does when a workload's instance ends, and how hard it tries.
