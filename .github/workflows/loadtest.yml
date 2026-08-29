@@ -63,10 +63,7 @@ jobs:
       - name: Start the server
         run: |
           make dev > server.log 2>&1 &
-          if ! ./orca admin health --wait 30s; then
-            cat server.log >&2
-            exit 1
-          fi
+          ./orca admin health --wait 30s
 
       # The smoke scenario, which is a few of every feature and takes seconds. The
       # larger scenarios are for running by hand: they measure how fast a machine is
