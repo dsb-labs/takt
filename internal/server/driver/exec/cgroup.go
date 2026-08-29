@@ -280,6 +280,12 @@ func vacate(root, leaf string) error {
 // Best effort, and deliberately so. A cgroup that refuses removal is one with
 // processes still in it — a limited workload adopted from an earlier server — and
 // the record naming it is what removes it when the workload stops.
+//
+// A young cgroup is left alone. Two processes can share one delegation — the test
+// suites run that way — and another's cgroup is empty for the moment between its
+// creation and its process being cloned into it. What this exists to remove has
+// been abandoned for as long as its server has been gone, so ignoring the fresh
+// costs nothing.
 func sweep(root string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -287,9 +293,15 @@ func sweep(root string) {
 	}
 
 	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), cgroupPrefix) {
-			_ = os.Remove(filepath.Join(root, entry.Name()))
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), cgroupPrefix) {
+			continue
 		}
+
+		if info, err := entry.Info(); err != nil || time.Since(info.ModTime()) < time.Minute {
+			continue
+		}
+
+		_ = os.Remove(filepath.Join(root, entry.Name()))
 	}
 }
 
