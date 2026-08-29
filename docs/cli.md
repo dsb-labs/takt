@@ -29,6 +29,7 @@ orca variable list                      List variables                       (al
 orca variable get <name>                Show a single variable
 orca variable delete <name>             Delete a variable                    (alias: rm)
 
+orca admin health                       Check that the server is alive
 orca admin backup <destination>         Write a backup of the node to a file
 orca admin restore <archive> [config]   Restore a node from a backup archive
 orca admin rekey                        Re-encrypt every secret under a new key
@@ -529,6 +530,24 @@ A variable a workload reads is refused, and the workloads reading it are named.
 `--force` removes it anyway. Those workloads keep running, and fail to start once
 something replaces them. Creating the variable again recovers them. See
 [Variables](variables.md).
+
+## admin health
+
+```sh
+orca admin health
+orca admin health --wait 30s
+```
+
+| Flag | Description |
+|---|---|
+| `--wait` | How long to wait for the server to become healthy, rather than asking once. |
+
+Asks the server's health endpoint and exits zero when it answers. Nothing is
+printed on success: the exit code is the signal, which is what a script
+conditions on.
+
+`--wait` asks once a second until the server answers or the duration runs out,
+for the moment after starting a server when the next step needs it listening.
 
 ## admin backup
 
