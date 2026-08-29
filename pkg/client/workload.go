@@ -200,7 +200,7 @@ const (
 func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool, error) {
 	resp, err := c.api.ApplyWorkloadWithResponse(ctx, spec.Name, wire.FromSpec(spec))
 	if err != nil {
-		return Workload{}, false, fmt.Errorf("failed to apply workload: %w", err)
+		return Workload{}, false, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -240,7 +240,7 @@ func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool,
 func (c *Client) DryRun(ctx context.Context, spec manifest.Spec) (DryRun, error) {
 	resp, err := c.api.DryRunWorkloadWithResponse(ctx, spec.Name, wire.FromSpec(spec))
 	if err != nil {
-		return DryRun{}, fmt.Errorf("failed to dry run workload: %w", err)
+		return DryRun{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -264,7 +264,7 @@ func (c *Client) DryRun(ctx context.Context, spec manifest.Spec) (DryRun, error)
 func (c *Client) Get(ctx context.Context, name string) (Workload, error) {
 	resp, err := c.api.GetWorkloadWithResponse(ctx, name)
 	if err != nil {
-		return Workload{}, fmt.Errorf("failed to get workload: %w", err)
+		return Workload{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -293,7 +293,7 @@ func (c *Client) List(ctx context.Context, queries ...string) ([]Workload, error
 
 	resp, err := c.api.ListWorkloadsWithResponse(ctx, &params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list workloads: %w", err)
+		return nil, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -389,7 +389,7 @@ func (c *Client) Delete(ctx context.Context, name string, options ...LifecycleOp
 
 	resp, err := c.api.DeleteWorkloadWithResponse(ctx, name, &params)
 	if err != nil {
-		return Workload{}, fmt.Errorf("failed to delete workload: %w", err)
+		return Workload{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	var workload Workload
@@ -463,7 +463,7 @@ func (c *Client) Stop(ctx context.Context, name string, options ...LifecycleOpti
 
 	resp, err := c.api.StopWorkloadWithResponse(ctx, name, api.StopWorkloadJSONRequestBody{})
 	if err != nil {
-		return Workload{}, fmt.Errorf("failed to stop workload: %w", err)
+		return Workload{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	var workload Workload
@@ -541,7 +541,7 @@ func (c *Client) Start(ctx context.Context, name string, options ...LifecycleOpt
 
 	resp, err := c.api.StartWorkloadWithResponse(ctx, name, api.StartWorkloadJSONRequestBody{})
 	if err != nil {
-		return Workload{}, fmt.Errorf("failed to start workload: %w", err)
+		return Workload{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	var workload Workload
@@ -611,7 +611,7 @@ func (c *Client) Restart(ctx context.Context, name string, options ...LifecycleO
 
 	resp, err := c.api.RestartWorkloadWithResponse(ctx, name, api.RestartWorkloadJSONRequestBody{})
 	if err != nil {
-		return Workload{}, fmt.Errorf("failed to restart workload: %w", err)
+		return Workload{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	var workload Workload
@@ -763,7 +763,7 @@ func (c *Client) Logs(ctx context.Context, out io.Writer, name string, options .
 
 	resp, err := inner.GetWorkloadLogs(ctx, name, &params)
 	if err != nil {
-		return fmt.Errorf("failed to read workload logs: %w", err)
+		return fmt.Errorf("failed to send the request: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -779,7 +779,7 @@ func (c *Client) Logs(ctx context.Context, out io.Writer, name string, options .
 			return nil
 		}
 
-		return fmt.Errorf("failed to read workload logs: %w", err)
+		return fmt.Errorf("failed to read the response body: %w", err)
 	}
 
 	return nil

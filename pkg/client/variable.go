@@ -74,7 +74,7 @@ func (c *Client) SetVariable(ctx context.Context, name, value string, labels map
 
 	resp, err := c.api.SetVariableWithResponse(ctx, name, api.VariableSpec{Value: value, Labels: wireLabels(labels)})
 	if err != nil {
-		return Variable{}, false, fmt.Errorf("failed to set variable: %w", err)
+		return Variable{}, false, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -100,7 +100,7 @@ func (c *Client) GetVariable(ctx context.Context, name string) (Variable, error)
 
 	resp, err := c.api.GetVariableWithResponse(ctx, name)
 	if err != nil {
-		return Variable{}, fmt.Errorf("failed to get variable: %w", err)
+		return Variable{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -119,7 +119,7 @@ func (c *Client) GetVariable(ctx context.Context, name string) (Variable, error)
 func (c *Client) ListVariables(ctx context.Context) ([]Variable, error) {
 	resp, err := c.api.ListVariablesWithResponse(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list variables: %w", err)
+		return nil, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -160,7 +160,7 @@ func (c *Client) DeleteVariable(ctx context.Context, name string, options ...Del
 
 	resp, err := c.api.DeleteVariableWithResponse(ctx, name, &params)
 	if err != nil {
-		return fmt.Errorf("failed to delete variable: %w", err)
+		return fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {

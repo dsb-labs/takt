@@ -54,7 +54,7 @@ func (c *Client) CreateVolume(ctx context.Context, volume manifest.Volume) (Volu
 		Labels:  wireLabels(volume.Labels),
 	})
 	if err != nil {
-		return Volume{}, fmt.Errorf("failed to create volume: %w", err)
+		return Volume{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -91,7 +91,7 @@ func (c *Client) UpdateVolume(ctx context.Context, volume manifest.Volume) (Volu
 		Labels:  wireLabels(volume.Labels),
 	})
 	if err != nil {
-		return Volume{}, fmt.Errorf("failed to update volume: %w", err)
+		return Volume{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -117,7 +117,7 @@ func (c *Client) GetVolume(ctx context.Context, name string) (Volume, error) {
 
 	resp, err := c.api.GetVolumeWithResponse(ctx, name)
 	if err != nil {
-		return Volume{}, fmt.Errorf("failed to get volume: %w", err)
+		return Volume{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -136,7 +136,7 @@ func (c *Client) GetVolume(ctx context.Context, name string) (Volume, error) {
 func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
 	resp, err := c.api.ListVolumesWithResponse(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list volumes: %w", err)
+		return nil, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -176,7 +176,7 @@ func (c *Client) DeleteVolume(ctx context.Context, name string, options ...Delet
 
 	resp, err := c.api.DeleteVolumeWithResponse(ctx, name, &params)
 	if err != nil {
-		return fmt.Errorf("failed to delete volume: %w", err)
+		return fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {

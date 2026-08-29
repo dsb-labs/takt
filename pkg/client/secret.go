@@ -77,7 +77,7 @@ func (c *Client) SetSecret(ctx context.Context, name string, value []byte, label
 
 	resp, err := c.api.SetSecretWithResponse(ctx, name, api.SecretSpec{Value: string(value), Labels: wireLabels(labels)})
 	if err != nil {
-		return Secret{}, false, fmt.Errorf("failed to set secret: %w", err)
+		return Secret{}, false, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -103,7 +103,7 @@ func (c *Client) GetSecret(ctx context.Context, name string) (Secret, error) {
 
 	resp, err := c.api.GetSecretWithResponse(ctx, name)
 	if err != nil {
-		return Secret{}, fmt.Errorf("failed to get secret: %w", err)
+		return Secret{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -122,7 +122,7 @@ func (c *Client) GetSecret(ctx context.Context, name string) (Secret, error) {
 func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error) {
 	resp, err := c.api.ListSecretsWithResponse(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list secrets: %w", err)
+		return nil, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -162,7 +162,7 @@ func (c *Client) DeleteSecret(ctx context.Context, name string, options ...Delet
 
 	resp, err := c.api.DeleteSecretWithResponse(ctx, name, &params)
 	if err != nil {
-		return fmt.Errorf("failed to delete secret: %w", err)
+		return fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {

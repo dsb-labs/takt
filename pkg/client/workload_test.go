@@ -988,6 +988,25 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
+func TestClient_NamesTheRequestWhenTheServerIsUnreachable(t *testing.T) {
+	t.Parallel()
+
+	// A server that is gone before the call, so the transport fails rather than the
+	// endpoint.
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	server.Close()
+
+	c, err := client.New(server.URL)
+	require.NoError(t, err)
+
+	_, err = c.Get(t.Context(), "example")
+	require.Error(t, err)
+
+	// The caller names the operation, so the client names the step it failed at.
+	assert.Contains(t, err.Error(), "failed to send the request")
+	assert.NotContains(t, err.Error(), "failed to get workload")
+}
+
 func newTestClient(t *testing.T, handler http.HandlerFunc) *client.Client {
 	t.Helper()
 

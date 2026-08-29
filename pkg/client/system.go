@@ -24,7 +24,7 @@ type Readiness struct {
 func (c *Client) Health(ctx context.Context) error {
 	resp, err := c.api.GetHealthWithResponse(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to check health: %w", err)
+		return fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
@@ -45,7 +45,7 @@ func (c *Client) Health(ctx context.Context) error {
 func (c *Client) Ready(ctx context.Context) (Readiness, error) {
 	resp, err := c.api.GetReadinessWithResponse(ctx)
 	if err != nil {
-		return Readiness{}, fmt.Errorf("failed to check readiness: %w", err)
+		return Readiness{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {

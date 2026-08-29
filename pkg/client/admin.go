@@ -68,7 +68,7 @@ func (c *Client) Backup(ctx context.Context, out io.Writer, options ...BackupOpt
 	// context.
 	resp, err := c.stream.GetBackup(ctx, &params)
 	if err != nil {
-		return fmt.Errorf("failed to read backup: %w", err)
+		return fmt.Errorf("failed to send the request: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -80,7 +80,7 @@ func (c *Client) Backup(ctx context.Context, out io.Writer, options ...BackupOpt
 	}
 
 	if _, err = io.Copy(out, resp.Body); err != nil {
-		return fmt.Errorf("failed to read backup: %w", err)
+		return fmt.Errorf("failed to read the response body: %w", err)
 	}
 
 	return nil
@@ -99,7 +99,7 @@ func (c *Client) Rekey(ctx context.Context) (Rekey, error) {
 	// something a fixed deadline should decide.
 	resp, err := c.stream.RekeyWithResponse(ctx, api.RekeyJSONRequestBody{})
 	if err != nil {
-		return Rekey{}, fmt.Errorf("failed to rekey: %w", err)
+		return Rekey{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
