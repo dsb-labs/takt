@@ -85,15 +85,16 @@ do, and writes nothing.
     "version": "v1",
     "name": "example",
     "ports": [
-      { "to": 80, "from": 30993, "protocol": "tcp" }
+      { "to": 80, "from": 31729, "protocol": "tcp" }
     ],
     "restart": { "policy": "always", "delay": 1000000000 },
-    "container": { "image": "nginx:1.27-alpine" }
+    "container": { "image": "nginx:1.28-alpine" }
   },
-  "SpecHash": "75d5b0a6ab6944e4f893bc133806cf0b0c46f88daac26dcb76e289e440b722cd",
+  "SpecHash": "d491e8d9d8b9859be95227e8c1484a9b457eccec59949a91b6f0d8ed293c4ce0",
   "Created": false,
   "Replaced": true,
-  "Unknown": null
+  "Unknown": null,
+  "Changed": ["$.container.image"]
 }
 ```
 
@@ -108,8 +109,19 @@ every secret and the value of every variable the workload reads. An apply can
 therefore replace a running instance because something outside the file moved, with
 nothing in the manifest to say so.
 
+`Changed` says what moved. The paths are into the specification the report carries,
+which is the resolved one rather than the file, so a field orca defaulted is compared
+as orca stored it. A field is named once, at the level the difference starts: a
+container block that was added reads as `$.container` rather than as every field
+inside it.
+
+An empty `Changed` alongside `Replaced` is not a contradiction. The hash covers what
+a workload reads as well as what it says, so an image rebuilt under the same tag
+replaces an instance with the manifest untouched.
+
 `Created` is true when nothing holds the name yet. Such a workload has nothing
-running, so `Replaced` is false for it.
+running and nothing to differ from, so `Replaced` is false for it and `Changed` is
+empty.
 
 Nothing is allocated. A port mapping with no `from` needs a host port, and allocating
 one would consume a port or move a workload's address while reporting that nothing
@@ -119,18 +131,29 @@ had changed. Such a port is printed without a `from`, and its path is listed in
 ```json
 {
   "Spec": {
+    "version": "v1",
+    "name": "example",
+    "labels": { "app": "web" },
     "ports": [
-      { "to": 80, "protocol": "tcp" }
-    ]
+      { "to": 80, "from": 31729, "protocol": "tcp" },
+      { "to": 443, "protocol": "tcp" }
+    ],
+    "restart": { "policy": "always", "delay": 1000000000 },
+    "container": { "image": "nginx:1.28-alpine" }
   },
   "SpecHash": "",
-  "Unknown": ["$.ports[0].from"]
+  "Created": false,
+  "Replaced": true,
+  "Unknown": ["$.ports[1].from"],
+  "Changed": ["$.container.image", "$.labels", "$.ports[1]"]
 }
 ```
 
-The paths are written in the syntax `orca workload list --query` uses. A port the
-workload already holds is reported with the host port it holds, because that is
-settled and needs no allocation.
+The paths in both lists are written in the syntax `orca workload list --query` uses.
+A port the workload already holds is reported with the host port it holds, because
+that is settled and needs no allocation, and it is never listed as changed: the
+difference between a stored host port and one not yet allocated is orca's to settle
+rather than something the operator wrote.
 
 `SpecHash` is empty whenever `Unknown` is not. The host ports reach the hash, so one
 computed before they are settled would be a hash the apply never stores. Such an

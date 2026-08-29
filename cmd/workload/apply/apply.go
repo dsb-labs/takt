@@ -27,8 +27,8 @@ func Command() *cobra.Command {
 			"Applying the same manifest twice is a no-op: the workload's version only\n" +
 			"changes when its specification does.\n\n" +
 			"Use --dry-run to report what applying the manifest would do without doing\n" +
-			"any of it. The report says whether the workload would be created, and\n" +
-			"whether its running instances would be replaced.",
+			"any of it. The report says whether the workload would be created, whether\n" +
+			"its running instances would be replaced, and which fields would change.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := os.Open(args[0])
