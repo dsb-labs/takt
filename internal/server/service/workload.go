@@ -15,6 +15,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
+	"github.com/dsb-labs/orca/internal/server/specdiff"
 	"github.com/dsb-labs/orca/internal/server/spechash"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -212,6 +213,14 @@ type (
 		// as it applies. A host port it has yet to allocate is the only one, and it
 		// is reported rather than invented.
 		Unknown []string
+		// The paths into the reported specification that differ from the one
+		// stored. Empty for a workload that does not exist, which has nothing to
+		// differ from.
+		//
+		// A workload can be replaced with none of these set. The hash covers what
+		// the workload reads as well as what it says, so an image rebuilt under the
+		// same tag moves the hash with nothing in the specification changing.
+		Changed []string
 	}
 
 	// The Health type reports what orca established about a workload's health,
@@ -598,6 +607,10 @@ func (s *WorkloadService) resolve(ctx context.Context, spec manifest.Spec) (reso
 // one computed before they are settled would be a hash the apply never stores. Such
 // an apply still replaces whatever is running, since an allocation it does not yet
 // hold is a specification that changed.
+//
+// The fields that differ from the stored specification are reported as paths as
+// well. They say what about the workload would move, where the hash says only that
+// something would.
 func (s *WorkloadService) DryRun(ctx context.Context, spec manifest.Spec) (DryRun, error) {
 	resolved, err := s.resolve(ctx, spec)
 	if err != nil {
@@ -611,6 +624,14 @@ func (s *WorkloadService) DryRun(ctx context.Context, spec manifest.Spec) (DryRu
 
 	settled := port.Resolved(resolved.spec, claims)
 
+	// The encoding is wanted whether or not the hash is: it is what the stored
+	// specification is compared against, and a port yet to be allocated changes
+	// nothing about how the rest of the specification encodes.
+	encoded, hash, err := spechash.Compute(settled, resolved.read.hashInputs(resolved.digest))
+	if err != nil {
+		return DryRun{}, fmt.Errorf("failed to hash specification: %w", err)
+	}
+
 	run := DryRun{
 		Spec:     settled,
 		Created:  !resolved.exists,
@@ -618,13 +639,14 @@ func (s *WorkloadService) DryRun(ctx context.Context, spec manifest.Spec) (DryRu
 		Unknown:  unknown(settled.Ports),
 	}
 
-	if pending {
-		return run, nil
+	if resolved.exists {
+		if run.Changed, err = specdiff.Changed(resolved.existing.Spec, encoded, run.Unknown); err != nil {
+			return DryRun{}, err
+		}
 	}
 
-	_, hash, err := spechash.Compute(settled, resolved.read.hashInputs(resolved.digest))
-	if err != nil {
-		return DryRun{}, fmt.Errorf("failed to hash specification: %w", err)
+	if pending {
+		return run, nil
 	}
 
 	run.SpecHash = hash

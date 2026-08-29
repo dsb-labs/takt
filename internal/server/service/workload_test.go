@@ -305,6 +305,83 @@ func TestWorkloadService_DryRun(t *testing.T) {
 		assert.True(t, run.Replaced)
 	})
 
+	t.Run("names the fields a changed specification would move", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		run, err := svc.DryRun(t.Context(), containerSpec("example", "example/example:2"))
+		require.NoError(t, err)
+		assert.True(t, run.Replaced)
+		// What moved, rather than only that something did.
+		assert.Equal(t, []string{"$.container.image"}, run.Changed)
+	})
+
+	t.Run("names nothing for an unchanged specification", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		run, err := svc.DryRun(t.Context(), containerSpec("example", "example/example:latest"))
+		require.NoError(t, err)
+		assert.Empty(t, run.Changed)
+	})
+
+	t.Run("names nothing for a workload that does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		// There is nothing to have changed from, and reporting every field as new
+		// would say only what the reported specification already says.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		run, err := svc.DryRun(t.Context(), containerSpec("example", "example/example:latest"))
+		require.NoError(t, err)
+		assert.True(t, run.Created)
+		assert.Empty(t, run.Changed)
+	})
+
+	t.Run("does not name a host port it has yet to allocate as changed", func(t *testing.T) {
+		t.Parallel()
+
+		// The stored specification holds the host port the workload was applied
+		// with, and the reported one holds no host port at all. That difference is
+		// orca's to settle rather than a change the operator made.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		held := containerSpec("example", "example/example:latest")
+		held.Ports = []manifest.Port{{To: 8080, From: 20005, Protocol: manifest.ProtocolTCP}}
+		held.Defaults()
+
+		stored := storedWorkload("example")
+		stored.ID, stored.Spec = "workload-id", encodedSpec(held)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(stored, nil).Once()
+		ports.EXPECT().List(mock.Anything, "workload-id").Return(nil, nil).Once()
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Ports = []manifest.Port{{To: 8080}}
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		run, err := svc.DryRun(t.Context(), spec)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"$.ports[0].from"}, run.Unknown)
+		assert.Empty(t, run.Changed)
+	})
+
 	t.Run("leaves a host port it has yet to allocate unknown", func(t *testing.T) {
 		t.Parallel()
 
@@ -3136,18 +3213,29 @@ func pullAlwaysSpec(name, image string) manifest.Spec {
 }
 
 func storedWorkload(name string) database.Workload {
-	spec, err := json.Marshal(containerSpec(name, "example/example:latest"))
-	if err != nil {
-		panic(err)
-	}
+	// Defaulted before it is encoded, because an apply stores the specification it
+	// resolved. A fixture holding less would read as a workload whose defaults were
+	// about to change.
+	spec := containerSpec(name, "example/example:latest")
+	spec.Defaults()
 
 	return database.Workload{
 		Name:     name,
 		Version:  1,
 		Runtime:  string(manifest.RuntimeContainer),
-		Spec:     spec,
+		Spec:     encodedSpec(spec),
 		SpecHash: "hash-one",
 	}
+}
+
+// encodedSpec encodes a specification the way an apply stores it.
+func encodedSpec(spec manifest.Spec) []byte {
+	encoded, err := json.Marshal(spec)
+	if err != nil {
+		panic(err)
+	}
+
+	return encoded
 }
 
 func newTestLogger(t *testing.T) *slog.Logger {
