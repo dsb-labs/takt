@@ -25,10 +25,23 @@ together.
 ## Testing
 
 ```sh
-go test -race ./...        # everything, including the end-to-end suite
-go test -short ./...       # unit tests only, no Docker needed
+make test                  # unit tests, no Docker needed
+make e2e                   # the end-to-end suite, needs a Docker daemon
 go tool staticcheck ./...
 ```
+
+The make targets wrap the run in `scripts/delegated.sh`, which starts it inside a
+delegated cgroup subtree — the thing that lets the server enforce resource limits on
+exec workloads. See the [delegation](docs/operating.md#delegation) section of the
+operating guide. Plain `go test` commands still work for narrowing to one package or
+one test, but run them through the wrapper when the tests touch resource limits:
+
+```sh
+./scripts/delegated.sh go test -run TestDriver_ResourceLimits ./internal/server/driver/exec
+```
+
+Without a delegated subtree those tests fail naming the fix, rather than skip: a
+skipped test is coverage nobody notices losing.
 
 The end-to-end suite in `internal/e2e` runs a real server against a real Docker
 daemon, so it needs one running and is skipped by `-short`. It also runs daily. That
@@ -53,7 +66,7 @@ ships unnoticed.
 ## End-to-end tests
 
 ```sh
-go test -race ./internal/e2e/...
+make e2e
 ```
 
 Each test starts a real server inside the test process and drives it through the
@@ -152,10 +165,13 @@ Docker daemon, and a teardown removes containers by orca's label.
 ## Running a server
 
 ```sh
-go run . serve dev.toml
+make dev
 ```
 
 `dev.toml` binds to localhost, keeps its state in `./data`, and logs at debug level.
+The target runs the server through `scripts/delegated.sh`, so it can enforce
+resource limits on exec workloads. A plain `go run . serve dev.toml` works too, and
+refuses manifests naming limits on exec workloads when the shell is not delegated.
 
 ## The capability the dev loop wants
 
