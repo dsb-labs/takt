@@ -15,6 +15,7 @@ on:
       - 'api/oapi-codegen.yaml'
       - '.mockery.yml'
       - 'scenarios/**'
+      - 'scripts/delegated.sh'
       - '.github/workflows/loadtest.yml'
   pull_request:
     paths:
@@ -25,6 +26,7 @@ on:
       - 'api/oapi-codegen.yaml'
       - '.mockery.yml'
       - 'scenarios/**'
+      - 'scripts/delegated.sh'
       - '.github/workflows/loadtest.yml'
   schedule:
     - cron: '43 4 * * *'
@@ -65,12 +67,27 @@ jobs:
           level = "debug"
           EOF
 
+      # The wrapper below puts the server in a systemd scope with a delegated
+      # cgroup subtree, which needs the runner user to have a systemd user
+      # manager and its bus. Lingering starts one for a user with no login
+      # session, which is what a runner is.
+      - name: Delegate a cgroup subtree
+        run: |
+          sudo loginctl enable-linger "$(whoami)"
+          for _ in $(seq 1 20); do [ -S "/run/user/$(id -u)/bus" ] && break; sleep 0.5; done
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+
       # Started in the background rather than as a service container, because the
       # load test drives the build under test. A released image would measure
       # whatever was last published.
+      #
+      # Started delegated, so the server under test can enforce resource limits
+      # the way a production server under systemd can. No scenario names limits
+      # yet, but the server's shape should match the one being measured.
       - name: Start the server
         run: |
-          ./orca serve loadtest/config.toml > loadtest/server.log 2>&1 &
+          ./scripts/delegated.sh ./orca serve loadtest/config.toml > loadtest/server.log 2>&1 &
           for _ in $(seq 30); do
             if curl -sf http://localhost:7373/health > /dev/null; then
               exit 0
