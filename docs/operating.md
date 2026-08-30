@@ -166,10 +166,9 @@ directories a workload may read stay readable, and everything it may write sits
 under `/var/lib/orca`. One consequence is worth knowing — under
 `NoNewPrivileges=yes` a workload cannot run a setuid binary.
 
-The optional `CAP_DAC_OVERRIDE` grant from
-[Deleting a volume a container wrote](#deleting-a-volume-a-container-wrote) still
-works under these settings. Put it in a drop-in with `systemctl edit orca` rather
-than editing the unit the package installed.
+The unit grants the server `CAP_DAC_OVERRIDE`, so `orca volume delete` can remove
+files a container wrote as another user. The grant does not reach the workloads.
+See [Deleting a volume a container wrote](#deleting-a-volume-a-container-wrote).
 
 ### Not in a container
 
@@ -475,8 +474,9 @@ volume belong to that user. The postgres image is the familiar case: it re-owns 
 data directory and makes it readable only by its own user. The server's user then
 cannot remove those files, and `orca volume delete` fails with a permission error.
 
-Grant the server the `CAP_DAC_OVERRIDE` capability, which lets it remove files
-whatever their owner. Under systemd:
+The `CAP_DAC_OVERRIDE` capability lets the server remove files whatever their
+owner. The packaged unit grants it. Grant it yourself when you run the server
+another way — under systemd:
 
 ```ini
 [Service]
@@ -488,8 +488,8 @@ The grant does not reach the workloads. orca drops its ambient capabilities befo
 exec workload's command runs, so the command holds none of them. A container's
 capabilities come from the Docker daemon rather than from orca.
 
-The grant is optional. A server without it runs everything, and only deleting a
-volume holding another user's files needs it. The same ownership stops anything else
+A server without the grant runs everything, and only deleting a volume holding
+another user's files needs it. The same ownership stops anything else
 running as the server's user — a backup, for one — from reading those files, and the
 capability changes nothing for them.
 
