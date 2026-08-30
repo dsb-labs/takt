@@ -112,6 +112,95 @@ func TestVariableRepository_List(t *testing.T) {
 	})
 }
 
+func TestVariableRepository_List_Query(t *testing.T) {
+	t.Parallel()
+
+	// Three variables whose labels differ, so a query can narrow and combine.
+	seed := func(t *testing.T, variables *database.VariableRepository) {
+		t.Helper()
+
+		labels := map[string]map[string]string{
+			"alpha":   {"app": "web", "env": "prod"},
+			"bravo":   {"app": "api", "env": "prod"},
+			"charlie": {"app": "web", "env": "dev"},
+		}
+
+		for name, variableLabels := range labels {
+			_, err := variables.Upsert(t.Context(), name, "value-"+name, variableLabels)
+			require.NoError(t, err)
+		}
+	}
+
+	tt := []struct {
+		Name     string
+		Queries  []database.Query
+		Expected []string
+	}{
+		{
+			Name:     "no queries returns everything",
+			Expected: []string{"alpha", "bravo", "charlie"},
+		},
+		{
+			Name:     "matches a label",
+			Queries:  []database.Query{{Path: "$.labels.app", Value: "web"}},
+			Expected: []string{"alpha", "charlie"},
+		},
+		{
+			Name: "multiple queries are combined with and",
+			Queries: []database.Query{
+				{Path: "$.labels.app", Value: "web"},
+				{Path: "$.labels.env", Value: "prod"},
+			},
+			Expected: []string{"alpha"},
+		},
+		{
+			Name:     "a value nothing holds matches nothing",
+			Queries:  []database.Query{{Path: "$.labels.app", Value: "nope"}},
+			Expected: nil,
+		},
+		{
+			Name: "a path outside labels matches nothing",
+			// Only the labels are queryable. A variable's value is selected by
+			// reading it, not by filtering the list.
+			Queries:  []database.Query{{Path: "$.value", Value: "value-alpha"}},
+			Expected: nil,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+
+			variables := database.NewVariableRepository(newTestDatabase(t))
+			seed(t, variables)
+
+			got, err := variables.List(t.Context(), tc.Queries...)
+			require.NoError(t, err)
+
+			names := make([]string, 0, len(got))
+			for _, variable := range got {
+				names = append(names, variable.Name)
+			}
+
+			if tc.Expected == nil {
+				assert.Empty(t, names)
+				return
+			}
+
+			assert.Equal(t, tc.Expected, names)
+		})
+	}
+
+	t.Run("reports a path sqlite cannot parse", func(t *testing.T) {
+		t.Parallel()
+
+		variables := database.NewVariableRepository(newTestDatabase(t))
+
+		_, err := variables.List(t.Context(), database.Query{Path: "not a path", Value: "web"})
+		assert.ErrorIs(t, err, database.ErrInvalidQueryPath)
+	})
+}
+
 func TestVariableRepository_Delete(t *testing.T) {
 	t.Parallel()
 

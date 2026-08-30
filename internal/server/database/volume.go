@@ -143,11 +143,27 @@ func (r *VolumeRepository) Update(ctx context.Context, name string, labels map[s
 	return r.Get(ctx, name)
 }
 
-// List returns every volume, ordered by name so that the result is stable.
-func (r *VolumeRepository) List(ctx context.Context) ([]Volume, error) {
-	const q = `SELECT id, name, json(labels), created_at FROM volume ORDER BY name ASC`
+// List returns the volumes matching every one of the given queries, ordered by
+// name so that the result is stable. Passing no queries returns every volume.
+//
+// A query's path addresses the volume's labels under $.labels, the same way a
+// workload query does. Filtering happens in the database rather than in the
+// caller, so a query that matches little doesn't cost a read of everything it
+// discards. Returns ErrInvalidQueryPath when a query names a path SQLite cannot
+// parse.
+func (r *VolumeRepository) List(ctx context.Context, queries ...Query) ([]Volume, error) {
+	const q = `
+		SELECT id, name, json(labels), created_at
+		FROM volume
+	`
 
-	rows, err := r.db.QueryContext(ctx, q)
+	if err := validPaths(ctx, r.db, queries); err != nil {
+		return nil, err
+	}
+
+	where, args := filter(labelSource, queries)
+
+	rows, err := r.db.QueryContext(ctx, q+where+"\n\t\tORDER BY name ASC\n\t", args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query volumes: %w", err)
 	}

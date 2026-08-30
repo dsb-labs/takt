@@ -166,15 +166,30 @@ func (r *SecretRepository) Get(ctx context.Context, name string) (Secret, error)
 	return secret, nil
 }
 
-// List returns every secret, ordered by name so that the result is stable.
+// List returns the secrets matching every one of the given queries, ordered by
+// name so that the result is stable. Passing no queries returns every secret.
+//
+// A query's path addresses the secret's labels under $.labels, the same way a
+// workload query does. The filtering never sees a value: only the labels are
+// queryable, so a query cannot be used to probe what a secret holds. Returns
+// ErrInvalidQueryPath when a query names a path SQLite cannot parse.
 //
 // The values are left behind. Listing secrets is how an operator finds out what
 // exists, which needs no decryption, and a read that does not carry a value cannot
 // leak one.
-func (r *SecretRepository) List(ctx context.Context) ([]Secret, error) {
-	const q = `SELECT id, name, revision, json(labels), created_at, updated_at FROM secret ORDER BY name ASC`
+func (r *SecretRepository) List(ctx context.Context, queries ...Query) ([]Secret, error) {
+	const q = `
+		SELECT id, name, revision, json(labels), created_at, updated_at
+		FROM secret
+	`
 
-	rows, err := r.db.QueryContext(ctx, q)
+	if err := validPaths(ctx, r.db, queries); err != nil {
+		return nil, err
+	}
+
+	where, args := filter(labelSource, queries)
+
+	rows, err := r.db.QueryContext(ctx, q+where+"\n\t\tORDER BY name ASC\n\t", args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query secrets: %w", err)
 	}

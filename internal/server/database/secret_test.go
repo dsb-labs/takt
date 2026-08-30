@@ -118,6 +118,97 @@ func TestSecretRepository_List(t *testing.T) {
 	})
 }
 
+func TestSecretRepository_List_Query(t *testing.T) {
+	t.Parallel()
+
+	// Three secrets whose labels differ, so a query can narrow and combine.
+	seed := func(t *testing.T, db *sql.DB, secrets *database.SecretRepository) {
+		t.Helper()
+
+		keyID := newTestKey(t, db)
+		labels := map[string]map[string]string{
+			"alpha":   {"app": "web", "env": "prod"},
+			"bravo":   {"app": "api", "env": "prod"},
+			"charlie": {"app": "web", "env": "dev"},
+		}
+
+		for name, secretLabels := range labels {
+			_, err := secrets.Upsert(t.Context(), name, []byte("sealed"), "rev-one", keyID, secretLabels)
+			require.NoError(t, err)
+		}
+	}
+
+	tt := []struct {
+		Name     string
+		Queries  []database.Query
+		Expected []string
+	}{
+		{
+			Name:     "no queries returns everything",
+			Expected: []string{"alpha", "bravo", "charlie"},
+		},
+		{
+			Name:     "matches a label",
+			Queries:  []database.Query{{Path: "$.labels.app", Value: "web"}},
+			Expected: []string{"alpha", "charlie"},
+		},
+		{
+			Name: "multiple queries are combined with and",
+			Queries: []database.Query{
+				{Path: "$.labels.app", Value: "web"},
+				{Path: "$.labels.env", Value: "prod"},
+			},
+			Expected: []string{"alpha"},
+		},
+		{
+			Name:     "a value nothing holds matches nothing",
+			Queries:  []database.Query{{Path: "$.labels.app", Value: "nope"}},
+			Expected: nil,
+		},
+		{
+			Name: "a path outside labels matches nothing",
+			// Only the labels are queryable, so a query cannot be aimed at what a
+			// secret holds.
+			Queries:  []database.Query{{Path: "$.value", Value: "sealed"}},
+			Expected: nil,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+
+			db := newTestDatabase(t)
+			secrets := database.NewSecretRepository(db)
+			seed(t, db, secrets)
+
+			got, err := secrets.List(t.Context(), tc.Queries...)
+			require.NoError(t, err)
+
+			names := make([]string, 0, len(got))
+			for _, secret := range got {
+				names = append(names, secret.Name)
+			}
+
+			if tc.Expected == nil {
+				assert.Empty(t, names)
+				return
+			}
+
+			assert.Equal(t, tc.Expected, names)
+		})
+	}
+
+	t.Run("reports a path sqlite cannot parse", func(t *testing.T) {
+		t.Parallel()
+
+		secrets := database.NewSecretRepository(newTestDatabase(t))
+
+		_, err := secrets.List(t.Context(), database.Query{Path: "not a path", Value: "web"})
+		assert.ErrorIs(t, err, database.ErrInvalidQueryPath)
+	})
+}
+
 func TestSecretRepository_Delete(t *testing.T) {
 	t.Parallel()
 

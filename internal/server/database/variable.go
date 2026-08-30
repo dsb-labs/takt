@@ -141,16 +141,30 @@ func (r *VariableRepository) Get(ctx context.Context, name string) (Variable, er
 	return variable, nil
 }
 
-// List returns every variable, ordered by name so that the result is stable.
+// List returns the variables matching every one of the given queries, ordered by
+// name so that the result is stable. Passing no queries returns every variable.
+//
+// A query's path addresses the variable's labels under $.labels, the same way a
+// workload query does. Returns ErrInvalidQueryPath when a query names a path
+// SQLite cannot parse.
 //
 // The values come with them, which is where this differs from the secret
 // repository. Listing secrets deliberately leaves the values behind because a read
 // that does not carry one cannot leak one. A variable's value is reported by the API
 // anyway, so withholding it here would only mean reading each one again.
-func (r *VariableRepository) List(ctx context.Context) ([]Variable, error) {
-	const q = `SELECT id, name, value, json(labels), created_at, updated_at FROM variable ORDER BY name ASC`
+func (r *VariableRepository) List(ctx context.Context, queries ...Query) ([]Variable, error) {
+	const q = `
+		SELECT id, name, value, json(labels), created_at, updated_at
+		FROM variable
+	`
 
-	rows, err := r.db.QueryContext(ctx, q)
+	if err := validPaths(ctx, r.db, queries); err != nil {
+		return nil, err
+	}
+
+	where, args := filter(labelSource, queries)
+
+	rows, err := r.db.QueryContext(ctx, q+where+"\n\t\tORDER BY name ASC\n\t", args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query variables: %w", err)
 	}
