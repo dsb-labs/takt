@@ -1,6 +1,8 @@
 [http]
 address = "localhost:9999"
 hosts = ["orca.example.com"]
+tls-cert = "/etc/orca/tls/cert.pem"
+tls-key = "/etc/orca/tls/key.pem"
 
 [data]
 directory = "/var/lib/orca"

@@ -33,6 +33,9 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "/etc/orca/docker-config.json", config.Docker.ConfigFile)
 				assert.Equal(t, 30*time.Second, config.Reconcile.Interval)
 				assert.Equal(t, []string{"orca.example.com"}, config.HTTP.Hosts)
+				assert.Equal(t, "/etc/orca/tls/cert.pem", config.HTTP.TLSCert)
+				assert.Equal(t, "/etc/orca/tls/key.pem", config.HTTP.TLSKey)
+				assert.True(t, config.HTTP.TLSEnabled())
 				assert.Equal(t, "0.0.0.0", config.Workload.Bind)
 				assert.Equal(t, 25000, config.Workload.MinPort)
 				assert.Equal(t, 26000, config.Workload.MaxPort)
@@ -180,6 +183,40 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			Name:         "an empty http address",
 			Mutate:       func(c *server.Config) { c.HTTP.Address = "" },
+			ExpectsError: true,
+		},
+		{
+			Name: "a tls certificate pair",
+			Mutate: func(c *server.Config) {
+				c.HTTP.TLSCert, c.HTTP.TLSKey = "/etc/orca/tls/cert.pem", "/etc/orca/tls/key.pem"
+			},
+		},
+		{
+			// Half a pair caught here is a clearer failure than a server that
+			// cannot present a certificate.
+			Name:         "a tls certificate without its key",
+			Mutate:       func(c *server.Config) { c.HTTP.TLSCert = "/etc/orca/tls/cert.pem" },
+			ExpectsError: true,
+		},
+		{
+			Name:         "a tls key without its certificate",
+			Mutate:       func(c *server.Config) { c.HTTP.TLSKey = "/etc/orca/tls/key.pem" },
+			ExpectsError: true,
+		},
+		{
+			// The server's working directory is nowhere an operator meant to keep
+			// key material.
+			Name: "a relative tls certificate",
+			Mutate: func(c *server.Config) {
+				c.HTTP.TLSCert, c.HTTP.TLSKey = "cert.pem", "/etc/orca/tls/key.pem"
+			},
+			ExpectsError: true,
+		},
+		{
+			Name: "a relative tls key",
+			Mutate: func(c *server.Config) {
+				c.HTTP.TLSCert, c.HTTP.TLSKey = "/etc/orca/tls/cert.pem", "key.pem"
+			},
 			ExpectsError: true,
 		},
 		{
