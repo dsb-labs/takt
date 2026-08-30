@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -16,6 +17,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/dsb-labs/orca/internal/server/api"
+	"github.com/dsb-labs/orca/internal/server/certificate"
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
 	"github.com/dsb-labs/orca/internal/server/driver/exec"
@@ -339,6 +341,27 @@ func Run(ctx context.Context, config Config) error {
 		IdleTimeout:       2 * time.Minute,
 	}
 
+	serve := server.ListenAndServe
+	if config.HTTP.TLSEnabled() {
+		// Loaded here rather than at the first handshake, so a pair the server
+		// cannot present stops it from starting instead of failing every
+		// connection.
+		loader, err := certificate.New(certificate.Config{
+			Logger:      logger,
+			Certificate: config.HTTP.TLSCert,
+			Key:         config.HTTP.TLSKey,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to load tls certificate: %w", err)
+		}
+
+		server.TLSConfig = &tls.Config{
+			GetCertificate: loader.GetCertificate,
+			MinVersion:     tls.VersionTLS12,
+		}
+		serve = func() error { return server.ListenAndServeTLS("", "") }
+	}
+
 	g, ctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error { return reconcile.Run(ctx) })
@@ -353,7 +376,7 @@ func Run(ctx context.Context, config Config) error {
 
 		return nil
 	})
-	g.Go(server.ListenAndServe)
+	g.Go(serve)
 	g.Go(func() error {
 		<-ctx.Done()
 
@@ -365,7 +388,7 @@ func Run(ctx context.Context, config Config) error {
 		return server.Shutdown(shutdownCtx)
 	})
 
-	logger.With("address", config.HTTP.Address).Info("orca server listening")
+	logger.With("address", config.HTTP.Address, "tls", config.HTTP.TLSEnabled()).Info("orca server listening")
 
 	err = g.Wait()
 	if errors.Is(err, http.ErrServerClosed) {
