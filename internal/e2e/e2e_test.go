@@ -1978,6 +1978,80 @@ func (s *Suite) TestVolumeLabelsSurviveAnUpdate() {
 	s.Equal(map[string]string{"app": "api"}, read.Labels)
 }
 
+// TestListQueryOnLabels covers filtering the volume, secret and variable lists by
+// a query into their labels, with the syntax the workload list already accepts.
+func (s *Suite) TestListQueryOnLabels() {
+	marker := s.volumeName()
+	web, api := marker+"-web", marker+"-api"
+	secret, variable := s.secretName(), s.variableName()
+	s.T().Cleanup(func() { s.cleanupVolume(web) })
+	s.T().Cleanup(func() { s.cleanupVolume(api) })
+	s.T().Cleanup(func() { s.cleanupSecret(secret) })
+	s.T().Cleanup(func() { s.cleanupVariable(variable) })
+
+	// The suite shares one server, so the labels carry this test's unique names
+	// rather than values another test might also use.
+	_, err := s.client.CreateVolume(s.ctx(), manifest.Volume{
+		Version: "v1",
+		Name:    web,
+		Labels:  map[string]string{"suite": marker, "role": "web"},
+	})
+	s.Require().NoError(err)
+
+	_, err = s.client.CreateVolume(s.ctx(), manifest.Volume{
+		Version: "v1",
+		Name:    api,
+		Labels:  map[string]string{"suite": marker, "role": "api"},
+	})
+	s.Require().NoError(err)
+
+	// A label is reached under $.labels, exactly as it is on a workload.
+	volumes, err := s.client.ListVolumes(s.ctx(), "$.labels.suite="+marker)
+	s.Require().NoError(err)
+	s.Require().Len(volumes, 2)
+	s.Equal(api, volumes[0].Name)
+	s.Equal(web, volumes[1].Name)
+
+	// Queries are combined, so adding one narrows rather than widens.
+	narrowed, err := s.client.ListVolumes(s.ctx(), "$.labels.suite="+marker, "$.labels.role=web")
+	s.Require().NoError(err)
+	s.Require().Len(narrowed, 1)
+	s.Equal(web, narrowed[0].Name)
+
+	// Nothing matching is an empty result, not an error.
+	none, err := s.client.ListVolumes(s.ctx(), "$.labels.suite="+marker, "$.labels.role=nope")
+	s.Require().NoError(err)
+	s.Empty(none)
+
+	// A malformed query is the caller's mistake and has to be reported as such.
+	_, err = s.client.ListVolumes(s.ctx(), "$.labels.role")
+	s.True(client.IsBadRequest(err), "expected a bad request error, got %v", err)
+
+	// The same query narrows the secret list.
+	_, _, err = s.client.SetSecret(s.ctx(), secret, []byte("held"), map[string]string{"suite": marker})
+	s.Require().NoError(err)
+
+	secrets, err := s.client.ListSecrets(s.ctx(), "$.labels.suite="+marker)
+	s.Require().NoError(err)
+	s.Require().Len(secrets, 1)
+	s.Equal(secret, secrets[0].Name)
+
+	_, err = s.client.ListSecrets(s.ctx(), "$.labels.suite")
+	s.True(client.IsBadRequest(err), "expected a bad request error, got %v", err)
+
+	// And the variable list.
+	_, _, err = s.client.SetVariable(s.ctx(), variable, "held", map[string]string{"suite": marker})
+	s.Require().NoError(err)
+
+	variables, err := s.client.ListVariables(s.ctx(), "$.labels.suite="+marker)
+	s.Require().NoError(err)
+	s.Require().Len(variables, 1)
+	s.Equal(variable, variables[0].Name)
+
+	_, err = s.client.ListVariables(s.ctx(), "$.labels.suite")
+	s.True(client.IsBadRequest(err), "expected a bad request error, got %v", err)
+}
+
 // TestDeletingASecretInUseIsRefused covers the refusal naming the workloads, and what
 // forcing it does to them.
 func (s *Suite) TestDeletingASecretInUseIsRefused() {
