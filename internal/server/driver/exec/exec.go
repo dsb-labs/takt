@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package exec provides the driver that runs workloads as processes on the host.
 //
 // It is the counterpart to the docker driver for work that has no image: a command,

@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package serve provides the CLI endpoint to the "serve" command.
 package serve
 

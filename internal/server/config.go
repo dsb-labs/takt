@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package server provides the orca server and its configuration.
 package server
 

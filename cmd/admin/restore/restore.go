@@ -1,3 +1,5 @@
+//go:build linux
+
 // Package restore provides the CLI endpoint to the "admin restore" command.
 package restore
 
