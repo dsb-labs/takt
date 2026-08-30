@@ -8,6 +8,8 @@ changes.
 [http]
 address = "127.0.0.1:7373"
 hosts = []
+tls-cert = ""
+tls-key = ""
 
 [data]
 directory = "~/.local/share/orca"
@@ -43,6 +45,8 @@ level = "info"
 |---|---|---|
 | `address` | `127.0.0.1:7373` | The address the API listens on. |
 | `hosts` | empty | The host names a request may name. |
+| `tls-cert` | empty | The PEM certificate the server presents when it serves TLS. |
+| `tls-key` | empty | The PEM private key for `tls-cert`. |
 
 The default is loopback. Reaching the API is enough to run code on the host, so read
 [Operating orca](operating.md) before binding it to a network.
@@ -60,6 +64,14 @@ hosts = ["orca.example.com"]
 A request naming anything else is refused with `421`. That check is what stops a page
 in the operator's browser from reaching a loopback-bound API — see
 [Operating orca](operating.md#exposure).
+
+Set `tls-cert` and `tls-key` together, or not at all, and give both as absolute
+paths. With the pair set, the server terminates TLS itself instead of speaking
+plain HTTP. The key file must be readable only by the user running the server,
+which is the same rule the secret keyring applies. The pair is reread when the
+certificate file changes, so a renewal does not need a restart. See
+[Operating orca](operating.md#serving-tls-directly) for when to prefer this over
+a reverse proxy.
 
 A request body is read up to 1 MiB and no further. There is no key for it: a manifest
 is a document an operator wrote by hand, and anything past a megabyte is a mistake or

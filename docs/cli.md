@@ -38,8 +38,13 @@ orca admin rekey                        Re-encrypt every secret under a new key
 Commands are grouped by what they act on, so a verb reads the same whichever noun
 precedes it.
 
-Every command except `serve` takes `--address` (`-a`), the URL of the server, which
-defaults to `http://localhost:7373`.
+Every command takes `--address` (`-a`), the URL of the server, which defaults to
+`http://localhost:7373`. Only `serve` ignores it, since it is the server.
+
+`--ca-cert` names a PEM file holding the certificate authority the client checks
+the server's certificate against, instead of the system roots. This is how you
+talk to a server that terminates TLS with a self-signed certificate. See
+[Operating orca](operating.md#serving-tls-directly).
 
 Read commands print indented JSON, so they pipe into `jq`.
 

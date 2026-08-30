@@ -29,6 +29,41 @@ reach the port can already run arbitrary workloads, so the names disclose nothin
 new — but they are disclosed, and a scraper is one more thing with reach to
 account for.
 
+### Serving TLS directly
+
+The server terminates TLS itself when the configuration names a certificate pair:
+
+```toml
+[http]
+address = "127.0.0.1:7373"
+tls-cert = "/etc/orca/tls/cert.pem"
+tls-key = "/etc/orca/tls/key.pem"
+```
+
+A reverse proxy is still the recommended front door, because it can also require
+a credential — TLS encrypts the connection and authenticates nobody. Serving TLS
+directly is for the deployment that only wanted the proxy to terminate TLS, such
+as a certbot-managed certificate on a home server. Over WireGuard or Tailscale,
+which are themselves encrypted, it adds little.
+
+The pair is reread when the certificate file changes, so a renewal tool that
+rewrites the files needs no restart and no hook. A rewrite the server cannot
+load keeps the previous pair in use and is retried, so a renewal caught between
+its two writes heals itself.
+
+The key file must be readable only by the user running the server, or the server
+refuses to start. This is the same rule the secret keyring applies, and for the
+same reason.
+
+A client trusts a self-signed pair by naming its certificate:
+
+```sh
+orca workload list --address https://orca.example.com:7373 --ca-cert /etc/orca/tls/cert.pem
+```
+
+There is no flag to skip verification. The host name check described below still
+applies to a TLS listener.
+
 ### Loopback is not a boundary against a browser
 
 A loopback bind stops another machine reaching orca. It does not stop a web page.
