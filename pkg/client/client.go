@@ -7,9 +7,12 @@
 package client
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
@@ -50,6 +53,13 @@ var (
 )
 
 type (
+	// The Option type is a function that modifies how New builds a Client.
+	Option func(*config)
+
+	config struct {
+		caCertificate string
+	}
+
 	// The Client type talks to an orca server over HTTP.
 	Client struct {
 		api *api.ClientWithResponses
@@ -72,13 +82,36 @@ type (
 // an endless response into memory.
 const maxErrorBody = 1 << 16
 
+// WithCACertificate makes the client check the server's certificate against the
+// PEM certificate authority file at the given path instead of the system roots.
+// This is how a client trusts a server with a self-signed certificate without
+// giving up verification altogether.
+func WithCACertificate(path string) Option {
+	return func(c *config) { c.caCertificate = path }
+}
+
 // New returns a Client that targets the orca server at the given address.
 //
-// An invalid address is rejected here so that callers see the problem at
-// construction time rather than on their first request.
-func New(address string) (*Client, error) {
+// An invalid address or an unusable certificate authority file is rejected here
+// so that callers see the problem at construction time rather than on their
+// first request.
+func New(address string, options ...Option) (*Client, error) {
+	var cfg config
+	for _, option := range options {
+		option(&cfg)
+	}
+
+	// One transport rather than one per inner client, so a followed log read
+	// checks the server's certificate the same way every other request does and
+	// the two share a connection pool.
+	transport, err := cfg.transport()
+	if err != nil {
+		return nil, err
+	}
+
 	inner, err := api.NewClientWithResponses(address, api.WithHTTPClient(&http.Client{
-		Timeout: 30 * time.Second,
+		Timeout:   30 * time.Second,
+		Transport: transport,
 	}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct client: %w", err)
@@ -88,12 +121,38 @@ func New(address string) (*Client, error) {
 	// above covers reading the body as well as sending the request. One client cannot
 	// serve both, so following gets its own and the caller's context is what ends it.
 	// Every other request keeps the timeout.
-	streaming, err := api.NewClientWithResponses(address, api.WithHTTPClient(&http.Client{}))
+	streaming, err := api.NewClientWithResponses(address, api.WithHTTPClient(&http.Client{
+		Transport: transport,
+	}))
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct client: %w", err)
 	}
 
 	return &Client{api: inner, stream: streaming}, nil
+}
+
+// transport returns the transport every request goes through.
+func (c config) transport() (http.RoundTripper, error) {
+	if c.caCertificate == "" {
+		return http.DefaultTransport, nil
+	}
+
+	pem, err := os.ReadFile(c.caCertificate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read ca certificate: %w", err)
+	}
+
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("no certificates in ca certificate file %s", c.caCertificate)
+	}
+
+	// Cloned from the default transport rather than built empty, so proxy
+	// support, dial timeouts and HTTP/2 stay as they are everywhere else.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{RootCAs: pool}
+
+	return transport, nil
 }
 
 // Error returns the message the server reported.
