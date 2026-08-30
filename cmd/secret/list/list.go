@@ -22,7 +22,7 @@ func Command() *cobra.Command {
 		Long: "List the secrets the server holds, with the workloads reading each one.\n\n" +
 			"No value is reported, here or anywhere else. This is how you find out what\n" +
 			"exists in order to reference it from a manifest.\n\n" +
-			"Repeat --query to narrow the result; a secret has to match all of them.\n" +
+			"Repeat --query to narrow the result. A secret has to match all of them.\n" +
 			"A query is a JSON path into the secret's labels and the value it must\n" +
 			"hold:\n\n" +
 			"  orca secret list --query '$.labels.app=web'\n" +

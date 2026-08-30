@@ -23,7 +23,7 @@ func Command() *cobra.Command {
 		Long: "List volumes.\n\n" +
 			"Each volume reports where its data is and which workloads mount it. A\n" +
 			"volume nothing mounts is one that can be deleted without forcing.\n\n" +
-			"Repeat --query to narrow the result; a volume has to match all of them.\n" +
+			"Repeat --query to narrow the result. A volume has to match all of them.\n" +
 			"A query is a JSON path into the volume's labels and the value it must\n" +
 			"hold:\n\n" +
 			"  orca volume list --query '$.labels.app=web'\n" +

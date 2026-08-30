@@ -25,7 +25,7 @@ func Command() *cobra.Command {
 			"The values are reported, unlike a secret's. Reviewing what a fleet is\n" +
 			"configured with is the reason to choose a variable, so a listing that\n" +
 			"withheld them would defeat the point.\n\n" +
-			"Repeat --query to narrow the result; a variable has to match all of them.\n" +
+			"Repeat --query to narrow the result. A variable has to match all of them.\n" +
 			"A query is a JSON path into the variable's labels and the value it must\n" +
 			"hold:\n\n" +
 			"  orca variable list --query '$.labels.app=web'\n" +

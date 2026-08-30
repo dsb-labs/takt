@@ -21,7 +21,7 @@ func Command() *cobra.Command {
 		Aliases: []string{"ls"},
 		Short:   "List workloads",
 		Long: "List workloads.\n\n" +
-			"Repeat --query to narrow the result; a workload has to match all of them.\n" +
+			"Repeat --query to narrow the result. A workload has to match all of them.\n" +
 			"A query is a JSON path into the workload's specification and the value it\n" +
 			"must hold:\n\n" +
 			"  orca workload list --query '$.labels.app=web'\n" +
