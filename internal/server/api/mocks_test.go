@@ -327,8 +327,14 @@ func (_c *MockSecretService_Get_Call) RunAndReturn(run func(ctx context.Context,
 }
 
 // List provides a mock function for the type MockSecretService
-func (_mock *MockSecretService) List(ctx context.Context) ([]service.Secret, error) {
-	ret := _mock.Called(ctx)
+func (_mock *MockSecretService) List(ctx context.Context, queries ...string) ([]service.Secret, error) {
+	var tmpRet mock.Arguments
+	if len(queries) > 0 {
+		tmpRet = _mock.Called(ctx, queries)
+	} else {
+		tmpRet = _mock.Called(ctx)
+	}
+	ret := tmpRet
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -336,18 +342,18 @@ func (_mock *MockSecretService) List(ctx context.Context) ([]service.Secret, err
 
 	var r0 []service.Secret
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]service.Secret, error)); ok {
-		return returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...string) ([]service.Secret, error)); ok {
+		return returnFunc(ctx, queries...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []service.Secret); ok {
-		r0 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...string) []service.Secret); ok {
+		r0 = returnFunc(ctx, queries...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]service.Secret)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, ...string) error); ok {
+		r1 = returnFunc(ctx, queries...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -361,18 +367,27 @@ type MockSecretService_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockSecretService_Expecter) List(ctx any) *MockSecretService_List_Call {
-	return &MockSecretService_List_Call{Call: _e.mock.On("List", ctx)}
+//   - queries ...string
+func (_e *MockSecretService_Expecter) List(ctx any, queries ...any) *MockSecretService_List_Call {
+	return &MockSecretService_List_Call{Call: _e.mock.On("List",
+		append([]any{ctx}, queries...)...)}
 }
 
-func (_c *MockSecretService_List_Call) Run(run func(ctx context.Context)) *MockSecretService_List_Call {
+func (_c *MockSecretService_List_Call) Run(run func(ctx context.Context, queries ...string)) *MockSecretService_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
+		var arg1 []string
+		var variadicArgs []string
+		if len(args) > 1 {
+			variadicArgs = args[1].([]string)
+		}
+		arg1 = variadicArgs
 		run(
 			arg0,
+			arg1...,
 		)
 	})
 	return _c
@@ -383,7 +398,7 @@ func (_c *MockSecretService_List_Call) Return(secrets []service.Secret, err erro
 	return _c
 }
 
-func (_c *MockSecretService_List_Call) RunAndReturn(run func(ctx context.Context) ([]service.Secret, error)) *MockSecretService_List_Call {
+func (_c *MockSecretService_List_Call) RunAndReturn(run func(ctx context.Context, queries ...string) ([]service.Secret, error)) *MockSecretService_List_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -780,8 +795,14 @@ func (_c *MockVariableService_Get_Call) RunAndReturn(run func(ctx context.Contex
 }
 
 // List provides a mock function for the type MockVariableService
-func (_mock *MockVariableService) List(ctx context.Context) ([]service.Variable, error) {
-	ret := _mock.Called(ctx)
+func (_mock *MockVariableService) List(ctx context.Context, queries ...string) ([]service.Variable, error) {
+	var tmpRet mock.Arguments
+	if len(queries) > 0 {
+		tmpRet = _mock.Called(ctx, queries)
+	} else {
+		tmpRet = _mock.Called(ctx)
+	}
+	ret := tmpRet
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -789,18 +810,18 @@ func (_mock *MockVariableService) List(ctx context.Context) ([]service.Variable,
 
 	var r0 []service.Variable
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]service.Variable, error)); ok {
-		return returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...string) ([]service.Variable, error)); ok {
+		return returnFunc(ctx, queries...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []service.Variable); ok {
-		r0 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...string) []service.Variable); ok {
+		r0 = returnFunc(ctx, queries...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]service.Variable)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, ...string) error); ok {
+		r1 = returnFunc(ctx, queries...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -814,18 +835,27 @@ type MockVariableService_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockVariableService_Expecter) List(ctx any) *MockVariableService_List_Call {
-	return &MockVariableService_List_Call{Call: _e.mock.On("List", ctx)}
+//   - queries ...string
+func (_e *MockVariableService_Expecter) List(ctx any, queries ...any) *MockVariableService_List_Call {
+	return &MockVariableService_List_Call{Call: _e.mock.On("List",
+		append([]any{ctx}, queries...)...)}
 }
 
-func (_c *MockVariableService_List_Call) Run(run func(ctx context.Context)) *MockVariableService_List_Call {
+func (_c *MockVariableService_List_Call) Run(run func(ctx context.Context, queries ...string)) *MockVariableService_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
+		var arg1 []string
+		var variadicArgs []string
+		if len(args) > 1 {
+			variadicArgs = args[1].([]string)
+		}
+		arg1 = variadicArgs
 		run(
 			arg0,
+			arg1...,
 		)
 	})
 	return _c
@@ -836,7 +866,7 @@ func (_c *MockVariableService_List_Call) Return(variables []service.Variable, er
 	return _c
 }
 
-func (_c *MockVariableService_List_Call) RunAndReturn(run func(ctx context.Context) ([]service.Variable, error)) *MockVariableService_List_Call {
+func (_c *MockVariableService_List_Call) RunAndReturn(run func(ctx context.Context, queries ...string) ([]service.Variable, error)) *MockVariableService_List_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1154,8 +1184,14 @@ func (_c *MockVolumeService_Get_Call) RunAndReturn(run func(ctx context.Context,
 }
 
 // List provides a mock function for the type MockVolumeService
-func (_mock *MockVolumeService) List(ctx context.Context) ([]service.Volume, error) {
-	ret := _mock.Called(ctx)
+func (_mock *MockVolumeService) List(ctx context.Context, queries ...string) ([]service.Volume, error) {
+	var tmpRet mock.Arguments
+	if len(queries) > 0 {
+		tmpRet = _mock.Called(ctx, queries)
+	} else {
+		tmpRet = _mock.Called(ctx)
+	}
+	ret := tmpRet
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -1163,18 +1199,18 @@ func (_mock *MockVolumeService) List(ctx context.Context) ([]service.Volume, err
 
 	var r0 []service.Volume
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]service.Volume, error)); ok {
-		return returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...string) ([]service.Volume, error)); ok {
+		return returnFunc(ctx, queries...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []service.Volume); ok {
-		r0 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...string) []service.Volume); ok {
+		r0 = returnFunc(ctx, queries...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]service.Volume)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, ...string) error); ok {
+		r1 = returnFunc(ctx, queries...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1188,18 +1224,27 @@ type MockVolumeService_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockVolumeService_Expecter) List(ctx any) *MockVolumeService_List_Call {
-	return &MockVolumeService_List_Call{Call: _e.mock.On("List", ctx)}
+//   - queries ...string
+func (_e *MockVolumeService_Expecter) List(ctx any, queries ...any) *MockVolumeService_List_Call {
+	return &MockVolumeService_List_Call{Call: _e.mock.On("List",
+		append([]any{ctx}, queries...)...)}
 }
 
-func (_c *MockVolumeService_List_Call) Run(run func(ctx context.Context)) *MockVolumeService_List_Call {
+func (_c *MockVolumeService_List_Call) Run(run func(ctx context.Context, queries ...string)) *MockVolumeService_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
+		var arg1 []string
+		var variadicArgs []string
+		if len(args) > 1 {
+			variadicArgs = args[1].([]string)
+		}
+		arg1 = variadicArgs
 		run(
 			arg0,
+			arg1...,
 		)
 	})
 	return _c
@@ -1210,7 +1255,7 @@ func (_c *MockVolumeService_List_Call) Return(volumes []service.Volume, err erro
 	return _c
 }
 
-func (_c *MockVolumeService_List_Call) RunAndReturn(run func(ctx context.Context) ([]service.Volume, error)) *MockVolumeService_List_Call {
+func (_c *MockVolumeService_List_Call) RunAndReturn(run func(ctx context.Context, queries ...string) ([]service.Volume, error)) *MockVolumeService_List_Call {
 	_c.Call.Return(run)
 	return _c
 }

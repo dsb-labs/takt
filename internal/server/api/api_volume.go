@@ -20,8 +20,9 @@ type (
 		Update(ctx context.Context, name string, labels map[string]string) (service.Volume, error)
 		// Get should return the volume with the given name.
 		Get(ctx context.Context, name string) (service.Volume, error)
-		// List should return every volume the server holds.
-		List(ctx context.Context) ([]service.Volume, error)
+		// List should return the volumes matching every one of the given
+		// "path=value" queries, or every volume the server holds when given none.
+		List(ctx context.Context, queries ...string) ([]service.Volume, error)
 		// Delete should remove the volume with the given name and everything stored
 		// in it, refusing a volume a workload mounts unless force is set.
 		Delete(ctx context.Context, name string, force bool) error

@@ -22,8 +22,10 @@ type (
 		Set(ctx context.Context, name string, value []byte, labels map[string]string) (service.Secret, bool, error)
 		// Get should return the secret with the given name, without its value.
 		Get(ctx context.Context, name string) (service.Secret, error)
-		// List should return every secret the server holds, without their values.
-		List(ctx context.Context) ([]service.Secret, error)
+		// List should return the secrets matching every one of the given
+		// "path=value" queries, or every secret the server holds when given none,
+		// without their values.
+		List(ctx context.Context, queries ...string) ([]service.Secret, error)
 		// Delete should remove the secret with the given name, refusing one a workload
 		// reads unless force is set.
 		Delete(ctx context.Context, name string, force bool) error

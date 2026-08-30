@@ -32,8 +32,9 @@ type (
 		Upsert(ctx context.Context, name, value string, labels map[string]string) (database.Variable, error)
 		// Get should return the variable with the given name.
 		Get(ctx context.Context, name string) (database.Variable, error)
-		// List should return every variable.
-		List(ctx context.Context) ([]database.Variable, error)
+		// List should return the variables matching every one of the given
+		// queries, or every variable when given none.
+		List(ctx context.Context, queries ...database.Query) ([]database.Variable, error)
 		// Delete should remove the variable with the given name.
 		Delete(ctx context.Context, name string) error
 		// UsedBy should name the workloads referencing the variable with the given
@@ -168,10 +169,25 @@ func (s *VariableService) Get(ctx context.Context, name string) (Variable, error
 	return s.hydrate(ctx, stored)
 }
 
-// List returns every variable, along with the workloads referencing each one.
-func (s *VariableService) List(ctx context.Context) ([]Variable, error) {
-	stored, err := s.variables.List(ctx)
+// List returns the variables matching every one of the given queries, along
+// with the workloads referencing each one. Passing no queries returns every
+// variable.
+//
+// Each query is a "path=value" string, where the path is a JSON path addressing
+// the variable's labels, such as "$.labels.app". Returns ErrInvalidQuery when
+// one is malformed.
+func (s *VariableService) List(ctx context.Context, queries ...string) ([]Variable, error) {
+	parsed, err := parseQueries(queries)
 	if err != nil {
+		return nil, err
+	}
+
+	stored, err := s.variables.List(ctx, parsed...)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidQueryPath) {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
+		}
+
 		return nil, err
 	}
 

@@ -197,6 +197,45 @@ func TestVariableService_List(t *testing.T) {
 	})
 }
 
+func TestVariableService_List_Queries(t *testing.T) {
+	t.Parallel()
+
+	t.Run("passes parsed queries to the repository", func(t *testing.T) {
+		t.Parallel()
+
+		variables := NewMockVariableRepository(t)
+
+		variables.EXPECT().List(mock.Anything, []database.Query{{Path: "$.labels.app", Value: "web"}}).
+			Return([]database.Variable{{Name: "db-host", Value: "localhost"}}, nil).Once()
+		variables.EXPECT().UsedBy(mock.Anything, "db-host").Return(nil, nil).Once()
+
+		got, err := newTestVariableService(t, variables).List(t.Context(), "$.labels.app=web")
+		require.NoError(t, err)
+		assert.Len(t, got, 1)
+	})
+
+	t.Run("rejects a query that is not path=value", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := newTestVariableService(t, NewMockVariableRepository(t)).List(t.Context(), "$.labels.app")
+		assert.ErrorIs(t, err, service.ErrInvalidQuery)
+	})
+
+	t.Run("reports a path the repository cannot parse", func(t *testing.T) {
+		t.Parallel()
+
+		variables := NewMockVariableRepository(t)
+
+		variables.EXPECT().List(mock.Anything, mock.Anything).
+			Return(nil, database.ErrInvalidQueryPath).Once()
+
+		// A bad path is the caller's mistake, so it must not surface as a server
+		// failure.
+		_, err := newTestVariableService(t, variables).List(t.Context(), "nonsense=web")
+		assert.ErrorIs(t, err, service.ErrInvalidQuery)
+	})
+}
+
 func TestVariableService_Delete(t *testing.T) {
 	t.Parallel()
 

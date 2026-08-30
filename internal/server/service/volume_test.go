@@ -401,6 +401,51 @@ func TestVolumeService_List(t *testing.T) {
 	}
 }
 
+func TestVolumeService_List_Queries(t *testing.T) {
+	t.Parallel()
+
+	t.Run("passes parsed queries to the repository", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockVolumeRepository(t)
+
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.labels.app", Value: "web"}}).
+			Return([]database.Volume{{ID: testVolumeID, Name: "alpha"}}, nil).Once()
+		repo.EXPECT().UsedBy(mock.Anything, "alpha").Return(nil, nil).Once()
+
+		svc, _ := newVolumeService(t, repo)
+
+		got, err := svc.List(t.Context(), "$.labels.app=web")
+		require.NoError(t, err)
+		assert.Len(t, got, 1)
+	})
+
+	t.Run("rejects a query that is not path=value", func(t *testing.T) {
+		t.Parallel()
+
+		svc, _ := newVolumeService(t, NewMockVolumeRepository(t))
+
+		_, err := svc.List(t.Context(), "$.labels.app")
+		assert.ErrorIs(t, err, service.ErrInvalidQuery)
+	})
+
+	t.Run("reports a path the repository cannot parse", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockVolumeRepository(t)
+
+		repo.EXPECT().List(mock.Anything, mock.Anything).
+			Return(nil, database.ErrInvalidQueryPath).Once()
+
+		svc, _ := newVolumeService(t, repo)
+
+		// A bad path is the caller's mistake, so it must not surface as a server
+		// failure.
+		_, err := svc.List(t.Context(), "nonsense=web")
+		assert.ErrorIs(t, err, service.ErrInvalidQuery)
+	})
+}
+
 func TestVolumeService_Path(t *testing.T) {
 	t.Parallel()
 

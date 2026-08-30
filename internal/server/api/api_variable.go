@@ -19,8 +19,10 @@ type (
 		Set(ctx context.Context, name, value string, labels map[string]string) (service.Variable, bool, error)
 		// Get should return the variable with the given name.
 		Get(ctx context.Context, name string) (service.Variable, error)
-		// List should return every variable the server holds.
-		List(ctx context.Context) ([]service.Variable, error)
+		// List should return the variables matching every one of the given
+		// "path=value" queries, or every variable the server holds when given
+		// none.
+		List(ctx context.Context, queries ...string) ([]service.Variable, error)
 		// Delete should remove the variable with the given name, refusing one a
 		// workload reads unless force is set.
 		Delete(ctx context.Context, name string, force bool) error

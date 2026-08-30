@@ -889,8 +889,14 @@ func (_c *MockSecretRepository_Get_Call) RunAndReturn(run func(ctx context.Conte
 }
 
 // List provides a mock function for the type MockSecretRepository
-func (_mock *MockSecretRepository) List(ctx context.Context) ([]database.Secret, error) {
-	ret := _mock.Called(ctx)
+func (_mock *MockSecretRepository) List(ctx context.Context, queries ...database.Query) ([]database.Secret, error) {
+	var tmpRet mock.Arguments
+	if len(queries) > 0 {
+		tmpRet = _mock.Called(ctx, queries)
+	} else {
+		tmpRet = _mock.Called(ctx)
+	}
+	ret := tmpRet
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -898,18 +904,18 @@ func (_mock *MockSecretRepository) List(ctx context.Context) ([]database.Secret,
 
 	var r0 []database.Secret
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]database.Secret, error)); ok {
-		return returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...database.Query) ([]database.Secret, error)); ok {
+		return returnFunc(ctx, queries...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []database.Secret); ok {
-		r0 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...database.Query) []database.Secret); ok {
+		r0 = returnFunc(ctx, queries...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]database.Secret)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, ...database.Query) error); ok {
+		r1 = returnFunc(ctx, queries...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -923,18 +929,27 @@ type MockSecretRepository_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockSecretRepository_Expecter) List(ctx any) *MockSecretRepository_List_Call {
-	return &MockSecretRepository_List_Call{Call: _e.mock.On("List", ctx)}
+//   - queries ...database.Query
+func (_e *MockSecretRepository_Expecter) List(ctx any, queries ...any) *MockSecretRepository_List_Call {
+	return &MockSecretRepository_List_Call{Call: _e.mock.On("List",
+		append([]any{ctx}, queries...)...)}
 }
 
-func (_c *MockSecretRepository_List_Call) Run(run func(ctx context.Context)) *MockSecretRepository_List_Call {
+func (_c *MockSecretRepository_List_Call) Run(run func(ctx context.Context, queries ...database.Query)) *MockSecretRepository_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
+		var arg1 []database.Query
+		var variadicArgs []database.Query
+		if len(args) > 1 {
+			variadicArgs = args[1].([]database.Query)
+		}
+		arg1 = variadicArgs
 		run(
 			arg0,
+			arg1...,
 		)
 	})
 	return _c
@@ -945,7 +960,7 @@ func (_c *MockSecretRepository_List_Call) Return(secrets []database.Secret, err 
 	return _c
 }
 
-func (_c *MockSecretRepository_List_Call) RunAndReturn(run func(ctx context.Context) ([]database.Secret, error)) *MockSecretRepository_List_Call {
+func (_c *MockSecretRepository_List_Call) RunAndReturn(run func(ctx context.Context, queries ...database.Query) ([]database.Secret, error)) *MockSecretRepository_List_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1547,8 +1562,14 @@ func (_c *MockVariableRepository_Get_Call) RunAndReturn(run func(ctx context.Con
 }
 
 // List provides a mock function for the type MockVariableRepository
-func (_mock *MockVariableRepository) List(ctx context.Context) ([]database.Variable, error) {
-	ret := _mock.Called(ctx)
+func (_mock *MockVariableRepository) List(ctx context.Context, queries ...database.Query) ([]database.Variable, error) {
+	var tmpRet mock.Arguments
+	if len(queries) > 0 {
+		tmpRet = _mock.Called(ctx, queries)
+	} else {
+		tmpRet = _mock.Called(ctx)
+	}
+	ret := tmpRet
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -1556,18 +1577,18 @@ func (_mock *MockVariableRepository) List(ctx context.Context) ([]database.Varia
 
 	var r0 []database.Variable
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]database.Variable, error)); ok {
-		return returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...database.Query) ([]database.Variable, error)); ok {
+		return returnFunc(ctx, queries...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []database.Variable); ok {
-		r0 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...database.Query) []database.Variable); ok {
+		r0 = returnFunc(ctx, queries...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]database.Variable)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, ...database.Query) error); ok {
+		r1 = returnFunc(ctx, queries...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1581,18 +1602,27 @@ type MockVariableRepository_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockVariableRepository_Expecter) List(ctx any) *MockVariableRepository_List_Call {
-	return &MockVariableRepository_List_Call{Call: _e.mock.On("List", ctx)}
+//   - queries ...database.Query
+func (_e *MockVariableRepository_Expecter) List(ctx any, queries ...any) *MockVariableRepository_List_Call {
+	return &MockVariableRepository_List_Call{Call: _e.mock.On("List",
+		append([]any{ctx}, queries...)...)}
 }
 
-func (_c *MockVariableRepository_List_Call) Run(run func(ctx context.Context)) *MockVariableRepository_List_Call {
+func (_c *MockVariableRepository_List_Call) Run(run func(ctx context.Context, queries ...database.Query)) *MockVariableRepository_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
+		var arg1 []database.Query
+		var variadicArgs []database.Query
+		if len(args) > 1 {
+			variadicArgs = args[1].([]database.Query)
+		}
+		arg1 = variadicArgs
 		run(
 			arg0,
+			arg1...,
 		)
 	})
 	return _c
@@ -1603,7 +1633,7 @@ func (_c *MockVariableRepository_List_Call) Return(variables []database.Variable
 	return _c
 }
 
-func (_c *MockVariableRepository_List_Call) RunAndReturn(run func(ctx context.Context) ([]database.Variable, error)) *MockVariableRepository_List_Call {
+func (_c *MockVariableRepository_List_Call) RunAndReturn(run func(ctx context.Context, queries ...database.Query) ([]database.Variable, error)) *MockVariableRepository_List_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1977,8 +2007,14 @@ func (_c *MockVolumeRepository_Insert_Call) RunAndReturn(run func(ctx context.Co
 }
 
 // List provides a mock function for the type MockVolumeRepository
-func (_mock *MockVolumeRepository) List(ctx context.Context) ([]database.Volume, error) {
-	ret := _mock.Called(ctx)
+func (_mock *MockVolumeRepository) List(ctx context.Context, queries ...database.Query) ([]database.Volume, error) {
+	var tmpRet mock.Arguments
+	if len(queries) > 0 {
+		tmpRet = _mock.Called(ctx, queries)
+	} else {
+		tmpRet = _mock.Called(ctx)
+	}
+	ret := tmpRet
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -1986,18 +2022,18 @@ func (_mock *MockVolumeRepository) List(ctx context.Context) ([]database.Volume,
 
 	var r0 []database.Volume
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) ([]database.Volume, error)); ok {
-		return returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...database.Query) ([]database.Volume, error)); ok {
+		return returnFunc(ctx, queries...)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) []database.Volume); ok {
-		r0 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, ...database.Query) []database.Volume); ok {
+		r0 = returnFunc(ctx, queries...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]database.Volume)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
-		r1 = returnFunc(ctx)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, ...database.Query) error); ok {
+		r1 = returnFunc(ctx, queries...)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2011,18 +2047,27 @@ type MockVolumeRepository_List_Call struct {
 
 // List is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *MockVolumeRepository_Expecter) List(ctx any) *MockVolumeRepository_List_Call {
-	return &MockVolumeRepository_List_Call{Call: _e.mock.On("List", ctx)}
+//   - queries ...database.Query
+func (_e *MockVolumeRepository_Expecter) List(ctx any, queries ...any) *MockVolumeRepository_List_Call {
+	return &MockVolumeRepository_List_Call{Call: _e.mock.On("List",
+		append([]any{ctx}, queries...)...)}
 }
 
-func (_c *MockVolumeRepository_List_Call) Run(run func(ctx context.Context)) *MockVolumeRepository_List_Call {
+func (_c *MockVolumeRepository_List_Call) Run(run func(ctx context.Context, queries ...database.Query)) *MockVolumeRepository_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
+		var arg1 []database.Query
+		var variadicArgs []database.Query
+		if len(args) > 1 {
+			variadicArgs = args[1].([]database.Query)
+		}
+		arg1 = variadicArgs
 		run(
 			arg0,
+			arg1...,
 		)
 	})
 	return _c
@@ -2033,7 +2078,7 @@ func (_c *MockVolumeRepository_List_Call) Return(volumes []database.Volume, err 
 	return _c
 }
 
-func (_c *MockVolumeRepository_List_Call) RunAndReturn(run func(ctx context.Context) ([]database.Volume, error)) *MockVolumeRepository_List_Call {
+func (_c *MockVolumeRepository_List_Call) RunAndReturn(run func(ctx context.Context, queries ...database.Query) ([]database.Volume, error)) *MockVolumeRepository_List_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -43,8 +43,9 @@ type (
 		Update(ctx context.Context, name string, labels map[string]string) (database.Volume, error)
 		// Get should return the volume with the given name.
 		Get(ctx context.Context, name string) (database.Volume, error)
-		// List should return every volume.
-		List(ctx context.Context) ([]database.Volume, error)
+		// List should return the volumes matching every one of the given queries,
+		// or every volume when given none.
+		List(ctx context.Context, queries ...database.Query) ([]database.Volume, error)
 		// Delete should remove the volume with the given name.
 		Delete(ctx context.Context, name string) error
 		// UsedBy should name the workloads whose specifications mount the volume
@@ -163,10 +164,24 @@ func (s *VolumeService) Get(ctx context.Context, name string) (Volume, error) {
 	return s.hydrate(stored, usedBy)
 }
 
-// List returns every volume, along with the workloads mounting each one.
-func (s *VolumeService) List(ctx context.Context) ([]Volume, error) {
-	stored, err := s.volumes.List(ctx)
+// List returns the volumes matching every one of the given queries, along with
+// the workloads mounting each one. Passing no queries returns every volume.
+//
+// Each query is a "path=value" string, where the path is a JSON path addressing
+// the volume's labels, such as "$.labels.app". Returns ErrInvalidQuery when one
+// is malformed.
+func (s *VolumeService) List(ctx context.Context, queries ...string) ([]Volume, error) {
+	parsed, err := parseQueries(queries)
 	if err != nil {
+		return nil, err
+	}
+
+	stored, err := s.volumes.List(ctx, parsed...)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidQueryPath) {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
+		}
+
 		return nil, err
 	}
 

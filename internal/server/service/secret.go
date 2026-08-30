@@ -49,8 +49,9 @@ type (
 		// Get should return the secret with the given name, including its encrypted
 		// value.
 		Get(ctx context.Context, name string) (database.Secret, error)
-		// List should return every secret, without their values.
-		List(ctx context.Context) ([]database.Secret, error)
+		// List should return the secrets matching every one of the given queries,
+		// or every secret when given none, without their values.
+		List(ctx context.Context, queries ...database.Query) ([]database.Secret, error)
 		// ListSealed should return every secret including its value and the key
 		// that sealed it.
 		ListSealed(ctx context.Context) ([]database.Secret, error)
@@ -245,11 +246,25 @@ func (s *SecretService) Get(ctx context.Context, name string) (Secret, error) {
 	return s.hydrate(ctx, stored)
 }
 
-// List returns every secret, along with the workloads referencing each one. No
-// value is part of what is returned.
-func (s *SecretService) List(ctx context.Context) ([]Secret, error) {
-	stored, err := s.secrets.List(ctx)
+// List returns the secrets matching every one of the given queries, along with
+// the workloads referencing each one. Passing no queries returns every secret.
+// No value is part of what is returned.
+//
+// Each query is a "path=value" string, where the path is a JSON path addressing
+// the secret's labels, such as "$.labels.app". Returns ErrInvalidQuery when one
+// is malformed.
+func (s *SecretService) List(ctx context.Context, queries ...string) ([]Secret, error) {
+	parsed, err := parseQueries(queries)
 	if err != nil {
+		return nil, err
+	}
+
+	stored, err := s.secrets.List(ctx, parsed...)
+	if err != nil {
+		if errors.Is(err, database.ErrInvalidQueryPath) {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
+		}
+
 		return nil, err
 	}
 
