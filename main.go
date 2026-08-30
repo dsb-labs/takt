@@ -21,6 +21,7 @@ import (
 	"github.com/dsb-labs/orca/cmd/volume"
 	"github.com/dsb-labs/orca/cmd/workload"
 	"github.com/dsb-labs/orca/internal/server/driver/exec"
+	"github.com/dsb-labs/orca/pkg/client"
 )
 
 func main() {
@@ -34,6 +35,8 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	var address string
+
 	cmd := &cobra.Command{
 		Use:          "orca",
 		Short:        "A single-node workload orchestrator",
@@ -41,7 +44,23 @@ func main() {
 		CompletionOptions: cobra.CompletionOptions{
 			DisableDefaultCmd: true,
 		},
+		// The client is built once here and carried in the command context, so
+		// no subcommand declares the server flags or builds a client of its
+		// own. The serve command gets one it never uses, which costs a URL
+		// parse and no connection.
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			c, err := client.New(address)
+			if err != nil {
+				return err
+			}
+
+			cmd.SetContext(client.NewContext(cmd.Context(), c))
+
+			return nil
+		},
 	}
+
+	cmd.PersistentFlags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 
 	if info, ok := debug.ReadBuildInfo(); ok {
 		cmd.Version = info.Main.Version

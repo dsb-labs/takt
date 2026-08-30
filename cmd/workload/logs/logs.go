@@ -14,7 +14,6 @@ import (
 
 // Command returns the "workload logs" command used to read a workload's recent output.
 func Command() *cobra.Command {
-	var address string
 	var tail int
 	var previous bool
 	var follow bool
@@ -25,10 +24,7 @@ func Command() *cobra.Command {
 		Short: "Read a workload's recent output",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			options := []client.LogOption{client.WithTail(tail)}
 			if previous {
@@ -48,7 +44,7 @@ func Command() *cobra.Command {
 				options = append(options, client.WithSince(instant))
 			}
 
-			if err = c.Logs(cmd.Context(), cmd.OutOrStdout(), args[0], options...); err != nil {
+			if err := c.Logs(cmd.Context(), cmd.OutOrStdout(), args[0], options...); err != nil {
 				// Interrupting a follow is how most of them end, so it leaves the
 				// command successful. The output already written is what the caller
 				// asked for, and they are the one who stopped it.
@@ -64,7 +60,6 @@ func Command() *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 	flags.IntVarP(&tail, "tail", "n", 100, "number of lines to read from the end of the logs")
 	flags.BoolVarP(&previous, "previous", "p", false, "read the instance that was replaced rather than the one running now")
 	flags.BoolVarP(&follow, "follow", "f", false, "keep reading output until the instance ends")

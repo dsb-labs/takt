@@ -12,7 +12,6 @@ import (
 // Command returns the "volume delete" command used to remove a volume and everything
 // stored in it.
 func Command() *cobra.Command {
-	var address string
 	var force bool
 
 	cmd := &cobra.Command{
@@ -26,17 +25,14 @@ func Command() *cobra.Command {
 			"mount that no longer resolves.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			var options []client.DeleteVolumeOption
 			if force {
 				options = append(options, client.WithForce())
 			}
 
-			if err = c.DeleteVolume(cmd.Context(), args[0], options...); err != nil {
+			if err := c.DeleteVolume(cmd.Context(), args[0], options...); err != nil {
 				return fmt.Errorf("failed to delete volume: %w", err)
 			}
 
@@ -44,9 +40,7 @@ func Command() *cobra.Command {
 		},
 	}
 
-	flags := cmd.Flags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
-	flags.BoolVarP(&force, "force", "f", false, "remove the volume even though a workload mounts it")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "remove the volume even though a workload mounts it")
 
 	return cmd
 }

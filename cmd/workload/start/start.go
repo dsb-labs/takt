@@ -11,7 +11,6 @@ import (
 
 // Command returns the "workload start" command used to resume a stopped workload.
 func Command() *cobra.Command {
-	var address string
 	var wait bool
 
 	cmd := &cobra.Command{
@@ -25,17 +24,14 @@ func Command() *cobra.Command {
 			"Pass --wait to block until the workload has left pending.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			var options []client.LifecycleOption
 			if wait {
 				options = append(options, client.WithWait())
 			}
 
-			if _, err = c.Start(cmd.Context(), args[0], options...); err != nil {
+			if _, err := c.Start(cmd.Context(), args[0], options...); err != nil {
 				return fmt.Errorf("failed to start workload: %w", err)
 			}
 
@@ -43,9 +39,7 @@ func Command() *cobra.Command {
 		},
 	}
 
-	flags := cmd.Flags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
-	flags.BoolVarP(&wait, "wait", "w", false, "block until the workload has left pending")
+	cmd.Flags().BoolVarP(&wait, "wait", "w", false, "block until the workload has left pending")
 
 	return cmd
 }

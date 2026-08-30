@@ -15,10 +15,7 @@ import (
 // Command returns the "workload apply" command used to submit a workload manifest to the
 // orca server.
 func Command() *cobra.Command {
-	var (
-		address string
-		dryRun  bool
-	)
+	var dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "apply <manifest>",
@@ -42,10 +39,7 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
@@ -68,7 +62,6 @@ func Command() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what applying the manifest would do, and apply nothing")
 
 	return cmd

@@ -12,7 +12,6 @@ import (
 
 // Command returns the "secret get" command used to read a single secret.
 func Command() *cobra.Command {
-	var address string
 
 	cmd := &cobra.Command{
 		Use:   "get <name>",
@@ -24,10 +23,7 @@ func Command() *cobra.Command {
 			"changes, so a rotation can be confirmed without the value being shown.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			secret, err := c.GetSecret(cmd.Context(), args[0])
 			if err != nil {
@@ -40,8 +36,6 @@ func Command() *cobra.Command {
 			return enc.Encode(secret)
 		},
 	}
-
-	cmd.Flags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 
 	return cmd
 }

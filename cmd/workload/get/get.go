@@ -12,17 +12,13 @@ import (
 
 // Command returns the "workload get" command used to show a single workload.
 func Command() *cobra.Command {
-	var address string
 
 	cmd := &cobra.Command{
 		Use:   "get <name>",
 		Short: "Show a single workload",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			workload, err := c.Get(cmd.Context(), args[0])
 			if err != nil {
@@ -35,8 +31,6 @@ func Command() *cobra.Command {
 			return enc.Encode(workload)
 		},
 	}
-
-	cmd.Flags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 
 	return cmd
 }

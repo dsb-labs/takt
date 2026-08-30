@@ -12,7 +12,6 @@ import (
 
 // Command returns the "variable get" command used to read a single variable.
 func Command() *cobra.Command {
-	var address string
 
 	cmd := &cobra.Command{
 		Use:   "get <name>",
@@ -23,10 +22,7 @@ func Command() *cobra.Command {
 			"variable.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			variable, err := c.GetVariable(cmd.Context(), args[0])
 			if err != nil {
@@ -39,8 +35,6 @@ func Command() *cobra.Command {
 			return enc.Encode(variable)
 		},
 	}
-
-	cmd.Flags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 
 	return cmd
 }

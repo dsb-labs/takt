@@ -22,7 +22,6 @@ type Result struct {
 
 // Command returns the "admin backup" command used to write a backup of the node.
 func Command() *cobra.Command {
-	var address string
 	var includeKeys bool
 
 	cmd := &cobra.Command{
@@ -41,10 +40,7 @@ func Command() *cobra.Command {
 			"a copy of it safe to keep somewhere a key would not be.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			// Exclusive, so a destination that is already there is refused rather
 			// than replaced. A backup is written to somewhere backups are kept, and
@@ -107,9 +103,7 @@ func Command() *cobra.Command {
 		},
 	}
 
-	flags := cmd.Flags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
-	flags.BoolVar(&includeKeys, "include-keys", false, "put the keyring in the archive, which makes it key material")
+	cmd.Flags().BoolVar(&includeKeys, "include-keys", false, "put the keyring in the archive, which makes it key material")
 
 	return cmd
 }

@@ -15,7 +15,6 @@ import (
 // Command returns the "volume create" command used to create a volume from a manifest
 // file.
 func Command() *cobra.Command {
-	var address string
 
 	cmd := &cobra.Command{
 		Use:   "create <manifest>",
@@ -37,10 +36,7 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			volume, err := c.CreateVolume(cmd.Context(), spec)
 			if err != nil {
@@ -53,8 +49,6 @@ func Command() *cobra.Command {
 			return enc.Encode(volume)
 		},
 	}
-
-	cmd.Flags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 
 	return cmd
 }

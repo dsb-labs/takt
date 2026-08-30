@@ -12,7 +12,6 @@ import (
 
 // Command returns the "volume get" command used to show a single volume.
 func Command() *cobra.Command {
-	var address string
 
 	cmd := &cobra.Command{
 		Use:   "get <name>",
@@ -22,10 +21,7 @@ func Command() *cobra.Command {
 			"workloads currently mounting it.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			volume, err := c.GetVolume(cmd.Context(), args[0])
 			if err != nil {
@@ -38,8 +34,6 @@ func Command() *cobra.Command {
 			return enc.Encode(volume)
 		},
 	}
-
-	cmd.Flags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 
 	return cmd
 }

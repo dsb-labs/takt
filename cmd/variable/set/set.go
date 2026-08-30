@@ -21,7 +21,6 @@ const maxValue = 1 << 20
 
 // Command returns the "variable set" command used to store a variable's value.
 func Command() *cobra.Command {
-	var address string
 	var file string
 	var labels map[string]string
 
@@ -54,10 +53,7 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			variable, _, err := c.SetVariable(cmd.Context(), args[0], value, labels)
 			if err != nil {
@@ -72,7 +68,6 @@ func Command() *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 	flags.StringVarP(&file, "from-file", "f", "", "read the value from this file rather than the argument or standard input")
 	flags.StringToStringVarP(&labels, "label", "l", nil,
 		"a key=value label to attach, repeatable. The labels given replace the ones stored")

@@ -13,7 +13,6 @@ import (
 // Command returns the "workload list" command used to list the workloads known to the orca
 // server.
 func Command() *cobra.Command {
-	var address string
 	var queries []string
 
 	cmd := &cobra.Command{
@@ -32,10 +31,7 @@ func Command() *cobra.Command {
 			"written that way.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			workloads, err := c.List(cmd.Context(), queries...)
 			if err != nil {
@@ -49,9 +45,7 @@ func Command() *cobra.Command {
 		},
 	}
 
-	flags := cmd.Flags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
-	flags.StringArrayVarP(&queries, "query", "q", nil, "filter by a path=value query into the specification, repeatable")
+	cmd.Flags().StringArrayVarP(&queries, "query", "q", nil, "filter by a path=value query into the specification, repeatable")
 
 	return cmd
 }

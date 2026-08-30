@@ -12,7 +12,6 @@ import (
 // Command returns the "workload delete" command used to remove a workload and stop
 // everything running for it.
 func Command() *cobra.Command {
-	var address string
 	var wait bool
 	var force bool
 
@@ -29,10 +28,7 @@ func Command() *cobra.Command {
 			"redeployed and report the reference they can no longer resolve.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			var options []client.LifecycleOption
 			if wait {
@@ -42,7 +38,7 @@ func Command() *cobra.Command {
 				options = append(options, client.WithForceDeleteWorkload())
 			}
 
-			if _, err = c.Delete(cmd.Context(), args[0], options...); err != nil {
+			if _, err := c.Delete(cmd.Context(), args[0], options...); err != nil {
 				return fmt.Errorf("failed to delete workload: %w", err)
 			}
 
@@ -51,7 +47,6 @@ func Command() *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 	flags.BoolVarP(&wait, "wait", "w", false, "block until the workload has finished terminating")
 	flags.BoolVarP(&force, "force", "f", false, "delete the workload even though another references it")
 

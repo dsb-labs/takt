@@ -16,7 +16,6 @@ import (
 // Command returns the "dev loadtest" command used to drive a server through a
 // scenario.
 func Command() *cobra.Command {
-	var address string
 	var dataDir string
 	var prefix string
 	var keep bool
@@ -51,10 +50,7 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			report, err := loadtest.Run(cmd.Context(), loadtest.Config{
 				Scenario: scenario,
@@ -86,7 +82,6 @@ func Command() *cobra.Command {
 	}
 
 	flags := cmd.Flags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 	flags.StringVar(&dataDir, "data-dir", "", "the server's data directory, to also report what a run left on disk")
 	flags.StringVar(&prefix, "prefix", defaultPrefix(), "what every name the run creates begins with")
 	flags.BoolVar(&keep, "keep", false, "leave the fleet in place instead of removing it")

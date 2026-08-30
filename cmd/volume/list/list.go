@@ -13,7 +13,6 @@ import (
 // Command returns the "volume list" command used to list the volumes the orca server
 // holds.
 func Command() *cobra.Command {
-	var address string
 	var queries []string
 
 	cmd := &cobra.Command{
@@ -30,10 +29,7 @@ func Command() *cobra.Command {
 			"  orca volume list -q '$.labels.app=web' -q '$.labels.env=prod'",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			volumes, err := c.ListVolumes(cmd.Context(), queries...)
 			if err != nil {
@@ -47,9 +43,7 @@ func Command() *cobra.Command {
 		},
 	}
 
-	flags := cmd.Flags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
-	flags.StringArrayVarP(&queries, "query", "q", nil, "filter by a path=value query into the labels, repeatable")
+	cmd.Flags().StringArrayVarP(&queries, "query", "q", nil, "filter by a path=value query into the labels, repeatable")
 
 	return cmd
 }

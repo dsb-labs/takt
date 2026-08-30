@@ -13,7 +13,6 @@ import (
 // Command returns the "admin rekey" command used to re-encrypt every secret under a
 // new key.
 func Command() *cobra.Command {
-	var address string
 
 	cmd := &cobra.Command{
 		Use:   "rekey",
@@ -30,10 +29,7 @@ func Command() *cobra.Command {
 			"it still opens the backups taken before now.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			rekey, err := c.Rekey(cmd.Context())
 			if err != nil {
@@ -52,8 +48,6 @@ func Command() *cobra.Command {
 			return enc.Encode(rekey)
 		},
 	}
-
-	cmd.Flags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
 
 	return cmd
 }

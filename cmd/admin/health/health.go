@@ -13,7 +13,6 @@ import (
 
 // Command returns the "admin health" command used to check that a server is alive.
 func Command() *cobra.Command {
-	var address string
 	var wait time.Duration
 
 	cmd := &cobra.Command{
@@ -28,13 +27,10 @@ func Command() *cobra.Command {
 			"when the next step needs it listening.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := client.New(address)
-			if err != nil {
-				return err
-			}
+			c := client.FromContext(cmd.Context())
 
 			if wait <= 0 {
-				if err = c.Health(cmd.Context()); err != nil {
+				if err := c.Health(cmd.Context()); err != nil {
 					return fmt.Errorf("server is not healthy: %w", err)
 				}
 
@@ -48,7 +44,7 @@ func Command() *cobra.Command {
 				// Asked with the bounded context, so a server that accepts the
 				// connection and never answers cannot hold the command past its
 				// deadline.
-				err = c.Health(ctx)
+				err := c.Health(ctx)
 				if err == nil {
 					return nil
 				}
@@ -69,9 +65,7 @@ func Command() *cobra.Command {
 		},
 	}
 
-	flags := cmd.Flags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
-	flags.DurationVar(&wait, "wait", 0, "how long to wait for the server to become healthy, rather than asking once")
+	cmd.Flags().DurationVar(&wait, "wait", 0, "how long to wait for the server to become healthy, rather than asking once")
 
 	return cmd
 }
