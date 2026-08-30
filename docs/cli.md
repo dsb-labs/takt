@@ -369,9 +369,8 @@ Prints every volume: where its data is on the host, and which workloads mount it
 volume nothing mounts is one that can be deleted without forcing.
 
 Each query is a JSON path into the volume's labels and the value it must hold, with
-the syntax `workload list` accepts. A volume has to match every query given. Only
-the labels are addressable, since they are the whole of what a volume carries that a
-query could reach.
+the syntax `workload list` accepts. A volume has to match every query given. A query
+can reach only the labels.
 
 ## volume get
 
@@ -459,8 +458,8 @@ anywhere else. This is how you find out what exists in order to reference it fro
 manifest.
 
 Each query is a JSON path into the secret's labels and the value it must hold, with
-the syntax `workload list` accepts. A secret has to match every query given. Only
-the labels are addressable, so a query cannot be aimed at what a secret holds.
+the syntax `workload list` accepts. A secret has to match every query given. A query
+can reach only the labels, so it cannot probe what a secret holds.
 
 ## secret get
 
@@ -532,8 +531,8 @@ unlike `secret list`, since reviewing what a fleet is configured with is the rea
 choose a variable.
 
 Each query is a JSON path into the variable's labels and the value it must hold, with
-the syntax `workload list` accepts. A variable has to match every query given. Only
-the labels are addressable — the values are for reading, not filtering.
+the syntax `workload list` accepts. A variable has to match every query given. A
+query can reach only the labels, not the values the list reports.
 
 ## variable get
 

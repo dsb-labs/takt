@@ -173,9 +173,9 @@ rather than by loading every workload and discarding most of them. Storing JSONB
 means a malformed specification is rejected as it is written rather than when something
 later tries to read it.
 
-The volume, secret and variable lists filter with the same query syntax. Those
-resources store no specification, so their queries address the labels alone, under
-the same `$.labels` root a workload query uses.
+The volume, secret and variable lists accept the same query syntax. Those resources
+store no specification, so a query reaches the labels alone, under the same
+`$.labels` root a workload query uses.
 
 ## Volumes have a lifetime of their own
 
