@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -341,7 +342,6 @@ func Run(ctx context.Context, config Config) error {
 		IdleTimeout:       2 * time.Minute,
 	}
 
-	serve := server.ListenAndServe
 	if config.HTTP.TLSEnabled() {
 		// Loaded here rather than at the first handshake, so a pair the server
 		// cannot present stops it from starting instead of failing every
@@ -359,7 +359,18 @@ func Run(ctx context.Context, config Config) error {
 			GetCertificate: loader.GetCertificate,
 			MinVersion:     tls.VersionTLS12,
 		}
-		serve = func() error { return server.ListenAndServeTLS("", "") }
+	}
+
+	// Opened here rather than by Serve, so readiness is signalled only once
+	// the address is bound.
+	listener, err := net.Listen("tcp", config.HTTP.Address)
+	if err != nil {
+		return fmt.Errorf("failed to listen on %s: %w", config.HTTP.Address, err)
+	}
+
+	serve := func() error { return server.Serve(listener) }
+	if config.HTTP.TLSEnabled() {
+		serve = func() error { return server.ServeTLS(listener, "", "") }
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
@@ -382,6 +393,10 @@ func Run(ctx context.Context, config Config) error {
 
 		logger.Debug("shutting down http server")
 
+		if err := notify("STOPPING=1"); err != nil {
+			logger.With("error", err).Warn("failed to signal stopping to the service manager")
+		}
+
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
@@ -389,6 +404,10 @@ func Run(ctx context.Context, config Config) error {
 	})
 
 	logger.With("address", config.HTTP.Address, "tls", config.HTTP.TLSEnabled()).Info("orca server listening")
+
+	if err = notify("READY=1"); err != nil {
+		logger.With("error", err).Warn("failed to signal readiness to the service manager")
+	}
 
 	err = g.Wait()
 	if errors.Is(err, http.ErrServerClosed) {
@@ -422,6 +441,34 @@ func newLogger(config LoggingConfig, extra slog.Handler) *slog.Logger {
 	}
 
 	return slog.New(handler)
+}
+
+// notify sends the given state to the service manager listening on the socket
+// named by NOTIFY_SOCKET, following the sd_notify(3) protocol. Outside a
+// service manager the variable is empty and notify does nothing.
+func notify(state string) error {
+	socket := os.Getenv("NOTIFY_SOCKET")
+	if socket == "" {
+		return nil
+	}
+
+	// A socket in the abstract namespace is named with a leading '@' in the
+	// variable and a leading NUL byte on the wire.
+	if strings.HasPrefix(socket, "@") {
+		socket = "\x00" + socket[1:]
+	}
+
+	conn, err := net.Dial("unixgram", socket)
+	if err != nil {
+		return fmt.Errorf("failed to dial the notify socket: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err = conn.Write([]byte(state)); err != nil {
+		return fmt.Errorf("failed to write to the notify socket: %w", err)
+	}
+
+	return nil
 }
 
 // currentKey returns the identifier of the key secrets are sealed under, generating
