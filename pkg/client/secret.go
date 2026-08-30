@@ -122,8 +122,8 @@ func (c *Client) GetSecret(ctx context.Context, name string) (Secret, error) {
 // of them when none are given, without their values.
 //
 // A query is a "path=value" filter over the secret's labels, where the path is a
-// JSON path such as "$.labels.app". Only the labels are addressable, so a query
-// cannot be aimed at what a secret holds.
+// JSON path such as "$.labels.app". A query can reach only the labels, so it
+// cannot probe what a secret holds.
 func (c *Client) ListSecrets(ctx context.Context, queries ...string) ([]Secret, error) {
 	var params api.ListSecretsParams
 	if len(queries) > 0 {

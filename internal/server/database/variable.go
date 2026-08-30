@@ -144,7 +144,7 @@ func (r *VariableRepository) Get(ctx context.Context, name string) (Variable, er
 // List returns the variables matching every one of the given queries, ordered by
 // name so that the result is stable. Passing no queries returns every variable.
 //
-// A query's path addresses the variable's labels under $.labels, the same way a
+// A query's path reaches the variable's labels under $.labels, the same way a
 // workload query does. Returns ErrInvalidQueryPath when a query names a path
 // SQLite cannot parse.
 //

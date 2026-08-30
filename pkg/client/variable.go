@@ -119,7 +119,7 @@ func (c *Client) GetVariable(ctx context.Context, name string) (Variable, error)
 // all of them when none are given, with their values.
 //
 // A query is a "path=value" filter over the variable's labels, where the path is
-// a JSON path such as "$.labels.app". Only the labels are addressable.
+// a JSON path such as "$.labels.app". A query can reach only the labels.
 func (c *Client) ListVariables(ctx context.Context, queries ...string) ([]Variable, error) {
 	var params api.ListVariablesParams
 	if len(queries) > 0 {

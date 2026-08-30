@@ -173,8 +173,8 @@ func (s *VariableService) Get(ctx context.Context, name string) (Variable, error
 // with the workloads referencing each one. Passing no queries returns every
 // variable.
 //
-// Each query is a "path=value" string, where the path is a JSON path addressing
-// the variable's labels, such as "$.labels.app". Returns ErrInvalidQuery when
+// Each query is a "path=value" string, where the path is a JSON path into the
+// variable's labels, such as "$.labels.app". Returns ErrInvalidQuery when
 // one is malformed.
 func (s *VariableService) List(ctx context.Context, queries ...string) ([]Variable, error) {
 	parsed, err := parseQueries(queries)

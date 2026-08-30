@@ -146,7 +146,7 @@ func (r *VolumeRepository) Update(ctx context.Context, name string, labels map[s
 // List returns the volumes matching every one of the given queries, ordered by
 // name so that the result is stable. Passing no queries returns every volume.
 //
-// A query's path addresses the volume's labels under $.labels, the same way a
+// A query's path reaches the volume's labels under $.labels, the same way a
 // workload query does. Filtering happens in the database rather than in the
 // caller, so a query that matches little doesn't cost a read of everything it
 // discards. Returns ErrInvalidQueryPath when a query names a path SQLite cannot

@@ -169,9 +169,9 @@ func (r *SecretRepository) Get(ctx context.Context, name string) (Secret, error)
 // List returns the secrets matching every one of the given queries, ordered by
 // name so that the result is stable. Passing no queries returns every secret.
 //
-// A query's path addresses the secret's labels under $.labels, the same way a
-// workload query does. The filtering never sees a value: only the labels are
-// queryable, so a query cannot be used to probe what a secret holds. Returns
+// A query's path reaches the secret's labels under $.labels, the same way a
+// workload query does. The filter never sees a value. A query can reach only
+// the labels, so it cannot probe what a secret holds. Returns
 // ErrInvalidQueryPath when a query names a path SQLite cannot parse.
 //
 // The values are left behind. Listing secrets is how an operator finds out what

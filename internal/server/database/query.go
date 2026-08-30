@@ -17,11 +17,11 @@ type (
 	// The Query type matches rows whose stored JSON has the given value at the
 	// given path.
 	//
-	// The path is a SQLite JSON path. For a workload it addresses the whole stored
-	// specification, so a query can reach anything the specification holds —
-	// including labels, which live under $.labels. A volume, secret or variable
-	// stores only labels, and its queries address them under the same $.labels
-	// root, so one path syntax works across every resource.
+	// The path is a SQLite JSON path. For a workload it is a path into the whole
+	// stored specification, so a query can reach anything the specification holds
+	// — including labels, which live under $.labels. A volume, secret or variable
+	// stores only labels, and its queries reach them under the same $.labels
+	// root. One path syntax then works across every resource.
 	Query struct {
 		// The JSON path into the resource, such as "$.labels.app".
 		Path string
@@ -32,7 +32,7 @@ type (
 
 // labelSource is the JSON source expression for resources whose only queryable
 // JSON is their labels column. Wrapping the column under a "labels" key is what
-// keeps the workload's $.labels.app path addressing labels here too.
+// lets the workload's $.labels.app path reach the labels here too.
 const labelSource = `json_object('labels', json(labels))`
 
 // filter builds the WHERE clause matching every query against the JSON the

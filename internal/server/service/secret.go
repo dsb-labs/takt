@@ -250,8 +250,8 @@ func (s *SecretService) Get(ctx context.Context, name string) (Secret, error) {
 // the workloads referencing each one. Passing no queries returns every secret.
 // No value is part of what is returned.
 //
-// Each query is a "path=value" string, where the path is a JSON path addressing
-// the secret's labels, such as "$.labels.app". Returns ErrInvalidQuery when one
+// Each query is a "path=value" string, where the path is a JSON path into the
+// secret's labels, such as "$.labels.app". Returns ErrInvalidQuery when one
 // is malformed.
 func (s *SecretService) List(ctx context.Context, queries ...string) ([]Secret, error) {
 	parsed, err := parseQueries(queries)

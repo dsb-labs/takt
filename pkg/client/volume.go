@@ -136,7 +136,7 @@ func (c *Client) GetVolume(ctx context.Context, name string) (Volume, error) {
 // of them when none are given.
 //
 // A query is a "path=value" filter over the volume's labels, where the path is a
-// JSON path such as "$.labels.app". Only the labels are addressable.
+// JSON path such as "$.labels.app". A query can reach only the labels.
 func (c *Client) ListVolumes(ctx context.Context, queries ...string) ([]Volume, error) {
 	var params api.ListVolumesParams
 	if len(queries) > 0 {

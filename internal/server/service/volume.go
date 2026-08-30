@@ -167,8 +167,8 @@ func (s *VolumeService) Get(ctx context.Context, name string) (Volume, error) {
 // List returns the volumes matching every one of the given queries, along with
 // the workloads mounting each one. Passing no queries returns every volume.
 //
-// Each query is a "path=value" string, where the path is a JSON path addressing
-// the volume's labels, such as "$.labels.app". Returns ErrInvalidQuery when one
+// Each query is a "path=value" string, where the path is a JSON path into the
+// volume's labels, such as "$.labels.app". Returns ErrInvalidQuery when one
 // is malformed.
 func (s *VolumeService) List(ctx context.Context, queries ...string) ([]Volume, error) {
 	parsed, err := parseQueries(queries)

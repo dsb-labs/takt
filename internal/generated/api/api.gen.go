@@ -1570,8 +1570,8 @@ type GetBackupParams struct {
 type ListSecretsParams struct {
 	// Query A `path=value` filter over the secret's labels, where the path is a
 	// JSON path such as `$.labels.app`. May be repeated, in which case a
-	// secret must match all of them. Only the labels are addressable, so a
-	// query cannot be aimed at what a secret holds.
+	// secret must match all of them. A query can reach only the labels, so
+	// it cannot probe what a secret holds.
 	Query *[]string `form:"query,omitempty" json:"query,omitempty"`
 }
 
@@ -1587,7 +1587,7 @@ type DeleteSecretParams struct {
 type ListVariablesParams struct {
 	// Query A `path=value` filter over the variable's labels, where the path is a
 	// JSON path such as `$.labels.app`. May be repeated, in which case a
-	// variable must match all of them. Only the labels are addressable.
+	// variable must match all of them. A query can reach only the labels.
 	Query *[]string `form:"query,omitempty" json:"query,omitempty"`
 }
 
@@ -1603,7 +1603,7 @@ type DeleteVariableParams struct {
 type ListVolumesParams struct {
 	// Query A `path=value` filter over the volume's labels, where the path is a
 	// JSON path such as `$.labels.app`. May be repeated, in which case a
-	// volume must match all of them. Only the labels are addressable.
+	// volume must match all of them. A query can reach only the labels.
 	Query *[]string `form:"query,omitempty" json:"query,omitempty"`
 }
 
