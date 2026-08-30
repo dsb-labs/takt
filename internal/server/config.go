@@ -54,6 +54,13 @@ type (
 		// asks for is checked rather than assumed to be orca's own. Set this to the
 		// name a reverse proxy in front of orca serves.
 		Hosts []string `toml:"hosts"`
+		// The PEM certificate file the server presents when it serves TLS. Set
+		// together with tls-key, or not at all. The pair is reread when this
+		// file changes, so a renewal does not need a restart.
+		TLSCert string `toml:"tls-cert"`
+		// The PEM private key for tls-cert. The file must be readable only by
+		// the user running the server.
+		TLSKey string `toml:"tls-key"`
 	}
 
 	// The DataConfig type contains configuration for the server's on-disk state.
@@ -319,9 +326,27 @@ func (c *Config) Validate() error {
 	)
 }
 
+// TLSEnabled reports whether the server terminates TLS itself.
+func (c HTTPConfig) TLSEnabled() bool {
+	return c.TLSCert != ""
+}
+
 func (c HTTPConfig) validate() error {
-	if c.Address == "" {
+	switch {
+	case c.Address == "":
 		return errors.New("http address is required")
+	// One path without the other is a mistake, and half a pair caught here is a
+	// clearer failure than a server that cannot present a certificate.
+	case (c.TLSCert == "") != (c.TLSKey == ""):
+		return errors.New("http tls-cert and tls-key must be set together")
+	// Absolute for the same reason as the docker config file: the server's
+	// working directory is nowhere an operator meant to keep key material.
+	// Whether the files exist is deliberately not checked, because everything
+	// that validates a configuration does not need them present.
+	case c.TLSCert != "" && !filepath.IsAbs(c.TLSCert):
+		return fmt.Errorf("http tls-cert must be absolute, got %q", c.TLSCert)
+	case c.TLSKey != "" && !filepath.IsAbs(c.TLSKey):
+		return fmt.Errorf("http tls-key must be absolute, got %q", c.TLSKey)
 	}
 
 	return nil
