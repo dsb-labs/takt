@@ -8,8 +8,8 @@ backup rather than a downgrade.
 ## The procedure
 
 1. Stop the server.
-2. Replace the binary with the new one. For the container image, pull the new tag
-   and recreate orca's container instead.
+2. Replace the binary with the new one. For a package install, install the new
+   package — your `/etc/orca/config.toml` is kept.
 3. Start the server.
 
 Workloads keep running through all three steps. A container keeps running when the

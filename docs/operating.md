@@ -120,6 +120,65 @@ containers reaching each other as well as stopping the network reaching them. Se
 An `exec` workload is not covered either way. The process binds its own port, so what
 it listens on is decided by the command rather than by orca.
 
+## Running under systemd
+
+Each release publishes a `.deb` and an `.rpm` package. A package installs:
+
+- the `orca` binary, at `/usr/bin/orca`.
+- a systemd unit, `orca.service`.
+- a sysusers entry that creates the `orca` system user.
+- `/etc/orca/config.toml`, which an upgrade never overwrites.
+
+The unit runs `orca serve /etc/orca/config.toml` as the `orca` user, with the data
+directory at `/var/lib/orca`. systemd creates that directory, owned by the `orca`
+user and readable only by it, which is the mode [State on disk](#state-on-disk)
+requires.
+
+Installing the package does not enable or start the service. The server cannot start
+until it can reach the Docker socket, and granting that access is yours to decide
+rather than a default:
+
+```sh
+usermod -aG docker orca
+systemctl enable --now orca
+```
+
+Membership of the `docker` group is root-equivalent. Anything in it can run a
+privileged container, so the grant above hands the `orca` user the host. That is
+what running orca means — see [Exposure](#exposure) — but it should happen because
+you typed it, not because a package script did.
+
+Three of the unit's settings carry behaviour documented elsewhere:
+
+- `Type=notify`. The server tells systemd it is ready when its listener is bound,
+  so `Restart=on-failure` and unit ordering track the server actually serving.
+- `KillMode=process`. Stopping the unit signals the server alone, so workloads
+  survive a restart. The default mode kills every process in the unit's cgroup.
+  See [Restarting the server](#restarting-the-server).
+- `Delegate=yes` with `DelegateSubgroup=main`, which is what makes `exec` resource
+  limits enforceable. See [Delegation](#delegation).
+
+The unit also confines the server. `ProtectSystem=strict` makes the filesystem
+read-only outside `/var/lib/orca`, `ProtectHome=yes` hides home directories, and
+`NoNewPrivileges=yes` stops privilege escalation. An `exec` workload inherits these
+restrictions, and they compose with [Confinement](#confinement): the system
+directories a workload may read stay readable, and everything it may write sits
+under `/var/lib/orca`. One consequence is worth knowing — under
+`NoNewPrivileges=yes` a workload cannot run a setuid binary.
+
+The optional `CAP_DAC_OVERRIDE` grant from
+[Deleting a volume a container wrote](#deleting-a-volume-a-container-wrote) still
+works under these settings. Put it in a drop-in with `systemctl edit orca` rather
+than editing the unit the package installed.
+
+### Not in a container
+
+orca runs on the host, and the release deliberately publishes no container image.
+The `exec` runtime starts processes on the machine orca runs on, so inside a
+container those workloads would run inside it too. Volumes and mounted values break
+more quietly: the Docker daemon resolves a bind mount against the host filesystem,
+and orca would write them somewhere the daemon cannot see.
+
 ## State on disk
 
 Everything orca keeps lives under the data directory, `~/.local/share/orca` by
