@@ -65,20 +65,3 @@ release:
 
 changelog:
   use: github
-
-dockers_v2:
-  - id: orca
-    images:
-      - "ghcr.io/dsb-labs/orca"
-    tags:
-      - "{{ .Tag }}"
-      - "v{{ .Major }}.{{ .Minor }}"
-      - "latest"
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    ids:
-      - orca
-    extra_files:
-      - LICENSE.md
-      - README.md
