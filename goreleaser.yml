@@ -26,6 +26,36 @@ archives:
     formats:
       - zip
 
+nfpms:
+  - id: orca
+    ids:
+      - orca
+    formats:
+      - deb
+      - rpm
+    file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    vendor: dsb-labs
+    homepage: https://github.com/dsb-labs/orca
+    maintainer: David Bond <david@dsb.dev>
+    description: |-
+      Single-node workload orchestrator.
+      orca runs container and exec workloads on one host, reconciling them
+      against applied manifests. Exec workloads require Linux 6.2 or later.
+    license: MIT
+    bindir: /usr/bin
+    contents:
+      - src: packaging/orca.service
+        dst: /usr/lib/systemd/system/orca.service
+      - src: packaging/sysusers.conf
+        dst: /usr/lib/sysusers.d/orca.conf
+      - src: packaging/config.toml
+        dst: /etc/orca/config.toml
+        type: config|noreplace
+      - src: LICENSE.md
+        dst: /usr/share/doc/orca/LICENSE.md
+    scripts:
+      postinstall: packaging/postinstall.sh
+
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
   algorithm: sha256
