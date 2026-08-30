@@ -357,10 +357,21 @@ no specification hash moves.
 
 ```sh
 orca volume list
+orca volume list -q '$.labels.app=web'
+orca volume list -q '$.labels.app=web' -q '$.labels.env=prod'
 ```
+
+| Flag | Description |
+|---|---|
+| `--query`, `-q` | A `path=value` filter into the labels. Repeatable. |
 
 Prints every volume: where its data is on the host, and which workloads mount it. A
 volume nothing mounts is one that can be deleted without forcing.
+
+Each query is a JSON path into the volume's labels and the value it must hold, with
+the syntax `workload list` accepts. A volume has to match every query given. Only
+the labels are addressable, since they are the whole of what a volume carries that a
+query could reach.
 
 ## volume get
 
@@ -436,11 +447,20 @@ did change replaces those workloads, and reaches them as they start.
 
 ```sh
 orca secret list
+orca secret list -q '$.labels.app=web'
 ```
+
+| Flag | Description |
+|---|---|
+| `--query`, `-q` | A `path=value` filter into the labels. Repeatable. |
 
 Prints every secret: its revision, and which workloads read it. No value, here or
 anywhere else. This is how you find out what exists in order to reference it from a
 manifest.
+
+Each query is a JSON path into the secret's labels and the value it must hold, with
+the syntax `workload list` accepts. A secret has to match every query given. Only
+the labels are addressable, so a query cannot be aimed at what a secret holds.
 
 ## secret get
 
@@ -500,11 +520,20 @@ did change replaces those workloads, and reaches them as they start.
 
 ```sh
 orca variable list
+orca variable list -q '$.labels.app=web'
 ```
+
+| Flag | Description |
+|---|---|
+| `--query`, `-q` | A `path=value` filter into the labels. Repeatable. |
 
 Prints every variable: its value, and which workloads read it. The values are shown,
 unlike `secret list`, since reviewing what a fleet is configured with is the reason to
 choose a variable.
+
+Each query is a JSON path into the variable's labels and the value it must hold, with
+the syntax `workload list` accepts. A variable has to match every query given. Only
+the labels are addressable — the values are for reading, not filtering.
 
 ## variable get
 
