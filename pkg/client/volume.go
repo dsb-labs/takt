@@ -132,9 +132,18 @@ func (c *Client) GetVolume(ctx context.Context, name string) (Volume, error) {
 	}
 }
 
-// ListVolumes returns every volume the server holds.
-func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
-	resp, err := c.api.ListVolumesWithResponse(ctx)
+// ListVolumes returns the volumes matching every one of the given queries, or all
+// of them when none are given.
+//
+// A query is a "path=value" filter over the volume's labels, where the path is a
+// JSON path such as "$.labels.app". Only the labels are addressable.
+func (c *Client) ListVolumes(ctx context.Context, queries ...string) ([]Volume, error) {
+	var params api.ListVolumesParams
+	if len(queries) > 0 {
+		params.Query = &queries
+	}
+
+	resp, err := c.api.ListVolumesWithResponse(ctx, &params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send the request: %w", err)
 	}
@@ -147,6 +156,8 @@ func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
 		}
 
 		return volumes, nil
+	case resp.JSON400 != nil:
+		return nil, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON500 != nil:
 		return nil, newError(http.StatusInternalServerError, resp.JSON500)
 	default:

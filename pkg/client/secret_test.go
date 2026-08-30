@@ -151,6 +151,26 @@ func TestClient_ListSecrets(t *testing.T) {
 		require.NoError(t, err)
 		assert.Empty(t, secrets)
 	})
+
+	t.Run("sends queries as repeated parameters", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, []string{"$.labels.app=web", "$.labels.env=prod"}, r.URL.Query()["query"])
+
+			writeJSON(t, w, http.StatusOK, api.ListSecretsResult{})
+		})
+
+		_, err := c.ListSecrets(t.Context(), "$.labels.app=web", "$.labels.env=prod")
+		require.NoError(t, err)
+	})
+
+	t.Run("reports a malformed query", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusBadRequest, api.ErrorResponse{Error: "invalid query"})
+		})
+
+		_, err := c.ListSecrets(t.Context(), "nonsense")
+		assert.True(t, client.IsBadRequest(err))
+	})
 }
 
 func TestClient_DeleteSecret(t *testing.T) {

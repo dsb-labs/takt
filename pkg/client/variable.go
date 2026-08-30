@@ -115,9 +115,18 @@ func (c *Client) GetVariable(ctx context.Context, name string) (Variable, error)
 	}
 }
 
-// ListVariables returns every variable the server holds, with their values.
-func (c *Client) ListVariables(ctx context.Context) ([]Variable, error) {
-	resp, err := c.api.ListVariablesWithResponse(ctx)
+// ListVariables returns the variables matching every one of the given queries, or
+// all of them when none are given, with their values.
+//
+// A query is a "path=value" filter over the variable's labels, where the path is
+// a JSON path such as "$.labels.app". Only the labels are addressable.
+func (c *Client) ListVariables(ctx context.Context, queries ...string) ([]Variable, error) {
+	var params api.ListVariablesParams
+	if len(queries) > 0 {
+		params.Query = &queries
+	}
+
+	resp, err := c.api.ListVariablesWithResponse(ctx, &params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send the request: %w", err)
 	}
@@ -130,6 +139,8 @@ func (c *Client) ListVariables(ctx context.Context) ([]Variable, error) {
 		}
 
 		return variables, nil
+	case resp.JSON400 != nil:
+		return nil, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON500 != nil:
 		return nil, newError(http.StatusInternalServerError, resp.JSON500)
 	default:

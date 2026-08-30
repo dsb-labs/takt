@@ -1566,6 +1566,15 @@ type GetBackupParams struct {
 	IncludeKeys *bool `form:"includeKeys,omitempty" json:"includeKeys,omitempty"`
 }
 
+// ListSecretsParams defines parameters for ListSecrets.
+type ListSecretsParams struct {
+	// Query A `path=value` filter over the secret's labels, where the path is a
+	// JSON path such as `$.labels.app`. May be repeated, in which case a
+	// secret must match all of them. Only the labels are addressable, so a
+	// query cannot be aimed at what a secret holds.
+	Query *[]string `form:"query,omitempty" json:"query,omitempty"`
+}
+
 // DeleteSecretParams defines parameters for DeleteSecret.
 type DeleteSecretParams struct {
 	// Force Remove the secret even though a workload reads it. Those workloads keep
@@ -1574,12 +1583,28 @@ type DeleteSecretParams struct {
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
 }
 
+// ListVariablesParams defines parameters for ListVariables.
+type ListVariablesParams struct {
+	// Query A `path=value` filter over the variable's labels, where the path is a
+	// JSON path such as `$.labels.app`. May be repeated, in which case a
+	// variable must match all of them. Only the labels are addressable.
+	Query *[]string `form:"query,omitempty" json:"query,omitempty"`
+}
+
 // DeleteVariableParams defines parameters for DeleteVariable.
 type DeleteVariableParams struct {
 	// Force Remove the variable even though a workload reads it. Those workloads keep
 	// running until something replaces them, and then fail to start until the
 	// variable exists again.
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+}
+
+// ListVolumesParams defines parameters for ListVolumes.
+type ListVolumesParams struct {
+	// Query A `path=value` filter over the volume's labels, where the path is a
+	// JSON path such as `$.labels.app`. May be repeated, in which case a
+	// volume must match all of them. Only the labels are addressable.
+	Query *[]string `form:"query,omitempty" json:"query,omitempty"`
 }
 
 // DeleteVolumeParams defines parameters for DeleteVolume.
@@ -1845,8 +1870,11 @@ type ClientInterface interface {
 	// No value is returned, here or anywhere else. This is how an operator finds
 	// out what exists in order to reference it from a manifest.
 	//
+	// Repeating the `query` parameter narrows the result: a secret is returned
+	// only when it satisfies every query given.
+	//
 	// Corresponds with GET /api/v1/secrets (the `ListSecrets` operationId).
-	ListSecrets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListSecrets(ctx context.Context, params *ListSecretsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteSecret Delete a secret
 	//
@@ -1919,8 +1947,11 @@ type ClientInterface interface {
 	// what a fleet is configured with is the reason to choose a variable over a
 	// secret, so a listing that withheld them would defeat the point.
 	//
+	// Repeating the `query` parameter narrows the result: a variable is returned
+	// only when it satisfies every query given.
+	//
 	// Corresponds with GET /api/v1/variables (the `ListVariables` operationId).
-	ListVariables(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListVariables(ctx context.Context, params *ListVariablesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteVariable Delete a variable
 	//
@@ -1986,8 +2017,11 @@ type ClientInterface interface {
 	// Returns the volumes the server holds, each with the workloads currently
 	// mounting it.
 	//
+	// Repeating the `query` parameter narrows the result: a volume is returned
+	// only when it satisfies every query given.
+	//
 	// Corresponds with GET /api/v1/volumes (the `ListVolumes` operationId).
-	ListVolumes(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ListVolumes(ctx context.Context, params *ListVolumesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateVolumeWithBody Create a volume
 	//
@@ -2490,9 +2524,12 @@ func (c *Client) Rekey(ctx context.Context, body RekeyJSONRequestBody, reqEditor
 // No value is returned, here or anywhere else. This is how an operator finds
 // out what exists in order to reference it from a manifest.
 //
+// Repeating the `query` parameter narrows the result: a secret is returned
+// only when it satisfies every query given.
+//
 // Corresponds with GET /api/v1/secrets (the `ListSecrets` operationId).
-func (c *Client) ListSecrets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListSecretsRequest(c.Server)
+func (c *Client) ListSecrets(ctx context.Context, params *ListSecretsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListSecretsRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2614,9 +2651,12 @@ func (c *Client) SetSecret(ctx context.Context, name SecretName, body SetSecretJ
 // what a fleet is configured with is the reason to choose a variable over a
 // secret, so a listing that withheld them would defeat the point.
 //
+// Repeating the `query` parameter narrows the result: a variable is returned
+// only when it satisfies every query given.
+//
 // Corresponds with GET /api/v1/variables (the `ListVariables` operationId).
-func (c *Client) ListVariables(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListVariablesRequest(c.Server)
+func (c *Client) ListVariables(ctx context.Context, params *ListVariablesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListVariablesRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2731,9 +2771,12 @@ func (c *Client) SetVariable(ctx context.Context, name VariableName, body SetVar
 // Returns the volumes the server holds, each with the workloads currently
 // mounting it.
 //
+// Repeating the `query` parameter narrows the result: a volume is returned
+// only when it satisfies every query given.
+//
 // Corresponds with GET /api/v1/volumes (the `ListVolumes` operationId).
-func (c *Client) ListVolumes(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListVolumesRequest(c.Server)
+func (c *Client) ListVolumes(ctx context.Context, params *ListVolumesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListVolumesRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -3445,7 +3488,7 @@ func NewRekeyRequestWithBody(server string, contentType string, body io.Reader) 
 }
 
 // NewListSecretsRequest constructs an http.Request for the ListSecrets method
-func NewListSecretsRequest(server string) (*http.Request, error) {
+func NewListSecretsRequest(server string, params *ListSecretsParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -3461,6 +3504,33 @@ func NewListSecretsRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Query != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "query", *params.Query, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -3614,7 +3684,7 @@ func NewSetSecretRequestWithBody(server string, name SecretName, contentType str
 }
 
 // NewListVariablesRequest constructs an http.Request for the ListVariables method
-func NewListVariablesRequest(server string) (*http.Request, error) {
+func NewListVariablesRequest(server string, params *ListVariablesParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -3630,6 +3700,33 @@ func NewListVariablesRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Query != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "query", *params.Query, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -3783,7 +3880,7 @@ func NewSetVariableRequestWithBody(server string, name VariableName, contentType
 }
 
 // NewListVolumesRequest constructs an http.Request for the ListVolumes method
-func NewListVolumesRequest(server string) (*http.Request, error) {
+func NewListVolumesRequest(server string, params *ListVolumesParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -3799,6 +3896,33 @@ func NewListVolumesRequest(server string) (*http.Request, error) {
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Query != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "query", *params.Query, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
@@ -4693,10 +4817,13 @@ type ClientWithResponsesInterface interface {
 	// No value is returned, here or anywhere else. This is how an operator finds
 	// out what exists in order to reference it from a manifest.
 	//
+	// Repeating the `query` parameter narrows the result: a secret is returned
+	// only when it satisfies every query given.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/v1/secrets (the `ListSecrets` operationId).
-	ListSecretsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListSecretsResponse, error)
+	ListSecretsWithResponse(ctx context.Context, params *ListSecretsParams, reqEditors ...RequestEditorFn) (*ListSecretsResponse, error)
 
 	// DeleteSecretWithResponse Delete a secret
 	//
@@ -4773,10 +4900,13 @@ type ClientWithResponsesInterface interface {
 	// what a fleet is configured with is the reason to choose a variable over a
 	// secret, so a listing that withheld them would defeat the point.
 	//
+	// Repeating the `query` parameter narrows the result: a variable is returned
+	// only when it satisfies every query given.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/v1/variables (the `ListVariables` operationId).
-	ListVariablesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVariablesResponse, error)
+	ListVariablesWithResponse(ctx context.Context, params *ListVariablesParams, reqEditors ...RequestEditorFn) (*ListVariablesResponse, error)
 
 	// DeleteVariableWithResponse Delete a variable
 	//
@@ -4846,10 +4976,13 @@ type ClientWithResponsesInterface interface {
 	// Returns the volumes the server holds, each with the workloads currently
 	// mounting it.
 	//
+	// Repeating the `query` parameter narrows the result: a volume is returned
+	// only when it satisfies every query given.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/v1/volumes (the `ListVolumes` operationId).
-	ListVolumesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVolumesResponse, error)
+	ListVolumesWithResponse(ctx context.Context, params *ListVolumesParams, reqEditors ...RequestEditorFn) (*ListVolumesResponse, error)
 
 	// CreateVolumeWithBodyWithResponse Create a volume
 	//
@@ -5340,6 +5473,8 @@ type ListSecretsResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *ListSecretsResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 }
@@ -5347,6 +5482,11 @@ type ListSecretsResponse struct {
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r ListSecretsResponse) GetJSON200() *ListSecretsResult {
 	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListSecretsResponse) GetJSON400() *BadRequest {
+	return r.JSON400
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -5567,6 +5707,8 @@ type ListVariablesResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *ListVariablesResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 }
@@ -5574,6 +5716,11 @@ type ListVariablesResponse struct {
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r ListVariablesResponse) GetJSON200() *ListVariablesResult {
 	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListVariablesResponse) GetJSON400() *BadRequest {
+	return r.JSON400
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -5794,6 +5941,8 @@ type ListVolumesResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *ListVolumesResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 }
@@ -5801,6 +5950,11 @@ type ListVolumesResponse struct {
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r ListVolumesResponse) GetJSON200() *ListVolumesResult {
 	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListVolumesResponse) GetJSON400() *BadRequest {
+	return r.JSON400
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -6901,11 +7055,14 @@ func (c *ClientWithResponses) RekeyWithResponse(ctx context.Context, body RekeyJ
 // No value is returned, here or anywhere else. This is how an operator finds
 // out what exists in order to reference it from a manifest.
 //
+// Repeating the `query` parameter narrows the result: a secret is returned
+// only when it satisfies every query given.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/v1/secrets (the `ListSecrets` operationId).
-func (c *ClientWithResponses) ListSecretsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListSecretsResponse, error) {
-	rsp, err := c.ListSecrets(ctx, reqEditors...)
+func (c *ClientWithResponses) ListSecretsWithResponse(ctx context.Context, params *ListSecretsParams, reqEditors ...RequestEditorFn) (*ListSecretsResponse, error) {
+	rsp, err := c.ListSecrets(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -7011,11 +7168,14 @@ func (c *ClientWithResponses) SetSecretWithResponse(ctx context.Context, name Se
 // what a fleet is configured with is the reason to choose a variable over a
 // secret, so a listing that withheld them would defeat the point.
 //
+// Repeating the `query` parameter narrows the result: a variable is returned
+// only when it satisfies every query given.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/v1/variables (the `ListVariables` operationId).
-func (c *ClientWithResponses) ListVariablesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVariablesResponse, error) {
-	rsp, err := c.ListVariables(ctx, reqEditors...)
+func (c *ClientWithResponses) ListVariablesWithResponse(ctx context.Context, params *ListVariablesParams, reqEditors ...RequestEditorFn) (*ListVariablesResponse, error) {
+	rsp, err := c.ListVariables(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -7114,11 +7274,14 @@ func (c *ClientWithResponses) SetVariableWithResponse(ctx context.Context, name 
 // Returns the volumes the server holds, each with the workloads currently
 // mounting it.
 //
+// Repeating the `query` parameter narrows the result: a volume is returned
+// only when it satisfies every query given.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/v1/volumes (the `ListVolumes` operationId).
-func (c *ClientWithResponses) ListVolumesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListVolumesResponse, error) {
-	rsp, err := c.ListVolumes(ctx, reqEditors...)
+func (c *ClientWithResponses) ListVolumesWithResponse(ctx context.Context, params *ListVolumesParams, reqEditors ...RequestEditorFn) (*ListVolumesResponse, error) {
+	rsp, err := c.ListVolumes(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -7737,6 +7900,13 @@ func ParseListSecretsResponse(rsp *http.Response) (*ListSecretsResponse, error) 
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -7904,6 +8074,13 @@ func ParseListVariablesResponse(rsp *http.Response) (*ListVariablesResponse, err
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -8070,6 +8247,13 @@ func ParseListVolumesResponse(rsp *http.Response) (*ListVolumesResponse, error) 
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -8803,7 +8987,7 @@ type ServerInterface interface {
 	Rekey(w http.ResponseWriter, r *http.Request)
 	// ListSecrets List secrets
 	// (GET /api/v1/secrets)
-	ListSecrets(w http.ResponseWriter, r *http.Request)
+	ListSecrets(w http.ResponseWriter, r *http.Request, params ListSecretsParams)
 	// DeleteSecret Delete a secret
 	// (DELETE /api/v1/secrets/{name})
 	DeleteSecret(w http.ResponseWriter, r *http.Request, name SecretName, params DeleteSecretParams)
@@ -8815,7 +8999,7 @@ type ServerInterface interface {
 	SetSecret(w http.ResponseWriter, r *http.Request, name SecretName)
 	// ListVariables List variables
 	// (GET /api/v1/variables)
-	ListVariables(w http.ResponseWriter, r *http.Request)
+	ListVariables(w http.ResponseWriter, r *http.Request, params ListVariablesParams)
 	// DeleteVariable Delete a variable
 	// (DELETE /api/v1/variables/{name})
 	DeleteVariable(w http.ResponseWriter, r *http.Request, name VariableName, params DeleteVariableParams)
@@ -8827,7 +9011,7 @@ type ServerInterface interface {
 	SetVariable(w http.ResponseWriter, r *http.Request, name VariableName)
 	// ListVolumes List volumes
 	// (GET /api/v1/volumes)
-	ListVolumes(w http.ResponseWriter, r *http.Request)
+	ListVolumes(w http.ResponseWriter, r *http.Request, params ListVolumesParams)
 	// CreateVolume Create a volume
 	// (POST /api/v1/volumes)
 	CreateVolume(w http.ResponseWriter, r *http.Request)
@@ -8937,8 +9121,27 @@ func (siw *ServerInterfaceWrapper) Rekey(w http.ResponseWriter, r *http.Request)
 // ListSecrets operation middleware
 func (siw *ServerInterfaceWrapper) ListSecrets(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSecretsParams
+
+	// ------------- Optional query parameter "query" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", r.URL.Query(), &params.Query, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "query"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "query", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListSecrets(w, r)
+		siw.Handler.ListSecrets(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9045,8 +9248,27 @@ func (siw *ServerInterfaceWrapper) SetSecret(w http.ResponseWriter, r *http.Requ
 // ListVariables operation middleware
 func (siw *ServerInterfaceWrapper) ListVariables(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListVariablesParams
+
+	// ------------- Optional query parameter "query" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", r.URL.Query(), &params.Query, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "query"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "query", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListVariables(w, r)
+		siw.Handler.ListVariables(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9153,8 +9375,27 @@ func (siw *ServerInterfaceWrapper) SetVariable(w http.ResponseWriter, r *http.Re
 // ListVolumes operation middleware
 func (siw *ServerInterfaceWrapper) ListVolumes(w http.ResponseWriter, r *http.Request) {
 
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListVolumesParams
+
+	// ------------- Optional query parameter "query" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", r.URL.Query(), &params.Query, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "query"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "query", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ListVolumes(w, r)
+		siw.Handler.ListVolumes(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9866,6 +10107,7 @@ func (response Rekey500JSONResponse) VisitRekeyResponse(w http.ResponseWriter) e
 }
 
 type ListSecretsRequestObject struct {
+	Params ListSecretsParams
 }
 
 type ListSecretsResponseObject interface {
@@ -9882,6 +10124,20 @@ func (response ListSecrets200JSONResponse) VisitListSecretsResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListSecrets400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListSecrets400JSONResponse) VisitListSecretsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -10089,6 +10345,7 @@ func (response SetSecret500JSONResponse) VisitSetSecretResponse(w http.ResponseW
 }
 
 type ListVariablesRequestObject struct {
+	Params ListVariablesParams
 }
 
 type ListVariablesResponseObject interface {
@@ -10105,6 +10362,20 @@ func (response ListVariables200JSONResponse) VisitListVariablesResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVariables400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListVariables400JSONResponse) VisitListVariablesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -10312,6 +10583,7 @@ func (response SetVariable500JSONResponse) VisitSetVariableResponse(w http.Respo
 }
 
 type ListVolumesRequestObject struct {
+	Params ListVolumesParams
 }
 
 type ListVolumesResponseObject interface {
@@ -10328,6 +10600,20 @@ func (response ListVolumes200JSONResponse) VisitListVolumesResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListVolumes400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListVolumes400JSONResponse) VisitListVolumesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -11530,8 +11816,10 @@ func (sh *strictHandler) Rekey(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListSecrets operation middleware
-func (sh *strictHandler) ListSecrets(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) ListSecrets(w http.ResponseWriter, r *http.Request, params ListSecretsParams) {
 	var request ListSecretsRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListSecrets(ctx, request.(ListSecretsRequestObject))
@@ -11640,8 +11928,10 @@ func (sh *strictHandler) SetSecret(w http.ResponseWriter, r *http.Request, name 
 }
 
 // ListVariables operation middleware
-func (sh *strictHandler) ListVariables(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) ListVariables(w http.ResponseWriter, r *http.Request, params ListVariablesParams) {
 	var request ListVariablesRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListVariables(ctx, request.(ListVariablesRequestObject))
@@ -11750,8 +12040,10 @@ func (sh *strictHandler) SetVariable(w http.ResponseWriter, r *http.Request, nam
 }
 
 // ListVolumes operation middleware
-func (sh *strictHandler) ListVolumes(w http.ResponseWriter, r *http.Request) {
+func (sh *strictHandler) ListVolumes(w http.ResponseWriter, r *http.Request, params ListVolumesParams) {
 	var request ListVolumesRequestObject
+
+	request.Params = params
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.ListVolumes(ctx, request.(ListVolumesRequestObject))

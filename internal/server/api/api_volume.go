@@ -144,10 +144,21 @@ func (a *VolumeAPI) GetVolume(ctx context.Context, request api.GetVolumeRequestO
 	return api.GetVolume200JSONResponse{Volume: newVolume(volume)}, nil
 }
 
-// ListVolumes returns every volume the server holds.
-func (a *VolumeAPI) ListVolumes(ctx context.Context, _ api.ListVolumesRequestObject) (api.ListVolumesResponseObject, error) {
-	volumes, err := a.volumes.List(ctx)
-	if err != nil {
+// ListVolumes returns the volumes matching the request's queries, or every
+// volume when it carries none.
+func (a *VolumeAPI) ListVolumes(ctx context.Context, request api.ListVolumesRequestObject) (api.ListVolumesResponseObject, error) {
+	var queries []string
+	if request.Params.Query != nil {
+		queries = *request.Params.Query
+	}
+
+	volumes, err := a.volumes.List(ctx, queries...)
+	switch {
+	case errors.Is(err, service.ErrInvalidQuery):
+		return api.ListVolumes400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+		}, nil
+	case err != nil:
 		return api.ListVolumes500JSONResponse{
 			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
 				Error: a.internalError("list volumes", err),

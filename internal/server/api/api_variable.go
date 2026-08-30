@@ -117,10 +117,21 @@ func (a *VariableAPI) GetVariable(ctx context.Context, request api.GetVariableRe
 	return api.GetVariable200JSONResponse{Variable: newVariable(variable)}, nil
 }
 
-// ListVariables returns every variable the server holds.
-func (a *VariableAPI) ListVariables(ctx context.Context, _ api.ListVariablesRequestObject) (api.ListVariablesResponseObject, error) {
-	variables, err := a.variables.List(ctx)
-	if err != nil {
+// ListVariables returns the variables matching the request's queries, or every
+// variable when it carries none.
+func (a *VariableAPI) ListVariables(ctx context.Context, request api.ListVariablesRequestObject) (api.ListVariablesResponseObject, error) {
+	var queries []string
+	if request.Params.Query != nil {
+		queries = *request.Params.Query
+	}
+
+	variables, err := a.variables.List(ctx, queries...)
+	switch {
+	case errors.Is(err, service.ErrInvalidQuery):
+		return api.ListVariables400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+		}, nil
+	case err != nil:
 		return api.ListVariables500JSONResponse{
 			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
 				Error: a.internalError("list variables", err),

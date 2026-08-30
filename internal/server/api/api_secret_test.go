@@ -194,6 +194,33 @@ func TestSecretAPI_ListSecrets(t *testing.T) {
 	})
 }
 
+func TestSecretAPI_ListSecrets_Query(t *testing.T) {
+	t.Parallel()
+
+	t.Run("passes queries through", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewMockSecretService(t)
+		svc.EXPECT().List(mock.Anything, []string{"$.labels.app=web", "$.labels.env=prod"}).
+			Return(nil, nil).Once()
+
+		resp := doSecret(t, svc, http.MethodGet,
+			"/api/v1/secrets?query=%24.labels.app%3Dweb&query=%24.labels.env%3Dprod", nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("reports a malformed query", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewMockSecretService(t)
+		svc.EXPECT().List(mock.Anything, mock.Anything).
+			Return(nil, service.ErrInvalidQuery).Once()
+
+		resp := doSecret(t, svc, http.MethodGet, "/api/v1/secrets?query=nonsense", nil)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
 func TestSecretAPI_DeleteSecret(t *testing.T) {
 	t.Parallel()
 

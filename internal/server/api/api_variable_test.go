@@ -220,6 +220,33 @@ func TestVariableAPI_ListVariables(t *testing.T) {
 	})
 }
 
+func TestVariableAPI_ListVariables_Query(t *testing.T) {
+	t.Parallel()
+
+	t.Run("passes queries through", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewMockVariableService(t)
+		svc.EXPECT().List(mock.Anything, []string{"$.labels.app=web", "$.labels.env=prod"}).
+			Return(nil, nil).Once()
+
+		resp := doVariable(t, svc, http.MethodGet,
+			"/api/v1/variables?query=%24.labels.app%3Dweb&query=%24.labels.env%3Dprod", nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("reports a malformed query", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewMockVariableService(t)
+		svc.EXPECT().List(mock.Anything, mock.Anything).
+			Return(nil, service.ErrInvalidQuery).Once()
+
+		resp := doVariable(t, svc, http.MethodGet, "/api/v1/variables?query=nonsense", nil)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
 func TestVariableAPI_DeleteVariable(t *testing.T) {
 	t.Parallel()
 

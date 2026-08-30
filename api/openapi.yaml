@@ -496,13 +496,31 @@ paths:
       description: |
         Returns the volumes the server holds, each with the workloads currently
         mounting it.
+
+        Repeating the `query` parameter narrows the result: a volume is returned
+        only when it satisfies every query given.
+      parameters:
+        - name: query
+          in: query
+          required: false
+          description: |
+            A `path=value` filter over the volume's labels, where the path is a
+            JSON path such as `$.labels.app`. May be repeated, in which case a
+            volume must match all of them. Only the labels are addressable.
+          schema:
+            type: array
+            items:
+              type: string
+              examples: ["$.labels.app=web"]
       responses:
         "200":
-          description: The volumes.
+          description: The matching volumes.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ListVolumesResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -658,13 +676,32 @@ paths:
 
         No value is returned, here or anywhere else. This is how an operator finds
         out what exists in order to reference it from a manifest.
+
+        Repeating the `query` parameter narrows the result: a secret is returned
+        only when it satisfies every query given.
+      parameters:
+        - name: query
+          in: query
+          required: false
+          description: |
+            A `path=value` filter over the secret's labels, where the path is a
+            JSON path such as `$.labels.app`. May be repeated, in which case a
+            secret must match all of them. Only the labels are addressable, so a
+            query cannot be aimed at what a secret holds.
+          schema:
+            type: array
+            items:
+              type: string
+              examples: ["$.labels.app=web"]
       responses:
         "200":
-          description: The secrets.
+          description: The matching secrets.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ListSecretsResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -792,13 +829,31 @@ paths:
         The values are part of the response, unlike a secret's. Being able to review
         what a fleet is configured with is the reason to choose a variable over a
         secret, so a listing that withheld them would defeat the point.
+
+        Repeating the `query` parameter narrows the result: a variable is returned
+        only when it satisfies every query given.
+      parameters:
+        - name: query
+          in: query
+          required: false
+          description: |
+            A `path=value` filter over the variable's labels, where the path is a
+            JSON path such as `$.labels.app`. May be repeated, in which case a
+            variable must match all of them. Only the labels are addressable.
+          schema:
+            type: array
+            items:
+              type: string
+              examples: ["$.labels.app=web"]
       responses:
         "200":
-          description: The variables.
+          description: The matching variables.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ListVariablesResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalServerError"
 

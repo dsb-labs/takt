@@ -120,10 +120,21 @@ func (a *SecretAPI) GetSecret(ctx context.Context, request api.GetSecretRequestO
 	return api.GetSecret200JSONResponse{Secret: newSecret(secret)}, nil
 }
 
-// ListSecrets returns every secret the server holds, without their values.
-func (a *SecretAPI) ListSecrets(ctx context.Context, _ api.ListSecretsRequestObject) (api.ListSecretsResponseObject, error) {
-	secrets, err := a.secrets.List(ctx)
-	if err != nil {
+// ListSecrets returns the secrets matching the request's queries, or every
+// secret when it carries none, without their values.
+func (a *SecretAPI) ListSecrets(ctx context.Context, request api.ListSecretsRequestObject) (api.ListSecretsResponseObject, error) {
+	var queries []string
+	if request.Params.Query != nil {
+		queries = *request.Params.Query
+	}
+
+	secrets, err := a.secrets.List(ctx, queries...)
+	switch {
+	case errors.Is(err, service.ErrInvalidQuery):
+		return api.ListSecrets400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+		}, nil
+	case err != nil:
 		return api.ListSecrets500JSONResponse{
 			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
 				Error: a.internalError("list secrets", err),
