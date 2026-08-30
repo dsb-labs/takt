@@ -1,0 +1,38 @@
+[Unit]
+Description=orca workload orchestrator
+Documentation=https://github.com/dsb-labs/orca
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=notify
+User=orca
+ExecStart=/usr/bin/orca serve /etc/orca/config.toml
+StateDirectory=orca
+StateDirectoryMode=0700
+Restart=on-failure
+
+# Exec workloads outlive the server by design. The default control-group
+# mode kills every process in the unit on stop, which takes them all down.
+KillMode=process
+
+# Resource limits on exec workloads need a delegated cgroup subtree. The
+# subgroup keeps a restart working when exec workloads survive the old
+# server. See the Delegation section of docs/operating.md.
+Delegate=yes
+DelegateSubgroup=main
+
+# These also apply to every exec workload the server starts. They compose
+# with the kernel confinement described in docs/operating.md: the system
+# directories stay readable, and the data directory stays writable.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+# Connecting to the docker socket needs a writable path, which
+# ProtectSystem=strict otherwise removes.
+ReadWritePaths=/run/docker.sock
+
+[Install]
+WantedBy=multi-user.target

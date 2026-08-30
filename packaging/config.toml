@@ -1,0 +1,7 @@
+# The orca server configuration. Every value has a default, so this file
+# only has to describe what it changes. The full set of keys is documented
+# at https://github.com/dsb-labs/orca/blob/main/docs/configuration.md.
+
+[data]
+# The systemd unit creates this directory and the orca user owns it.
+directory = "/var/lib/orca"
