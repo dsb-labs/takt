@@ -37,7 +37,9 @@ orca workload get example
 
 `get` reports the host port orca allocated, which is how the workload is reached.
 
-The server is also published as a container image at `ghcr.io/dsb-labs/orca`.
+Each release also publishes `.deb` and `.rpm` packages that install the server as
+a systemd service. See
+[Running under systemd](docs/operating.md#running-under-systemd).
 
 ## A workload
 
@@ -170,7 +172,9 @@ dependency keeps working without being re-applied.
 
 ## Requirements
 
-- Linux. The `exec:` runtime reads `/proc` to identify the processes it started.
+- Linux, on the host rather than in a container. The `exec:` runtime starts
+  processes on the machine orca runs on, and reads `/proc` to identify them. See
+  [Not in a container](docs/operating.md#not-in-a-container).
 - Linux 6.2 or later with Landlock enabled, for workloads that name `exec:`. Every
   `exec` workload is confined by the kernel, and a host that cannot do that refuses to
   run one. See [Confinement](docs/operating.md#confinement).
