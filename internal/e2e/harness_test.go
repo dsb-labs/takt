@@ -3,11 +3,18 @@ package e2e_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -62,6 +69,54 @@ type (
 // so that a later server can be started against the same desired state.
 func withDataDirectory(directory string) option {
 	return func(c *server.Config) { c.Data.Directory = directory }
+}
+
+// withTLS modifies the server to terminate TLS with a self-signed pair generated
+// for the test. The suite's client trusts the pair through the same option an
+// operator would use.
+func (s *Suite) withTLS() option {
+	cert, key := s.generateCertificate()
+
+	return func(c *server.Config) { c.HTTP.TLSCert, c.HTTP.TLSKey = cert, key }
+}
+
+// generateCertificate writes a self-signed certificate pair into a temporary
+// directory and returns the certificate path and the key path.
+func (s *Suite) generateCertificate() (string, string) {
+	private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	s.Require().NoError(err)
+
+	serial, err := rand.Int(rand.Reader, big.NewInt(1<<62))
+	s.Require().NoError(err)
+
+	template := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: "orca e2e"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		// The suite dials the address literal, so the address literal is what
+		// the certificate has to name.
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:    []string{"localhost"},
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &private.PublicKey, private)
+	s.Require().NoError(err)
+
+	keyDER, err := x509.MarshalECPrivateKey(private)
+	s.Require().NoError(err)
+
+	directory := s.T().TempDir()
+	cert, key := filepath.Join(directory, "cert.pem"), filepath.Join(directory, "key.pem")
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	s.Require().NoError(os.WriteFile(cert, certPEM, 0o600))
+	// Owner-only, because the server refuses a key anyone else can read.
+	s.Require().NoError(os.WriteFile(key, keyPEM, 0o600))
+
+	return cert, key
 }
 
 // SetupSuite checks that the daemon these tests need is actually reachable, failing
@@ -121,7 +176,15 @@ func (s *Suite) start(options ...option) {
 
 	group.Go(func() error { return server.Run(ctx, config) })
 
-	c, err := client.New("http://" + config.HTTP.Address)
+	address := "http://" + config.HTTP.Address
+
+	var clientOptions []client.Option
+	if config.HTTP.TLSEnabled() {
+		address = "https://" + config.HTTP.Address
+		clientOptions = append(clientOptions, client.WithCACertificate(config.HTTP.TLSCert))
+	}
+
+	c, err := client.New(address, clientOptions...)
 	s.Require().NoError(err)
 
 	s.client, s.cancel, s.done, s.directory = c, cancel, group, config.Data.Directory

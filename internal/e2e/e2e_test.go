@@ -1155,6 +1155,52 @@ func (s *Suite) TestFollowingAContainersOutput() {
 	}
 }
 
+// TestServingTLS covers the server terminating TLS itself: the client trusts the
+// self-signed pair through its certificate authority option, a workload goes in
+// and comes out over the encrypted connection, and a followed log read still
+// streams. The follow matters because a TLS listener negotiates HTTP/2, and a
+// stream that buffers under it would pass every other request while breaking
+// this one.
+func (s *Suite) TestServingTLS() {
+	s.restart(s.withTLS())
+
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name)
+	spec.Container.Command = []string{"sh", "-c", `i=0; while true; do i=$((i+1)); echo "line $i"; sleep 1; done`}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitInstance(name)
+
+	ctx, cancel := context.WithCancel(s.ctx())
+	s.T().Cleanup(cancel)
+
+	var out syncBuffer
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.client.Logs(ctx, &out, name, client.WithTail(1), client.WithFollow())
+	}()
+
+	// A second line can only have arrived through the followed connection, which
+	// is what proves the stream flushes over TLS.
+	s.Require().Eventuallyf(func() bool {
+		return strings.Count(out.String(), "line ") > 1
+	}, convergeTimeout, 500*time.Millisecond, "the followed output never arrived over tls")
+
+	cancel()
+
+	select {
+	case err = <-done:
+		s.Require().NoError(err)
+	case <-time.After(convergeTimeout):
+		s.Fail("the follow outlived the caller that asked for it")
+	}
+}
+
 // TestFollowingAProcessEndsWithIt covers the promise a follow makes about when it stops:
 // the read ends when the instance does, so nothing has to be cancelled to get out of it.
 //
