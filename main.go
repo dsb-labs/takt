@@ -35,7 +35,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	var address string
+	var address, caCert string
 
 	cmd := &cobra.Command{
 		Use:          "orca",
@@ -49,7 +49,12 @@ func main() {
 		// own. The serve command gets one it never uses, which costs a URL
 		// parse and no connection.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := client.New(address)
+			var options []client.Option
+			if caCert != "" {
+				options = append(options, client.WithCACertificate(caCert))
+			}
+
+			c, err := client.New(address, options...)
 			if err != nil {
 				return err
 			}
@@ -60,7 +65,9 @@ func main() {
 		},
 	}
 
-	cmd.PersistentFlags().StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
+	flags := cmd.PersistentFlags()
+	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
+	flags.StringVar(&caCert, "ca-cert", "", "path to a PEM file holding the certificate authority to check the server against")
 
 	if info, ok := debug.ReadBuildInfo(); ok {
 		cmd.Version = info.Main.Version
