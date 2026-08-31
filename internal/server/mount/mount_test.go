@@ -1,6 +1,7 @@
-package service_test
+package mount_test
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/server/mount"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
-func TestMountService_Deliver(t *testing.T) {
+func TestMounter_Deliver(t *testing.T) {
 	t.Parallel()
 
 	t.Run("writes a file for every value the workload mounts", func(t *testing.T) {
@@ -22,7 +23,7 @@ func TestMountService_Deliver(t *testing.T) {
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a certificate", nil).Once()
 		variables.EXPECT().Value(mock.Anything, "app-config").Return(`{"level":"debug"}`, nil).Once()
 
-		svc, root := newMountService(t, secrets, variables)
+		svc, root := newMounter(t, secrets, variables)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
@@ -52,7 +53,7 @@ func TestMountService_Deliver(t *testing.T) {
 		secrets := NewMockValueStore(t)
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a certificate", nil).Once()
 
-		svc, root := newMountService(t, secrets, nil)
+		svc, root := newMounter(t, secrets, nil)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
@@ -78,7 +79,7 @@ func TestMountService_Deliver(t *testing.T) {
 		secrets.EXPECT().Value(mock.Anything, "shared").Return("the secret", nil).Once()
 		variables.EXPECT().Value(mock.Anything, "shared").Return("the variable", nil).Once()
 
-		svc, _ := newMountService(t, secrets, variables)
+		svc, _ := newMounter(t, secrets, variables)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Secret: "shared", To: "/etc/secret"},
@@ -104,7 +105,7 @@ func TestMountService_Deliver(t *testing.T) {
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("first", nil).Once()
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("second", nil).Once()
 
-		svc, _ := newMountService(t, secrets, nil)
+		svc, _ := newMounter(t, secrets, nil)
 		spec := mountSpec(manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"})
 
 		first, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
@@ -125,7 +126,7 @@ func TestMountService_Deliver(t *testing.T) {
 	})
 
 	t.Run("ignores a mounted volume", func(t *testing.T) {
-		svc, root := newMountService(t, nil, nil)
+		svc, root := newMounter(t, nil, nil)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Name: "example-data", To: "/var/lib/example", From: "/somewhere"},
@@ -143,7 +144,7 @@ func TestMountService_Deliver(t *testing.T) {
 		secrets.EXPECT().Value(mock.Anything, "nope").
 			Return("", database.ErrSecretNotFound).Once()
 
-		svc, _ := newMountService(t, secrets, nil)
+		svc, _ := newMounter(t, secrets, nil)
 
 		// Writing an empty file would hand the workload a value orca does not hold,
 		// which it would then use.
@@ -154,7 +155,7 @@ func TestMountService_Deliver(t *testing.T) {
 	})
 
 	t.Run("refuses a value on a server holding no store of that kind", func(t *testing.T) {
-		svc, _ := newMountService(t, nil, nil)
+		svc, _ := newMounter(t, nil, nil)
 
 		_, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
@@ -163,7 +164,7 @@ func TestMountService_Deliver(t *testing.T) {
 	})
 
 	t.Run("refuses an identifier it cannot use as a directory", func(t *testing.T) {
-		svc, _ := newMountService(t, NewMockValueStore(t), nil)
+		svc, _ := newMounter(t, NewMockValueStore(t), nil)
 
 		// A service that removes directories should not build a path from a value it has
 		// not looked at.
@@ -171,12 +172,12 @@ func TestMountService_Deliver(t *testing.T) {
 			_, err := svc.Deliver(t.Context(), id, 1, mountSpec(
 				manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
 			))
-			assert.ErrorIs(t, err, service.ErrInvalidMount, "accepted the identifier %q", id)
+			assert.ErrorIs(t, err, mount.ErrInvalidMount, "accepted the identifier %q", id)
 		}
 	})
 }
 
-func TestMountService_Refresh(t *testing.T) {
+func TestMounter_Refresh(t *testing.T) {
 	t.Parallel()
 
 	signalled := func() manifest.Spec {
@@ -192,7 +193,7 @@ func TestMountService_Refresh(t *testing.T) {
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("first", nil).Once()
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("second", nil).Once()
 
-		svc, _ := newMountService(t, secrets, nil)
+		svc, _ := newMounter(t, secrets, nil)
 		spec := signalled()
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
@@ -219,7 +220,7 @@ func TestMountService_Refresh(t *testing.T) {
 		secrets := NewMockValueStore(t)
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("unchanged", nil).Twice()
 
-		svc, _ := newMountService(t, secrets, nil)
+		svc, _ := newMounter(t, secrets, nil)
 		spec := signalled()
 
 		_, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
@@ -236,7 +237,7 @@ func TestMountService_Refresh(t *testing.T) {
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("first", nil).Once()
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("second", nil).Once()
 
-		svc, _ := newMountService(t, secrets, nil)
+		svc, _ := newMounter(t, secrets, nil)
 		spec := signalled()
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
@@ -257,7 +258,7 @@ func TestMountService_Refresh(t *testing.T) {
 		secrets := NewMockValueStore(t)
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("first", nil).Once()
 
-		svc, _ := newMountService(t, secrets, nil)
+		svc, _ := newMounter(t, secrets, nil)
 		spec := mountSpec(manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"})
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
@@ -277,7 +278,7 @@ func TestMountService_Refresh(t *testing.T) {
 	})
 
 	t.Run("reports nothing for a version that was never delivered", func(t *testing.T) {
-		svc, _ := newMountService(t, NewMockValueStore(t), nil)
+		svc, _ := newMounter(t, NewMockValueStore(t), nil)
 
 		// The workload has not started yet, so there is no file of ours to rewrite and
 		// nothing to compare against. Delivery writes both.
@@ -287,7 +288,7 @@ func TestMountService_Refresh(t *testing.T) {
 	})
 
 	t.Run("reports nothing for a workload that mounts no value", func(t *testing.T) {
-		svc, _ := newMountService(t, nil, nil)
+		svc, _ := newMounter(t, nil, nil)
 
 		refreshed, err := svc.Refresh(t.Context(), "example", testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Name: "example-data", To: "/var/lib/example"},
@@ -297,7 +298,7 @@ func TestMountService_Refresh(t *testing.T) {
 	})
 }
 
-func TestMountService_Reclaim(t *testing.T) {
+func TestMounter_Reclaim(t *testing.T) {
 	t.Parallel()
 
 	// The leak this exists to stop. Every rotation of a mounted secret left the
@@ -307,7 +308,7 @@ func TestMountService_Reclaim(t *testing.T) {
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("the first certificate", nil).Once()
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("the second certificate", nil).Once()
 
-		svc, _ := newMountService(t, secrets, nil)
+		svc, _ := newMounter(t, secrets, nil)
 
 		spec := mountSpec(manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"})
 
@@ -341,7 +342,7 @@ func TestMountService_Reclaim(t *testing.T) {
 		secrets := NewMockValueStore(t)
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a certificate", nil).Twice()
 
-		svc, root := newMountService(t, secrets, nil)
+		svc, root := newMounter(t, secrets, nil)
 
 		spec := mountSpec(manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"})
 
@@ -368,7 +369,7 @@ func TestMountService_Reclaim(t *testing.T) {
 		secrets := NewMockValueStore(t)
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a certificate", nil).Once()
 
-		svc, _ := newMountService(t, secrets, nil)
+		svc, _ := newMounter(t, secrets, nil)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
@@ -380,7 +381,7 @@ func TestMountService_Reclaim(t *testing.T) {
 	})
 
 	t.Run("accepts a workload it never wrote for", func(t *testing.T) {
-		svc, _ := newMountService(t, nil, nil)
+		svc, _ := newMounter(t, nil, nil)
 
 		// A workload that mounts nothing has no versions to sweep, which is not a
 		// failure: the reconciler calls this after every start.
@@ -388,20 +389,20 @@ func TestMountService_Reclaim(t *testing.T) {
 	})
 
 	t.Run("refuses an identifier it cannot use as a directory", func(t *testing.T) {
-		svc, _ := newMountService(t, nil, nil)
+		svc, _ := newMounter(t, nil, nil)
 
-		assert.ErrorIs(t, svc.Reclaim("../escape", 1), service.ErrInvalidMount)
+		assert.ErrorIs(t, svc.Reclaim("../escape", 1), mount.ErrInvalidMount)
 	})
 }
 
-func TestMountService_Forget(t *testing.T) {
+func TestMounter_Forget(t *testing.T) {
 	t.Parallel()
 
 	t.Run("removes what it wrote for the workload", func(t *testing.T) {
 		secrets := NewMockValueStore(t)
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a certificate", nil).Once()
 
-		svc, _ := newMountService(t, secrets, nil)
+		svc, _ := newMounter(t, secrets, nil)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
@@ -417,29 +418,29 @@ func TestMountService_Forget(t *testing.T) {
 	})
 
 	t.Run("accepts a workload it never wrote for", func(t *testing.T) {
-		svc, _ := newMountService(t, nil, nil)
+		svc, _ := newMounter(t, nil, nil)
 
 		// The workload mounted nothing, so there is nothing to remove.
 		assert.NoError(t, svc.Forget(testVolumeID))
 	})
 
 	t.Run("refuses an identifier it cannot use as a directory", func(t *testing.T) {
-		svc, _ := newMountService(t, nil, nil)
+		svc, _ := newMounter(t, nil, nil)
 
 		for _, id := range []string{"", "..", "../escape", "with/separator"} {
-			assert.ErrorIs(t, svc.Forget(id), service.ErrInvalidMount, "accepted the identifier %q", id)
+			assert.ErrorIs(t, svc.Forget(id), mount.ErrInvalidMount, "accepted the identifier %q", id)
 		}
 	})
 }
 
-func TestMountService_Prune(t *testing.T) {
+func TestMounter_Prune(t *testing.T) {
 	t.Parallel()
 
 	t.Run("removes what it wrote for workloads that no longer exist", func(t *testing.T) {
 		secrets := NewMockValueStore(t)
 		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a certificate", nil).Twice()
 
-		svc, _ := newMountService(t, secrets, nil)
+		svc, _ := newMounter(t, secrets, nil)
 		spec := mountSpec(manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"})
 
 		kept, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
@@ -463,30 +464,32 @@ func TestMountService_Prune(t *testing.T) {
 	})
 
 	t.Run("accepts a host where nothing has been delivered", func(t *testing.T) {
-		svc, _ := newMountService(t, nil, nil)
+		svc, _ := newMounter(t, nil, nil)
 
 		assert.NoError(t, svc.Prune([]string{testVolumeID}))
 	})
 }
 
 // mountSpec returns a container specification mounting the given mounts, which is all
-// the mount service reads of one.
+// the mounter reads of one.
 func mountSpec(mounts ...manifest.VolumeMount) manifest.Spec {
-	spec := containerSpec("example", "example/example:latest")
-	spec.Volumes = mounts
-
-	return spec
+	return manifest.Spec{
+		Version:   "v1",
+		Name:      "example",
+		Container: &manifest.Container{Image: "example/example:latest"},
+		Volumes:   mounts,
+	}
 }
 
-// newMountService returns a mount service alongside the data directory it writes
+// newMounter returns a mounter alongside the data directory it writes
 // mounted values under. Either store may be nil, which is a server holding nothing of
 // that kind.
-func newMountService(t *testing.T, secrets, variables service.ValueStore) (*service.MountService, string) {
+func newMounter(t *testing.T, secrets, variables mount.ValueStore) (*mount.Mounter, string) {
 	t.Helper()
 
 	root := t.TempDir()
 
-	config := service.MountServiceConfig{
+	config := mount.Config{
 		Logger:    newTestLogger(t),
 		Directory: root,
 	}
@@ -500,5 +503,26 @@ func newMountService(t *testing.T, secrets, variables service.ValueStore) (*serv
 		config.Variables = variables
 	}
 
-	return service.NewMountService(config), root
+	return mount.New(config), root
+}
+
+// The identifiers orca assigns are xid values: twenty lowercase alphanumeric
+// characters.
+const (
+	testVolumeID  = "cvhs0dq0kqj4c9r8m1a0"
+	otherVolumeID = "cvhs0dq0kqj4c9r8m1a1"
+)
+
+func newTestLogger(t *testing.T) *slog.Logger {
+	t.Helper()
+
+	level := slog.LevelError
+	if testing.Verbose() {
+		level = slog.LevelDebug
+	}
+
+	return slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{
+		AddSource: testing.Verbose(),
+		Level:     level,
+	}))
 }

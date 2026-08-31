@@ -25,6 +25,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
 	"github.com/dsb-labs/orca/internal/server/driver/exec"
 	"github.com/dsb-labs/orca/internal/server/health"
+	"github.com/dsb-labs/orca/internal/server/mount"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
 	"github.com/dsb-labs/orca/internal/server/resolve"
@@ -192,7 +193,7 @@ func Run(ctx context.Context, config Config) error {
 	// The services rather than the repositories, because materialising a mounted value
 	// means reading the value itself — which for a secret is decryption, and lives
 	// behind the secret service.
-	mountSvc := service.NewMountService(service.MountServiceConfig{
+	mounter := mount.New(mount.Config{
 		Logger:    logger,
 		Secrets:   secretSvc,
 		Variables: variableSvc,
@@ -239,7 +240,7 @@ func Run(ctx context.Context, config Config) error {
 		}),
 		// Written as a workload starts and removed when it stops, so a mounted value's
 		// plaintext is on the disk for no longer than the workload reading it.
-		Mounts:  mountSvc,
+		Mounts:  mounter,
 		Checker: checker,
 		// A check goes to where the workload's ports are published, which is not
 		// loopback for a server told to publish somewhere specific.

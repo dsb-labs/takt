@@ -21,8 +21,8 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
 	"github.com/dsb-labs/orca/internal/server/health"
+	"github.com/dsb-labs/orca/internal/server/mount"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
-	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -2816,7 +2816,7 @@ func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
 		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
 
 		mounts.EXPECT().Refresh(mock.Anything, "example", "workload-id", 1, mock.Anything).
-			Return([]service.Refresh{{
+			Return([]mount.Refresh{{
 				Reference: manifest.Reference{Kind: manifest.KindSecret, Name: "tls-cert"},
 				Signal:    manifest.SignalHUP,
 			}}, nil)
@@ -2873,7 +2873,7 @@ func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
 		passes := newCounter()
 		d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(running, nil)
 
-		refreshed := []service.Refresh{
+		refreshed := []mount.Refresh{
 			{
 				Reference: manifest.Reference{Kind: manifest.KindSecret, Name: "tls-cert"},
 				Signal:    manifest.SignalHUP,

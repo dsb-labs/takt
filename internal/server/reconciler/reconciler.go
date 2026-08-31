@@ -27,7 +27,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
-	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/server/mount"
 	"github.com/dsb-labs/orca/internal/server/state"
 	"github.com/dsb-labs/orca/internal/server/telemetry"
 	"github.com/dsb-labs/orca/pkg/manifest"
@@ -129,7 +129,7 @@ type (
 		Deliver(ctx context.Context, id string, version int, spec manifest.Spec) ([]driver.Volume, error)
 		// Refresh should rewrite the mounted values that have changed since they were
 		// delivered, reporting the signal each affected workload asked for.
-		Refresh(ctx context.Context, name, id string, version int, spec manifest.Spec) ([]service.Refresh, error)
+		Refresh(ctx context.Context, name, id string, version int, spec manifest.Spec) ([]mount.Refresh, error)
 		// Forget should remove the files written for a workload, once nothing is
 		// running for it.
 		Forget(id string) error
@@ -1133,7 +1133,7 @@ func (r *Reconciler) refresh(ctx context.Context, row database.Workload) error {
 }
 
 // signalsOf returns the set of signals a batch of refreshed mounts asks for.
-func signalsOf(refreshed []service.Refresh) map[string]struct{} {
+func signalsOf(refreshed []mount.Refresh) map[string]struct{} {
 	signals := make(map[string]struct{}, len(refreshed))
 	for _, refresh := range refreshed {
 		signals[string(refresh.Signal)] = struct{}{}

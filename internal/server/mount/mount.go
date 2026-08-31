@@ -1,4 +1,6 @@
-package service
+// Package mount materialises the secrets and variables a workload mounts as
+// files on the host, and owns the directories holding them.
+package mount
 
 import (
 	"context"
@@ -10,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -29,7 +32,7 @@ const (
 	mountDir = "mounts"
 	// The tree holding the files workloads mount.
 	mountFileDir = "files"
-	// The tree holding what the service records about what it wrote, which no
+	// The tree holding what the mounter records about what it wrote, which no
 	// workload has a path to.
 	mountStateDir = "state"
 	// What a version's record is named, appended to the version number. The files
@@ -39,7 +42,7 @@ const (
 )
 
 type (
-	// The ValueStore interface describes how the mount service reads what one mount
+	// The ValueStore interface describes how the mounter reads what one mount
 	// names.
 	//
 	// One interface for both kinds, because reading a secret and reading a variable
@@ -52,8 +55,8 @@ type (
 		Value(ctx context.Context, name string) (string, error)
 	}
 
-	// The MountService type materialises the secrets and variables a workload mounts
-	// as files on the host, and owns the directories holding them.
+	// The Mounter type materialises the secrets and variables a workload mounts as
+	// files on the host, and owns the directories holding them.
 	//
 	// It exists because a runtime mounts a path rather than a value: there is no way
 	// to put a secret inside a container without writing it somewhere first. Keeping
@@ -63,7 +66,7 @@ type (
 	// The files are written as a workload starts and removed when it stops, so a
 	// value's plaintext exists on disk for as long as the workload reading it and no
 	// longer.
-	MountService struct {
+	Mounter struct {
 		logger    *slog.Logger
 		secrets   ValueStore
 		variables ValueStore
@@ -71,9 +74,9 @@ type (
 		state     string
 	}
 
-	// The MountServiceConfig type contains fields used to construct a MountService.
-	MountServiceConfig struct {
-		// The logger used for service events.
+	// The Config type contains fields used to construct a Mounter.
+	Config struct {
+		// The logger used for mount events.
 		Logger *slog.Logger
 		// Where the secrets a workload mounts are read from. May be nil, in which case
 		// a workload mounting a secret fails to start.
@@ -95,7 +98,7 @@ type (
 		Signal manifest.Signal
 	}
 
-	// The delivered type is what the service records about the files it wrote for one
+	// The delivered type is what the mounter records about the files it wrote for one
 	// version of a workload.
 	//
 	// Only a digest of each value is kept, never the value. The record lives beside
@@ -108,12 +111,12 @@ type (
 	}
 )
 
-// NewMountService returns a new instance of the MountService type.
-func NewMountService(config MountServiceConfig) *MountService {
+// New returns a new instance of the Mounter type.
+func New(config Config) *Mounter {
 	root := filepath.Join(config.Directory, mountDir)
 
-	return &MountService{
-		logger:    config.Logger.With("component", "service"),
+	return &Mounter{
+		logger:    config.Logger.With("component", "mount"),
 		secrets:   config.Secrets,
 		variables: config.Variables,
 		// Two trees rather than one, for the reason the exec driver has two: a
@@ -135,13 +138,13 @@ func NewMountService(config MountServiceConfig) *MountService {
 // could not read.
 // Writing an empty file instead would hand the workload a value orca does not hold,
 // which it would then use.
-func (s *MountService) Deliver(ctx context.Context, id string, version int, spec manifest.Spec) ([]driver.Volume, error) {
+func (m *Mounter) Deliver(ctx context.Context, id string, version int, spec manifest.Spec) ([]driver.Volume, error) {
 	mounts := valueMounts(spec)
 	if len(mounts) == 0 {
 		return nil, nil
 	}
 
-	dir, err := s.version(s.files, id, version)
+	dir, err := m.version(m.files, id, version)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +163,7 @@ func (s *MountService) Deliver(ctx context.Context, id string, version int, spec
 	for _, mount := range mounts {
 		reference, _ := mount.Reference()
 
-		value, err := s.value(ctx, reference)
+		value, err := m.value(ctx, reference)
 		if err != nil {
 			return nil, err
 		}
@@ -180,11 +183,11 @@ func (s *MountService) Deliver(ctx context.Context, id string, version int, spec
 		})
 	}
 
-	if err = s.record(id, version, record); err != nil {
+	if err = m.record(id, version, record); err != nil {
 		return nil, err
 	}
 
-	s.logger.With("workload", id, "version", version, "mounts", len(volumes)).Debug("mounted values delivered")
+	m.logger.With("workload", id, "version", version, "mounts", len(volumes)).Debug("mounted values delivered")
 
 	return volumes, nil
 }
@@ -200,18 +203,18 @@ func (s *MountService) Deliver(ctx context.Context, id string, version int, spec
 // so a renamed file would leave the workload reading the old contents forever — which
 // is the one failure this exists to avoid. The caller signals the workload once this
 // returns, so nothing is told to reload a file that has not been written yet.
-func (s *MountService) Refresh(ctx context.Context, name, id string, version int, spec manifest.Spec) ([]Refresh, error) {
+func (m *Mounter) Refresh(ctx context.Context, name, id string, version int, spec manifest.Spec) ([]Refresh, error) {
 	mounts := signalledMounts(spec)
 	if len(mounts) == 0 {
 		return nil, nil
 	}
 
-	dir, err := s.version(s.files, id, version)
+	dir, err := m.version(m.files, id, version)
 	if err != nil {
 		return nil, err
 	}
 
-	record, err := s.delivered(id, version)
+	record, err := m.delivered(id, version)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +231,7 @@ func (s *MountService) Refresh(ctx context.Context, name, id string, version int
 	for _, mount := range mounts {
 		reference, _ := mount.Reference()
 
-		value, err := s.value(ctx, reference)
+		value, err := m.value(ctx, reference)
 		if err != nil {
 			return nil, err
 		}
@@ -258,24 +261,24 @@ func (s *MountService) Refresh(ctx context.Context, name, id string, version int
 	// Recorded after the files are written, so a failure part-way leaves the old
 	// digests and the next pass writes again rather than reporting the change
 	// delivered when it was not.
-	if err = s.record(id, version, record); err != nil {
+	if err = m.record(id, version, record); err != nil {
 		return nil, err
 	}
 
-	s.logger.With("workload", name, "version", version, "mounts", len(refreshed)).Info("mounted values refreshed")
+	m.logger.With("workload", name, "version", version, "mounts", len(refreshed)).Info("mounted values refreshed")
 
 	return refreshed, nil
 }
 
-// Forget removes everything the service wrote for a workload, which is what takes a
+// Forget removes everything the mounter wrote for a workload, which is what takes a
 // mounted value's plaintext off the disk.
 //
 // Called once nothing is running for the workload, so the files outlive the process
-// reading them by no longer than the teardown takes. A workload the service never
+// reading them by no longer than the teardown takes. A workload the mounter never
 // wrote for is not an error: it mounted nothing, and there is nothing to remove.
-func (s *MountService) Forget(id string) error {
-	for _, tree := range []string{s.files, s.state} {
-		dir, err := s.dir(tree, id)
+func (m *Mounter) Forget(id string) error {
+	for _, tree := range []string{m.files, m.state} {
+		dir, err := m.dir(tree, id)
 		if err != nil {
 			return err
 		}
@@ -307,16 +310,16 @@ func (s *MountService) Forget(id string) error {
 // reclaims what a crash between delivering and starting left behind. A workload that
 // has delivered nothing is not an error, and neither is one already holding only the
 // version named.
-func (s *MountService) Reclaim(id string, keep int) error {
+func (m *Mounter) Reclaim(id string, keep int) error {
 	// The two trees are shaped differently, so each is swept for the names it uses:
 	// a version's files live in a directory named for the version, and its record is
 	// a file named for the version with an extension. Sweeping only the first leaves
 	// a record per replacement for as long as the workload exists.
-	if err := s.reclaim(s.files, id, keep, ""); err != nil {
+	if err := m.reclaim(m.files, id, keep, ""); err != nil {
 		return err
 	}
 
-	return s.reclaim(s.state, id, keep, stateExtension)
+	return m.reclaim(m.state, id, keep, stateExtension)
 }
 
 // reclaim removes every version a workload holds beneath tree except the one named,
@@ -324,8 +327,8 @@ func (s *MountService) Reclaim(id string, keep int) error {
 //
 // An entry that is not named that way was not written here, so it is left where it
 // is rather than removed on a guess.
-func (s *MountService) reclaim(tree, id string, keep int, suffix string) error {
-	dir, err := s.dir(tree, id)
+func (m *Mounter) reclaim(tree, id string, keep int, suffix string) error {
+	dir, err := m.dir(tree, id)
 	if err != nil {
 		return err
 	}
@@ -364,12 +367,12 @@ func (s *MountService) reclaim(tree, id string, keep int, suffix string) error {
 	return nil
 }
 
-// Prune removes what the service wrote for workloads other than those named.
+// Prune removes what the mounter wrote for workloads other than those named.
 //
 // This is how a value delivered by a server that stopped before it could tear the
 // workload down is eventually removed. Left alone, such a file would sit on the disk
 // holding a secret's plaintext for a workload that no longer exists.
-func (s *MountService) Prune(keep []string) error {
+func (m *Mounter) Prune(keep []string) error {
 	// A set rather than a scan of the slice per directory, so that a host with many
 	// workloads does not turn this into a comparison of every name against every other.
 	wanted := make(map[string]struct{}, len(keep))
@@ -377,7 +380,7 @@ func (s *MountService) Prune(keep []string) error {
 		wanted[id] = struct{}{}
 	}
 
-	for _, tree := range []string{s.files, s.state} {
+	for _, tree := range []string{m.files, m.state} {
 		entries, err := os.ReadDir(tree)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -401,7 +404,7 @@ func (s *MountService) Prune(keep []string) error {
 				return fmt.Errorf("failed to remove mount directory: %w", pathless(err))
 			}
 
-			s.logger.With("workload", entry.Name()).Debug("removed the mounted values of a workload that no longer exists")
+			m.logger.With("workload", entry.Name()).Debug("removed the mounted values of a workload that no longer exists")
 		}
 	}
 
@@ -413,8 +416,8 @@ func (s *MountService) Prune(keep []string) error {
 // Unlike the resolver's, something the store does not hold is an error rather than a
 // false: a mount names what it reads directly, so there is no expansion to report it
 // and nothing else that would.
-func (s *MountService) value(ctx context.Context, reference manifest.Reference) (string, error) {
-	store, missing := resolve.StoreFor(s.secrets, s.variables, reference.Kind)
+func (m *Mounter) value(ctx context.Context, reference manifest.Reference) (string, error) {
+	store, missing := resolve.StoreFor(m.secrets, m.variables, reference.Kind)
 
 	// A server holding no store of that kind holds nothing under the name, which is
 	// the same answer as a name nobody created.
@@ -431,8 +434,8 @@ func (s *MountService) value(ctx context.Context, reference manifest.Reference) 
 }
 
 // record writes what was delivered for one version of a workload.
-func (s *MountService) record(id string, version int, record delivered) error {
-	dir, err := s.dir(s.state, id)
+func (m *Mounter) record(id string, version int, record delivered) error {
+	dir, err := m.dir(m.state, id)
 	if err != nil {
 		return err
 	}
@@ -457,8 +460,8 @@ func (s *MountService) record(id string, version int, record delivered) error {
 
 // delivered reads what was written for one version of a workload, reporting an empty
 // record when nothing has been.
-func (s *MountService) delivered(id string, version int) (delivered, error) {
-	dir, err := s.dir(s.state, id)
+func (m *Mounter) delivered(id string, version int) (delivered, error) {
+	dir, err := m.dir(m.state, id)
 	if err != nil {
 		return delivered{}, err
 	}
@@ -482,12 +485,17 @@ func (s *MountService) delivered(id string, version int) (delivered, error) {
 	return record, nil
 }
 
+// The shape of the identifiers the database hands out — xid values: twenty
+// lowercase alphanumeric characters. The volume service holds the same rule for
+// the same reason.
+var idPattern = regexp.MustCompile(`^[0-9a-v]{20}$`)
+
 // dir returns the directory holding a workload's mounts beneath the given tree.
 //
 // The identifier is checked before it becomes a path component, for the same reason the
-// volume service checks one: a service that removes directories should not build a path
-// from a value it has not looked at.
-func (s *MountService) dir(tree, id string) (string, error) {
+// volume service checks one: a component that removes directories should not build a
+// path from a value it has not looked at.
+func (m *Mounter) dir(tree, id string) (string, error) {
 	if !idPattern.MatchString(id) {
 		return "", fmt.Errorf("%w: identifier %q is not usable as a directory", ErrInvalidMount, id)
 	}
@@ -500,8 +508,8 @@ func (s *MountService) dir(tree, id string) (string, error) {
 // Keyed by version as the exec driver's directories are, so that a replacement's files
 // do not overwrite those of the instance it is replacing while that one is still
 // reading them.
-func (s *MountService) version(tree, id string, version int) (string, error) {
-	dir, err := s.dir(tree, id)
+func (m *Mounter) version(tree, id string, version int) (string, error) {
+	dir, err := m.dir(tree, id)
 	if err != nil {
 		return "", err
 	}
@@ -549,7 +557,7 @@ func write(path, value string) error {
 
 // pathless strips the filesystem path from an error, keeping the cause.
 //
-// The service's errors reach the API, and a path inside the data directory is a
+// The mounter's errors reach the API, and a path inside the data directory is a
 // detail of the host that a caller has no business seeing. The wrap above each
 // call already names the operation, so the path adds nothing the cause does not.
 func pathless(err error) error {

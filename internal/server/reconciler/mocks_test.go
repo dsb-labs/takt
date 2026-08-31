@@ -10,7 +10,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
-	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/server/mount"
 	"github.com/dsb-labs/orca/pkg/manifest"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -1313,23 +1313,23 @@ func (_c *MockMounts_Reclaim_Call) RunAndReturn(run func(id string, keep int) er
 }
 
 // Refresh provides a mock function for the type MockMounts
-func (_mock *MockMounts) Refresh(ctx context.Context, name string, id string, version int, spec manifest.Spec) ([]service.Refresh, error) {
+func (_mock *MockMounts) Refresh(ctx context.Context, name string, id string, version int, spec manifest.Spec) ([]mount.Refresh, error) {
 	ret := _mock.Called(ctx, name, id, version, spec)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Refresh")
 	}
 
-	var r0 []service.Refresh
+	var r0 []mount.Refresh
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, manifest.Spec) ([]service.Refresh, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, manifest.Spec) ([]mount.Refresh, error)); ok {
 		return returnFunc(ctx, name, id, version, spec)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, manifest.Spec) []service.Refresh); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int, manifest.Spec) []mount.Refresh); ok {
 		r0 = returnFunc(ctx, name, id, version, spec)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]service.Refresh)
+			r0 = ret.Get(0).([]mount.Refresh)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, int, manifest.Spec) error); ok {
@@ -1388,12 +1388,12 @@ func (_c *MockMounts_Refresh_Call) Run(run func(ctx context.Context, name string
 	return _c
 }
 
-func (_c *MockMounts_Refresh_Call) Return(refreshs []service.Refresh, err error) *MockMounts_Refresh_Call {
+func (_c *MockMounts_Refresh_Call) Return(refreshs []mount.Refresh, err error) *MockMounts_Refresh_Call {
 	_c.Call.Return(refreshs, err)
 	return _c
 }
 
-func (_c *MockMounts_Refresh_Call) RunAndReturn(run func(ctx context.Context, name string, id string, version int, spec manifest.Spec) ([]service.Refresh, error)) *MockMounts_Refresh_Call {
+func (_c *MockMounts_Refresh_Call) RunAndReturn(run func(ctx context.Context, name string, id string, version int, spec manifest.Spec) ([]mount.Refresh, error)) *MockMounts_Refresh_Call {
 	_c.Call.Return(run)
 	return _c
 }

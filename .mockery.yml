@@ -5,6 +5,9 @@ packages:
   github.com/dsb-labs/orca/internal/server/driver/docker:
     config:
       all: true
+  github.com/dsb-labs/orca/internal/server/mount:
+    config:
+      all: true
   github.com/dsb-labs/orca/internal/server/resolve:
     config:
       all: true
