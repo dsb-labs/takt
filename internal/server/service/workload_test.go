@@ -2937,6 +2937,48 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 		assert.NotEqual(t, 20005, claimed[0].Host)
 	})
 
+	t.Run("moves one instance's ports without touching the specification", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Count = 2
+		spec.Ports = []manifest.Port{{To: 80, From: 20005}}
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		row := database.Workload{ID: "workload-id", Name: "example", Runtime: string(manifest.RuntimeContainer), Spec: encoded, SpecHash: "hash-one"}
+		held := []database.Port{
+			{WorkloadID: row.ID, Instance: 0, Container: 80, Host: 20005, Protocol: "tcp", Dynamic: true},
+			{WorkloadID: row.ID, Instance: 1, Container: 80, Host: 20006, Protocol: "tcp", Dynamic: true},
+		}
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+		ports.EXPECT().List(mock.Anything, row.ID).Return(held, nil).Once()
+		ports.EXPECT().Allocated(mock.Anything).Return(map[string][]int{"tcp": {20005, 20006}}, nil).Once()
+
+		// The rows alone: the specification carries only the first instance's
+		// ports, none of which moved, so nothing is upserted and nothing is
+		// redeployed.
+		var claimed []database.Port
+		ports.EXPECT().Claim(mock.Anything, row.ID, mock.Anything).
+			RunAndReturn(func(_ context.Context, _ string, p []database.Port) error {
+				claimed = p
+				return nil
+			}).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		changed, err := svc.ReallocateInstance(t.Context(), "example", 1)
+		require.NoError(t, err)
+		assert.True(t, changed)
+
+		require.Len(t, claimed, 2)
+		assert.Equal(t, 20005, claimed[0].Host, "the first instance keeps its port")
+		assert.Equal(t, 1, claimed[1].Instance)
+		assert.NotEqual(t, 20006, claimed[1].Host, "the second instance's port moves")
+	})
+
 	t.Run("rehashes the workloads referencing it", func(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 		addresses := NewMockWorkloadAddresses(t)

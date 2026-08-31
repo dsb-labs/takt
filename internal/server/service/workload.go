@@ -136,6 +136,9 @@ type (
 		// Allocated should return every host port allocated to any workload, keyed
 		// by the protocol it is allocated on.
 		Allocated(ctx context.Context) (map[string][]int, error)
+		// Claim should record the given ports as allocated to the workload with
+		// the given identifier, replacing whatever was allocated to it before.
+		Claim(ctx context.Context, workloadID string, ports []database.Port) error
 	}
 
 	// The VolumeLocator interface describes how the service finds out where a
@@ -638,7 +641,7 @@ func (s *WorkloadService) DryRun(ctx context.Context, spec manifest.Spec) (DryRu
 		return DryRun{}, err
 	}
 
-	claims, pending, err := s.claims.Preview(ctx, resolved.spec.Name, heldClaims(resolved.held), resolved.spec.Ports, 1)
+	claims, pending, err := s.claims.Preview(ctx, resolved.spec.Name, heldClaims(resolved.held), resolved.spec.Ports, resolved.spec.Count)
 	if err != nil {
 		return DryRun{}, err
 	}
@@ -712,7 +715,7 @@ func (s *WorkloadService) store(ctx context.Context, resolved resolution) (datab
 	current := heldClaims(resolved.held)
 
 	for attempt := range attempts {
-		claims, err := s.claims.Resolve(ctx, spec.Name, current, spec.Ports, 1)
+		claims, err := s.claims.Resolve(ctx, spec.Name, current, spec.Ports, spec.Count)
 		if err != nil {
 			return database.Workload{}, false, err
 		}
@@ -1062,7 +1065,7 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 
 	// The stored specification already has its host ports filled in, so the dynamic
 	// ones are cleared to ask for a fresh allocation rather than the same port back.
-	claims, err := s.claims.Resolve(ctx, name, pinned, port.Requested(spec.Ports, current), 1)
+	claims, err := s.claims.Resolve(ctx, name, pinned, port.Requested(spec.Ports, current), spec.Count)
 	if err != nil {
 		return false, err
 	}
@@ -1102,6 +1105,77 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 	// The whole point of the reallocation is that the workload's address moved, so
 	// everything reading it is now holding one that reaches nothing.
 	s.redeploy(ctx, name)
+
+	s.wake()
+
+	return true, nil
+}
+
+// ReallocateInstance abandons one instance's dynamic host ports and allocates new
+// ones, leaving every other instance's allocation and the stored specification
+// alone. Returns false when the instance holds nothing dynamic to move.
+//
+// The first instance's ports are the workload's advertised address and live in the
+// stored specification, so moving them is a specification change and takes the full
+// Reallocate path: the hash moves, every instance is replaced, and everything
+// reading the address is redeployed. A later instance's ports live only in the port
+// rows, so moving them restarts that instance and nothing else.
+func (s *WorkloadService) ReallocateInstance(ctx context.Context, name string, instance int) (bool, error) {
+	if instance == 0 {
+		return s.Reallocate(ctx, name)
+	}
+
+	row, err := s.workloads.Get(ctx, name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return false, ErrWorkloadNotFound
+	case err != nil:
+		return false, fmt.Errorf("failed to load workload: %w", err)
+	}
+
+	held, err := s.ports.List(ctx, row.ID)
+	if err != nil {
+		return false, fmt.Errorf("failed to read workload ports: %w", err)
+	}
+
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
+		return false, err
+	}
+
+	// Dropping the instance's dynamic allocations is what makes resolution pick new
+	// ports for them. Every other claim is kept, so resolution hands the other
+	// instances exactly what they hold.
+	var dynamic bool
+
+	current := heldClaims(held)
+	kept := make([]port.Claim, 0, len(current))
+
+	for _, claim := range current {
+		if claim.Dynamic && claim.Instance == instance {
+			dynamic = true
+
+			continue
+		}
+
+		kept = append(kept, claim)
+	}
+
+	if !dynamic {
+		return false, nil
+	}
+
+	claims, err := s.claims.Resolve(ctx, name, kept, port.Requested(spec.Ports, current), spec.Count)
+	if err != nil {
+		return false, err
+	}
+
+	// The rows alone. The specification carries only the first instance's ports,
+	// none of which moved, so there is no hash to recompute and nothing to
+	// redeploy.
+	if err = s.ports.Claim(ctx, row.ID, allocations(claims, row.ID)); err != nil {
+		return false, fmt.Errorf("failed to claim workload ports: %w", err)
+	}
 
 	s.wake()
 
