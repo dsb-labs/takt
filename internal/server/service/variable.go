@@ -242,13 +242,14 @@ func (s *VariableService) Delete(ctx context.Context, name string, force bool) e
 // Value returns what the named variable holds, for the resolver to substitute into a
 // workload's environment as it starts.
 //
-// Reports ErrVariableNotFound when nothing holds the name, which the resolver turns
-// into a refusal to start rather than handing the workload the reference text.
+// Reports database.ErrVariableNotFound when nothing holds the name, which the
+// resolver turns into a refusal to start rather than handing the workload the
+// reference text.
 func (s *VariableService) Value(ctx context.Context, name string) (string, error) {
 	stored, err := s.variables.Get(ctx, name)
 	switch {
 	case errors.Is(err, database.ErrVariableNotFound):
-		return "", fmt.Errorf("%w: %s", ErrVariableNotFound, name)
+		return "", err
 	case err != nil:
 		return "", fmt.Errorf("failed to load variable %s: %w", name, err)
 	}

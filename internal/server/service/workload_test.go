@@ -1285,7 +1285,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 
 		addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return("", fmt.Errorf("%w: nope", service.ErrWorkloadNotFound)).Once()
+			Return("", fmt.Errorf("%w: nope", database.ErrWorkloadNotFound)).Once()
 
 		// The workload could never run, and the operator asking for it is the one who
 		// can fix the name or apply what it names first.
@@ -1786,7 +1786,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 		repo.EXPECT().Get(mock.Anything, "api").
 			Return(database.Workload{ID: "api-id", Name: "api", Spec: consumerSpec, SpecHash: "hash-one"}, nil).Once()
 		addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return("", fmt.Errorf("%w: postgres", service.ErrWorkloadNotFound)).Once()
+			Return("", fmt.Errorf("%w: postgres", database.ErrWorkloadNotFound)).Once()
 		repo.EXPECT().ReferencedBy(mock.Anything, "api").Return(nil, nil).Maybe()
 
 		rehashed := make(chan database.Workload, 1)

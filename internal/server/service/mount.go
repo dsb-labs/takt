@@ -117,7 +117,8 @@ func NewMountService(config MountServiceConfig) *MountService {
 // and the workload always starts against what orca holds now. A workload mounting
 // nothing writes nothing and creates no directories.
 //
-// Returns ErrSecretNotFound or ErrVariableNotFound naming what it could not read.
+// Returns database.ErrSecretNotFound or database.ErrVariableNotFound naming what it
+// could not read.
 // Writing an empty file instead would hand the workload a value orca does not hold,
 // which it would then use.
 func (s *MountService) Deliver(ctx context.Context, id string, version int, spec manifest.Spec) ([]driver.Volume, error) {

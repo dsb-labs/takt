@@ -279,9 +279,9 @@ type (
 	// the address and nothing else.
 	WorkloadAddresses interface {
 		// Address should return the address the reference names as read by one
-		// instance of the referencing workload, reporting ErrWorkloadNotFound
-		// when nothing holds the name and ErrPortNotPublished when the workload
-		// publishes no such port.
+		// instance of the referencing workload, reporting
+		// database.ErrWorkloadNotFound when nothing holds the name and
+		// ErrPortNotPublished when the workload publishes no such port.
 		Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error)
 	}
 
@@ -1445,7 +1445,7 @@ func (s *WorkloadService) resolveReferences(ctx context.Context, spec manifest.S
 		// hash carries that instance's view.
 		address, err := s.addresses.Address(ctx, reference, spec.Name, 0)
 		switch {
-		case errors.Is(err, ErrWorkloadNotFound):
+		case errors.Is(err, database.ErrWorkloadNotFound):
 			resolved.unknown = append(resolved.unknown, reference.String())
 
 			continue

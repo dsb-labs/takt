@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -140,7 +141,7 @@ func TestMountService_Deliver(t *testing.T) {
 	t.Run("refuses a value the server does not hold", func(t *testing.T) {
 		secrets := NewMockValueStore(t)
 		secrets.EXPECT().Value(mock.Anything, "nope").
-			Return("", service.ErrSecretNotFound).Once()
+			Return("", database.ErrSecretNotFound).Once()
 
 		svc, _ := newMountService(t, secrets, nil)
 
@@ -149,7 +150,7 @@ func TestMountService_Deliver(t *testing.T) {
 		_, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Secret: "nope", To: "/etc/tls/cert.pem"},
 		))
-		assert.ErrorIs(t, err, service.ErrSecretNotFound)
+		assert.ErrorIs(t, err, database.ErrSecretNotFound)
 	})
 
 	t.Run("refuses a value on a server holding no store of that kind", func(t *testing.T) {
@@ -158,7 +159,7 @@ func TestMountService_Deliver(t *testing.T) {
 		_, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
 		))
-		assert.ErrorIs(t, err, service.ErrSecretNotFound)
+		assert.ErrorIs(t, err, database.ErrSecretNotFound)
 	})
 
 	t.Run("refuses an identifier it cannot use as a directory", func(t *testing.T) {

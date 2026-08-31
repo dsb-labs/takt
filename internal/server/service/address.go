@@ -96,13 +96,13 @@ func NewAddressService(config AddressServiceConfig) *AddressService {
 // A workload publishing none is reachable at no address, so a reference to one could
 // never mean anything.
 //
-// Returns ErrWorkloadNotFound when nothing holds the name, or ErrPortNotPublished
-// when the workload holds it but publishes no such port.
+// Returns database.ErrWorkloadNotFound when nothing holds the name, or
+// ErrPortNotPublished when the workload holds it but publishes no such port.
 func (s *AddressService) Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error) {
 	row, err := s.workloads.Get(ctx, reference.Name)
 	switch {
 	case errors.Is(err, database.ErrWorkloadNotFound):
-		return "", fmt.Errorf("%w: %s", ErrWorkloadNotFound, reference.Name)
+		return "", fmt.Errorf("%w: %s", database.ErrWorkloadNotFound, reference.Name)
 	case err != nil:
 		return "", fmt.Errorf("failed to load workload: %w", err)
 	}

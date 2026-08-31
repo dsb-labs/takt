@@ -317,7 +317,7 @@ func TestVariableService_Value(t *testing.T) {
 			Return(database.Variable{}, database.ErrVariableNotFound).Once()
 
 		value, err := newTestVariableService(t, variables).Value(t.Context(), "nope")
-		require.ErrorIs(t, err, service.ErrVariableNotFound)
+		require.ErrorIs(t, err, database.ErrVariableNotFound)
 		assert.Empty(t, value)
 	})
 
@@ -331,7 +331,7 @@ func TestVariableService_Value(t *testing.T) {
 		// operator told the latter would go looking for the wrong thing.
 		_, err := newTestVariableService(t, variables).Value(t.Context(), "log-level")
 		require.ErrorIs(t, err, failure)
-		assert.NotErrorIs(t, err, service.ErrVariableNotFound)
+		assert.NotErrorIs(t, err, database.ErrVariableNotFound)
 	})
 }
 

@@ -311,7 +311,7 @@ func TestSecretService_Value(t *testing.T) {
 			Return(database.Secret{}, database.ErrSecretNotFound).Once()
 
 		value, err := newTestSecretService(t, secrets, nil).Value(t.Context(), "nope")
-		require.ErrorIs(t, err, service.ErrSecretNotFound)
+		require.ErrorIs(t, err, database.ErrSecretNotFound)
 		assert.Empty(t, value)
 	})
 
@@ -325,7 +325,7 @@ func TestSecretService_Value(t *testing.T) {
 		// created, and an operator told the latter would go looking for the wrong thing.
 		_, err := newTestSecretService(t, secrets, nil).Value(t.Context(), "db-password")
 		require.ErrorIs(t, err, secret.ErrInvalidCiphertext)
-		assert.NotErrorIs(t, err, service.ErrSecretNotFound)
+		assert.NotErrorIs(t, err, database.ErrSecretNotFound)
 	})
 }
 

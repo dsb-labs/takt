@@ -136,7 +136,7 @@ func TestAddressService_Address(t *testing.T) {
 
 		_, err := newTestAddressService(t, workloads, ports).
 			Address(t.Context(), manifest.Reference{Kind: manifest.KindWorkload, Name: "nope"}, "reader", 0)
-		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
+		assert.ErrorIs(t, err, database.ErrWorkloadNotFound)
 	})
 }
 

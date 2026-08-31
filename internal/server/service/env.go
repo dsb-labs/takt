@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -18,7 +19,8 @@ type (
 	// satisfied by: substituting a value needs one name at a time and nothing else.
 	ValueStore interface {
 		// Value should return what the named secret or variable holds, reporting
-		// ErrSecretNotFound or ErrVariableNotFound when nothing holds the name.
+		// database.ErrSecretNotFound or database.ErrVariableNotFound when
+		// nothing holds the name.
 		Value(ctx context.Context, name string) (string, error)
 	}
 
@@ -30,9 +32,9 @@ type (
 	// settled on for the workload being referenced.
 	AddressResolver interface {
 		// Address should return the address the reference names as read by one
-		// instance of the referencing workload, reporting ErrWorkloadNotFound
-		// when nothing holds the name and ErrPortNotPublished when the workload
-		// publishes no such port.
+		// instance of the referencing workload, reporting
+		// database.ErrWorkloadNotFound when nothing holds the name and
+		// ErrPortNotPublished when the workload publishes no such port.
 		Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error)
 	}
 
@@ -227,7 +229,7 @@ func (r *EnvResolver) address(ctx context.Context, reference manifest.Reference,
 
 	address, err := r.workloads.Address(ctx, reference, reader, readerInstance)
 	switch {
-	case errors.Is(err, ErrWorkloadNotFound):
+	case errors.Is(err, database.ErrWorkloadNotFound):
 		return "", false, nil
 	case err != nil:
 		return "", false, err
@@ -246,8 +248,8 @@ func (r *EnvResolver) address(ctx context.Context, reference manifest.Reference,
 // holds means, which is where the two genuinely differ.
 func storeFor(secrets, variables ValueStore, kind manifest.ReferenceKind) (ValueStore, error) {
 	if kind == manifest.KindVariable {
-		return variables, ErrVariableNotFound
+		return variables, database.ErrVariableNotFound
 	}
 
-	return secrets, ErrSecretNotFound
+	return secrets, database.ErrSecretNotFound
 }

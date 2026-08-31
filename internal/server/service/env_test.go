@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dsb-labs/orca/internal/server/database"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -114,7 +115,7 @@ func TestEnvResolver_Resolve(t *testing.T) {
 		secrets := NewMockValueStore(t)
 
 		secrets.EXPECT().Value(mock.Anything, "nope").
-			Return("", fmt.Errorf("%w: nope", service.ErrSecretNotFound)).Once()
+			Return("", fmt.Errorf("%w: nope", database.ErrSecretNotFound)).Once()
 
 		// Handing the workload the reference text would have it use that as the value.
 		_, err := newTestEnvResolver(t, secrets, nil).
@@ -131,7 +132,7 @@ func TestEnvResolver_Resolve(t *testing.T) {
 		variables := NewMockValueStore(t)
 
 		variables.EXPECT().Value(mock.Anything, "nope").
-			Return("", fmt.Errorf("%w: nope", service.ErrVariableNotFound)).Once()
+			Return("", fmt.Errorf("%w: nope", database.ErrVariableNotFound)).Once()
 
 		_, err := newTestEnvResolver(t, nil, variables).
 			Resolve(t.Context(), map[string]string{"LEVEL": "${var:nope}"}, "reader", 0)
@@ -193,7 +194,7 @@ func TestEnvResolver_Resolve(t *testing.T) {
 		addresses := NewMockAddressResolver(t)
 
 		addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return("", fmt.Errorf("%w: nope", service.ErrWorkloadNotFound)).Once()
+			Return("", fmt.Errorf("%w: nope", database.ErrWorkloadNotFound)).Once()
 
 		// The paced restart retries until the workload exists, so this is what a
 		// consumer waiting on its dependency reports in the meantime.

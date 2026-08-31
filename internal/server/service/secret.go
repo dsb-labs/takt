@@ -320,8 +320,8 @@ func (s *SecretService) Delete(ctx context.Context, name string, force bool) err
 // into a workload's environment as it starts.
 //
 // This and Resolve are the only things that produce a secret's plaintext. Reports
-// ErrSecretNotFound when nothing holds the name, which the resolver turns into a
-// refusal to start rather than handing the workload the reference text.
+// database.ErrSecretNotFound when nothing holds the name, which the resolver turns
+// into a refusal to start rather than handing the workload the reference text.
 func (s *SecretService) Value(ctx context.Context, name string) (string, error) {
 	// The row and the cipher have to come from the same side of a rekey, so the read
 	// is held for both rather than only for the decryption.
@@ -331,7 +331,7 @@ func (s *SecretService) Value(ctx context.Context, name string) (string, error) 
 	stored, err := s.secrets.Get(ctx, name)
 	switch {
 	case errors.Is(err, database.ErrSecretNotFound):
-		return "", fmt.Errorf("%w: %s", ErrSecretNotFound, name)
+		return "", err
 	case err != nil:
 		return "", fmt.Errorf("failed to load secret %s: %w", name, err)
 	}
