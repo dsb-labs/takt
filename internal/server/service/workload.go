@@ -15,6 +15,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
+	"github.com/dsb-labs/orca/internal/server/resolve"
 	"github.com/dsb-labs/orca/internal/server/specdiff"
 	"github.com/dsb-labs/orca/internal/server/spechash"
 	"github.com/dsb-labs/orca/internal/server/state"
@@ -39,6 +40,9 @@ var (
 	// ErrWorkloadSuspended is returned when restarting a workload that is
 	// suspended, since nothing would start until it is started again.
 	ErrWorkloadSuspended = errors.New("workload is suspended")
+	// ErrPortNotPublished is returned when a specification references a port the
+	// referenced workload does not publish.
+	ErrPortNotPublished = errors.New("port not published")
 	// ErrInvalidQuery is returned when a list query is malformed.
 	ErrInvalidQuery = errors.New("invalid query")
 	// ErrInvalidSpec is returned when a specification does not describe a runnable
@@ -274,7 +278,7 @@ type (
 		// Address should return the address the reference names as read by one
 		// instance of the referencing workload, reporting
 		// database.ErrWorkloadNotFound when nothing holds the name and
-		// ErrPortNotPublished when the workload publishes no such port.
+		// resolve.ErrPortNotPublished when the workload publishes no such port.
 		Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error)
 	}
 
@@ -1421,7 +1425,7 @@ func (s *WorkloadService) resolveReferences(ctx context.Context, spec manifest.S
 			resolved.unknown = append(resolved.unknown, reference.String())
 
 			continue
-		case errors.Is(err, ErrPortNotPublished):
+		case errors.Is(err, resolve.ErrPortNotPublished):
 			resolved.absentPorts = append(resolved.absentPorts, reference.String())
 
 			continue

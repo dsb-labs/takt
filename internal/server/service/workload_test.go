@@ -27,6 +27,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver/exec"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
+	"github.com/dsb-labs/orca/internal/server/resolve"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/internal/server/state"
 	"github.com/dsb-labs/orca/pkg/manifest"
@@ -1306,7 +1307,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 
 		addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return("", fmt.Errorf("%w: workload postgres does not publish http", service.ErrPortNotPublished)).Once()
+			Return("", fmt.Errorf("%w: workload postgres does not publish http", resolve.ErrPortNotPublished)).Once()
 
 		_, _, err := newTestAddressAwareService(t, d, repo, ports, addresses).
 			Apply(t.Context(), referencing("${workload:postgres:http}"))

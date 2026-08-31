@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/resolve"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -38,6 +39,19 @@ const (
 )
 
 type (
+	// The ValueStore interface describes how the mount service reads what one mount
+	// names.
+	//
+	// One interface for both kinds, because reading a secret and reading a variable
+	// differ only in which service answers. Narrower than either service it is
+	// satisfied by: materialising a value needs one name at a time and nothing else.
+	ValueStore interface {
+		// Value should return what the named secret or variable holds, reporting
+		// database.ErrSecretNotFound or database.ErrVariableNotFound when
+		// nothing holds the name.
+		Value(ctx context.Context, name string) (string, error)
+	}
+
 	// The MountService type materialises the secrets and variables a workload mounts
 	// as files on the host, and owns the directories holding them.
 	//
@@ -400,7 +414,7 @@ func (s *MountService) Prune(keep []string) error {
 // false: a mount names what it reads directly, so there is no expansion to report it
 // and nothing else that would.
 func (s *MountService) value(ctx context.Context, reference manifest.Reference) (string, error) {
-	store, missing := storeFor(s.secrets, s.variables, reference.Kind)
+	store, missing := resolve.StoreFor(s.secrets, s.variables, reference.Kind)
 
 	// A server holding no store of that kind holds nothing under the name, which is
 	// the same answer as a name nobody created.

@@ -1,4 +1,4 @@
-package service_test
+package resolve_test
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/server/resolve"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -177,13 +177,15 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 
 	t.Run("substitutes the address of a referenced workload", func(t *testing.T) {
-		addresses := NewMockAddressResolver(t)
+		workloads, ports := NewMockWorkloadLocator(t), NewMockPortLocator(t)
 
-		addresses.EXPECT().
-			Address(mock.Anything, manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres", Port: "pg"}, "reader", 0).
-			Return("10.0.0.5:20432", nil).Once()
+		workloads.EXPECT().Get(mock.Anything, "postgres").
+			Return(database.Workload{ID: "workload-one", Name: "postgres"}, nil).Once()
+		ports.EXPECT().List(mock.Anything, "workload-one").Return([]database.Port{
+			{WorkloadID: "workload-one", Name: "pg", Container: 5432, Host: 20432, Protocol: "tcp", Dynamic: true},
+		}, nil).Once()
 
-		resolved, err := newTestEnvResolverWithAddresses(t, addresses).Resolve(t.Context(), map[string]string{
+		resolved, err := newTestEnvResolverWithAddresses(t, workloads, ports).Resolve(t.Context(), map[string]string{
 			"DSN": "postgres://app@${workload:postgres:pg}/app",
 		}, "reader", 0)
 		require.NoError(t, err)
@@ -191,14 +193,14 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 
 	t.Run("reports a workload that does not exist", func(t *testing.T) {
-		addresses := NewMockAddressResolver(t)
+		workloads, ports := NewMockWorkloadLocator(t), NewMockPortLocator(t)
 
-		addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-			Return("", fmt.Errorf("%w: nope", database.ErrWorkloadNotFound)).Once()
+		workloads.EXPECT().Get(mock.Anything, "nope").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 
 		// The paced restart retries until the workload exists, so this is what a
 		// consumer waiting on its dependency reports in the meantime.
-		_, err := newTestEnvResolverWithAddresses(t, addresses).
+		_, err := newTestEnvResolverWithAddresses(t, workloads, ports).
 			Resolve(t.Context(), map[string]string{"DSN": "${workload:nope}"}, "reader", 0)
 		require.ErrorIs(t, err, manifest.ErrUnknownWorkload)
 		assert.Contains(t, err.Error(), "DSN")
@@ -206,17 +208,20 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 
 	t.Run("reports a port the referenced workload does not publish", func(t *testing.T) {
-		addresses := NewMockAddressResolver(t)
+		workloads, ports := NewMockWorkloadLocator(t), NewMockPortLocator(t)
 
-		failure := fmt.Errorf("%w: workload postgres does not publish http", service.ErrPortNotPublished)
-		addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("", failure).Once()
+		workloads.EXPECT().Get(mock.Anything, "postgres").
+			Return(database.Workload{ID: "workload-one", Name: "postgres"}, nil).Once()
+		ports.EXPECT().List(mock.Anything, "workload-one").Return([]database.Port{
+			{WorkloadID: "workload-one", Name: "pg", Container: 5432, Host: 20432, Protocol: "tcp", Dynamic: true},
+		}, nil).Once()
 
 		// Not the same as a workload nobody created. The workload is right there, and
 		// an operator told its address is unknown would go looking for the wrong
 		// thing.
-		_, err := newTestEnvResolverWithAddresses(t, addresses).
+		_, err := newTestEnvResolverWithAddresses(t, workloads, ports).
 			Resolve(t.Context(), map[string]string{"DSN": "${workload:postgres:http}"}, "reader", 0)
-		require.ErrorIs(t, err, failure)
+		require.ErrorIs(t, err, resolve.ErrPortNotPublished)
 		assert.NotErrorIs(t, err, manifest.ErrUnknownWorkload)
 	})
 
@@ -227,19 +232,19 @@ func TestEnvResolver_Resolve(t *testing.T) {
 	})
 }
 
-func newTestEnvResolverWithAddresses(t *testing.T, addresses service.AddressResolver) *service.EnvResolver {
+func newTestEnvResolverWithAddresses(t *testing.T, workloads resolve.WorkloadLocator, ports resolve.PortLocator) *resolve.EnvResolver {
 	t.Helper()
 
-	return service.NewEnvResolver(service.EnvResolverConfig{
+	return resolve.NewEnvResolver(resolve.EnvResolverConfig{
 		Logger:    newTestLogger(t),
-		Workloads: addresses,
+		Workloads: newTestAddressResolver(t, workloads, ports),
 	})
 }
 
-func newTestEnvResolver(t *testing.T, secrets, variables service.ValueStore) *service.EnvResolver {
+func newTestEnvResolver(t *testing.T, secrets, variables resolve.ValueStore) *resolve.EnvResolver {
 	t.Helper()
 
-	return service.NewEnvResolver(service.EnvResolverConfig{
+	return resolve.NewEnvResolver(resolve.EnvResolverConfig{
 		Logger:    newTestLogger(t),
 		Secrets:   secrets,
 		Variables: variables,

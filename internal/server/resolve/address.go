@@ -1,4 +1,11 @@
-package service
+// Package resolve turns the references in a workload's specification into the
+// values they name: a secret's plaintext, a variable's value, or the address
+// another workload is reached at.
+//
+// It sits below the service package so that both tiers can resolve: the workload
+// service proves a reference resolves as a specification is applied, and the
+// reconciler resolves the real values as a workload starts.
+package resolve
 
 import (
 	"context"
@@ -20,7 +27,7 @@ var (
 )
 
 type (
-	// The WorkloadLocator interface describes how the address service finds the
+	// The WorkloadLocator interface describes how the address resolver finds the
 	// workload a reference names.
 	//
 	// Narrower than the repository it is satisfied by: resolving an address needs one
@@ -31,7 +38,7 @@ type (
 		Get(ctx context.Context, name string) (database.Workload, error)
 	}
 
-	// The PortLocator interface describes how the address service finds the ports a
+	// The PortLocator interface describes how the address resolver finds the ports a
 	// workload publishes.
 	PortLocator interface {
 		// List should return the ports allocated to the workload with the given
@@ -39,23 +46,23 @@ type (
 		List(ctx context.Context, workloadID string) ([]database.Port, error)
 	}
 
-	// The AddressService type turns a reference to another workload into the address
+	// The AddressResolver type turns a reference to another workload into the address
 	// that workload is reached at.
 	//
 	// The host is the same for every workload, since orca publishes their ports on
 	// this one machine. What differs is the port, which orca may have chosen and may
 	// revise, and which is the reason a workload's address is worth referencing
 	// rather than writing down.
-	AddressService struct {
+	AddressResolver struct {
 		logger    *slog.Logger
 		workloads WorkloadLocator
 		ports     PortLocator
 		address   string
 	}
 
-	// The AddressServiceConfig type contains fields used to construct an
-	// AddressService.
-	AddressServiceConfig struct {
+	// The AddressResolverConfig type contains fields used to construct an
+	// AddressResolver.
+	AddressResolverConfig struct {
 		// The logger used for resolution events.
 		Logger *slog.Logger
 		// Where the referenced workload is read from.
@@ -67,10 +74,10 @@ type (
 	}
 )
 
-// NewAddressService returns a new instance of the AddressService type.
-func NewAddressService(config AddressServiceConfig) *AddressService {
-	return &AddressService{
-		logger:    config.Logger.With("component", "service"),
+// NewAddressResolver returns a new instance of the AddressResolver type.
+func NewAddressResolver(config AddressResolverConfig) *AddressResolver {
+	return &AddressResolver{
+		logger:    config.Logger.With("component", "resolve"),
 		workloads: config.Workloads,
 		ports:     config.Ports,
 		address:   config.Address,
@@ -98,8 +105,8 @@ func NewAddressService(config AddressServiceConfig) *AddressService {
 //
 // Returns database.ErrWorkloadNotFound when nothing holds the name, or
 // ErrPortNotPublished when the workload holds it but publishes no such port.
-func (s *AddressService) Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error) {
-	row, err := s.workloads.Get(ctx, reference.Name)
+func (r *AddressResolver) Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error) {
+	row, err := r.workloads.Get(ctx, reference.Name)
 	switch {
 	case errors.Is(err, database.ErrWorkloadNotFound):
 		return "", fmt.Errorf("%w: %s", database.ErrWorkloadNotFound, reference.Name)
@@ -107,7 +114,7 @@ func (s *AddressService) Address(ctx context.Context, reference manifest.Referen
 		return "", fmt.Errorf("failed to load workload: %w", err)
 	}
 
-	published, err := s.ports.List(ctx, row.ID)
+	published, err := r.ports.List(ctx, row.ID)
 	if err != nil {
 		return "", fmt.Errorf("failed to read workload ports: %w", err)
 	}
@@ -117,7 +124,7 @@ func (s *AddressService) Address(ctx context.Context, reference manifest.Referen
 	}
 
 	if reference.Port == "" {
-		return s.address, nil
+		return r.address, nil
 	}
 
 	// The count is read from the rows rather than by decoding the specification:
@@ -138,7 +145,7 @@ func (s *AddressService) Address(ctx context.Context, reference manifest.Referen
 		}
 
 		if reference.Port.Matches(port.Name, port.Container) {
-			return net.JoinHostPort(s.address, strconv.Itoa(port.Host)), nil
+			return net.JoinHostPort(r.address, strconv.Itoa(port.Host)), nil
 		}
 	}
 

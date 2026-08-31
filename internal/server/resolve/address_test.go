@@ -1,6 +1,7 @@
-package service_test
+package resolve_test
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -8,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/server/resolve"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
-func TestAddressService_Address(t *testing.T) {
+func TestAddressResolver_Address(t *testing.T) {
 	t.Parallel()
 
 	published := []database.Port{
@@ -58,7 +59,7 @@ func TestAddressService_Address(t *testing.T) {
 			Name:      "reports a port the workload does not publish",
 			Reference: manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres", Port: "http"},
 			Ports:     published,
-			ExpectErr: service.ErrPortNotPublished,
+			ExpectErr: resolve.ErrPortNotPublished,
 		},
 		{
 			// A workload publishing nothing is reachable at no address, so the
@@ -66,7 +67,7 @@ func TestAddressService_Address(t *testing.T) {
 			// port.
 			Name:      "reports a workload publishing no ports",
 			Reference: manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres"},
-			ExpectErr: service.ErrPortNotPublished,
+			ExpectErr: resolve.ErrPortNotPublished,
 		},
 	}
 
@@ -78,7 +79,7 @@ func TestAddressService_Address(t *testing.T) {
 				Return(database.Workload{ID: "workload-one", Name: "postgres"}, nil)
 			ports.EXPECT().List(mock.Anything, "workload-one").Return(tc.Ports, nil)
 
-			address, err := newTestAddressService(t, workloads, ports).Address(t.Context(), tc.Reference, "reader", 0)
+			address, err := newTestAddressResolver(t, workloads, ports).Address(t.Context(), tc.Reference, "reader", 0)
 			if tc.ExpectErr != nil {
 				assert.ErrorIs(t, err, tc.ExpectErr)
 
@@ -103,7 +104,7 @@ func TestAddressService_Address(t *testing.T) {
 			{WorkloadID: "workload-one", Instance: 2, Name: "pg", Container: 5432, Host: 20434, Protocol: "tcp", Dynamic: true},
 		}, nil)
 
-		svc := newTestAddressService(t, workloads, ports)
+		svc := newTestAddressResolver(t, workloads, ports)
 		reference := manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres", Port: "pg"}
 
 		// Three instances of one reader land one on each target instance, because
@@ -134,19 +135,33 @@ func TestAddressService_Address(t *testing.T) {
 		workloads.EXPECT().Get(mock.Anything, "nope").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 
-		_, err := newTestAddressService(t, workloads, ports).
+		_, err := newTestAddressResolver(t, workloads, ports).
 			Address(t.Context(), manifest.Reference{Kind: manifest.KindWorkload, Name: "nope"}, "reader", 0)
 		assert.ErrorIs(t, err, database.ErrWorkloadNotFound)
 	})
 }
 
-func newTestAddressService(t *testing.T, workloads service.WorkloadLocator, ports service.PortLocator) *service.AddressService {
+func newTestAddressResolver(t *testing.T, workloads resolve.WorkloadLocator, ports resolve.PortLocator) *resolve.AddressResolver {
 	t.Helper()
 
-	return service.NewAddressService(service.AddressServiceConfig{
+	return resolve.NewAddressResolver(resolve.AddressResolverConfig{
 		Logger:    newTestLogger(t),
 		Workloads: workloads,
 		Ports:     ports,
 		Address:   "10.0.0.5",
 	})
+}
+
+func newTestLogger(t *testing.T) *slog.Logger {
+	t.Helper()
+
+	level := slog.LevelError
+	if testing.Verbose() {
+		level = slog.LevelDebug
+	}
+
+	return slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{
+		AddSource: testing.Verbose(),
+		Level:     level,
+	}))
 }

@@ -1,4 +1,4 @@
-package service
+package resolve
 
 import (
 	"context"
@@ -24,20 +24,6 @@ type (
 		Value(ctx context.Context, name string) (string, error)
 	}
 
-	// The AddressResolver interface describes how the resolver turns a reference to
-	// another workload into the address that workload is reached at.
-	//
-	// Separate from ValueStore because the two answer different questions. A secret
-	// and a variable are read by name, where an address is derived from what orca
-	// settled on for the workload being referenced.
-	AddressResolver interface {
-		// Address should return the address the reference names as read by one
-		// instance of the referencing workload, reporting
-		// database.ErrWorkloadNotFound when nothing holds the name and
-		// ErrPortNotPublished when the workload publishes no such port.
-		Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error)
-	}
-
 	// The EnvResolver type turns the references in a workload's environment into the
 	// values it is started with.
 	//
@@ -50,7 +36,7 @@ type (
 		logger    *slog.Logger
 		secrets   ValueStore
 		variables ValueStore
-		workloads AddressResolver
+		workloads *AddressResolver
 	}
 
 	// The EnvResolverConfig type contains fields used to construct an EnvResolver.
@@ -65,14 +51,14 @@ type (
 		Variables ValueStore
 		// Where the address of a referenced workload is resolved. May be nil, in
 		// which case a workload referencing another fails to start.
-		Workloads AddressResolver
+		Workloads *AddressResolver
 	}
 )
 
 // NewEnvResolver returns a new instance of the EnvResolver type.
 func NewEnvResolver(config EnvResolverConfig) *EnvResolver {
 	return &EnvResolver{
-		logger:    config.Logger.With("component", "service"),
+		logger:    config.Logger.With("component", "resolve"),
 		secrets:   config.Secrets,
 		variables: config.Variables,
 		workloads: config.Workloads,
@@ -193,7 +179,7 @@ func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference, r
 		return r.address(ctx, reference, reader, readerInstance)
 	}
 
-	store, missing := storeFor(r.secrets, r.variables, reference.Kind)
+	store, missing := StoreFor(r.secrets, r.variables, reference.Kind)
 
 	// A server holding no store of that kind holds nothing under the name, which is
 	// the same answer as a name nobody created.
@@ -238,7 +224,7 @@ func (r *EnvResolver) address(ctx context.Context, reference manifest.Reference,
 	return address, true, nil
 }
 
-// storeFor returns the store holding values of the given kind, along with the error
+// StoreFor returns the store holding values of the given kind, along with the error
 // reporting that nothing holds a name of that kind. The store is nil when the server
 // holds none.
 //
@@ -246,7 +232,10 @@ func (r *EnvResolver) address(ctx context.Context, reference manifest.Reference,
 // reference — an environment being resolved and a value being mounted — cannot disagree
 // about which store answers for a kind. Each keeps its own policy on what a name nobody
 // holds means, which is where the two genuinely differ.
-func storeFor(secrets, variables ValueStore, kind manifest.ReferenceKind) (ValueStore, error) {
+//
+// Generic so that each reader names its own narrow store interface and still gets
+// the one rule.
+func StoreFor[Store any](secrets, variables Store, kind manifest.ReferenceKind) (Store, error) {
 	if kind == manifest.KindVariable {
 		return variables, database.ErrVariableNotFound
 	}

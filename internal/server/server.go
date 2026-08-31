@@ -27,6 +27,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
+	"github.com/dsb-labs/orca/internal/server/resolve"
 	"github.com/dsb-labs/orca/internal/server/secret"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/internal/server/telemetry"
@@ -207,7 +208,7 @@ func Run(ctx context.Context, config Config) error {
 			Warn("this host has no routable address, so only exec workloads can reach another workload")
 	}
 
-	addressSvc := service.NewAddressService(service.AddressServiceConfig{
+	addresses := resolve.NewAddressResolver(resolve.AddressResolverConfig{
 		Logger:    logger,
 		Workloads: workloads,
 		Ports:     ports,
@@ -230,11 +231,11 @@ func Run(ctx context.Context, config Config) error {
 		Ports:     ports,
 		// One resolver for both kinds, because one value in an environment may hold
 		// both and expansion refuses what it cannot resolve.
-		Env: service.NewEnvResolver(service.EnvResolverConfig{
+		Env: resolve.NewEnvResolver(resolve.EnvResolverConfig{
 			Logger:    logger,
 			Secrets:   secretSvc,
 			Variables: variableSvc,
-			Workloads: addressSvc,
+			Workloads: addresses,
 		}),
 		// Written as a workload starts and removed when it stops, so a mounted value's
 		// plaintext is on the disk for no longer than the workload reading it.
@@ -288,7 +289,7 @@ func Run(ctx context.Context, config Config) error {
 		// each thing currently holds and nothing else.
 		Secrets:    secrets,
 		Variables:  variables,
-		Addresses:  addressSvc,
+		Addresses:  addresses,
 		Images:     dockerDriver,
 		Claimer:    claimer,
 		Checker:    checker,
