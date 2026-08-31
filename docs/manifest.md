@@ -51,6 +51,7 @@ container:
 |---|---|---|
 | `version` | yes | The schema version. Must be `v1`. |
 | `name` | yes | Identifies the workload. Lowercase alphanumeric and dashes, up to 63 characters. |
+| `count` | no | How many instances to run. One when omitted. See [Count](#count). |
 | `labels` | no | Key-value pairs attached to the workload. See [Labels](#labels). |
 | `ports` | no | The ports the workload publishes. |
 | `env` | no | Environment variables set for the workload. A value may reference a secret or a variable. |
@@ -91,6 +92,35 @@ and a variable take theirs from `--label`, since neither is described by a manif
 **A label is as readable as the thing that carries it.** That matters most for a
 secret, whose value is deliberately unreadable: a label on a secret is as public as
 its name, and is no place to put a credential.
+
+## Count
+
+```yaml
+count: 3
+```
+
+How many instances of the workload to run. One when omitted. Each instance is
+converged on its own: it is started, health-checked, restarted and replaced
+independently, so one instance crashing does not touch the others. A specification
+change rolls across the instances one reconcile pass at a time.
+
+Each instance publishes the workload's ports on host ports of its own, which is why
+a count above one cannot be combined with a pinned `from`: one host port cannot
+reach more than one listener. An exec workload must pin every port it publishes, so
+an exec workload with ports always runs one instance. A schedule cannot be combined
+with a count either, because N copies of a cron job firing at once is almost never
+what a schedule means.
+
+**On one node, a count buys throughput rather than availability.** The host is the
+failure domain, and a second instance on the same host does not survive it losing
+power. Several copies of a single-threaded service across several cores is the case
+this serves.
+
+Instances share what the workload mounts. A volume is one directory on the host,
+and every instance reads and writes the same one. That is correct for data that is
+safe for concurrent writers and corrupting for anything that is not — a database
+file, for one — and orca cannot tell which is which. Mount a volume into a workload
+with a count only when its contents tolerate concurrent writers.
 
 ## Runtimes
 
@@ -208,6 +238,11 @@ An allocated port is sticky. It stays the same across restarts and image changes
 anything pointing at it keeps working. Pin `from` when something outside orca has to
 know the address up front. Pinning a port another workload holds is rejected when you
 apply the manifest.
+
+A workload running more than one instance publishes each port once per instance, at
+a host port of its own. `orca workload get` reports every mapping, with `Instance`
+saying which instance a mapping reaches, and each instance's allocation is sticky on
+its own.
 
 A container's port is published on every interface unless the server is configured
 otherwise, so anything the host is reachable at reaches the workload. See
@@ -390,6 +425,13 @@ env:
 port is selected the way a health check selects one: by the name it was given, or by
 the port inside the workload. `${workload:name}` resolves to the host alone, for a
 value whose port you already know and would otherwise write twice.
+
+A workload running more than one instance publishes the port at several addresses,
+and a reference still resolves to one of them. Which one is derived from the reading
+workload's own name and instance, so a reader running several instances spreads them
+evenly across the target's. Changing the target's count moves the arithmetic and the
+readers are redeployed onto the new spread, rolling one instance per pass. A single
+reader keeps sending everything to one instance — orca does not balance requests.
 
 The address is not a URL. orca does not know what the workload speaks, so a bare
 address composes into whatever you are writing.
@@ -749,5 +791,8 @@ the first after the last run, so a workload down for several does not run once f
 
 A scheduled workload cannot declare a health check. A check restarts a workload that
 stops answering, and a scheduled workload is expected to end.
+
+A scheduled workload cannot run more than one instance, because N copies of a cron
+job firing at once is almost never what a schedule means.
 
 `orca workload get` reports when a scheduled workload next runs, once it has run at least once.

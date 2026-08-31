@@ -317,19 +317,22 @@ reconciliation pass re-derives both.
 
 ## Exec workload directories
 
-Each version of an `exec` workload gets a directory of its own, under two separate
-trees:
+Each version of each instance of an `exec` workload gets a directory of its own,
+under two separate trees:
 
 ```
-exec/workloads/<id>/<version>/
+exec/workloads/<id>/<instance>/<version>/
   cwd/            the process's working directory
   output.log      the process's output, both streams combined
   previous.log    the output of the attempt this one replaced
 
-exec/state/<id>/<version>/
+exec/state/<id>/<instance>/<version>/
   state.json      the process orca started, and how it ended
   retained        present when the record is kept only for its output
 ```
+
+`<instance>` is the instance's index, counted from zero. A workload running one
+instance keeps everything under `0`.
 
 The process runs in `cwd`. What orca records about it lives in the other tree, which
 holds no working directory at all, so a workload writing above its own has nothing of
@@ -533,6 +536,11 @@ Ctrl-C.
 A replacement is a new instance. A workload that restarts while you are watching ends
 the command, and reading the next attempt means running it again.
 
+A workload running more than one instance is followed one instance at a time, named
+by `--instance` with the index to read. A follow without one is refused, because a
+follow reads one stream and interleaving several would return output nothing could
+attribute. An ordinary read without `--instance` returns every instance's output.
+
 ### Output since a moment
 
 ```sh
@@ -561,12 +569,12 @@ This matters most for a workload that keeps restarting. The attempt running now 
 failed yet, so its output does not say why the workload is failing. The attempt before
 it does.
 
-One attempt is kept per workload, so a workload crashing in a loop does not fill the
+One attempt is kept per instance, so a workload crashing in a loop does not fill the
 disk. Reading the previous output of a workload that has only ever run once gives
 nothing, because there is no earlier attempt.
 
-What is kept is not counted as running. It has no bearing on the workload's state, and a
-container being kept for its output is not a second instance:
+What is kept is not counted as running. It has no bearing on the workload's state,
+and a container being kept for its output is a corpse rather than another instance:
 
 ```sh
 orca workload get example
@@ -586,7 +594,8 @@ reports why in `orca workload get`, as `lastError` with the time it was recorded
 error stands until an attempt succeeds, so a workload failing on every pass carries a
 recent timestamp where one that failed once an hour ago does not. It is held in
 memory: a server restart clears it, and the next pass either fails again and restores
-it or succeeds.
+it or succeeds. One error is reported per workload, which for a workload running
+several instances is the most recent failure among them.
 
 At `info` the server is quiet unless something is wrong. Setting the level to `debug`
 reports each decision a reconciliation pass makes. Turn it on when a workload is not
@@ -662,8 +671,9 @@ SQLite's write lock.
 ## Host ports
 
 orca allocates a host port for a container port that names none, from the range in the
-configuration. An allocation is sticky: it survives restarts and specification changes,
-so anything pointing at it keeps working.
+configuration. A workload running several instances holds one allocation per instance.
+An allocation is sticky to its instance: it survives restarts and specification
+changes, so anything pointing at it keeps working.
 
 The range covers each protocol separately, since TCP and UDP are unrelated address
 spaces. A workload holding 20000/tcp leaves 20000/udp free for another.

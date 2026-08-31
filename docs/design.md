@@ -41,8 +41,9 @@ work nothing asked for sees everything, and convergence sees only what is live.
 A pass reads the full desired state, asks every driver what it is running, and acts on
 the difference:
 
-1. A workload with nothing running is started.
-2. An instance whose specification hash differs from the stored one is replaced.
+1. A workload running fewer instances than its count asks for is started, and one
+   running more has the excess removed.
+2. An instance whose specification hash differs from its expected one is replaced.
 3. An instance that ended is restarted, subject to the workload's restart policy.
 4. An instance nothing asked for is stopped.
 5. A workload marked for deletion is torn down, and its row removed once nothing is
@@ -70,7 +71,14 @@ mutated is more subtle than starting again.
 
 The specification hash recorded on an instance is what identifies it as outdated. That
 hash covers the resolved specification, host ports included, so a reallocated port reads
-as an ordinary change and replaces the instance bound to the old one.
+as an ordinary change and replaces the instance bound to the old one. Each instance
+carries a hash of its own, folding in the addresses it resolved, so a change to what
+one instance reads replaces that instance alone.
+
+A workload running several instances is replaced one instance per pass. The change
+rolls across them at the reconcile interval rather than taking every instance down at
+once, which is what makes replacing a counted workload a degradation rather than an
+outage.
 
 ## The schedule outranks the restart policy
 
@@ -260,6 +268,15 @@ for `exec`.
 The reference is resolved twice and never stored. It is hashed when the specification
 is written and expanded again as the workload starts, so a workload never holds an
 address that has since moved.
+
+A target running several instances is reached at several addresses, and a reference
+still resolves to one. The choice is arithmetic over the reader's own name and
+instance, so it is deterministic, needs no stored state, and spreads a reader's
+instances evenly across the target's. Scaling the target moves the arithmetic and
+the readers roll onto the new spread — each stale instance is found by the hash
+comparison above, one per pass. What this deliberately is not is request-level
+balancing: a single reader instance sends everything to the one instance it
+resolved.
 
 Ordering falls out of convergence rather than being declared. A workload whose
 reference resolves against nothing fails to start and is retried on the paced
