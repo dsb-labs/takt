@@ -23,6 +23,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/server/state"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -45,7 +46,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			SetupMocks: func(svc *MockWorkloadService) {
 				svc.EXPECT().Apply(mock.Anything, mock.MatchedBy(func(spec manifest.Spec) bool {
 					return spec.Name == "example" && spec.Container != nil
-				})).Return(workload("example", service.WorkloadStateRunning), true, nil).Once()
+				})).Return(workload("example", state.Running), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
 			Assert: func(t *testing.T, w generated.Workload) {
@@ -59,7 +60,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
 				svc.EXPECT().Apply(mock.Anything, mock.Anything).
-					Return(workload("example", service.WorkloadStateRunning), false, nil).Once()
+					Return(workload("example", state.Running), false, nil).Once()
 			},
 			ExpectStatus: http.StatusOK,
 		},
@@ -565,7 +566,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 	t.Run("returns the workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "example").
-			Return(workload("example", service.WorkloadStateRunning), nil).Once()
+			Return(workload("example", state.Running), nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
@@ -587,7 +588,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 	t.Run("reports an exit code once the instance has stopped", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 
-		stopped := workload("example", service.WorkloadStateFailed)
+		stopped := workload("example", state.Failed)
 		stopped.Instances = []driver.Instance{
 			{ID: "container-one", State: driver.StateFailed, ExitCode: 137, SpecHash: "hash-one"},
 		}
@@ -611,7 +612,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 	t.Run("reports the health of a checked workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 
-		checked := workload("example", service.WorkloadStateFailed)
+		checked := workload("example", state.Failed)
 		checked.Healths = map[int]service.Health{0: {
 			Checked: true,
 			Result: health.Result{
@@ -650,7 +651,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 
 		// An image carrying its own HEALTHCHECK is being checked by docker whether or
 		// not the manifest declares one, and surfacing that beats discarding it.
-		declared := workload("example", service.WorkloadStateRunning)
+		declared := workload("example", state.Running)
 		declared.Instances = []driver.Instance{
 			{ID: "container-one", State: driver.StateRunning, SpecHash: "hash-one", RuntimeHealth: "healthy"},
 		}
@@ -679,7 +680,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 	t.Run("reports no health for an unchecked workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "example").
-			Return(workload("example", service.WorkloadStateRunning), nil).Once()
+			Return(workload("example", state.Running), nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
@@ -697,7 +698,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 	t.Run("reports why a workload is not converging", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 
-		failing := workload("example", service.WorkloadStatePending)
+		failing := workload("example", state.Pending)
 		failing.LastError = "failed to start workload: no such image"
 		failing.LastErrorAt = time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
 
@@ -720,7 +721,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 	t.Run("reports no error for a converging workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "example").
-			Return(workload("example", service.WorkloadStateRunning), nil).Once()
+			Return(workload("example", state.Running), nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
 		require.Equal(t, http.StatusOK, resp.Code)
@@ -748,8 +749,8 @@ func TestWorkloadAPI_ListWorkloads(t *testing.T) {
 	t.Run("returns every workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().List(mock.Anything).Return([]service.Workload{
-			workload("alpha", service.WorkloadStateRunning),
-			workload("bravo", service.WorkloadStatePending),
+			workload("alpha", state.Running),
+			workload("bravo", state.Pending),
 		}, nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads", nil)
@@ -803,7 +804,7 @@ func TestWorkloadAPI_DeleteWorkload(t *testing.T) {
 	t.Run("accepts the deletion and returns the terminating workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 
-		terminating := workload("example", service.WorkloadStateTerminating)
+		terminating := workload("example", state.Terminating)
 		terminating.Deleting = true
 
 		svc.EXPECT().Delete(mock.Anything, "example", false).Return(terminating, nil).Once()
@@ -840,7 +841,7 @@ func TestWorkloadAPI_DeleteWorkload(t *testing.T) {
 	t.Run("deletes a referenced workload when forced", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Delete(mock.Anything, "postgres", true).
-			Return(workload("postgres", service.WorkloadStateTerminating), nil).Once()
+			Return(workload("postgres", state.Terminating), nil).Once()
 
 		resp := do(t, svc, http.MethodDelete, "/api/v1/workloads/postgres?force=true", nil)
 		assert.Equal(t, http.StatusAccepted, resp.Code)
@@ -862,7 +863,7 @@ func TestWorkloadAPI_StopWorkload(t *testing.T) {
 	t.Run("accepts the stop and returns the suspended workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 
-		suspended := workload("example", service.WorkloadStateSuspended)
+		suspended := workload("example", state.Suspended)
 		suspended.Suspended = true
 
 		svc.EXPECT().Stop(mock.Anything, "example").Return(suspended, nil).Once()
@@ -908,7 +909,7 @@ func TestWorkloadAPI_StartWorkload(t *testing.T) {
 	t.Run("accepts the start and returns the workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Start(mock.Anything, "example").
-			Return(workload("example", service.WorkloadStatePending), nil).Once()
+			Return(workload("example", state.Pending), nil).Once()
 
 		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/example/start", bytes.NewReader([]byte("{}")))
 		require.Equal(t, http.StatusAccepted, resp.Code)
@@ -949,7 +950,7 @@ func TestWorkloadAPI_RestartWorkload(t *testing.T) {
 	t.Run("accepts the restart and returns the workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Restart(mock.Anything, "example").
-			Return(workload("example", service.WorkloadStateRunning), nil).Once()
+			Return(workload("example", state.Running), nil).Once()
 
 		resp := do(t, svc, http.MethodPost, "/api/v1/workloads/example/restart", bytes.NewReader([]byte("{}")))
 		require.Equal(t, http.StatusAccepted, resp.Code)
@@ -995,7 +996,7 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 
 	t.Run("returns the logs as plain text", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", service.WorkloadStateRunning), nil).Once()
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
 		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 100}).
 			RunAndReturn(func(_ context.Context, out io.Writer, _ string, _ driver.LogOptions) error {
 				_, err := out.Write([]byte("hello world\n"))
@@ -1011,7 +1012,7 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 
 	t.Run("honours the tail parameter", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", service.WorkloadStateRunning), nil).Once()
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
 		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 20}).Return(nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?tail=20", nil)
@@ -1021,7 +1022,7 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 	t.Run("caps an unbounded tail", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "example").
-			Return(workload("example", service.WorkloadStateRunning), nil).Once()
+			Return(workload("example", state.Running), nil).Once()
 
 		// The server reads what it is asked to read, so an uncapped request would let
 		// a caller decide how much work it does.
@@ -1034,7 +1035,7 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 	t.Run("raises a tail below the minimum", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "example").
-			Return(workload("example", service.WorkloadStateRunning), nil).Once()
+			Return(workload("example", state.Running), nil).Once()
 
 		// Docker reads a negative count as every line, so passing one straight
 		// through would return the whole of a workload's output and make the cap
@@ -1056,7 +1057,7 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 
 	t.Run("asks for the attempt that was replaced", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", service.WorkloadStateRunning), nil).Once()
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
 
 		// For a workload restarting repeatedly this is the attempt that failed, where
 		// the one running now has not failed yet.
@@ -1069,7 +1070,7 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 
 	t.Run("reads the current attempt when nothing asks otherwise", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", service.WorkloadStateRunning), nil).Once()
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
 
 		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 100}).
 			Return(nil).Once()
@@ -1080,7 +1081,7 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 
 	t.Run("follows the current attempt from an instant", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", service.WorkloadStateRunning), nil).Once()
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
 
 		since := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.UTC)
 
@@ -1154,7 +1155,7 @@ func canonicalSpec(name string) manifest.Spec {
 	return spec
 }
 
-func workload(name string, state service.WorkloadState) service.Workload {
+func workload(name string, state state.Workload) service.Workload {
 	return service.Workload{
 		Name:      name,
 		Version:   1,

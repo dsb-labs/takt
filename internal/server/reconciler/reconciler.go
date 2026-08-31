@@ -28,6 +28,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver"
 	"github.com/dsb-labs/orca/internal/server/health"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/server/state"
 	"github.com/dsb-labs/orca/internal/server/telemetry"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
@@ -627,18 +628,6 @@ func (r *Reconciler) prune(rows []database.Workload) {
 	}
 }
 
-// Every state a workload can report. Recording all of them each pass means a
-// state nothing is in reads as zero rather than holding whatever it last was.
-var workloadStates = []service.WorkloadState{
-	service.WorkloadStateCompleted,
-	service.WorkloadStateFailed,
-	service.WorkloadStatePending,
-	service.WorkloadStateRunning,
-	service.WorkloadStateStopped,
-	service.WorkloadStateSuspended,
-	service.WorkloadStateTerminating,
-}
-
 // measure records the number of workloads in each state.
 //
 // Each state is derived by the same rules the API reports it under, so a
@@ -646,21 +635,23 @@ var workloadStates = []service.WorkloadState{
 // before the restart policy is folded in, because the observed map is what the
 // rest of the pass converges from.
 func (r *Reconciler) measure(ctx context.Context, rows []database.Workload, observed map[string][]driver.Instance) {
-	counts := make(map[service.WorkloadState]int, len(workloadStates))
+	// Every state is recorded each pass, so a state nothing is in reads as zero
+	// rather than holding whatever it last was.
+	counts := make(map[state.Workload]int, len(state.Workloads))
 	for _, row := range rows {
 		policy := restartPolicy(row)
 
 		instances := slices.Clone(observed[row.Name])
 		for i := range instances {
-			instances[i].State = service.CompletionState(instances[i], policy)
+			instances[i].State = state.Completion(instances[i], policy)
 		}
 
-		counts[service.StateOf(instances, !row.DeletedAt.IsZero(), !row.SuspendedAt.IsZero())]++
+		counts[state.Of(instances, !row.DeletedAt.IsZero(), !row.SuspendedAt.IsZero())]++
 	}
 
-	for _, state := range workloadStates {
-		r.instruments.workloads.Record(ctx, int64(counts[state]),
-			metric.WithAttributes(attribute.String("state", string(state))))
+	for _, workloadState := range state.Workloads {
+		r.instruments.workloads.Record(ctx, int64(counts[workloadState]),
+			metric.WithAttributes(attribute.String("state", string(workloadState))))
 	}
 }
 
