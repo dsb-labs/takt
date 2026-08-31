@@ -18,6 +18,7 @@ func Command() *cobra.Command {
 	var previous bool
 	var follow bool
 	var since string
+	var instance int
 
 	cmd := &cobra.Command{
 		Use:   "logs <name>",
@@ -29,6 +30,10 @@ func Command() *cobra.Command {
 			options := []client.LogOption{client.WithTail(tail)}
 			if previous {
 				options = append(options, client.WithPrevious())
+			}
+
+			if cmd.Flags().Changed("instance") {
+				options = append(options, client.WithInstance(instance))
 			}
 
 			if follow {
@@ -64,6 +69,7 @@ func Command() *cobra.Command {
 	flags.BoolVarP(&previous, "previous", "p", false, "read the instance that was replaced rather than the one running now")
 	flags.BoolVarP(&follow, "follow", "f", false, "keep reading output until the instance ends")
 	flags.StringVar(&since, "since", "", "read only the output written since a duration ago or an RFC 3339 time, for container workloads")
+	flags.IntVarP(&instance, "instance", "i", 0, "index of the instance to read, for a workload running more than one")
 
 	// The instance a replacement kept has already ended, so there is nothing for a
 	// follow of it to wait on.
