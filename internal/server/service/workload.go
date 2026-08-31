@@ -152,12 +152,13 @@ type (
 	// The Claimer interface describes how the service settles a workload's ports on
 	// the host ports they are reached at.
 	Claimer interface {
-		// Resolve should settle every mapping on a host port, keeping the
-		// allocations the workload already holds.
-		Resolve(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, error)
+		// Resolve should settle every mapping on a host port for each of the
+		// workload's instances, keeping the allocations every instance already
+		// holds.
+		Resolve(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port, count int) ([]port.Claim, error)
 		// Preview should settle every mapping it can without allocating anything,
 		// reporting whether any of them still needs a host port.
-		Preview(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, bool, error)
+		Preview(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port, count int) ([]port.Claim, bool, error)
 	}
 
 	// The Checker interface describes how the service reads the health of
@@ -637,7 +638,7 @@ func (s *WorkloadService) DryRun(ctx context.Context, spec manifest.Spec) (DryRu
 		return DryRun{}, err
 	}
 
-	claims, pending, err := s.claims.Preview(ctx, resolved.spec.Name, heldClaims(resolved.held), resolved.spec.Ports)
+	claims, pending, err := s.claims.Preview(ctx, resolved.spec.Name, heldClaims(resolved.held), resolved.spec.Ports, 1)
 	if err != nil {
 		return DryRun{}, err
 	}
@@ -711,7 +712,7 @@ func (s *WorkloadService) store(ctx context.Context, resolved resolution) (datab
 	current := heldClaims(resolved.held)
 
 	for attempt := range attempts {
-		claims, err := s.claims.Resolve(ctx, spec.Name, current, spec.Ports)
+		claims, err := s.claims.Resolve(ctx, spec.Name, current, spec.Ports, 1)
 		if err != nil {
 			return database.Workload{}, false, err
 		}
@@ -1061,7 +1062,7 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 
 	// The stored specification already has its host ports filled in, so the dynamic
 	// ones are cleared to ask for a fresh allocation rather than the same port back.
-	claims, err := s.claims.Resolve(ctx, name, pinned, port.Requested(spec.Ports, current))
+	claims, err := s.claims.Resolve(ctx, name, pinned, port.Requested(spec.Ports, current), 1)
 	if err != nil {
 		return false, err
 	}
@@ -1412,6 +1413,7 @@ func heldClaims(ports []database.Port) []port.Claim {
 	claims := make([]port.Claim, 0, len(ports))
 	for _, allocation := range ports {
 		claims = append(claims, port.Claim{
+			Instance:  allocation.Instance,
 			Name:      allocation.Name,
 			Container: allocation.Container,
 			Host:      allocation.Host,
@@ -1431,6 +1433,7 @@ func allocations(claims []port.Claim, workloadID string) []database.Port {
 	for _, claim := range claims {
 		ports = append(ports, database.Port{
 			WorkloadID: workloadID,
+			Instance:   claim.Instance,
 			Name:       claim.Name,
 			Container:  claim.Container,
 			Host:       claim.Host,

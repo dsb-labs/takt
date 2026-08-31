@@ -24,6 +24,9 @@ type (
 	// workload identifier, because the caller writing it knows which workload it
 	// belongs to and this package does not.
 	Claim struct {
+		// The index of the workload instance the claim belongs to. Each instance
+		// settles the same mappings on host ports of its own.
+		Instance int
 		// What the specification called the port, which is how the rest of a
 		// manifest refers to it. Empty for a port the specification did not name.
 		Name string
@@ -116,7 +119,9 @@ func Pinned(mappings []manifest.Port) bool {
 func Requested(mappings []manifest.Port, held []Claim) []manifest.Port {
 	allocated := make(map[key]struct{}, len(held))
 	for _, claim := range held {
-		if claim.Dynamic {
+		// The stored specification carries the first instance's resolutions, so
+		// what was originally asked for is recovered against that instance alone.
+		if claim.Dynamic && claim.Instance == 0 {
 			allocated[key{claim.Container, claim.Protocol}] = struct{}{}
 		}
 	}
@@ -135,14 +140,20 @@ func Requested(mappings []manifest.Port, held []Claim) []manifest.Port {
 	return requested
 }
 
-// Resolve settles every mapping on a host port, keeping the allocations the workload
-// already holds.
+// Resolve settles every mapping on a host port for each of the workload's
+// instances, keeping the allocations every instance already holds.
 //
 // A port's protocol is part of its identity here as it is in the schema, since TCP
 // and UDP are separate address spaces: what is taken on one says nothing about the
 // other, and resolving them against a single set would refuse ports that are free.
-func (c *Claimer) Resolve(ctx context.Context, workload string, existing []Claim, mappings []manifest.Port) ([]Claim, error) {
-	held := heldBy(existing)
+func (c *Claimer) Resolve(ctx context.Context, workload string, existing []Claim, mappings []manifest.Port, count int) ([]Claim, error) {
+	// One host port cannot reach more than one instance, so a specification
+	// pinning a port resolves for a single instance only. Validation refuses the
+	// combination before it gets here, and this guards the invariant if it ever
+	// does not.
+	if count > 1 && Pinned(mappings) {
+		return nil, fmt.Errorf("%w: a pinned host port cannot serve %d instances", ErrHostPortTaken, count)
+	}
 
 	// Ports already promised to any workload are off limits, along with the ones
 	// resolved so far in this specification.
@@ -165,19 +176,27 @@ func (c *Claimer) Resolve(ctx context.Context, workload string, existing []Claim
 		}
 	}
 
-	allocations, err := c.allocate(held, taken, mappings)
-	if err != nil {
-		return nil, err
-	}
+	resolved := make([]Claim, 0, count*len(mappings))
 
-	resolved := make([]Claim, 0, len(mappings))
-	for _, mapping := range mappings {
-		claim, err := c.resolve(ctx, workload, held, allocations, mapping)
+	// Instance by instance, so each one keeps what it held and allocates around
+	// what every earlier one settled: allocate appends its choices to taken.
+	for instance := range count {
+		held := heldBy(existing, instance)
+
+		allocations, err := c.allocate(held, taken, mappings)
 		if err != nil {
 			return nil, err
 		}
 
-		resolved = append(resolved, claim)
+		for _, mapping := range mappings {
+			claim, err := c.resolve(ctx, workload, held, allocations, mapping)
+			if err != nil {
+				return nil, err
+			}
+
+			claim.Instance = instance
+			resolved = append(resolved, claim)
+		}
 	}
 
 	return resolved, nil
@@ -196,35 +215,47 @@ func (c *Claimer) Resolve(ctx context.Context, workload string, existing []Claim
 // cannot disagree about which port a workload keeps or which pinned port is refused.
 // A pinned port another workload holds is still an error here, because that is the
 // answer the caller asked for.
-func (c *Claimer) Preview(ctx context.Context, workload string, existing []Claim, mappings []manifest.Port) ([]Claim, bool, error) {
-	held := heldBy(existing)
+func (c *Claimer) Preview(ctx context.Context, workload string, existing []Claim, mappings []manifest.Port, count int) ([]Claim, bool, error) {
+	if count > 1 && Pinned(mappings) {
+		return nil, false, fmt.Errorf("%w: a pinned host port cannot serve %d instances", ErrHostPortTaken, count)
+	}
 
 	var pending bool
 
-	claims := make([]Claim, 0, len(mappings))
-	for _, mapping := range mappings {
-		// No allocations, so a mapping that is neither pinned nor already held is
-		// settled on nothing.
-		claim, err := c.resolve(ctx, workload, held, nil, mapping)
-		if err != nil {
-			return nil, false, err
-		}
+	claims := make([]Claim, 0, count*len(mappings))
 
-		if claim.Host == 0 {
-			pending = true
-		}
+	for instance := range count {
+		held := heldBy(existing, instance)
 
-		claims = append(claims, claim)
+		for _, mapping := range mappings {
+			// No allocations, so a mapping that is neither pinned nor already held is
+			// settled on nothing.
+			claim, err := c.resolve(ctx, workload, held, nil, mapping)
+			if err != nil {
+				return nil, false, err
+			}
+
+			if claim.Host == 0 {
+				pending = true
+			}
+
+			claim.Instance = instance
+			claims = append(claims, claim)
+		}
 	}
 
 	return claims, pending, nil
 }
 
-// heldBy reports the claims a workload already holds, keyed by the port and protocol
-// each one settles.
-func heldBy(existing []Claim) map[key]Claim {
+// heldBy reports the claims one of a workload's instances already holds, keyed by
+// the port and protocol each one settles.
+func heldBy(existing []Claim, instance int) map[key]Claim {
 	held := make(map[key]Claim, len(existing))
 	for _, claim := range existing {
+		if claim.Instance != instance {
+			continue
+		}
+
 		held[key{claim.Container, claim.Protocol}] = claim
 	}
 
@@ -352,11 +383,15 @@ func protocolOf(mapping manifest.Port) Protocol {
 	return Protocol(mapping.Protocol)
 }
 
-// Resolved returns spec with every port's host side filled in from the claims.
+// Resolved returns spec with every port's host side filled in from the first
+// instance's claims.
 //
 // The resolved ports are part of the specification that gets hashed, which is what
 // makes a reallocated port replace the container running on the old one: to the
-// reconciler it is simply a specification that has changed.
+// reconciler it is simply a specification that has changed. Only the first
+// instance's ports are written, because they are the workload's advertised
+// address: a later instance's port moving replaces that instance alone, not the
+// whole workload.
 func Resolved(spec manifest.Spec, claims []Claim) manifest.Spec {
 	if len(spec.Ports) == 0 || len(claims) == 0 {
 		return spec
@@ -364,6 +399,10 @@ func Resolved(spec manifest.Spec, claims []Claim) manifest.Spec {
 
 	settled := make(map[key]Claim, len(claims))
 	for _, claim := range claims {
+		if claim.Instance != 0 {
+			continue
+		}
+
 		settled[key{claim.Container, claim.Protocol}] = claim
 	}
 

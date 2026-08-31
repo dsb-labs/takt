@@ -3650,8 +3650,8 @@ func (_m *MockClaimer) EXPECT() *MockClaimer_Expecter {
 }
 
 // Preview provides a mock function for the type MockClaimer
-func (_mock *MockClaimer) Preview(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, bool, error) {
-	ret := _mock.Called(ctx, workload, held, mappings)
+func (_mock *MockClaimer) Preview(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port, count int) ([]port.Claim, bool, error) {
+	ret := _mock.Called(ctx, workload, held, mappings, count)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Preview")
@@ -3660,23 +3660,23 @@ func (_mock *MockClaimer) Preview(ctx context.Context, workload string, held []p
 	var r0 []port.Claim
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []port.Claim, []manifest.Port) ([]port.Claim, bool, error)); ok {
-		return returnFunc(ctx, workload, held, mappings)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []port.Claim, []manifest.Port, int) ([]port.Claim, bool, error)); ok {
+		return returnFunc(ctx, workload, held, mappings, count)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []port.Claim, []manifest.Port) []port.Claim); ok {
-		r0 = returnFunc(ctx, workload, held, mappings)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []port.Claim, []manifest.Port, int) []port.Claim); ok {
+		r0 = returnFunc(ctx, workload, held, mappings, count)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]port.Claim)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []port.Claim, []manifest.Port) bool); ok {
-		r1 = returnFunc(ctx, workload, held, mappings)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []port.Claim, []manifest.Port, int) bool); ok {
+		r1 = returnFunc(ctx, workload, held, mappings, count)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, string, []port.Claim, []manifest.Port) error); ok {
-		r2 = returnFunc(ctx, workload, held, mappings)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, []port.Claim, []manifest.Port, int) error); ok {
+		r2 = returnFunc(ctx, workload, held, mappings, count)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -3693,11 +3693,12 @@ type MockClaimer_Preview_Call struct {
 //   - workload string
 //   - held []port.Claim
 //   - mappings []manifest.Port
-func (_e *MockClaimer_Expecter) Preview(ctx any, workload any, held any, mappings any) *MockClaimer_Preview_Call {
-	return &MockClaimer_Preview_Call{Call: _e.mock.On("Preview", ctx, workload, held, mappings)}
+//   - count int
+func (_e *MockClaimer_Expecter) Preview(ctx any, workload any, held any, mappings any, count any) *MockClaimer_Preview_Call {
+	return &MockClaimer_Preview_Call{Call: _e.mock.On("Preview", ctx, workload, held, mappings, count)}
 }
 
-func (_c *MockClaimer_Preview_Call) Run(run func(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port)) *MockClaimer_Preview_Call {
+func (_c *MockClaimer_Preview_Call) Run(run func(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port, count int)) *MockClaimer_Preview_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -3715,11 +3716,16 @@ func (_c *MockClaimer_Preview_Call) Run(run func(ctx context.Context, workload s
 		if args[3] != nil {
 			arg3 = args[3].([]manifest.Port)
 		}
+		var arg4 int
+		if args[4] != nil {
+			arg4 = args[4].(int)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
+			arg4,
 		)
 	})
 	return _c
@@ -3730,14 +3736,14 @@ func (_c *MockClaimer_Preview_Call) Return(claims []port.Claim, b bool, err erro
 	return _c
 }
 
-func (_c *MockClaimer_Preview_Call) RunAndReturn(run func(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, bool, error)) *MockClaimer_Preview_Call {
+func (_c *MockClaimer_Preview_Call) RunAndReturn(run func(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port, count int) ([]port.Claim, bool, error)) *MockClaimer_Preview_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Resolve provides a mock function for the type MockClaimer
-func (_mock *MockClaimer) Resolve(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, error) {
-	ret := _mock.Called(ctx, workload, held, mappings)
+func (_mock *MockClaimer) Resolve(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port, count int) ([]port.Claim, error) {
+	ret := _mock.Called(ctx, workload, held, mappings, count)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Resolve")
@@ -3745,18 +3751,18 @@ func (_mock *MockClaimer) Resolve(ctx context.Context, workload string, held []p
 
 	var r0 []port.Claim
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []port.Claim, []manifest.Port) ([]port.Claim, error)); ok {
-		return returnFunc(ctx, workload, held, mappings)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []port.Claim, []manifest.Port, int) ([]port.Claim, error)); ok {
+		return returnFunc(ctx, workload, held, mappings, count)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []port.Claim, []manifest.Port) []port.Claim); ok {
-		r0 = returnFunc(ctx, workload, held, mappings)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []port.Claim, []manifest.Port, int) []port.Claim); ok {
+		r0 = returnFunc(ctx, workload, held, mappings, count)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]port.Claim)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []port.Claim, []manifest.Port) error); ok {
-		r1 = returnFunc(ctx, workload, held, mappings)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []port.Claim, []manifest.Port, int) error); ok {
+		r1 = returnFunc(ctx, workload, held, mappings, count)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3773,11 +3779,12 @@ type MockClaimer_Resolve_Call struct {
 //   - workload string
 //   - held []port.Claim
 //   - mappings []manifest.Port
-func (_e *MockClaimer_Expecter) Resolve(ctx any, workload any, held any, mappings any) *MockClaimer_Resolve_Call {
-	return &MockClaimer_Resolve_Call{Call: _e.mock.On("Resolve", ctx, workload, held, mappings)}
+//   - count int
+func (_e *MockClaimer_Expecter) Resolve(ctx any, workload any, held any, mappings any, count any) *MockClaimer_Resolve_Call {
+	return &MockClaimer_Resolve_Call{Call: _e.mock.On("Resolve", ctx, workload, held, mappings, count)}
 }
 
-func (_c *MockClaimer_Resolve_Call) Run(run func(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port)) *MockClaimer_Resolve_Call {
+func (_c *MockClaimer_Resolve_Call) Run(run func(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port, count int)) *MockClaimer_Resolve_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -3795,11 +3802,16 @@ func (_c *MockClaimer_Resolve_Call) Run(run func(ctx context.Context, workload s
 		if args[3] != nil {
 			arg3 = args[3].([]manifest.Port)
 		}
+		var arg4 int
+		if args[4] != nil {
+			arg4 = args[4].(int)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
+			arg4,
 		)
 	})
 	return _c
@@ -3810,7 +3822,7 @@ func (_c *MockClaimer_Resolve_Call) Return(claims []port.Claim, err error) *Mock
 	return _c
 }
 
-func (_c *MockClaimer_Resolve_Call) RunAndReturn(run func(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port) ([]port.Claim, error)) *MockClaimer_Resolve_Call {
+func (_c *MockClaimer_Resolve_Call) RunAndReturn(run func(ctx context.Context, workload string, held []port.Claim, mappings []manifest.Port, count int) ([]port.Claim, error)) *MockClaimer_Resolve_Call {
 	_c.Call.Return(run)
 	return _c
 }

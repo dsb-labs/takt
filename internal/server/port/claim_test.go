@@ -1,6 +1,7 @@
 package port_test
 
 import (
+	"cmp"
 	"errors"
 	"testing"
 
@@ -19,6 +20,7 @@ func TestClaimer_Resolve(t *testing.T) {
 		Name       string
 		Held       []port.Claim
 		Mappings   []manifest.Port
+		Count      int
 		SetupMocks func(*MockRepository)
 		Assert     func(*testing.T, []port.Claim)
 		ExpectErr  error
@@ -164,6 +166,72 @@ func TestClaimer_Resolve(t *testing.T) {
 			ExpectErr: port.ErrHostPortTaken,
 		},
 		{
+			// Each instance publishes the same container port on a host port of
+			// its own.
+			Name:     "allocates a host port per instance",
+			Mappings: []manifest.Port{{To: 8080}},
+			Count:    3,
+			SetupMocks: func(ports *MockRepository) {
+				ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Once()
+			},
+			Assert: func(t *testing.T, claims []port.Claim) {
+				require.Len(t, claims, 3)
+
+				hosts := make(map[int]struct{}, 3)
+				for i, claim := range claims {
+					assert.Equal(t, i, claim.Instance)
+					assert.Equal(t, 8080, claim.Container)
+					hosts[claim.Host] = struct{}{}
+				}
+
+				assert.Len(t, hosts, 3, "each instance holds a host port of its own")
+			},
+		},
+		{
+			Name: "keeps each instance's host port",
+			Held: []port.Claim{
+				{Instance: 0, Container: 8080, Host: 20005, Protocol: port.ProtocolTCP, Dynamic: true},
+				{Instance: 1, Container: 8080, Host: 20007, Protocol: port.ProtocolTCP, Dynamic: true},
+			},
+			Mappings: []manifest.Port{{To: 8080}},
+			Count:    2,
+			SetupMocks: func(ports *MockRepository) {
+				ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Once()
+			},
+			Assert: func(t *testing.T, claims []port.Claim) {
+				require.Len(t, claims, 2)
+				assert.Equal(t, 20005, claims[0].Host)
+				assert.Equal(t, 20007, claims[1].Host)
+			},
+		},
+		{
+			// Resolving with a smaller count returns claims for the remaining
+			// instances alone, and persisting them releases the rest.
+			Name: "drops a removed instance's claims",
+			Held: []port.Claim{
+				{Instance: 0, Container: 8080, Host: 20005, Protocol: port.ProtocolTCP, Dynamic: true},
+				{Instance: 1, Container: 8080, Host: 20007, Protocol: port.ProtocolTCP, Dynamic: true},
+			},
+			Mappings: []manifest.Port{{To: 8080}},
+			Count:    1,
+			SetupMocks: func(ports *MockRepository) {
+				ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Once()
+			},
+			Assert: func(t *testing.T, claims []port.Claim) {
+				require.Len(t, claims, 1)
+				assert.Equal(t, 0, claims[0].Instance)
+				assert.Equal(t, 20005, claims[0].Host)
+			},
+		},
+		{
+			// One host port cannot reach more than one instance.
+			Name:       "refuses a pinned port for more than one instance",
+			Mappings:   []manifest.Port{{To: 8080, From: 4141}},
+			Count:      2,
+			SetupMocks: func(*MockRepository) {},
+			ExpectErr:  port.ErrHostPortTaken,
+		},
+		{
 			// A capacity problem rather than a fault or a bad request: the
 			// specification becomes servable when a workload is deleted or the range
 			// is widened.
@@ -197,7 +265,7 @@ func TestClaimer_Resolve(t *testing.T) {
 				Ports:     ports,
 			})
 
-			claims, err := claimer.Resolve(t.Context(), "example", tc.Held, tc.Mappings)
+			claims, err := claimer.Resolve(t.Context(), "example", tc.Held, tc.Mappings, cmp.Or(tc.Count, 1))
 			if tc.Assert == nil {
 				assert.Error(t, err)
 				if tc.ExpectErr != nil {
@@ -220,6 +288,7 @@ func TestClaimer_Preview(t *testing.T) {
 		Name       string
 		Held       []port.Claim
 		Mappings   []manifest.Port
+		Count      int
 		SetupMocks func(*MockRepository)
 		Assert     func(*testing.T, []port.Claim, bool)
 		ExpectErr  error
@@ -288,6 +357,22 @@ func TestClaimer_Preview(t *testing.T) {
 				assert.True(t, pending)
 			},
 		},
+		{
+			// An instance the workload has not run yet has no allocation to keep,
+			// so growing the count reads as pending.
+			Name:       "reports an unsettled instance as pending",
+			Held:       []port.Claim{{Instance: 0, Container: 8080, Host: 20005, Protocol: port.ProtocolTCP, Dynamic: true}},
+			Mappings:   []manifest.Port{{To: 8080}},
+			Count:      2,
+			SetupMocks: func(*MockRepository) {},
+			Assert: func(t *testing.T, claims []port.Claim, pending bool) {
+				require.Len(t, claims, 2)
+				assert.Equal(t, 20005, claims[0].Host)
+				assert.Zero(t, claims[1].Host)
+				assert.Equal(t, 1, claims[1].Instance)
+				assert.True(t, pending)
+			},
+		},
 	}
 
 	for _, tc := range tt {
@@ -301,7 +386,7 @@ func TestClaimer_Preview(t *testing.T) {
 				Ports: ports,
 			})
 
-			claims, pending, err := claimer.Preview(t.Context(), "example", tc.Held, tc.Mappings)
+			claims, pending, err := claimer.Preview(t.Context(), "example", tc.Held, tc.Mappings, cmp.Or(tc.Count, 1))
 			if tc.Assert == nil {
 				assert.Error(t, err)
 				if tc.ExpectErr != nil {
