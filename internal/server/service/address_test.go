@@ -78,7 +78,7 @@ func TestAddressService_Address(t *testing.T) {
 				Return(database.Workload{ID: "workload-one", Name: "postgres"}, nil)
 			ports.EXPECT().List(mock.Anything, "workload-one").Return(tc.Ports, nil)
 
-			address, err := newTestAddressService(t, workloads, ports).Address(t.Context(), tc.Reference)
+			address, err := newTestAddressService(t, workloads, ports).Address(t.Context(), tc.Reference, "reader", 0)
 			if tc.ExpectErr != nil {
 				assert.ErrorIs(t, err, tc.ExpectErr)
 
@@ -90,6 +90,44 @@ func TestAddressService_Address(t *testing.T) {
 		})
 	}
 
+	t.Run("spreads a reader's instances across the target's", func(t *testing.T) {
+		workloads, ports := NewMockWorkloadLocator(t), NewMockPortLocator(t)
+
+		workloads.EXPECT().Get(mock.Anything, "postgres").
+			Return(database.Workload{ID: "workload-one", Name: "postgres"}, nil)
+
+		// Three instances publishing the same container port at three host ports.
+		ports.EXPECT().List(mock.Anything, "workload-one").Return([]database.Port{
+			{WorkloadID: "workload-one", Instance: 0, Name: "pg", Container: 5432, Host: 20432, Protocol: "tcp", Dynamic: true},
+			{WorkloadID: "workload-one", Instance: 1, Name: "pg", Container: 5432, Host: 20433, Protocol: "tcp", Dynamic: true},
+			{WorkloadID: "workload-one", Instance: 2, Name: "pg", Container: 5432, Host: 20434, Protocol: "tcp", Dynamic: true},
+		}, nil)
+
+		svc := newTestAddressService(t, workloads, ports)
+		reference := manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres", Port: "pg"}
+
+		// Three instances of one reader land one on each target instance, because
+		// the reader's own index offsets the choice.
+		seen := make(map[string]struct{}, 3)
+		for readerInstance := range 3 {
+			address, err := svc.Address(t.Context(), reference, "api", readerInstance)
+			require.NoError(t, err)
+
+			seen[address] = struct{}{}
+		}
+
+		assert.Len(t, seen, 3, "each reader instance reached a target instance of its own")
+
+		// Deterministic: the same reader resolves the same address every time, so a
+		// dry run and an apply cannot disagree.
+		first, err := svc.Address(t.Context(), reference, "api", 0)
+		require.NoError(t, err)
+
+		again, err := svc.Address(t.Context(), reference, "api", 0)
+		require.NoError(t, err)
+		assert.Equal(t, first, again)
+	})
+
 	t.Run("reports a workload that does not exist", func(t *testing.T) {
 		workloads, ports := NewMockWorkloadLocator(t), NewMockPortLocator(t)
 
@@ -97,7 +135,7 @@ func TestAddressService_Address(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 
 		_, err := newTestAddressService(t, workloads, ports).
-			Address(t.Context(), manifest.Reference{Kind: manifest.KindWorkload, Name: "nope"})
+			Address(t.Context(), manifest.Reference{Kind: manifest.KindWorkload, Name: "nope"}, "reader", 0)
 		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
 	})
 }

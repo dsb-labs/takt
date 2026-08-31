@@ -270,10 +270,11 @@ type (
 	// Narrower than the address service it is satisfied by: hashing a workload needs
 	// the address and nothing else.
 	WorkloadAddresses interface {
-		// Address should return the address the reference names, reporting
-		// ErrWorkloadNotFound when nothing holds the name and ErrPortNotPublished
-		// when the workload publishes no such port.
-		Address(ctx context.Context, reference manifest.Reference) (string, error)
+		// Address should return the address the reference names as read by one
+		// instance of the referencing workload, reporting ErrWorkloadNotFound
+		// when nothing holds the name and ErrPortNotPublished when the workload
+		// publishes no such port.
+		Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error)
 	}
 
 	// The ImageResolver interface describes how the service learns which digest an
@@ -1415,7 +1416,10 @@ func (s *WorkloadService) resolveReferences(ctx context.Context, spec manifest.S
 			return references{}, fmt.Errorf("%w: this server resolves no workload addresses", ErrWorkloadNotFound)
 		}
 
-		address, err := s.addresses.Address(ctx, reference)
+		// The first instance's resolution stands in for the workload here: what is
+		// being established is that the reference resolves at all, and the stored
+		// hash carries that instance's view.
+		address, err := s.addresses.Address(ctx, reference, spec.Name, 0)
 		switch {
 		case errors.Is(err, ErrWorkloadNotFound):
 			resolved.unknown = append(resolved.unknown, reference.String())

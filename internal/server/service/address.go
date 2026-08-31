@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"net"
 	"strconv"
@@ -76,11 +77,20 @@ func NewAddressService(config AddressServiceConfig) *AddressService {
 	}
 }
 
-// Address returns the address the reference names.
+// Address returns the address the reference names, as read by one instance of the
+// referencing workload.
 //
 // A reference naming a port resolves to a host and a port. One naming none resolves
 // to the host alone, so that a workload composing an address it already knows the
 // port of does not have to name it twice.
+//
+// A workload running several instances publishes a port at several addresses, and a
+// reference still resolves to one. Which one is chosen by the reader's identity:
+// instance readerInstance of the workload named reader lands on
+// (hash(reader) + readerInstance) mod count. The choice is deterministic, so a
+// dry run and an apply agree, and a reader workload's own instances spread evenly
+// across the target's. A count change moves the arithmetic and the readers follow,
+// which is rebalancing rather than an accident.
 //
 // The referenced workload must publish at least one port, whichever form was written.
 // A workload publishing none is reachable at no address, so a reference to one could
@@ -88,7 +98,7 @@ func NewAddressService(config AddressServiceConfig) *AddressService {
 //
 // Returns ErrWorkloadNotFound when nothing holds the name, or ErrPortNotPublished
 // when the workload holds it but publishes no such port.
-func (s *AddressService) Address(ctx context.Context, reference manifest.Reference) (string, error) {
+func (s *AddressService) Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error) {
 	row, err := s.workloads.Get(ctx, reference.Name)
 	switch {
 	case errors.Is(err, database.ErrWorkloadNotFound):
@@ -110,11 +120,44 @@ func (s *AddressService) Address(ctx context.Context, reference manifest.Referen
 		return s.address, nil
 	}
 
+	// The count is read from the rows rather than by decoding the specification:
+	// every instance holds rows, so the highest index says how many there are, and
+	// the rows are what is being chosen between anyway.
+	count := 1
 	for _, port := range published {
+		if port.Instance >= count {
+			count = port.Instance + 1
+		}
+	}
+
+	slot := pick(reader, readerInstance, count)
+
+	for _, port := range published {
+		if port.Instance != slot {
+			continue
+		}
+
 		if reference.Port.Matches(port.Name, port.Container) {
 			return net.JoinHostPort(s.address, strconv.Itoa(port.Host)), nil
 		}
 	}
 
 	return "", fmt.Errorf("%w: workload %s does not publish %s", ErrPortNotPublished, reference.Name, reference.Port)
+}
+
+// pick chooses which of a target's instances a reader lands on.
+//
+// The offset by the reader's own instance is what spreads a reader workload's
+// replicas exactly evenly: three readers of a three-instance target land one on
+// each. The hash spreads unrelated readers, so they do not all crowd the first
+// instance.
+func pick(reader string, readerInstance, count int) int {
+	if count <= 1 {
+		return 0
+	}
+
+	digest := fnv.New32a()
+	_, _ = digest.Write([]byte(reader))
+
+	return int((digest.Sum32() + uint32(readerInstance)) % uint32(count))
 }

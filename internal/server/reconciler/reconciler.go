@@ -99,7 +99,7 @@ type (
 	Resolver interface {
 		// Resolve should return env with every reference replaced by the value it
 		// names, reporting an error when one cannot be resolved.
-		Resolve(ctx context.Context, env map[string]string) (map[string]string, error)
+		Resolve(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error)
 	}
 
 	// The Mounts interface describes how the reconciler turns the secrets and
@@ -1491,7 +1491,7 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 	// the operator cannot see. Returning here instead leaves the backoff to pace the
 	// retries, so a workload waiting on a secret does not fill the log.
 	if r.env != nil {
-		if w.Env, err = r.env.Resolve(startCtx, w.Env); err != nil {
+		if w.Env, err = r.env.Resolve(startCtx, w.Env, w.Name, w.Instance); err != nil {
 			return fmt.Errorf("failed to resolve environment for workload: %w", err)
 		}
 	}

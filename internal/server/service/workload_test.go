@@ -1223,7 +1223,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		addresses.EXPECT().
-			Address(mock.Anything, manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres", Port: "pg"}).
+			Address(mock.Anything, manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres", Port: "pg"}, mock.Anything, mock.Anything).
 			Return("10.0.0.5:20432", nil).Once()
 
 		var stored database.Workload
@@ -1257,7 +1257,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 			repo.EXPECT().Get(mock.Anything, "example").
 				Return(database.Workload{}, database.ErrWorkloadNotFound)
 			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
-			addresses.EXPECT().Address(mock.Anything, mock.Anything).Return(address, nil).Once()
+			addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(address, nil).Once()
 
 			repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
 				RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
@@ -1284,7 +1284,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 
-		addresses.EXPECT().Address(mock.Anything, mock.Anything).
+		addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return("", fmt.Errorf("%w: nope", service.ErrWorkloadNotFound)).Once()
 
 		// The workload could never run, and the operator asking for it is the one who
@@ -1304,7 +1304,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 
-		addresses.EXPECT().Address(mock.Anything, mock.Anything).
+		addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return("", fmt.Errorf("%w: workload postgres does not publish http", service.ErrPortNotPublished)).Once()
 
 		_, _, err := newTestAddressAwareService(t, d, repo, ports, addresses).
@@ -1785,7 +1785,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 		// holds.
 		repo.EXPECT().Get(mock.Anything, "api").
 			Return(database.Workload{ID: "api-id", Name: "api", Spec: consumerSpec, SpecHash: "hash-one"}, nil).Once()
-		addresses.EXPECT().Address(mock.Anything, mock.Anything).
+		addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return("", fmt.Errorf("%w: postgres", service.ErrWorkloadNotFound)).Once()
 		repo.EXPECT().ReferencedBy(mock.Anything, "api").Return(nil, nil).Maybe()
 
@@ -3013,7 +3013,7 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 		repo.EXPECT().ReferencedBy(mock.Anything, "example").Return([]string{"api"}, nil).Once()
 		repo.EXPECT().Get(mock.Anything, "api").
 			Return(database.Workload{ID: "api-id", Name: "api", Spec: consumerSpec, SpecHash: "hash-two"}, nil).Once()
-		addresses.EXPECT().Address(mock.Anything, mock.Anything).Return("10.0.0.5:20100", nil).Once()
+		addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return("10.0.0.5:20100", nil).Once()
 		repo.EXPECT().ReferencedBy(mock.Anything, "api").Return(nil, nil).Maybe()
 
 		rehashed := make(chan database.Workload, 1)

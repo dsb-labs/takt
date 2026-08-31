@@ -2246,7 +2246,7 @@ func TestReconciler_Run_ResolvesSecrets(t *testing.T) {
 		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
 		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
 
-		secrets.EXPECT().Resolve(mock.Anything, map[string]string{"DSN": "${secret:db-password}"}).
+		secrets.EXPECT().Resolve(mock.Anything, map[string]string{"DSN": "${secret:db-password}"}, mock.Anything, mock.Anything).
 			Return(map[string]string{"DSN": "hunter2"}, nil)
 
 		started := make(chan map[string]string, 1)
@@ -2297,8 +2297,8 @@ func TestReconciler_Run_ResolvesSecrets(t *testing.T) {
 		d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(nil, nil)
 
 		resolves := newCounter()
-		secrets.EXPECT().Resolve(mock.Anything, mock.Anything).
-			RunAndReturn(func(context.Context, map[string]string) (map[string]string, error) {
+		secrets.EXPECT().Resolve(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(context.Context, map[string]string, string, int) (map[string]string, error) {
 				resolves.inc()
 
 				return nil, errors.New("secret not found: nope")

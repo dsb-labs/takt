@@ -29,10 +29,11 @@ type (
 	// and a variable are read by name, where an address is derived from what orca
 	// settled on for the workload being referenced.
 	AddressResolver interface {
-		// Address should return the address the reference names, reporting
-		// ErrWorkloadNotFound when nothing holds the name and ErrPortNotPublished
-		// when the workload publishes no such port.
-		Address(ctx context.Context, reference manifest.Reference) (string, error)
+		// Address should return the address the reference names as read by one
+		// instance of the referencing workload, reporting ErrWorkloadNotFound
+		// when nothing holds the name and ErrPortNotPublished when the workload
+		// publishes no such port.
+		Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error)
 	}
 
 	// The EnvResolver type turns the references in a workload's environment into the
@@ -76,15 +77,18 @@ func NewEnvResolver(config EnvResolverConfig) *EnvResolver {
 	}
 }
 
-// Resolve returns env with every reference replaced by the value it names.
+// Resolve returns env with every reference replaced by the value it names, as read
+// by the given instance of the named reader workload.
 //
 // This is the only thing that produces a secret's plaintext outside the secret
-// service, and it exists for the reconciler to call as a workload starts.
+// service, and it exists for the reconciler to call as a workload starts. The reader
+// identity is what a reference to another workload resolves against: each of the
+// reader's instances may land on a different instance of the target.
 //
 // Returns manifest.ErrUnknownSecret or manifest.ErrUnknownVariable naming both the
 // environment variable and what it could not read. Handing the workload the reference
 // text would have it use that as the value.
-func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[string]string, error) {
+func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error) {
 	if len(env) == 0 {
 		return env, nil
 	}
@@ -108,7 +112,7 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[s
 				return value, true
 			}
 
-			value, found, err := r.value(ctx, reference)
+			value, found, err := r.value(ctx, reference, reader, readerInstance)
 			switch {
 			case err != nil:
 				failed = err
@@ -147,9 +151,9 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string) (map[s
 // Nothing held under the name is a false rather than an error, so that expansion is
 // what reports it. That keeps one description of an unresolved reference, whichever
 // kind it named and wherever expansion was called from.
-func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference) (string, bool, error) {
+func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, bool, error) {
 	if reference.Kind == manifest.KindWorkload {
-		return r.address(ctx, reference)
+		return r.address(ctx, reference, reader, readerInstance)
 	}
 
 	store, missing := storeFor(r.secrets, r.variables, reference.Kind)
@@ -179,14 +183,14 @@ func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference) (
 // is an error instead: the reference names something specific about a workload that
 // is right there, and being told the address is unknown would send an operator
 // looking for the wrong thing.
-func (r *EnvResolver) address(ctx context.Context, reference manifest.Reference) (string, bool, error) {
+func (r *EnvResolver) address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, bool, error) {
 	// A server resolving no addresses holds nothing under the name, which is the same
 	// answer as a workload nobody created.
 	if r.workloads == nil {
 		return "", false, nil
 	}
 
-	address, err := r.workloads.Address(ctx, reference)
+	address, err := r.workloads.Address(ctx, reference, reader, readerInstance)
 	switch {
 	case errors.Is(err, ErrWorkloadNotFound):
 		return "", false, nil

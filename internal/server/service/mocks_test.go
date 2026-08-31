@@ -673,8 +673,8 @@ func (_m *MockAddressResolver) EXPECT() *MockAddressResolver_Expecter {
 }
 
 // Address provides a mock function for the type MockAddressResolver
-func (_mock *MockAddressResolver) Address(ctx context.Context, reference manifest.Reference) (string, error) {
-	ret := _mock.Called(ctx, reference)
+func (_mock *MockAddressResolver) Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error) {
+	ret := _mock.Called(ctx, reference, reader, readerInstance)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Address")
@@ -682,16 +682,16 @@ func (_mock *MockAddressResolver) Address(ctx context.Context, reference manifes
 
 	var r0 string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Reference) (string, error)); ok {
-		return returnFunc(ctx, reference)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Reference, string, int) (string, error)); ok {
+		return returnFunc(ctx, reference, reader, readerInstance)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Reference) string); ok {
-		r0 = returnFunc(ctx, reference)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Reference, string, int) string); ok {
+		r0 = returnFunc(ctx, reference, reader, readerInstance)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Reference) error); ok {
-		r1 = returnFunc(ctx, reference)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Reference, string, int) error); ok {
+		r1 = returnFunc(ctx, reference, reader, readerInstance)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -706,11 +706,13 @@ type MockAddressResolver_Address_Call struct {
 // Address is a helper method to define mock.On call
 //   - ctx context.Context
 //   - reference manifest.Reference
-func (_e *MockAddressResolver_Expecter) Address(ctx any, reference any) *MockAddressResolver_Address_Call {
-	return &MockAddressResolver_Address_Call{Call: _e.mock.On("Address", ctx, reference)}
+//   - reader string
+//   - readerInstance int
+func (_e *MockAddressResolver_Expecter) Address(ctx any, reference any, reader any, readerInstance any) *MockAddressResolver_Address_Call {
+	return &MockAddressResolver_Address_Call{Call: _e.mock.On("Address", ctx, reference, reader, readerInstance)}
 }
 
-func (_c *MockAddressResolver_Address_Call) Run(run func(ctx context.Context, reference manifest.Reference)) *MockAddressResolver_Address_Call {
+func (_c *MockAddressResolver_Address_Call) Run(run func(ctx context.Context, reference manifest.Reference, reader string, readerInstance int)) *MockAddressResolver_Address_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -720,9 +722,19 @@ func (_c *MockAddressResolver_Address_Call) Run(run func(ctx context.Context, re
 		if args[1] != nil {
 			arg1 = args[1].(manifest.Reference)
 		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -733,7 +745,7 @@ func (_c *MockAddressResolver_Address_Call) Return(s string, err error) *MockAdd
 	return _c
 }
 
-func (_c *MockAddressResolver_Address_Call) RunAndReturn(run func(ctx context.Context, reference manifest.Reference) (string, error)) *MockAddressResolver_Address_Call {
+func (_c *MockAddressResolver_Address_Call) RunAndReturn(run func(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error)) *MockAddressResolver_Address_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -4201,8 +4213,8 @@ func (_m *MockWorkloadAddresses) EXPECT() *MockWorkloadAddresses_Expecter {
 }
 
 // Address provides a mock function for the type MockWorkloadAddresses
-func (_mock *MockWorkloadAddresses) Address(ctx context.Context, reference manifest.Reference) (string, error) {
-	ret := _mock.Called(ctx, reference)
+func (_mock *MockWorkloadAddresses) Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error) {
+	ret := _mock.Called(ctx, reference, reader, readerInstance)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Address")
@@ -4210,16 +4222,16 @@ func (_mock *MockWorkloadAddresses) Address(ctx context.Context, reference manif
 
 	var r0 string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Reference) (string, error)); ok {
-		return returnFunc(ctx, reference)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Reference, string, int) (string, error)); ok {
+		return returnFunc(ctx, reference, reader, readerInstance)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Reference) string); ok {
-		r0 = returnFunc(ctx, reference)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Reference, string, int) string); ok {
+		r0 = returnFunc(ctx, reference, reader, readerInstance)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Reference) error); ok {
-		r1 = returnFunc(ctx, reference)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Reference, string, int) error); ok {
+		r1 = returnFunc(ctx, reference, reader, readerInstance)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4234,11 +4246,13 @@ type MockWorkloadAddresses_Address_Call struct {
 // Address is a helper method to define mock.On call
 //   - ctx context.Context
 //   - reference manifest.Reference
-func (_e *MockWorkloadAddresses_Expecter) Address(ctx any, reference any) *MockWorkloadAddresses_Address_Call {
-	return &MockWorkloadAddresses_Address_Call{Call: _e.mock.On("Address", ctx, reference)}
+//   - reader string
+//   - readerInstance int
+func (_e *MockWorkloadAddresses_Expecter) Address(ctx any, reference any, reader any, readerInstance any) *MockWorkloadAddresses_Address_Call {
+	return &MockWorkloadAddresses_Address_Call{Call: _e.mock.On("Address", ctx, reference, reader, readerInstance)}
 }
 
-func (_c *MockWorkloadAddresses_Address_Call) Run(run func(ctx context.Context, reference manifest.Reference)) *MockWorkloadAddresses_Address_Call {
+func (_c *MockWorkloadAddresses_Address_Call) Run(run func(ctx context.Context, reference manifest.Reference, reader string, readerInstance int)) *MockWorkloadAddresses_Address_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -4248,9 +4262,19 @@ func (_c *MockWorkloadAddresses_Address_Call) Run(run func(ctx context.Context, 
 		if args[1] != nil {
 			arg1 = args[1].(manifest.Reference)
 		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -4261,7 +4285,7 @@ func (_c *MockWorkloadAddresses_Address_Call) Return(s string, err error) *MockW
 	return _c
 }
 
-func (_c *MockWorkloadAddresses_Address_Call) RunAndReturn(run func(ctx context.Context, reference manifest.Reference) (string, error)) *MockWorkloadAddresses_Address_Call {
+func (_c *MockWorkloadAddresses_Address_Call) RunAndReturn(run func(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error)) *MockWorkloadAddresses_Address_Call {
 	_c.Call.Return(run)
 	return _c
 }
