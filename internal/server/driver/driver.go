@@ -74,6 +74,10 @@ type (
 		ID string
 		// The name of the workload, which identifies it to the operator.
 		Name string
+		// The index of the instance this work runs as. A workload asking for N
+		// instances is handed to its driver N times, each with its own index and
+		// its own ports.
+		Instance int
 		// The version of the specification this work is created from.
 		Version int
 		// The hash of the specification this work is created from, recorded by the
@@ -101,6 +105,10 @@ type (
 		ID string
 		// The name of the workload the instance belongs to.
 		Workload string
+		// The index of the instance among the workload's instances. Each index is
+		// converged on its own, so a driver reports the index it recorded when the
+		// instance started.
+		Index int
 		// The hash of the specification the instance was started from. When this
 		// differs from the workload's desired hash, the instance is stale and
 		// will be replaced.
@@ -157,6 +165,12 @@ type (
 		// Never combined with Previous. A retained instance has already ended, so
 		// there is nothing further for it to say.
 		Follow bool
+		// Which instance's output to read, by its index. Nil reads every instance,
+		// which is what a caller passing nothing means.
+		//
+		// A pointer rather than an index, because zero is a valid index and the
+		// unset case has to be told apart from asking for the first instance.
+		Instance *int
 		// The instant to read the output from, ignoring anything written before it.
 		//
 		// The zero time reads from as far back as Tail allows, which is what a caller
