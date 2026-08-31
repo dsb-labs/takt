@@ -1,1 +1,1 @@
-{"version":"v1","name":"worker","container":{"image":"ghcr.io/dsb-labs/worker:v1"}}
+{"version":"v1","name":"worker","count":0,"container":{"image":"ghcr.io/dsb-labs/worker:v1"}}

@@ -1,1 +1,1 @@
-{"version":"v1","name":"example","env":{"UPSTREAM":"${workload:api:http}"},"restart":{"policy":"always","delay":5000000000},"container":{"image":"example/example:latest"}}
+{"version":"v1","name":"example","count":1,"env":{"UPSTREAM":"${workload:api:http}"},"restart":{"policy":"always","delay":5000000000},"container":{"image":"example/example:latest"}}

@@ -1,0 +1,1 @@
+{"version":"v1","name":"example","count":3,"restart":{"policy":"always","delay":5000000000},"container":{"image":"example/example:latest"}}

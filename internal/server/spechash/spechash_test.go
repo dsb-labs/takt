@@ -80,6 +80,12 @@ func TestCompute(t *testing.T) {
 			Name: "runs a command on the host",
 			File: "exec.json",
 		},
+		{
+			// The count is part of the specification, so scaling a workload moves
+			// its hash and replaces its instances through the ordinary stale path.
+			Name: "runs more than one instance",
+			File: "count.json",
+		},
 	}
 
 	for _, tc := range tt {
@@ -96,6 +102,29 @@ func TestCompute(t *testing.T) {
 			assert.JSONEq(t, string(readFixture(t, tc.File)), string(encoded))
 		})
 	}
+}
+
+// TestCompute_CountOfOneIsTheDefault holds the rule that writing count: 1 asks for
+// what leaving it out already means. The two must hash identically, or adding the
+// explicit form to a manifest would replace a workload that is not changing.
+func TestCompute_CountOfOneIsTheDefault(t *testing.T) {
+	t.Parallel()
+
+	counted, err := manifest.Parse(strings.NewReader(
+		"version: v1\nname: example\ncount: 1\ncontainer:\n  image: example/example:latest\n"))
+	require.NoError(t, err)
+
+	uncounted, err := manifest.Parse(strings.NewReader(
+		"version: v1\nname: example\ncontainer:\n  image: example/example:latest\n"))
+	require.NoError(t, err)
+
+	_, explicit, err := spechash.Compute(counted, spechash.Inputs{})
+	require.NoError(t, err)
+
+	_, defaulted, err := spechash.Compute(uncounted, spechash.Inputs{})
+	require.NoError(t, err)
+
+	assert.Equal(t, explicit, defaulted)
 }
 
 // TestCompute_SignallingMountIsNotASpecificationChange holds the rule the omitempty on

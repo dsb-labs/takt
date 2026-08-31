@@ -89,6 +89,10 @@ type (
 		Version string `json:"version"`
 		// The name that identifies the workload.
 		Name string `json:"name"`
+		// How many instances of the workload to run. Zero means one, which
+		// Defaults resolves. Each instance publishes the workload's ports on
+		// host ports of its own.
+		Count int `json:"count"`
 		// When the workload runs, rather than running continuously. Nil runs it
 		// continuously.
 		Schedule *Schedule `json:"schedule,omitempty"`
@@ -528,6 +532,10 @@ func (s *Schedule) Parsed() (cron.Schedule, error) {
 // Every workload has an answer to what happens when it ends, so a specification
 // naming no policy still gets one.
 func (s *Spec) Defaults() {
+	if s.Count == 0 {
+		s.Count = 1
+	}
+
 	if s.Restart == nil {
 		s.Restart = new(Restart)
 	}

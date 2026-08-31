@@ -173,6 +173,10 @@ func Validate(spec Spec) error {
 		return fmt.Errorf("invalid manifest: %w", err)
 	}
 
+	if err = validateCount(spec); err != nil {
+		return err
+	}
+
 	if err = validateRestart(spec.Restart); err != nil {
 		return err
 	}
@@ -239,6 +243,15 @@ func validateRestart(restart *Restart) error {
 	return nil
 }
 
+// validateCount reports whether the workload's instance count is one orca can run.
+func validateCount(spec Spec) error {
+	if spec.Count < 1 {
+		return errors.New("invalid count: must be at least 1")
+	}
+
+	return nil
+}
+
 // validateSchedule reports whether the workload's schedule is one orca can act on.
 func validateSchedule(spec Spec) error {
 	schedule := spec.Schedule
@@ -263,6 +276,12 @@ func validateSchedule(spec Spec) error {
 	// the pair is rejected rather than left to whichever acts first.
 	if spec.Health != nil {
 		return errors.New("invalid schedule: a scheduled workload cannot declare a health check")
+	}
+
+	// N copies of a cron job firing at once is almost never what a schedule means,
+	// so the pair is rejected rather than guessed at.
+	if spec.Count > 1 {
+		return errors.New("invalid schedule: a scheduled workload cannot run more than one instance")
 	}
 
 	return nil
@@ -332,6 +351,18 @@ func validatePorts(spec Spec, runtime Runtime) error {
 
 	if err := validPorts(spec.Ports); err != nil {
 		return err
+	}
+
+	// One host port reaches one listener, so a pinned port cannot serve more than
+	// one instance. Exec workloads must pin every port, which is why a count above
+	// one is a container-only feature for a workload that publishes anything.
+	if spec.Count > 1 {
+		for _, port := range spec.Ports {
+			if port.From != 0 {
+				return fmt.Errorf("invalid ports: port %d pins host port %d, "+
+					"which cannot reach more than one instance", port.To, port.From)
+			}
+		}
 	}
 
 	switch runtime {

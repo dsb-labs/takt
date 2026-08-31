@@ -1,1 +1,1 @@
-{"version":"v1","name":"example","restart":{"policy":"always","delay":5000000000},"volumes":[{"secret":"tls-cert","to":"/etc/tls/cert.pem","signal":"SIGHUP"}],"container":{"image":"example/example:latest"}}
+{"version":"v1","name":"example","count":1,"restart":{"policy":"always","delay":5000000000},"volumes":[{"secret":"tls-cert","to":"/etc/tls/cert.pem","signal":"SIGHUP"}],"container":{"image":"example/example:latest"}}

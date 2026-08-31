@@ -98,8 +98,10 @@ func TestFromSpec(t *testing.T) {
 
 	t.Run("round-trips a full specification", func(t *testing.T) {
 		spec := manifest.Spec{
-			Version:  "v1",
-			Name:     "example",
+			Version: "v1",
+			Name:    "example",
+			// Resolved rather than zero for the reason the restart policy is.
+			Count:    1,
 			Schedule: &manifest.Schedule{Cron: "*/5 * * * *", Overlap: manifest.OverlapReplace},
 			Labels:   map[string]string{"some-key": "some-value"},
 			// Resolved rather than empty, because a round trip runs the value
@@ -130,6 +132,7 @@ func TestFromSpec(t *testing.T) {
 		spec := manifest.Spec{
 			Version: "v1",
 			Name:    "example",
+			Count:   1,
 			Restart: &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay},
 			Exec:    &manifest.Exec{Command: []string{"echo", "hello world"}},
 		}

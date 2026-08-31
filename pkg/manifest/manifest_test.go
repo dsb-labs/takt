@@ -797,6 +797,7 @@ func TestValidate_Labels(t *testing.T) {
 		return manifest.Spec{
 			Version:   "v1",
 			Name:      "example",
+			Count:     1,
 			Labels:    labels,
 			Container: &manifest.Container{Image: "example/example:latest"},
 		}

@@ -2073,7 +2073,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 		// Pinned to the literal, because a change here replaces every running instance
 		// on upgrade and has to be a decision rather than a side effect. The value
 		// moved once, when the stored specification became the canonical one.
-		assert.Equal(t, "371a0141b0c044f8548664539d7cb3cca729520d0a5844e58651f5602ae77713", hash)
+		assert.Equal(t, "1585158d850ed1821df72ce2875024da74ec56ee1882b1676909c9953c83ba27", hash)
 	})
 
 	t.Run("moves the hash when a secret's revision moves", func(t *testing.T) {
@@ -2106,7 +2106,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 
 		withSecret := applyForHash(t, plain, map[string]string{"db-password": "rev-one"})
 
-		assert.NotEqual(t, "371a0141b0c044f8548664539d7cb3cca729520d0a5844e58651f5602ae77713", withSecret)
+		assert.NotEqual(t, "1585158d850ed1821df72ce2875024da74ec56ee1882b1676909c9953c83ba27", withSecret)
 	})
 
 	t.Run("stores the reference rather than the value", func(t *testing.T) {
@@ -2183,7 +2183,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 		// otherwise replace every running instance that reads a secret, so both fields
 		// are omitted when empty and this is the test that holds them to it.
 		assert.Equal(t,
-			"084f5988e3dddd828f6a59d9e03b9d3a6e6c0b4be738ac1769243fabc3b27e34",
+			"e972d98383170850b8e3d81289d41ce78df79f17e993045208be4b66c2f5cf99",
 			applyForHashOf(t, spec, map[string]string{"db-password": "rev-one"}, nil))
 	})
 
@@ -2218,7 +2218,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 
 		withVariable := applyForHashOf(t, spec, nil, map[string]string{"log-level": "debug"})
 
-		assert.NotEqual(t, "371a0141b0c044f8548664539d7cb3cca729520d0a5844e58651f5602ae77713", withVariable)
+		assert.NotEqual(t, "1585158d850ed1821df72ce2875024da74ec56ee1882b1676909c9953c83ba27", withVariable)
 	})
 
 	t.Run("hashes the two kinds into different places", func(t *testing.T) {
@@ -2341,7 +2341,7 @@ func TestWorkloadService_Apply_HashesImageDigest(t *testing.T) {
 		// existed. The resolver mock is strict, so this also proves no registry
 		// round-trip is made for a workload that never asked for one.
 		assert.Equal(t,
-			"371a0141b0c044f8548664539d7cb3cca729520d0a5844e58651f5602ae77713",
+			"1585158d850ed1821df72ce2875024da74ec56ee1882b1676909c9953c83ba27",
 			applyForDigestHash(t, containerSpec("example", "example/example:latest"), nil))
 	})
 
@@ -2650,7 +2650,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 
 	// The literal hash of a workload mounting nothing, which is what every assertion
 	// about a mounted value not reaching the hash is compared against.
-	const plainHash = "371a0141b0c044f8548664539d7cb3cca729520d0a5844e58651f5602ae77713"
+	const plainHash = "1585158d850ed1821df72ce2875024da74ec56ee1882b1676909c9953c83ba27"
 
 	t.Run("moves the hash when a mounted secret's revision moves", func(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
