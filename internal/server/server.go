@@ -243,8 +243,8 @@ func Run(ctx context.Context, config Config) error {
 		// A check goes to where the workload's ports are published, which is not
 		// loopback for a server told to publish somewhere specific.
 		Bind: config.Workload.Bind,
-		Reallocate: func(ctx context.Context, workload string) (bool, error) {
-			return svc.Reallocate(ctx, workload)
+		Reallocate: func(ctx context.Context, workload string, instance int) (bool, error) {
+			return svc.ReallocateInstance(ctx, workload, instance)
 		},
 		Interval:       config.Reconcile.Interval,
 		MeterProvider:  tel.MeterProvider(),

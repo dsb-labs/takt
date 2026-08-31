@@ -145,6 +145,41 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string, reader
 	return resolved, nil
 }
 
+// Addresses returns the resolved address of every workload reference in env, keyed
+// by the reference as written.
+//
+// This exists for the reconciler, which folds the addresses one instance resolves
+// into the hash that instance is expected to carry. Only the workload references
+// are resolved: a secret's plaintext has no business existing for a comparison.
+func (r *EnvResolver) Addresses(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error) {
+	if r.workloads == nil || len(env) == 0 {
+		return nil, nil
+	}
+
+	found, err := manifest.References(manifest.Spec{Env: env})
+	if err != nil {
+		return nil, err
+	}
+
+	references := manifest.Of(found, manifest.KindWorkload)
+	if len(references) == 0 {
+		return nil, nil
+	}
+
+	addresses := make(map[string]string, len(references))
+
+	for _, reference := range references {
+		address, err := r.workloads.Address(ctx, reference, reader, readerInstance)
+		if err != nil {
+			return nil, err
+		}
+
+		addresses[reference.String()] = address
+	}
+
+	return addresses, nil
+}
+
 // value reads what the reference names from whichever store holds that kind,
 // reporting whether anything holds it.
 //

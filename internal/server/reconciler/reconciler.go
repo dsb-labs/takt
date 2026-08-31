@@ -5,6 +5,8 @@ package reconciler
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -57,6 +59,14 @@ type (
 		// that an operator can read why an attempt failed, and a deleted workload has no
 		// such reader — one left behind is work the orphan sweep would find forever.
 		Discard(ctx context.Context, id, workload string) error
+		// StopInstance should stop what the driver runs for one instance of a
+		// workload, retaining its most recent output exactly as Stop does for
+		// every instance. This is what replacing a single instance takes.
+		StopInstance(ctx context.Context, id, workload string, instance int) error
+		// DiscardInstance should stop what the driver runs for one instance of a
+		// workload and remove all of it, including what was retained for it. This
+		// is what removing an instance takes when a workload's count shrinks.
+		DiscardInstance(ctx context.Context, id, workload string, instance int) error
 		// Signal should send the named signal to everything the driver runs for a
 		// workload, so that a workload mounting a value can be told the value
 		// changed rather than being replaced.
@@ -100,6 +110,11 @@ type (
 		// Resolve should return env with every reference replaced by the value it
 		// names, reporting an error when one cannot be resolved.
 		Resolve(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error)
+		// Addresses should return the resolved address of every workload
+		// reference in env, keyed by the reference as written. This is what an
+		// instance's expected hash covers: each instance may resolve a reference
+		// to a different address, so staleness has to be judged against its own.
+		Addresses(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error)
 	}
 
 	// The Mounts interface describes how the reconciler turns the secrets and
@@ -127,12 +142,16 @@ type (
 	// The Checker interface describes how the reconciler registers and reads what
 	// orca established about a workload's health.
 	Checker interface {
-		// Set should register the check for a workload, replacing any it already had.
+		// Set should register the check for one instance of a workload, replacing
+		// any it already had.
 		Set(workload string, instance int, check health.Check)
-		// Forget should drop the check for a workload that no longer exists.
+		// Forget should drop every check for a workload that no longer exists.
 		Forget(workload string)
-		// Result should return the most recent outcome for a workload, reporting
-		// false when it has no check registered.
+		// ForgetInstance should drop one instance's check, once the instance is
+		// gone while its workload stays.
+		ForgetInstance(workload string, instance int)
+		// Result should return the most recent outcome for one instance of a
+		// workload, reporting false when it has no check registered.
 		Result(workload string, instance int) (health.Result, bool)
 	}
 
@@ -154,19 +173,26 @@ type (
 		mounts      Mounts
 		checker     Checker
 		bind        string
-		reallocate  func(ctx context.Context, workload string) (bool, error)
+		reallocate  func(ctx context.Context, workload string, instance int) (bool, error)
 		now         func() time.Time
 		interval    time.Duration
 		nudge       chan struct{}
 		tracer      trace.Tracer
 		instruments instruments
 
+		// The port allocations the current pass converges against, written once as
+		// a pass begins and read by the converges it spawns. Unguarded because
+		// passes never overlap: the loop's goroutine writes it before anything
+		// concurrent reads it.
+		allocations map[string][]database.Port
+
 		// Guards backoff, lastError and restarts, which are the only state a pass
 		// carries between workloads and so the only things converging them
 		// concurrently can contend on.
 		mux sync.Mutex
-		// How long to wait before restarting each workload that keeps failing.
-		backoff map[string]backoff
+		// How long to wait before restarting each instance that keeps failing.
+		// Keyed per instance, so one instance crashing does not pace the others.
+		backoff map[slot]backoff
 		// The workloads whose instances an operator asked to have replaced,
 		// consumed by the next pass over each. In memory rather than stored,
 		// because a request the server loses can simply be made again.
@@ -217,10 +243,10 @@ type (
 		// The address a workload's host ports are published on, which is where a
 		// health check is performed. Empty probes loopback.
 		Bind string
-		// Called to abandon the host ports orca chose for a workload when it fails
-		// to start, reporting whether anything changed. May be nil, in which case
-		// ports are never reallocated.
-		Reallocate func(ctx context.Context, workload string) (bool, error)
+		// Called to abandon the host ports orca chose for one instance of a
+		// workload when it fails to start, reporting whether anything changed. May
+		// be nil, in which case ports are never reallocated.
+		Reallocate func(ctx context.Context, workload string, instance int) (bool, error)
 		// How often a full reconciliation pass runs regardless of events.
 		Interval time.Duration
 		// Reports the current time, which every timing decision a pass makes reads
@@ -269,6 +295,13 @@ type (
 		message string
 		// When the failure was recorded.
 		at time.Time
+	}
+
+	// The slot type identifies one instance of one workload, which is the grain
+	// backoff and health are kept at.
+	slot struct {
+		workload string
+		instance int
 	}
 )
 
@@ -331,7 +364,7 @@ func New(config Config) *Reconciler {
 		reallocate:   config.Reallocate,
 		now:          clock(config.Now),
 		interval:     config.Interval,
-		backoff:      make(map[string]backoff),
+		backoff:      make(map[slot]backoff),
 		restarts:     make(map[string]struct{}),
 		lastError:    make(map[string]lastError),
 		observations: observations,
@@ -502,8 +535,19 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	observed := make(map[string][]driver.Instance, len(instances))
 	held := make(map[string]struct{}, len(instances))
 
+	// The instance indexes each workload holds anything under, retained included.
+	// Scaling down has to see a slot whose only remnant is a retained corpse, or
+	// the corpse outlives the count that removed it.
+	indexes := make(map[string]map[int]struct{}, len(instances))
+
 	for _, instance := range instances {
 		held[instance.Workload] = struct{}{}
+
+		if indexes[instance.Workload] == nil {
+			indexes[instance.Workload] = make(map[int]struct{})
+		}
+
+		indexes[instance.Workload][instance.Index] = struct{}{}
 
 		if instance.Retained {
 			continue
@@ -512,15 +556,27 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 		observed[instance.Workload] = append(observed[instance.Workload], r.checked(instance))
 	}
 
+	// Read once per pass rather than per workload. Written before the converges
+	// spawn, so they read it without contention.
+	r.allocations = nil
+	if r.ports != nil {
+		if r.allocations, err = r.ports.ListAll(ctx); err != nil {
+			outcome = outcomeObserveFailed
+			r.logger.With("error", err).Error("failed to read workload ports")
+
+			return
+		}
+	}
+
 	r.measure(ctx, rows, observed)
-	r.register(ctx, rows, observed)
+	r.register(rows, observed)
 
 	desired := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
 		desired[row.Name] = struct{}{}
 	}
 
-	r.convergeAll(ctx, rows, observed)
+	r.convergeAll(ctx, rows, observed, indexes)
 
 	// Anything a driver holds that nothing asked for is an orphan — most often the
 	// remnant of a workload deleted while the server was down.
@@ -622,7 +678,7 @@ func (r *Reconciler) measure(ctx context.Context, rows []database.Workload, obse
 // should not open a thousand connections to a daemon that will queue them anyway, and
 // a bound keeps the load orca offers a runtime a property of the server rather than of
 // how many workloads happen to exist.
-func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, observed map[string][]driver.Instance) {
+func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, observed map[string][]driver.Instance, indexes map[string]map[int]struct{}) {
 	var wg sync.WaitGroup
 
 	slots := make(chan struct{}, convergeLimit())
@@ -647,7 +703,7 @@ func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, 
 
 			started := time.Now()
 
-			err := r.converge(ctx, row, observed[row.Name])
+			err := r.converge(ctx, row, observed[row.Name], indexes[row.Name])
 
 			// Recorded without naming the workload. A histogram carries a series per
 			// bucket per attribute, so a name here is sixteen series per workload
@@ -682,8 +738,14 @@ func convergeLimit() int {
 }
 
 // converge brings a single workload's running state into line with its desired
-// state.
-func (r *Reconciler) converge(ctx context.Context, row database.Workload, instances []driver.Instance) error {
+// state, one instance at a time.
+//
+// Whole-workload questions — deletion, suspension, a missing driver, an operator's
+// restart, a schedule — are answered first, because they override whatever any one
+// instance is doing. Everything else is decided per instance: each slot from zero
+// to count-1 is observed, replaced, restarted and paced on its own, so one crashing
+// instance never touches its siblings.
+func (r *Reconciler) converge(ctx context.Context, row database.Workload, instances []driver.Instance, indexes map[int]struct{}) error {
 	// A workload marked for deletion is torn down here rather than by whoever
 	// asked, so that one component is responsible for touching the runtime and the
 	// desired state survives until the work described by it is actually gone.
@@ -706,89 +768,304 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		return nil
 	}
 
-	// An instance on its way out is mid-teardown from an earlier pass. Acting now
-	// would mean stopping what is already stopping, or starting a replacement whose
-	// name the departing container still holds, so the pass leaves the workload
-	// alone and picks it up once the runtime has finished.
-	if slices.ContainsFunc(instances, terminating) {
-		r.logger.With("workload", row.Name).Debug("waiting for workload to finish terminating")
+	count := countOf(row)
 
-		return nil
-	}
-
-	// An operator asked for the instances to be replaced. They get the same
-	// stop-then-start a stale instance gets, from the unchanged specification:
-	// container names derive from the workload and version, so the corpses have
-	// to be cleared before replacements can take their place.
+	// An operator asked for the instances to be replaced. Every slot gets the same
+	// stop-then-start a stale instance gets, from the unchanged specification.
 	if r.restartRequested(row.Name) {
+		if slices.ContainsFunc(instances, terminating) {
+			r.logger.With("workload", row.Name).Debug("waiting for workload to finish terminating")
+
+			return nil
+		}
+
 		r.logger.With("workload", row.Name).Info("restarting workload on request")
 
 		if err := r.stop(ctx, row); err != nil {
 			return fmt.Errorf("failed to stop workload for restart: %w", err)
 		}
 
-		return r.start(ctx, row)
+		return r.startAll(ctx, row, count)
 	}
 
 	// A scheduled workload runs when its expression says to and waits in between, so
-	// the schedule decides rather than the restart policy. It comes before the stale
-	// check because an occurrence starts the workload from its current specification
-	// anyway, which is what replacing a stale instance would have achieved.
+	// the schedule decides rather than the restart policy. Validation refuses a
+	// schedule with a count above one, so the whole path converges a single
+	// instance.
 	if schedule := r.schedule(row); schedule != nil {
+		if slices.ContainsFunc(instances, terminating) {
+			r.logger.With("workload", row.Name).Debug("waiting for workload to finish terminating")
+
+			return nil
+		}
+
 		return r.occurrence(ctx, row, instances, schedule)
 	}
 
-	// A specification change is what makes an instance stale, and replacing it is
-	// the only way to apply the change: docker cannot mutate most of a container's
-	// configuration in place.
-	if stale := staleInstances(row, instances); len(stale) > 0 {
-		r.logger.With("workload", row.Name, "version", row.Version).Debug("replacing stale workload")
-
-		if err := r.stop(ctx, row); err != nil {
-			return fmt.Errorf("failed to stop stale workload: %w", err)
+	// A slot at or past the count is one a smaller count removed. Discarded rather
+	// than stopped: the instance is not being replaced, so nothing will read the
+	// output a retained corpse keeps. Retained remnants count here, which is what
+	// the unfiltered indexes are for.
+	for index := range indexes {
+		if index < count {
+			continue
 		}
 
-		return r.start(ctx, row)
+		r.logger.With("workload", row.Name, "instance", index).Info("removing an instance the count no longer asks for")
+
+		if err := r.discardInstance(ctx, row, index); err != nil {
+			return err
+		}
+	}
+
+	byIndex := make(map[int][]driver.Instance, count)
+	for _, instance := range instances {
+		byIndex[instance.Index] = append(byIndex[instance.Index], instance)
+	}
+
+	// At most one replacement of something running per pass, so a change rolls
+	// across the instances at the reconcile interval instead of taking them all
+	// down at once. Slots with nothing running are not held back by it.
+	var (
+		replaced   bool
+		anyRunning bool
+	)
+
+	for index := range count {
+		up, err := r.convergeSlot(ctx, row, index, byIndex[index], &replaced)
+		if err != nil {
+			return err
+		}
+
+		anyRunning = anyRunning || up
+	}
+
+	if !anyRunning {
+		return nil
+	}
+
+	// A workload mounting a value it asked to be signalled about is told here,
+	// because its specification is current by construction: such a value stays out
+	// of the hash, so a change to one leaves the workload looking exactly as it
+	// does now. Comparing what was delivered against what orca holds is the only
+	// thing that would notice.
+	return r.refresh(ctx, row)
+}
+
+// convergeSlot brings one instance of a workload into line, reporting whether the
+// slot has something up.
+func (r *Reconciler) convergeSlot(ctx context.Context, row database.Workload, index int, instances []driver.Instance, replaced *bool) (bool, error) {
+	// An instance on its way out is mid-teardown from an earlier pass. Acting now
+	// would mean stopping what is already stopping, so the slot is left alone and
+	// picked up once the runtime has finished. Only this slot waits: the others
+	// have names and ports of their own to converge against.
+	if slices.ContainsFunc(instances, terminating) {
+		r.logger.With("workload", row.Name, "instance", index).Debug("waiting for instance to finish terminating")
+
+		return true, nil
+	}
+
+	// A specification change is what makes an instance stale, and replacing it is
+	// the only way to apply the change. The expected hash is the slot's own: an
+	// instance carries the addresses it resolved, and two slots may legitimately
+	// carry different ones.
+	if stale := r.staleSlot(ctx, row, index, instances); len(stale) > 0 {
+		if *replaced {
+			// Another slot was replaced this pass. This one is due and rolls on a
+			// later pass, which is what keeps a change from taking every instance
+			// down at once.
+			return slices.ContainsFunc(instances, running), nil
+		}
+
+		*replaced = true
+
+		r.logger.With("workload", row.Name, "instance", index, "version", row.Version).Debug("replacing stale instance")
+
+		if err := r.stopInstance(ctx, row, index); err != nil {
+			return false, fmt.Errorf("failed to stop stale instance: %w", err)
+		}
+
+		return false, r.start(ctx, row, index)
 	}
 
 	if slices.ContainsFunc(instances, running) {
-		// Something is up and current, so there is nothing to do. Whether the
-		// workload has converged is a separate question: a container that exits the
-		// moment it starts is genuinely observed as running on its way through, so
-		// clearing the backoff on sight of that reset the pacing every cycle and let
-		// such a workload loop at five containers a second indefinitely. It has to
-		// have stayed up to count as settled.
+		// Something is up and current, so there is nothing to do. It has to have
+		// stayed up to count as settled: a container that exits the moment it
+		// starts is genuinely observed as running on its way through, and clearing
+		// the backoff on sight of that would reset the pacing every cycle.
 		if slices.ContainsFunc(instances, func(i driver.Instance) bool { return settled(i, r.now()) }) {
-			r.settle(row.Name)
+			r.settle(row.Name, index)
 		}
 
-		// A workload mounting a value it asked to be signalled about is told here,
-		// because its specification is current by construction: such a value stays out
-		// of the hash, so a change to one leaves the workload looking exactly as it
-		// does now. Comparing what was delivered against what orca holds is the only
-		// thing that would notice.
-		return r.refresh(ctx, row)
+		return true, nil
 	}
 
-	// A workload whose instances have all ended under a policy that asks for nothing
-	// further is finished with. It is left exactly as it is: the containers stay so
-	// that the outcome remains readable, and the stale check above is what runs the
-	// workload again once its specification changes.
-	//
-	// Whether it succeeded is not decided here. A clean exit reads as completed and a
-	// dirty one stays failed, which the service derives from the exit code the driver
-	// reported — so `never` retires a failed workload without calling it a success.
+	// An instance whose runs have all ended under a policy that asks for nothing
+	// further is finished with. It is left exactly as it is, so the outcome stays
+	// readable, and the stale check is what runs it again once the specification
+	// changes.
 	if policy := restartPolicy(row); retired(policy, instances) {
-		r.settle(row.Name)
+		r.settle(row.Name, index)
+
+		return false, nil
+	}
+
+	if len(instances) == 0 {
+		return false, r.attempt(ctx, row, index)
+	}
+
+	return false, r.restart(ctx, row, index, instances)
+}
+
+// countOf reads how many instances a stored workload asks for.
+//
+// A specification that cannot be decoded reads as one. It was validated before it
+// was stored, so failing here means the two have diverged, and converging one
+// instance is a better failure than converging none.
+func countOf(row database.Workload) int {
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil || spec.Count < 1 {
+		return 1
+	}
+
+	return spec.Count
+}
+
+// startAll starts every slot of a workload, reporting the first failure.
+func (r *Reconciler) startAll(ctx context.Context, row database.Workload, count int) error {
+	for index := range count {
+		if err := r.start(ctx, row, index); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// staleSlot returns the slot's instances running a specification other than its
+// current one.
+//
+// The comparison is against the slot's expected hash, which folds in the addresses
+// this instance resolves. When those cannot be resolved — the target is mid-delete,
+// or its ports are mid-move — the slot is left alone rather than judged against a
+// hash that could not be computed: replacing it would start something that cannot
+// resolve its environment either.
+func (r *Reconciler) staleSlot(ctx context.Context, row database.Workload, index int, instances []driver.Instance) []driver.Instance {
+	if len(instances) == 0 {
+		return nil
+	}
+
+	expected, err := r.slotHash(ctx, row, index)
+	if err != nil {
+		r.logger.With("workload", row.Name, "instance", index, "error", err).
+			Debug("leaving an instance whose expected hash cannot be resolved")
 
 		return nil
 	}
 
-	if len(instances) == 0 {
-		return r.attempt(ctx, row)
+	var stale []driver.Instance
+
+	for _, instance := range instances {
+		if instance.SpecHash != expected {
+			stale = append(stale, instance)
+		}
 	}
 
-	return r.restart(ctx, row, instances)
+	// The hash says nothing about the slot's own host ports, which live in rows
+	// rather than in the specification for every slot but the first. An instance
+	// publishing ports its rows no longer name is bound to an address nothing
+	// records, which is the same staleness by another route.
+	if len(stale) == 0 && portsDrifted(instances, r.slotPorts(row, index)) {
+		stale = slices.Clone(instances)
+	}
+
+	return stale
+}
+
+// portsDrifted reports whether a running instance publishes ports other than the
+// ones its slot's rows record.
+//
+// Only an instance that reports its ports is judged — the exec runtime reports
+// none, and its ports cannot move independently of its specification anyway.
+func portsDrifted(instances []driver.Instance, rows []database.Port) bool {
+	if len(rows) == 0 {
+		return false
+	}
+
+	for _, instance := range instances {
+		if instance.State != driver.StateRunning || len(instance.Ports) == 0 {
+			continue
+		}
+
+		for _, row := range rows {
+			published := slices.ContainsFunc(instance.Ports, func(port driver.Port) bool {
+				return port.Container == row.Container && port.Host == row.Host && port.Protocol == row.Protocol
+			})
+
+			if !published {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// driverPorts maps port rows onto the shape a driver publishes.
+func driverPorts(rows []database.Port) []driver.Port {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	ports := make([]driver.Port, 0, len(rows))
+	for _, row := range rows {
+		ports = append(ports, driver.Port{Container: row.Container, Host: row.Host, Protocol: row.Protocol})
+	}
+
+	return ports
+}
+
+// slotPorts returns the port rows one instance of a workload holds.
+func (r *Reconciler) slotPorts(row database.Workload, index int) []database.Port {
+	return slices.DeleteFunc(slices.Clone(r.allocations[row.ID]), func(port database.Port) bool {
+		return port.Instance != index
+	})
+}
+
+// slotHash returns the hash one instance's work is expected to carry.
+//
+// A workload referencing nothing expects the stored hash on every instance. One
+// that references other workloads folds the addresses this instance resolves into
+// it, because each instance may land on a different instance of a target — so a
+// target's port moving replaces exactly the instances that were reading it, found
+// by comparison on the next pass rather than by anything remembering to tell them.
+func (r *Reconciler) slotHash(ctx context.Context, row database.Workload, index int) (string, error) {
+	if len(row.Workloads) == 0 || r.env == nil {
+		return row.SpecHash, nil
+	}
+
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
+		return "", err
+	}
+
+	addresses, err := r.env.Addresses(ctx, spec.Env, row.Name, index)
+	if err != nil {
+		return "", err
+	}
+
+	if len(addresses) == 0 {
+		return row.SpecHash, nil
+	}
+
+	digest := sha256.New()
+	digest.Write([]byte(row.SpecHash))
+
+	for _, reference := range slices.Sorted(maps.Keys(addresses)) {
+		fmt.Fprintf(digest, "\n%s=%s", reference, addresses[reference])
+	}
+
+	return hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 // refresh rewrites the values a running workload mounts and signals it for each one
@@ -876,34 +1153,38 @@ func signalsOf(refreshed []service.Refresh) map[string]struct{} {
 // This belongs to the pass rather than to whoever applies a workload: the reconciler
 // is what runs continuously, so a server that restarts resumes checking the workloads
 // it adopts without waiting for anything to be applied or read again.
-func (r *Reconciler) register(ctx context.Context, rows []database.Workload, observed map[string][]driver.Instance) {
+func (r *Reconciler) register(rows []database.Workload, observed map[string][]driver.Instance) {
 	if r.checker == nil || r.ports == nil {
 		return
 	}
 
-	allocations, err := r.ports.ListAll(ctx)
-	if err != nil {
-		r.logger.With("error", err).Error("failed to read workload ports")
-		return
-	}
-
 	for _, row := range rows {
-		check, ok, err := healthCheck(r.bind, row, allocations[row.ID])
-		switch {
-		case err != nil:
-			// The specification was validated before it was stored, so a check that
-			// cannot be resolved now means the two have diverged rather than that the
-			// operator made a mistake.
-			r.logger.With("workload", row.Name, "error", err).Error("failed to resolve health check")
-		case ok && row.DeletedAt.IsZero() && row.SuspendedAt.IsZero() && !retired(restartPolicy(row), observed[row.Name]):
-			r.checker.Set(row.Name, 0, check)
-		default:
-			// The workload declares no check, or is on its way out, or is suspended,
-			// or has ended and will not be restarted. None is worth probing, and
-			// probing the last would report a finished workload as unhealthy for no
-			// longer answering — or a deliberately stopped one as broken for being
-			// exactly as down as it was asked to be.
-			r.checker.Forget(row.Name)
+		count := countOf(row)
+
+		byIndex := make(map[int][]driver.Instance, count)
+		for _, instance := range observed[row.Name] {
+			byIndex[instance.Index] = append(byIndex[instance.Index], instance)
+		}
+
+		// One check per instance, against that instance's own host port, so one
+		// instance failing to answer marks that instance alone.
+		for index := range count {
+			check, ok, err := healthCheck(r.bind, row, r.slotPorts(row, index))
+			switch {
+			case err != nil:
+				// The specification was validated before it was stored, so a check
+				// that cannot be resolved now means the two have diverged rather
+				// than that the operator made a mistake.
+				r.logger.With("workload", row.Name, "instance", index, "error", err).Error("failed to resolve health check")
+			case ok && row.DeletedAt.IsZero() && row.SuspendedAt.IsZero() && !retired(restartPolicy(row), byIndex[index]):
+				r.checker.Set(row.Name, index, check)
+			default:
+				// The workload declares no check, or is on its way out, or is
+				// suspended, or this instance has ended and will not be restarted.
+				// None is worth probing, and probing the last would report a
+				// finished instance as unhealthy for no longer answering.
+				r.checker.ForgetInstance(row.Name, index)
+			}
 		}
 	}
 }
@@ -1134,9 +1415,9 @@ func (r *Reconciler) occurrence(ctx context.Context, row database.Workload, inst
 		return fmt.Errorf("failed to clear the previous run: %w", err)
 	}
 
-	r.settle(row.Name)
+	r.settleAll(row.Name)
 
-	return r.start(ctx, row)
+	return r.start(ctx, row, 0)
 }
 
 // between decides what to do with a scheduled workload when no occurrence is due.
@@ -1162,7 +1443,7 @@ func (r *Reconciler) between(ctx context.Context, row database.Workload, instanc
 		return nil
 	}
 
-	return r.restart(ctx, row, instances)
+	return r.restart(ctx, row, 0, instances)
 }
 
 // lastRun reports when the workload most recently started, or the zero time when
@@ -1240,10 +1521,10 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 		return fmt.Errorf("failed to delete workload: %w", err)
 	}
 
-	// Backoff and the last error are keyed by workload and would otherwise outlive
-	// it, pacing the restarts of a later workload that happens to reuse the name and
-	// reporting a failure it never had.
-	r.settle(row.Name)
+	// Backoff and the last error would otherwise outlive the workload, pacing the
+	// restarts of a later workload that happens to reuse the name and reporting a
+	// failure it never had.
+	r.settleAll(row.Name)
 
 	// A restart asked for before the deletion landed dies with the workload, for
 	// the same reason: it would otherwise lie in wait for a later workload that
@@ -1295,7 +1576,7 @@ func (r *Reconciler) suspend(ctx context.Context, row database.Workload, instanc
 	// Backoff and the last error describe attempts to run the workload, which is
 	// exactly what suspension asks to stop. Clearing them means a resume starts
 	// from a clean slate rather than inside a backoff window.
-	r.settle(row.Name)
+	r.settleAll(row.Name)
 
 	// A restart asked for before the suspension landed is superseded by it. What
 	// was running is stopped either way, and a resume should not replay it.
@@ -1304,98 +1585,101 @@ func (r *Reconciler) suspend(ctx context.Context, row database.Workload, instanc
 	return nil
 }
 
-// attempt starts a workload that has nothing running, pacing repeated failures with
-// the same backoff a repeatedly-crashing workload gets.
+// attempt starts an instance that has nothing running, pacing repeated failures
+// with the same backoff a repeatedly-crashing instance gets.
 //
-// A workload can fail to start for reasons no amount of retrying will fix — an image
-// that does not exist, a host port held by something outside orca and no free port to
-// move to. Without pacing, such a workload is retried on every pass and every driver
+// An instance can fail to start for reasons no amount of retrying will fix — an
+// image that does not exist, a host port held by something outside orca and no free
+// port to move to. Without pacing, it is retried on every pass and every driver
 // event, which was measured filling the log at over a thousand errors in four
 // minutes while achieving nothing.
-func (r *Reconciler) attempt(ctx context.Context, row database.Workload) error {
-	if r.waiting(row.Name) {
+func (r *Reconciler) attempt(ctx context.Context, row database.Workload, index int) error {
+	if r.waiting(row.Name, index) {
 		return nil
 	}
 
-	if err := r.start(ctx, row); err != nil {
-		r.hold(ctx, row.Name, restartPolicy(row))
+	if err := r.start(ctx, row, index); err != nil {
+		r.hold(ctx, row.Name, index, restartPolicy(row))
 
 		return err
 	}
 
-	r.settle(row.Name)
+	r.settle(row.Name, index)
 
 	return nil
 }
 
-// restart brings back a workload whose instances have all stopped, pacing repeated
+// restart brings back an instance whose runs have all stopped, pacing repeated
 // failures with exponential backoff.
-func (r *Reconciler) restart(ctx context.Context, row database.Workload, instances []driver.Instance) error {
-	if r.waiting(row.Name) {
+func (r *Reconciler) restart(ctx context.Context, row database.Workload, index int, instances []driver.Instance) error {
+	if r.waiting(row.Name, index) {
 		return nil
 	}
 
 	policy := restartPolicy(row)
 
-	// A workload told to give up gives up. It is left exactly as it ended, so the
-	// outcome stays readable, and changing its specification starts it again.
-	if !policy.Restarts(exitCodeOf(instances), r.attempts(row.Name)) {
-		if r.giveUp(row.Name) {
+	// An instance told to give up gives up. It is left exactly as it ended, so the
+	// outcome stays readable, and changing the specification starts it again.
+	if !policy.Restarts(exitCodeOf(instances), r.attempts(row.Name, index)) {
+		if r.giveUp(row.Name, index) {
 			r.instruments.giveups.Add(ctx, 1,
 				metric.WithAttributes(attribute.String("workload", row.Name)))
 		}
 
-		r.logger.With("workload", row.Name, "attempts", r.attempts(row.Name)).
-			Info("giving up on a workload that will not stay up")
+		r.logger.With("workload", row.Name, "instance", index, "attempts", r.attempts(row.Name, index)).
+			Info("giving up on an instance that will not stay up")
 
 		return nil
 	}
 
-	// The stopped instances have to be cleared before new work can take their
-	// place: their container names are derived from the workload and version, so
-	// a replacement would otherwise collide with the corpse.
-	if err := r.stop(ctx, row); err != nil {
-		return fmt.Errorf("failed to clear stopped workload: %w", err)
+	// The stopped instance has to be cleared before new work can take its place:
+	// container names derive from the workload, version and instance, so a
+	// replacement would otherwise collide with the corpse.
+	if err := r.stopInstance(ctx, row, index); err != nil {
+		return fmt.Errorf("failed to clear stopped instance: %w", err)
 	}
 
-	if err := r.start(ctx, row); err != nil {
-		r.hold(ctx, row.Name, policy)
+	if err := r.start(ctx, row, index); err != nil {
+		r.hold(ctx, row.Name, index, policy)
 
 		return err
 	}
 
-	state := r.hold(ctx, row.Name, policy)
+	state := r.hold(ctx, row.Name, index, policy)
 
 	r.logger.With(
 		"workload", row.Name,
+		"instance", index,
 		"attempts", state.attempts,
 		"exit_code", exitCodeOf(instances),
-	).Debug("restarted stopped workload")
+	).Debug("restarted stopped instance")
 
 	return nil
 }
 
-// waiting reports whether a workload is still inside its backoff window.
-func (r *Reconciler) waiting(workload string) bool {
+// waiting reports whether an instance is still inside its backoff window.
+func (r *Reconciler) waiting(workload string, index int) bool {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
-	state := r.backoff[workload]
+	state := r.backoff[slot{workload: workload, instance: index}]
 
 	return !state.next.IsZero() && r.now().Before(state.next)
 }
 
-// hold records another attempt against a workload and pushes out the earliest time
+// hold records another attempt against an instance and pushes out the earliest time
 // the next one may happen.
-func (r *Reconciler) hold(ctx context.Context, workload string, restart *manifest.Restart) backoff {
+func (r *Reconciler) hold(ctx context.Context, workload string, index int, restart *manifest.Restart) backoff {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
-	state := r.backoff[workload]
+	key := slot{workload: workload, instance: index}
+
+	state := r.backoff[key]
 
 	state.attempts++
 	state.next = r.now().Add(delay(state.attempts, restart.Delay))
-	r.backoff[workload] = state
+	r.backoff[key] = state
 
 	r.instruments.restarts.Add(ctx, 1,
 		metric.WithAttributes(attribute.String("workload", workload)))
@@ -1403,45 +1687,62 @@ func (r *Reconciler) hold(ctx context.Context, workload string, restart *manifes
 	return state
 }
 
-// giveUp marks a workload as given up on, reporting whether it was not already —
-// the decision repeats on every pass over a workload that stays down, and this is
+// giveUp marks an instance as given up on, reporting whether it was not already —
+// the decision repeats on every pass over an instance that stays down, and this is
 // what lets it count once.
-func (r *Reconciler) giveUp(workload string) bool {
+func (r *Reconciler) giveUp(workload string, index int) bool {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
-	state := r.backoff[workload]
+	key := slot{workload: workload, instance: index}
+
+	state := r.backoff[key]
 	if state.gaveUp {
 		return false
 	}
 
 	state.gaveUp = true
-	r.backoff[workload] = state
+	r.backoff[key] = state
 
 	return true
 }
 
-// attempts reports how many restarts a workload has been given.
-func (r *Reconciler) attempts(workload string) int {
+// attempts reports how many restarts an instance has been given.
+func (r *Reconciler) attempts(workload string, index int) int {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
-	return r.backoff[workload].attempts
+	return r.backoff[slot{workload: workload, instance: index}].attempts
 }
 
-// settle forgets a workload's backoff and last error, which is what starting from a
-// clean slate means: the next failure is paced from the beginning rather than from
-// where the last run of failures left off, and nothing is reported as wrong until
-// something is.
+// settle forgets an instance's backoff and its workload's last error, which is what
+// starting from a clean slate means: the next failure is paced from the beginning
+// rather than from where the last run of failures left off, and nothing is reported
+// as wrong until something is.
 //
 // The error clears here rather than when an attempt begins, so that it stands for
 // exactly as long as the workload has not converged. An error that vanished the
 // moment a retry began would be invisible for the window an operator is looking.
-func (r *Reconciler) settle(workload string) {
+func (r *Reconciler) settle(workload string, index int) {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
-	delete(r.backoff, workload)
+	delete(r.backoff, slot{workload: workload, instance: index})
+	delete(r.lastError, workload)
+}
+
+// settleAll forgets every instance's backoff and the workload's last error, for the
+// paths that act on the whole workload: a teardown, a suspension, a schedule.
+func (r *Reconciler) settleAll(workload string) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	for key := range r.backoff {
+		if key.workload == workload {
+			delete(r.backoff, key)
+		}
+	}
+
 	delete(r.lastError, workload)
 }
 
@@ -1465,10 +1766,25 @@ func (r *Reconciler) LastError(workload string) (string, time.Time, bool) {
 	return recorded.message, recorded.at, ok
 }
 
-func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
+func (r *Reconciler) start(ctx context.Context, row database.Workload, index int) error {
 	w, err := driver.NewWorkload(row)
 	if err != nil {
 		return err
+	}
+
+	w.Instance = index
+
+	// The stored specification carries the first instance's resolved ports, so a
+	// later instance swaps in the rows the allocator settled for its own index.
+	if index > 0 {
+		w.Ports = driverPorts(r.slotPorts(row, index))
+	}
+
+	// The hash the instance is stamped with is its own: the slot's expected hash,
+	// which folds in the addresses this instance resolves. Staleness on a later
+	// pass compares against the same computation.
+	if w.SpecHash, err = r.slotHash(ctx, row, index); err != nil {
+		return fmt.Errorf("failed to resolve the instance's expected hash: %w", err)
 	}
 
 	startCtx, cancel := context.WithTimeout(ctx, startTimeout)
@@ -1518,15 +1834,15 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload) error {
 		// outside orca has taken, which nothing orca does will free. Rather than
 		// try to recognise that specific failure — docker reports it as an
 		// untyped error whose wording is not part of any contract — any failure
-		// gives up the ports orca chose for itself. Ports the specification
+		// gives up the ports orca chose for this instance. Ports the specification
 		// pinned are left alone: they were asked for, so moving them would be
 		// overriding a decision rather than revising a guess.
-		r.abandonPorts(ctx, row)
+		r.abandonPorts(ctx, row, index)
 
 		return fmt.Errorf("failed to start workload: %w", err)
 	}
 
-	r.logger.With("workload", row.Name, "instance", id, "version", row.Version).Info("workload started")
+	r.logger.With("workload", row.Name, "id", id, "instance", index, "version", row.Version).Info("workload started")
 
 	// After the start rather than before it. A replacement's files are written
 	// alongside those the instance being replaced is still reading, and sweeping them
@@ -1660,17 +1976,17 @@ func (r *Reconciler) watch(ctx context.Context) (<-chan driver.Event, error) {
 // pass tries different ones. Failures are logged rather than returned: the caller is
 // already reporting why the workload didn't start, and a workload that keeps its
 // ports is no worse off than before.
-func (r *Reconciler) abandonPorts(ctx context.Context, row database.Workload) {
+func (r *Reconciler) abandonPorts(ctx context.Context, row database.Workload, index int) {
 	if r.reallocate == nil {
 		return
 	}
 
-	changed, err := r.reallocate(ctx, row.Name)
+	changed, err := r.reallocate(ctx, row.Name, index)
 	switch {
 	case err != nil:
-		r.logger.With("workload", row.Name, "error", err).Error("failed to reallocate workload ports")
+		r.logger.With("workload", row.Name, "instance", index, "error", err).Error("failed to reallocate workload ports")
 	case changed:
-		r.logger.With("workload", row.Name).Info("reallocated host ports after a failed start")
+		r.logger.With("workload", row.Name, "instance", index).Info("reallocated host ports after a failed start")
 	}
 }
 
@@ -1699,6 +2015,58 @@ func (r *Reconciler) stop(ctx context.Context, row database.Workload) error {
 	}
 
 	r.forget(row.Name)
+
+	return nil
+}
+
+// stopInstance asks the driver that runs a workload to stop one of its instances,
+// bounded as stop is.
+//
+// The instance's check history goes with it, for the reason the workload-wide stop
+// drops every check: it describes work that no longer exists, and a replacement
+// condemned for the departed instance's failures could never demonstrate recovery.
+func (r *Reconciler) stopInstance(ctx context.Context, row database.Workload, index int) error {
+	d, ok := r.driverFor(row)
+	if !ok {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
+	defer cancel()
+
+	if err := d.StopInstance(ctx, row.ID, row.Name, index); err != nil {
+		return fmt.Errorf("failed to stop instance on the %s runtime: %w", d.Name(), err)
+	}
+
+	if r.checker != nil {
+		r.checker.ForgetInstance(row.Name, index)
+	}
+
+	return nil
+}
+
+// discardInstance removes one instance a workload's count no longer asks for, and
+// everything the pass remembers about it.
+func (r *Reconciler) discardInstance(ctx context.Context, row database.Workload, index int) error {
+	d, ok := r.driverFor(row)
+	if !ok {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
+	defer cancel()
+
+	if err := d.DiscardInstance(ctx, row.ID, row.Name, index); err != nil {
+		return fmt.Errorf("failed to discard instance on the %s runtime: %w", d.Name(), err)
+	}
+
+	r.mux.Lock()
+	delete(r.backoff, slot{workload: row.Name, instance: index})
+	r.mux.Unlock()
+
+	if r.checker != nil {
+		r.checker.ForgetInstance(row.Name, index)
+	}
 
 	return nil
 }
@@ -1759,19 +2127,6 @@ func (r *Reconciler) forget(workload string) {
 	if r.checker != nil {
 		r.checker.Forget(workload)
 	}
-}
-
-// staleInstances returns the instances running a specification other than the
-// workload's current one.
-func staleInstances(row database.Workload, instances []driver.Instance) []driver.Instance {
-	var stale []driver.Instance
-	for _, instance := range instances {
-		if instance.SpecHash != row.SpecHash {
-			stale = append(stale, instance)
-		}
-	}
-
-	return stale
 }
 
 // running reports whether an instance counts as up for the purpose of deciding

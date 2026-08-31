@@ -70,7 +70,7 @@ func TestReconciler_Run(t *testing.T) {
 					storedWorkload("example", "hash-two"),
 				}, nil)
 
-				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
+				d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil)
 				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 					return w.SpecHash == "hash-two"
 				})).Return("container-two", nil)
@@ -88,7 +88,7 @@ func TestReconciler_Run(t *testing.T) {
 
 				// The corpse has to be cleared first: container names derive from
 				// the workload and version, so a replacement would collide.
-				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
+				d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil)
 				d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil)
 			},
 		},
@@ -508,10 +508,11 @@ func TestReconciler_Run_Health(t *testing.T) {
 			// The stored spec declares no check, so the reconciler has nothing to
 			// register — the result is what decides the outcome here.
 			checker.EXPECT().Forget("example").Maybe()
+			checker.EXPECT().ForgetInstance("example", 0).Maybe()
 			checker.EXPECT().Result("example", 0).Return(tc.Result, tc.Checked)
 
 			if tc.ExpectRestart {
-				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
+				d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil).Once()
 				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 					return w.Name == "example"
 				})).Return("container-two", nil).Once()
@@ -787,14 +788,16 @@ func TestReconciler_Run_ForgetsChecksOnReplacement(t *testing.T) {
 	// condemned for failures it never produced, and denied the start period every
 	// newly started workload is owed.
 	forgotten := make(chan struct{}, 1)
-	checker.EXPECT().Forget("example").Run(func(string) {
+	notify := func() {
 		select {
 		case forgotten <- struct{}{}:
 		default:
 		}
-	}).Return()
+	}
+	checker.EXPECT().Forget("example").Run(func(string) { notify() }).Return().Maybe()
+	checker.EXPECT().ForgetInstance("example", 0).Run(func(string, int) { notify() }).Return().Maybe()
 
-	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
+	d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil).Once()
 	d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil).Once()
 
 	events := make(chan driver.Event)
@@ -857,12 +860,14 @@ func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 	}, nil)
 
 	forgotten := make(chan struct{}, 1)
-	checker.EXPECT().Forget("example").Run(func(string) {
+	notify := func() {
 		select {
 		case forgotten <- struct{}{}:
 		default:
 		}
-	}).Return()
+	}
+	checker.EXPECT().Forget("example").Run(func(string) { notify() }).Return().Maybe()
+	checker.EXPECT().ForgetInstance("example", 0).Run(func(string, int) { notify() }).Return().Maybe()
 
 	events := make(chan driver.Event)
 	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
@@ -921,12 +926,14 @@ func TestReconciler_Run_ForgetsChecksOfASuspendedWorkload(t *testing.T) {
 	}, nil)
 
 	forgotten := make(chan struct{}, 1)
-	checker.EXPECT().Forget("example").Run(func(string) {
+	notify := func() {
 		select {
 		case forgotten <- struct{}{}:
 		default:
 		}
-	}).Return()
+	}
+	checker.EXPECT().Forget("example").Run(func(string) { notify() }).Return().Maybe()
+	checker.EXPECT().ForgetInstance("example", 0).Run(func(string, int) { notify() }).Return().Maybe()
 
 	events := make(chan driver.Event)
 	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
@@ -1418,7 +1425,11 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 			repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
 			if tc.ExpectStop {
-				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
+				// An occurrence clears the whole workload where a between-run retry
+				// clears the one instance, and which path a case takes is its
+				// business — either counts as the stop it expects.
+				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Maybe()
+				d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil).Maybe()
 			}
 			if tc.ExpectStart {
 				d.EXPECT().Start(mock.Anything, mock.Anything).Return("two", nil)
@@ -1525,7 +1536,7 @@ func TestReconciler_Run_GivesUpAfterTheAttemptsAllowed(t *testing.T) {
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
 	// The first pass restarts it, which uses the one attempt. Nothing after that.
-	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
+	d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil).Once()
 	d.EXPECT().Start(mock.Anything, mock.Anything).Return("two", nil).Once()
 
 	events := make(chan driver.Event)
@@ -1636,7 +1647,7 @@ func TestReconciler_Run_RestartPolicy(t *testing.T) {
 			if tc.ExpectRestart {
 				// The corpse is cleared first, since container names derive from the
 				// workload and version.
-				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
+				d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil)
 				d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil)
 			}
 
@@ -1691,7 +1702,7 @@ func TestReconciler_Run_RerunsARetiredWorkloadWhenItsSpecChanges(t *testing.T) {
 
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 
-	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil)
+	d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil)
 	d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 		return w.SpecHash == "hash-two"
 	})).Return("container-two", nil)
@@ -1760,12 +1771,14 @@ func TestReconciler_Run_ForgetsChecksOfARetiredWorkload(t *testing.T) {
 	// A finished workload has nothing listening. Probing it would report it unhealthy
 	// for no longer answering, which says nothing an operator can act on.
 	forgotten := make(chan struct{}, 1)
-	checker.EXPECT().Forget("example").Run(func(string) {
+	notify := func() {
 		select {
 		case forgotten <- struct{}{}:
 		default:
 		}
-	}).Return()
+	}
+	checker.EXPECT().Forget("example").Run(func(string) { notify() }).Return().Maybe()
+	checker.EXPECT().ForgetInstance("example", 0).Run(func(string, int) { notify() }).Return().Maybe()
 
 	events := make(chan driver.Event)
 	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
@@ -1845,6 +1858,7 @@ func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
 	var starts atomic.Int64
 
 	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Maybe()
+	d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil).Maybe()
 	d.EXPECT().Start(mock.Anything, mock.Anything).
 		RunAndReturn(func(context.Context, driver.Workload) (string, error) {
 			starts.Add(1)
@@ -2314,7 +2328,7 @@ func TestReconciler_Run_ResolvesSecrets(t *testing.T) {
 			Drivers:   map[string]reconciler.Driver{docker.Name: d},
 			Workloads: repo,
 			Env:       secrets,
-			Reallocate: func(context.Context, string) (bool, error) {
+			Reallocate: func(context.Context, string, int) (bool, error) {
 				reallocated.inc()
 
 				return false, nil
@@ -2587,7 +2601,7 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 			Drivers:   map[string]reconciler.Driver{docker.Name: d},
 			Workloads: repo,
 			Mounts:    mounts,
-			Reallocate: func(context.Context, string) (bool, error) {
+			Reallocate: func(context.Context, string, int) (bool, error) {
 				reallocated.inc()
 
 				return false, nil
@@ -2972,7 +2986,7 @@ func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
 		// writes the current value as its replacement starts. The mock has no
 		// expectation for Refresh or Signal, so either would fail the test.
 		mounts.EXPECT().Deliver(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
-		d.EXPECT().Stop(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		d.EXPECT().StopInstance(mock.Anything, mock.Anything, mock.Anything, 0).Return(nil)
 
 		started := make(chan struct{}, 1)
 		d.EXPECT().Start(mock.Anything, mock.Anything).

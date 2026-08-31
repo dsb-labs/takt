@@ -105,6 +105,75 @@ func (_c *MockDriver_Discard_Call) RunAndReturn(run func(ctx context.Context, id
 	return _c
 }
 
+// DiscardInstance provides a mock function for the type MockDriver
+func (_mock *MockDriver) DiscardInstance(ctx context.Context, id string, workload string, instance int) error {
+	ret := _mock.Called(ctx, id, workload, instance)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DiscardInstance")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int) error); ok {
+		r0 = returnFunc(ctx, id, workload, instance)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockDriver_DiscardInstance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DiscardInstance'
+type MockDriver_DiscardInstance_Call struct {
+	*mock.Call
+}
+
+// DiscardInstance is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id string
+//   - workload string
+//   - instance int
+func (_e *MockDriver_Expecter) DiscardInstance(ctx any, id any, workload any, instance any) *MockDriver_DiscardInstance_Call {
+	return &MockDriver_DiscardInstance_Call{Call: _e.mock.On("DiscardInstance", ctx, id, workload, instance)}
+}
+
+func (_c *MockDriver_DiscardInstance_Call) Run(run func(ctx context.Context, id string, workload string, instance int)) *MockDriver_DiscardInstance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDriver_DiscardInstance_Call) Return(err error) *MockDriver_DiscardInstance_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockDriver_DiscardInstance_Call) RunAndReturn(run func(ctx context.Context, id string, workload string, instance int) error) *MockDriver_DiscardInstance_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Name provides a mock function for the type MockDriver
 func (_mock *MockDriver) Name() string {
 	ret := _mock.Called()
@@ -405,6 +474,75 @@ func (_c *MockDriver_Stop_Call) Return(err error) *MockDriver_Stop_Call {
 }
 
 func (_c *MockDriver_Stop_Call) RunAndReturn(run func(ctx context.Context, id string, workload string) error) *MockDriver_Stop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// StopInstance provides a mock function for the type MockDriver
+func (_mock *MockDriver) StopInstance(ctx context.Context, id string, workload string, instance int) error {
+	ret := _mock.Called(ctx, id, workload, instance)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StopInstance")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, int) error); ok {
+		r0 = returnFunc(ctx, id, workload, instance)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockDriver_StopInstance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StopInstance'
+type MockDriver_StopInstance_Call struct {
+	*mock.Call
+}
+
+// StopInstance is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id string
+//   - workload string
+//   - instance int
+func (_e *MockDriver_Expecter) StopInstance(ctx any, id any, workload any, instance any) *MockDriver_StopInstance_Call {
+	return &MockDriver_StopInstance_Call{Call: _e.mock.On("StopInstance", ctx, id, workload, instance)}
+}
+
+func (_c *MockDriver_StopInstance_Call) Run(run func(ctx context.Context, id string, workload string, instance int)) *MockDriver_StopInstance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDriver_StopInstance_Call) Return(err error) *MockDriver_StopInstance_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockDriver_StopInstance_Call) RunAndReturn(run func(ctx context.Context, id string, workload string, instance int) error) *MockDriver_StopInstance_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -746,6 +884,86 @@ type MockResolver_Expecter struct {
 
 func (_m *MockResolver) EXPECT() *MockResolver_Expecter {
 	return &MockResolver_Expecter{mock: &_m.Mock}
+}
+
+// Addresses provides a mock function for the type MockResolver
+func (_mock *MockResolver) Addresses(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error) {
+	ret := _mock.Called(ctx, env, reader, readerInstance)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Addresses")
+	}
+
+	var r0 map[string]string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, map[string]string, string, int) (map[string]string, error)); ok {
+		return returnFunc(ctx, env, reader, readerInstance)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, map[string]string, string, int) map[string]string); ok {
+		r0 = returnFunc(ctx, env, reader, readerInstance)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, map[string]string, string, int) error); ok {
+		r1 = returnFunc(ctx, env, reader, readerInstance)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockResolver_Addresses_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Addresses'
+type MockResolver_Addresses_Call struct {
+	*mock.Call
+}
+
+// Addresses is a helper method to define mock.On call
+//   - ctx context.Context
+//   - env map[string]string
+//   - reader string
+//   - readerInstance int
+func (_e *MockResolver_Expecter) Addresses(ctx any, env any, reader any, readerInstance any) *MockResolver_Addresses_Call {
+	return &MockResolver_Addresses_Call{Call: _e.mock.On("Addresses", ctx, env, reader, readerInstance)}
+}
+
+func (_c *MockResolver_Addresses_Call) Run(run func(ctx context.Context, env map[string]string, reader string, readerInstance int)) *MockResolver_Addresses_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 map[string]string
+		if args[1] != nil {
+			arg1 = args[1].(map[string]string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockResolver_Addresses_Call) Return(stringToString map[string]string, err error) *MockResolver_Addresses_Call {
+	_c.Call.Return(stringToString, err)
+	return _c
+}
+
+func (_c *MockResolver_Addresses_Call) RunAndReturn(run func(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error)) *MockResolver_Addresses_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // Resolve provides a mock function for the type MockResolver
@@ -1243,6 +1461,52 @@ func (_c *MockChecker_Forget_Call) Return() *MockChecker_Forget_Call {
 }
 
 func (_c *MockChecker_Forget_Call) RunAndReturn(run func(workload string)) *MockChecker_Forget_Call {
+	_c.Run(run)
+	return _c
+}
+
+// ForgetInstance provides a mock function for the type MockChecker
+func (_mock *MockChecker) ForgetInstance(workload string, instance int) {
+	_mock.Called(workload, instance)
+	return
+}
+
+// MockChecker_ForgetInstance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ForgetInstance'
+type MockChecker_ForgetInstance_Call struct {
+	*mock.Call
+}
+
+// ForgetInstance is a helper method to define mock.On call
+//   - workload string
+//   - instance int
+func (_e *MockChecker_Expecter) ForgetInstance(workload any, instance any) *MockChecker_ForgetInstance_Call {
+	return &MockChecker_ForgetInstance_Call{Call: _e.mock.On("ForgetInstance", workload, instance)}
+}
+
+func (_c *MockChecker_ForgetInstance_Call) Run(run func(workload string, instance int)) *MockChecker_ForgetInstance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockChecker_ForgetInstance_Call) Return() *MockChecker_ForgetInstance_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockChecker_ForgetInstance_Call) RunAndReturn(run func(workload string, instance int)) *MockChecker_ForgetInstance_Call {
 	_c.Run(run)
 	return _c
 }
