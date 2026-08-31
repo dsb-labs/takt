@@ -120,9 +120,9 @@ type (
 		// supervising goroutine both touch.
 		mux sync.Mutex
 		// The processes this server started and is still waiting on, keyed by
-		// workload. A process adopted from an earlier server is absent: nothing here
-		// can wait for a process it did not start.
-		supervised map[string]*supervised
+		// workload instance. A process adopted from an earlier server is absent:
+		// nothing here can wait for a process it did not start.
+		supervised map[supKey]*supervised
 		// Reports that a supervised process has ended, so the reconciler converges
 		// without waiting for its next tick.
 		events chan driver.Event
@@ -153,6 +153,19 @@ type (
 		// rather than the workload's.
 		state string
 	}
+
+	// The supKey type identifies one supervised instance of a workload.
+	supKey struct {
+		workload string
+		instance int
+	}
+
+	// The record type locates one attempt in the driver's state tree, carrying the
+	// instance index its path encodes.
+	record struct {
+		path     string
+		instance int
+	}
 )
 
 // New returns a Driver that runs processes under the root directory in config.
@@ -165,7 +178,7 @@ func New(config Config) *Driver {
 		state:      filepath.Join(config.Root, stateDir),
 		workloads:  filepath.Join(config.Root, workloadDir),
 		allowed:    config.AllowPaths,
-		supervised: make(map[string]*supervised),
+		supervised: make(map[supKey]*supervised),
 		// Buffered so that a process ending never blocks its own supervisor on a
 		// reconciler that is mid-pass.
 		events: make(chan driver.Event, 16),
@@ -216,12 +229,12 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		}
 	}
 
-	workload, err := d.version(d.workloads, w.ID, w.Version)
+	workload, err := d.place(d.workloads, w.ID, w.Instance, w.Version)
 	if err != nil {
 		return "", err
 	}
 
-	recordPath, err := d.version(d.state, w.ID, w.Version)
+	recordPath, err := d.place(d.state, w.ID, w.Instance, w.Version)
 	if err != nil {
 		return "", err
 	}
@@ -393,9 +406,9 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", err
 	}
 
-	d.supervise(ctx, w.Name, &supervised{cmd: cmd, state: recordPath})
+	d.supervise(ctx, w.Name, w.Instance, &supervised{cmd: cmd, state: recordPath})
 
-	d.logger.With("workload", w.Name, "pid", recorded.PID, "version", w.Version).Debug("process started")
+	d.logger.With("workload", w.Name, "pid", recorded.PID, "version", w.Version, "instance", w.Instance).Debug("process started")
 
 	return strconv.Itoa(recorded.PID), nil
 }
@@ -406,9 +419,11 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 // process adopted from an earlier server has no supervisor, so an exit that happens
 // while orca is down leaves no code to record — Observe reports that as a failure,
 // since a job that may not have finished is better run again than assumed complete.
-func (d *Driver) supervise(ctx context.Context, workload string, process *supervised) {
+func (d *Driver) supervise(ctx context.Context, workload string, instance int, process *supervised) {
+	key := supKey{workload: workload, instance: instance}
+
 	d.mux.Lock()
-	d.supervised[workload] = process
+	d.supervised[key] = process
 	d.mux.Unlock()
 
 	d.waits.Go(func() {
@@ -417,8 +432,8 @@ func (d *Driver) supervise(ctx context.Context, workload string, process *superv
 		d.mux.Lock()
 		// Only forget this process if it is still the one registered. A replacement
 		// started while this one was ending owns the entry now.
-		if d.supervised[workload] == process {
-			delete(d.supervised, workload)
+		if d.supervised[key] == process {
+			delete(d.supervised, key)
 		}
 		d.mux.Unlock()
 
@@ -458,22 +473,22 @@ func (d *Driver) supervise(ctx context.Context, workload string, process *superv
 	})
 }
 
-// Stop ends everything the driver runs for a workload, keeping the output of the
-// version it most recently ran so that it can still be read.
+// Stop ends everything the driver runs for a workload, keeping each instance's most
+// recent output so that it can still be read.
 //
 // The process group is signalled rather than the process, so that anything the command
 // started is stopped with it. A group given time to stop and still running is killed:
 // a workload that ignores the request must not be able to block the pass that asked.
 //
-// One version's output is kept for the reason the docker driver keeps a container: the
-// reconciler stops a workload before it starts it, so removing everything here is what
+// One version's output is kept per instance, for the reason the docker driver keeps a
+// container: the reconciler stops before it starts, so removing everything here is what
 // used to discard the output of the attempt that just failed. What survives is that
 // version's output.log and its record, marked retained. The working directory goes with
 // the rest, because it holds the symlinks to the workload's volumes and nothing is left
 // to read them.
 //
-// Every other version goes, in both trees. Keeping one version rather than all of them
-// bounds what a workload crashing in a loop leaves on the disk.
+// Every other version goes, in both trees. Keeping one version per instance rather
+// than all of them bounds what a workload crashing in a loop leaves on the disk.
 func (d *Driver) Stop(ctx context.Context, id, workload string) error {
 	found, err := d.resolve(workload, id)
 	if err != nil || found == "" {
@@ -482,29 +497,63 @@ func (d *Driver) Stop(ctx context.Context, id, workload string) error {
 
 	id = found
 
-	versions, err := d.halt(ctx, id, workload)
+	records, err := d.records(id)
 	if err != nil {
 		return err
 	}
 
-	keep := newest(versions)
+	return d.stop(ctx, id, workload, records)
+}
 
-	for _, path := range versions {
-		if path == keep {
+// StopInstance ends what the driver runs for one instance of a workload, retaining
+// its most recent output exactly as Stop does for every instance.
+func (d *Driver) StopInstance(ctx context.Context, id, workload string, instance int) error {
+	found, err := d.resolve(workload, id)
+	if err != nil || found == "" {
+		return err
+	}
+
+	id = found
+
+	records, err := d.records(id)
+	if err != nil {
+		return err
+	}
+
+	return d.stop(ctx, id, workload, ofInstance(records, instance))
+}
+
+// stop halts the given records and keeps each instance's newest, discarding the rest.
+func (d *Driver) stop(ctx context.Context, id, workload string, records []record) error {
+	if err := d.halt(ctx, workload, records); err != nil {
+		return err
+	}
+
+	byInstance := make(map[int][]record)
+	for _, r := range records {
+		byInstance[r.instance] = append(byInstance[r.instance], r)
+	}
+
+	for _, held := range byInstance {
+		keep := newest(held)
+
+		for _, r := range held {
+			if r == keep {
+				continue
+			}
+
+			if err := d.discardRecord(id, r); err != nil {
+				return err
+			}
+		}
+
+		if keep.path == "" {
 			continue
 		}
 
-		if err = d.discardVersion(id, path); err != nil {
+		if err := d.keep(id, keep); err != nil {
 			return err
 		}
-	}
-
-	if keep == "" {
-		return nil
-	}
-
-	if err = d.keep(id, keep); err != nil {
-		return err
 	}
 
 	d.logger.With("workload", workload).Debug("workload stopped, keeping its output")
@@ -524,7 +573,12 @@ func (d *Driver) Discard(ctx context.Context, id, workload string) error {
 		return err
 	}
 
-	if _, err = d.halt(ctx, found, workload); err != nil {
+	records, err := d.records(found)
+	if err != nil {
+		return err
+	}
+
+	if err = d.halt(ctx, workload, records); err != nil {
 		return err
 	}
 
@@ -544,16 +598,47 @@ func (d *Driver) Discard(ctx context.Context, id, workload string) error {
 	return nil
 }
 
-// halt ends every process the driver runs for a workload and returns the version
-// directories it has records in, so that a caller can decide what to keep.
-func (d *Driver) halt(ctx context.Context, id, workload string) ([]string, error) {
-	versions, err := d.versions(d.state, id)
-	if err != nil {
-		return nil, err
+// DiscardInstance ends what the driver runs for one instance of a workload and
+// removes its directories from both trees, including the output Stop kept for it.
+//
+// This is what removing an instance takes when a workload's count shrinks: the
+// instance is not being replaced, so nothing will read the output a retained record
+// keeps.
+func (d *Driver) DiscardInstance(ctx context.Context, id, workload string, instance int) error {
+	found, err := d.resolve(workload, id)
+	if err != nil || found == "" {
+		return err
 	}
 
-	for _, path := range versions {
-		recorded, err := readState(path)
+	records, err := d.records(found)
+	if err != nil {
+		return err
+	}
+
+	if err = d.halt(ctx, workload, ofInstance(records, instance)); err != nil {
+		return err
+	}
+
+	for _, tree := range []string{d.state, d.workloads} {
+		path, err := d.dir(tree, found)
+		if err != nil {
+			return err
+		}
+
+		if err = os.RemoveAll(filepath.Join(path, strconv.Itoa(instance))); err != nil {
+			return fmt.Errorf("failed to remove instance directory: %w", pathless(err))
+		}
+	}
+
+	d.logger.With("workload", workload, "instance", instance).Debug("instance discarded")
+
+	return nil
+}
+
+// halt ends every process the given records describe, and forgets their supervisors.
+func (d *Driver) halt(ctx context.Context, workload string, records []record) error {
+	for _, r := range records {
+		recorded, err := readState(r.path)
 		if err != nil {
 			// Nothing readable to stop. The directory is still dealt with by the caller,
 			// since a record that cannot be read describes nothing that can be
@@ -563,7 +648,7 @@ func (d *Driver) halt(ctx context.Context, id, workload string) ([]string, error
 
 		if recorded.alive() {
 			if err = d.terminate(ctx, recorded.PID); err != nil {
-				return nil, fmt.Errorf("failed to stop process: %w", err)
+				return fmt.Errorf("failed to stop process: %w", err)
 			}
 		}
 
@@ -573,16 +658,18 @@ func (d *Driver) halt(ctx context.Context, id, workload string) ([]string, error
 		// behind.
 		if recorded.Cgroup != "" {
 			if err = discardCgroup(recorded.Cgroup); err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
 
 	d.mux.Lock()
-	delete(d.supervised, workload)
+	for _, r := range records {
+		delete(d.supervised, supKey{workload: workload, instance: r.instance})
+	}
 	d.mux.Unlock()
 
-	return versions, nil
+	return nil
 }
 
 // resolve finds the identifier of the workload a caller means, reporting an empty one
@@ -620,8 +707,8 @@ func (d *Driver) resolve(workload, id string) (string, error) {
 // The working directory goes because it holds the symlinks to the workload's volumes and
 // whatever the command wrote beside them, none of which has a reader once the process has
 // ended.
-func (d *Driver) keep(id, path string) error {
-	recorded, err := readState(path)
+func (d *Driver) keep(id string, r record) error {
+	recorded, err := readState(r.path)
 	if err != nil {
 		// No record to read, so there is no version to find the output under. Observe
 		// skips such a version anyway, and the files are left rather than moved on the
@@ -629,7 +716,7 @@ func (d *Driver) keep(id, path string) error {
 		return nil
 	}
 
-	workload, err := d.version(d.workloads, id, recorded.Version)
+	workload, err := d.place(d.workloads, id, r.instance, recorded.Version)
 	if err != nil {
 		return err
 	}
@@ -646,14 +733,14 @@ func (d *Driver) keep(id, path string) error {
 		return fmt.Errorf("failed to keep the previous output: %w", pathless(err))
 	}
 
-	return retain(path)
+	return retain(r.path)
 }
 
-// discardVersion removes one version of a workload from both trees.
-func (d *Driver) discardVersion(id, path string) error {
-	recorded, err := readState(path)
+// discardRecord removes one record of a workload from both trees.
+func (d *Driver) discardRecord(id string, r record) error {
+	recorded, err := readState(r.path)
 	if err == nil {
-		workload, err := d.version(d.workloads, id, recorded.Version)
+		workload, err := d.place(d.workloads, id, r.instance, recorded.Version)
 		if err != nil {
 			return err
 		}
@@ -663,36 +750,43 @@ func (d *Driver) discardVersion(id, path string) error {
 		}
 	}
 
-	if err = os.RemoveAll(path); err != nil {
+	if err = os.RemoveAll(r.path); err != nil {
 		return fmt.Errorf("failed to remove workload directory: %w", pathless(err))
 	}
 
 	return nil
 }
 
-// newest returns the version directory holding the most recent record, which is the one
-// worth keeping for its output.
+// newest returns the record most recently run among the given ones, which is the one
+// worth keeping for its output. The callers group per instance before asking.
 //
 // Ordered by the version the record names rather than by the directory's name, so
 // nothing depends on how a path sorts — "10" sorts before "9" as text.
-func newest(versions []string) string {
+func newest(records []record) record {
 	var (
-		newest  string
+		found   record
 		version = -1
 	)
 
-	for _, path := range versions {
-		recorded, err := readState(path)
+	for _, r := range records {
+		recorded, err := readState(r.path)
 		if err != nil {
 			continue
 		}
 
 		if recorded.Version > version {
-			newest, version = path, recorded.Version
+			found, version = r, recorded.Version
 		}
 	}
 
-	return newest
+	return found
+}
+
+// ofInstance returns the records belonging to the given instance index.
+func ofInstance(records []record, instance int) []record {
+	return slices.DeleteFunc(slices.Clone(records), func(r record) bool {
+		return r.instance != instance
+	})
 }
 
 // Signal sends the named signal to every process the driver runs for the named
@@ -726,13 +820,13 @@ func (d *Driver) Signal(_ context.Context, id, workload, signal string) error {
 		id = found
 	}
 
-	versions, err := d.versions(d.state, id)
+	records, err := d.records(id)
 	if err != nil {
 		return err
 	}
 
-	for _, path := range versions {
-		recorded, err := readState(path)
+	for _, r := range records {
+		recorded, err := readState(r.path)
 		if err != nil {
 			// Nothing readable to signal. A record that cannot be read describes
 			// nothing that can be converged, which Observe already reports.
@@ -826,13 +920,13 @@ func (d *Driver) identify(workload string) (string, error) {
 	}
 
 	for _, id := range ids {
-		versions, err := d.versions(d.state, id)
+		records, err := d.records(id)
 		if err != nil {
 			continue
 		}
 
-		for _, path := range versions {
-			recorded, err := readState(path)
+		for _, r := range records {
+			recorded, err := readState(r.path)
 			if err != nil {
 				continue
 			}
@@ -937,7 +1031,7 @@ func (d *Driver) ObserveWorkload(_ context.Context, id, _ string) ([]driver.Inst
 // reason each skip gives: what is being reported is what the driver can see, and one
 // unreadable record should not hide the rest.
 func (d *Driver) instances(id string) []driver.Instance {
-	versions, err := d.versions(d.state, id)
+	records, err := d.records(id)
 	if err != nil {
 		// A directory the driver cannot have created, so there is nothing here it can
 		// report on.
@@ -946,10 +1040,10 @@ func (d *Driver) instances(id string) []driver.Instance {
 		return nil
 	}
 
-	instances := make([]driver.Instance, 0, len(versions))
+	instances := make([]driver.Instance, 0, len(records))
 
-	for _, path := range versions {
-		recorded, err := readState(path)
+	for _, r := range records {
+		recorded, err := readState(r.path)
 		if err != nil {
 			// A directory with no readable record describes nothing that can be
 			// converged. Reporting an instance for it would have the reconciler act
@@ -967,17 +1061,18 @@ func (d *Driver) instances(id string) []driver.Instance {
 			continue
 		}
 
-		instances = append(instances, instance(recorded.Workload, recorded, retained(path)))
+		instances = append(instances, instance(recorded.Workload, r.instance, recorded, retained(r.path)))
 	}
 
 	return instances
 }
 
 // instance maps a record onto what the server reads.
-func instance(workload string, recorded state, retained bool) driver.Instance {
+func instance(workload string, index int, recorded state, retained bool) driver.Instance {
 	out := driver.Instance{
 		ID:        strconv.Itoa(recorded.PID),
 		Workload:  workload,
+		Index:     index,
 		SpecHash:  recorded.SpecHash,
 		Version:   recorded.Version,
 		StartedAt: recorded.StartedAt,
@@ -1061,12 +1156,13 @@ func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, optio
 		return err
 	}
 
-	// Output lives in the workload's own tree, which is the one it writes to. Which file
-	// holds which attempt is the whole of the bookkeeping: the current one writes to
-	// outputFile, and a stop moves it aside to previousFile.
-	versions, err := d.versions(d.workloads, id)
+	records, err := d.records(id)
 	if err != nil {
 		return err
+	}
+
+	if options.Instance != nil {
+		records = ofInstance(records, *options.Instance)
 	}
 
 	name := outputFile
@@ -1076,34 +1172,47 @@ func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, optio
 
 	// Where a follow carries on from, found before the tail so that nothing written
 	// between the two reads is skipped. Previous is never followed: the attempt it
-	// holds has already ended.
-	var record, current string
+	// holds has already ended. What is followed is the newest record among those
+	// selected, which is the attempt now running.
+	var followRecord, followDir string
 	if options.Follow && !options.Previous {
-		record, current, err = d.following(id)
-		if err != nil {
-			return err
+		if r := newest(records); r.path != "" {
+			followRecord = r.path
+
+			followDir, err = d.output(id, r)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	var offset int64
 
-	for _, path := range versions {
+	// Output lives in the workload's own tree, which is the one it writes to. Which
+	// file holds which attempt is the whole of the bookkeeping: the current one
+	// writes to outputFile, and a stop moves it aside to previousFile.
+	for _, r := range records {
+		path, err := d.output(id, r)
+		if err != nil {
+			return err
+		}
+
 		read, err := tailFile(out, filepath.Join(path, name), options.Tail)
 		if err != nil {
 			return err
 		}
 
-		if path == current {
+		if path == followDir {
 			offset = read
 		}
 	}
 
-	if record == "" {
+	if followRecord == "" {
 		return nil
 	}
 
-	return followFile(ctx, out, filepath.Join(current, name), offset, func() bool {
-		recorded, err := readState(record)
+	return followFile(ctx, out, filepath.Join(followDir, name), offset, func() bool {
+		recorded, err := readState(followRecord)
 		if err != nil {
 			// Nothing readable says whether the process is still running. Ending the
 			// follow is the only honest answer: waiting on a file that may never grow
@@ -1115,27 +1224,15 @@ func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, optio
 	})
 }
 
-// following returns the record and the directory of the version a follow watches, which
-// is the one now running. Both are empty when the driver has no record for the workload.
-func (d *Driver) following(id string) (string, string, error) {
-	records, err := d.versions(d.state, id)
+// output returns the workload-tree directory holding a record's output. The two trees
+// place a record the same way, so the version its state names says where to read.
+func (d *Driver) output(id string, r record) (string, error) {
+	recorded, err := readState(r.path)
 	if err != nil {
-		return "", "", err
+		return "", fmt.Errorf("failed to locate instance output: %w", err)
 	}
 
-	record := newest(records)
-	if record == "" {
-		return "", "", nil
-	}
-
-	root, err := d.dir(d.workloads, id)
-	if err != nil {
-		return "", "", err
-	}
-
-	// The two trees name a version's directory the same way, so the record found in one
-	// says which directory to read in the other.
-	return record, filepath.Join(root, filepath.Base(record)), nil
+	return d.place(d.workloads, id, r.instance, recorded.Version)
 }
 
 // Wait blocks until every supervising goroutine has finished.
@@ -1161,9 +1258,9 @@ func (d *Driver) Release() {
 	d.mux.Lock()
 	defer d.mux.Unlock()
 
-	for workload, process := range d.supervised {
+	for key, process := range d.supervised {
 		if err := process.cmd.Process.Release(); err != nil {
-			d.logger.With("workload", workload, "error", err).Error("failed to release process")
+			d.logger.With("workload", key.workload, "instance", key.instance, "error", err).Error("failed to release process")
 		}
 	}
 
@@ -1179,9 +1276,13 @@ func (d *Driver) Supervises(workload string) bool {
 	d.mux.Lock()
 	defer d.mux.Unlock()
 
-	_, ok := d.supervised[workload]
+	for key := range d.supervised {
+		if key.workload == workload {
+			return true
+		}
+	}
 
-	return ok
+	return false
 }
 
 // dir returns the directory holding a workload beneath the given tree.
@@ -1202,15 +1303,15 @@ func (d *Driver) dir(tree, id string) (string, error) {
 	return filepath.Join(tree, id), nil
 }
 
-// version returns the directory holding one version of a workload beneath the given
-// tree.
-func (d *Driver) version(tree, id string, version int) (string, error) {
+// place returns the directory holding one version of one instance beneath the given
+// tree, which both trees lay out the same way: <id>/<instance>/<version>.
+func (d *Driver) place(tree, id string, instance, version int) (string, error) {
 	dir, err := d.dir(tree, id)
 	if err != nil {
 		return "", err
 	}
 
-	return filepath.Join(dir, strconv.Itoa(version)), nil
+	return filepath.Join(dir, strconv.Itoa(instance), strconv.Itoa(version)), nil
 }
 
 // workloads lists the workloads the driver has directories for.
@@ -1218,28 +1319,45 @@ func (d *Driver) known() ([]string, error) {
 	return d.subdirectories(d.state)
 }
 
-// versions returns the paths of every version of a workload the driver has a record
-// for, oldest first, so that reading them yields a workload's history in order.
+// records returns every record the state tree holds for a workload, carrying the
+// instance index each record's path encodes.
 //
-// The tree says which paths these are: records for observing what is running, workload
-// directories for reading output.
-func (d *Driver) versions(tree, id string) ([]string, error) {
-	root, err := d.dir(tree, id)
+// A first-level directory that is not an instance index is skipped rather than
+// reported: the driver never creates one, so whatever it holds describes nothing
+// that can be converged.
+func (d *Driver) records(id string) ([]record, error) {
+	root, err := d.dir(d.state, id)
 	if err != nil {
 		return nil, err
 	}
 
-	names, err := d.subdirectories(root)
+	instances, err := d.subdirectories(root)
 	if err != nil {
 		return nil, err
 	}
 
-	paths := make([]string, 0, len(names))
-	for _, name := range names {
-		paths = append(paths, filepath.Join(root, name))
+	var records []record
+
+	for _, name := range instances {
+		instance, err := strconv.Atoi(name)
+		if err != nil {
+			continue
+		}
+
+		versions, err := d.subdirectories(filepath.Join(root, name))
+		if err != nil {
+			return nil, err
+		}
+
+		for _, version := range versions {
+			records = append(records, record{
+				path:     filepath.Join(root, name, version),
+				instance: instance,
+			})
+		}
 	}
 
-	return paths, nil
+	return records, nil
 }
 
 // subdirectories lists the directories directly inside a path, reporting none when the

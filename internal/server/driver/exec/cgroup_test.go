@@ -45,7 +45,7 @@ func TestDriver_ResourceLimits(t *testing.T) {
 		// Read through the process rather than through the driver's internals, so
 		// what is asserted is what the kernel is actually enforcing on the command.
 		path := cgroupOf(t, pid)
-		assert.Equal(t, "orca-"+testID+"-1", filepath.Base(path))
+		assert.Equal(t, "orca-"+testID+"-0-1", filepath.Base(path))
 		assert.Equal(t, strconv.Itoa(32*1024*1024), limitOf(t, path, "memory.max"))
 		assert.Equal(t, "0", limitOf(t, path, "memory.swap.max"))
 		assert.Equal(t, "50000 100000", limitOf(t, path, "cpu.max"))

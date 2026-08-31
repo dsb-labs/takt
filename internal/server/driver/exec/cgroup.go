@@ -329,7 +329,9 @@ func (d *Driver) limit(w driver.Workload) (*cgroup, error) {
 		return nil, err
 	}
 
-	path := filepath.Join(root, cgroupPrefix+w.ID+"-"+strconv.Itoa(w.Version))
+	// The instance is part of the name so that a workload's instances get cgroups
+	// of their own: two sharing one would share the limits it enforces.
+	path := filepath.Join(root, cgroupPrefix+w.ID+"-"+strconv.Itoa(w.Instance)+"-"+strconv.Itoa(w.Version))
 	if err = os.Mkdir(path, 0o755); err != nil && !os.IsExist(err) {
 		return nil, fmt.Errorf("failed to create the workload's cgroup: %w", pathless(err))
 	}

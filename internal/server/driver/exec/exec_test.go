@@ -66,7 +66,7 @@ func TestDriver_Start(t *testing.T) {
 
 		// Its own directory, and only the owner's: a workload's environment reaches
 		// its command line and its output.
-		info, err := os.Stat(filepath.Join(root, "workloads", testID, "1"))
+		info, err := os.Stat(filepath.Join(root, "workloads", testID, "0", "1"))
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
 	})
@@ -309,7 +309,7 @@ func TestDriver_Stop(t *testing.T) {
 		// The directory the process ran in does not. It holds the symlinks to the
 		// workload's volumes and whatever the command wrote beside them, none of which
 		// has a reader once the process has ended.
-		_, err = os.Stat(filepath.Join(root, "workloads", testID, "1", "cwd"))
+		_, err = os.Stat(filepath.Join(root, "workloads", testID, "0", "1", "cwd"))
 		assert.True(t, os.IsNotExist(err), "the working directory outlived the process")
 	})
 
@@ -344,13 +344,13 @@ func TestDriver_Stop(t *testing.T) {
 		}
 
 		for _, version := range []string{"1", "2"} {
-			_, err := os.Stat(filepath.Join(root, "workloads", testID, version))
+			_, err := os.Stat(filepath.Join(root, "workloads", testID, "0", version))
 			assert.Truef(t, os.IsNotExist(err), "version %s outlived the version that replaced it", version)
 		}
 
 		// Set aside as the previous attempt's rather than left where it was, so that a
 		// restart at this version opens a file of its own instead of appending to it.
-		_, err := os.Stat(filepath.Join(root, "workloads", testID, "3", "previous.log"))
+		_, err := os.Stat(filepath.Join(root, "workloads", testID, "0", "3", "previous.log"))
 		assert.NoError(t, err, "the most recent version's output was not kept")
 	})
 
@@ -443,7 +443,7 @@ func TestDriver_Signal(t *testing.T) {
 		// leaves another.
 		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
 
-		cwd := filepath.Join(root, "workloads", testID, "1", "cwd")
+		cwd := filepath.Join(root, "workloads", testID, "0", "1", "cwd")
 
 		require.Eventually(t, func() bool {
 			_, err := os.Stat(filepath.Join(cwd, "trapped.txt"))
@@ -485,7 +485,7 @@ func TestDriver_Signal(t *testing.T) {
 		// parent. Both outlive the test binary otherwise.
 		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
 
-		cwd := filepath.Join(root, "workloads", testID, "1", "cwd")
+		cwd := filepath.Join(root, "workloads", testID, "0", "1", "cwd")
 		child := awaitChildPID(t, root, "example", 1)
 
 		require.Eventually(t, func() bool {
@@ -986,6 +986,93 @@ func workload(name string, version int, hash, script string) driver.Workload {
 	}
 }
 
+func TestDriver_Instances(t *testing.T) {
+	t.Parallel()
+
+	t.Run("runs each instance in a directory and record of its own", func(t *testing.T) {
+		d, root := newDriver(t)
+		ctx := t.Context()
+
+		first := workload("example", 1, "hash", "sleep 60")
+
+		second := workload("example", 1, "hash", "sleep 60")
+		second.Instance = 1
+
+		_, err := d.Start(ctx, first)
+		require.NoError(t, err)
+
+		_, err = d.Start(ctx, second)
+		require.NoError(t, err)
+
+		defer func() { require.NoError(t, d.Discard(context.Background(), testID, "example")) }()
+
+		// Two instances are two currents: neither replaces the other, so neither
+		// reads as retained.
+		instances, err := d.ObserveWorkload(ctx, testID, "example")
+		require.NoError(t, err)
+		require.Len(t, instances, 2)
+
+		byIndex := make(map[int]driver.Instance, len(instances))
+		for _, instance := range instances {
+			byIndex[instance.Index] = instance
+		}
+
+		assert.Equal(t, driver.StateRunning, byIndex[0].State)
+		assert.Equal(t, driver.StateRunning, byIndex[1].State)
+		assert.False(t, byIndex[0].Retained)
+		assert.False(t, byIndex[1].Retained)
+
+		for _, instance := range []string{"0", "1"} {
+			_, err = os.Stat(filepath.Join(root, "workloads", testID, instance, "1", "cwd"))
+			assert.NoError(t, err)
+		}
+
+		// Stopping one instance leaves the other running.
+		require.NoError(t, d.StopInstance(ctx, testID, "example", 1))
+
+		require.Eventually(t, func() bool {
+			instances, err = d.ObserveWorkload(ctx, testID, "example")
+			if err != nil || len(instances) != 2 {
+				return false
+			}
+
+			for _, instance := range instances {
+				byIndex[instance.Index] = instance
+			}
+
+			return byIndex[1].Retained && byIndex[0].State == driver.StateRunning
+		}, 10*time.Second, 50*time.Millisecond, "the stopped instance was never retained")
+	})
+
+	t.Run("discarding an instance removes what a stop retained for it", func(t *testing.T) {
+		d, root := newDriver(t)
+		ctx := t.Context()
+
+		first := workload("example", 1, "hash", "sleep 60")
+
+		second := workload("example", 1, "hash", "sleep 60")
+		second.Instance = 1
+
+		_, err := d.Start(ctx, first)
+		require.NoError(t, err)
+
+		_, err = d.Start(ctx, second)
+		require.NoError(t, err)
+
+		defer func() { require.NoError(t, d.Discard(context.Background(), testID, "example")) }()
+
+		require.NoError(t, d.DiscardInstance(ctx, testID, "example", 1))
+
+		instances, err := d.ObserveWorkload(ctx, testID, "example")
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+		assert.Equal(t, 0, instances[0].Index)
+
+		_, err = os.Stat(filepath.Join(root, "state", testID, "1"))
+		assert.True(t, os.IsNotExist(err), "the discarded instance's records remain")
+	})
+}
+
 // awaitState waits for a workload's single instance to reach the given state.
 func awaitState(t *testing.T, d *exec.Driver, workload string, want driver.State) {
 	t.Helper()
@@ -1055,7 +1142,7 @@ func output(t *testing.T, d *exec.Driver, workload string) string {
 func awaitChildPID(t *testing.T, root, workload string, version int) int {
 	t.Helper()
 
-	path := filepath.Join(root, "workloads", testID, strconv.Itoa(version), "cwd", "child.pid")
+	path := filepath.Join(root, "workloads", testID, "0", strconv.Itoa(version), "cwd", "child.pid")
 
 	var pid int
 
@@ -1082,7 +1169,7 @@ func writeInstance(t *testing.T, root, workload string, version int, recorded ma
 	// directory named for the identifier. The name is inside the record.
 	recorded["workload"] = workload
 
-	dir := filepath.Join(root, "state", testID, strconv.Itoa(version))
+	dir := filepath.Join(root, "state", testID, "0", strconv.Itoa(version))
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 
 	data, err := json.Marshal(recorded)
@@ -1098,7 +1185,7 @@ func writeInstanceFor(t *testing.T, root, id, workload string, version int, reco
 
 	recorded["workload"] = workload
 
-	dir := filepath.Join(root, "state", id, strconv.Itoa(version))
+	dir := filepath.Join(root, "state", id, "0", strconv.Itoa(version))
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 
 	data, err := json.Marshal(recorded)
@@ -1180,7 +1267,7 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "written\n", string(contents))
 
-		link := filepath.Join(root, "workloads", testID, "1", "cwd", "var", "lib", "example")
+		link := filepath.Join(root, "workloads", testID, "0", "1", "cwd", "var", "lib", "example")
 		target, err := os.Readlink(link)
 		require.NoError(t, err, "the volume was not linked into the working directory")
 		assert.Equal(t, volume, target)
@@ -1198,7 +1285,7 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 		_, err := d.Start(t.Context(), w)
 		require.NoError(t, err)
 
-		_, err = os.Lstat(filepath.Join(root, "workloads", testID, "1", "cwd", "a", "b", "c", "deep"))
+		_, err = os.Lstat(filepath.Join(root, "workloads", testID, "0", "1", "cwd", "a", "b", "c", "deep"))
 		assert.NoError(t, err)
 	})
 
@@ -1211,7 +1298,7 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 		d, root := newDriver(t)
 		volume := newVolume(t, "example-data")
 
-		cwd := filepath.Join(root, "workloads", testID, "1", "cwd")
+		cwd := filepath.Join(root, "workloads", testID, "0", "1", "cwd")
 
 		for _, target := range []string{"/../../escape", "../../escape", "/./x", "/a/../b"} {
 			w := workload("example", 1, "hash-one", "exit 0")
@@ -1275,7 +1362,7 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 
 		awaitState(t, d, "example", driver.StateExited)
 
-		contents, err := os.ReadFile(filepath.Join(root, "workloads", testID, "1", "cwd", "file"))
+		contents, err := os.ReadFile(filepath.Join(root, "workloads", testID, "0", "1", "cwd", "file"))
 		require.NoError(t, err, "a confined workload could not write its own working directory")
 		assert.Equal(t, "written\n", string(contents))
 	})
