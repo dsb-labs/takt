@@ -17,7 +17,6 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.1
 	github.com/docker/go-units v0.5.0
-	github.com/go-ozzo/ozzo-validation/v4 v4.4.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/landlock-lsm/go-landlock v0.9.0
 	github.com/oapi-codegen/runtime v1.7.0

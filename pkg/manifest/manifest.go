@@ -21,7 +21,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/docker/go-units"
-	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v3"
 )
@@ -138,54 +137,58 @@ func ParseVolume(r io.Reader) (Volume, error) {
 
 // ValidateVolume reports whether volume is a usable volume specification.
 func ValidateVolume(volume Volume) error {
-	err := validation.ValidateStruct(&volume,
-		validation.Field(&volume.Version,
-			validation.Required,
-			validation.In(version).Error(fmt.Sprintf("must be %q", version)),
-		),
-		validation.Field(&volume.Name,
-			validation.Required,
-			validation.Length(1, 63),
-			validation.Match(namePattern).Error("must be lowercase alphanumeric, optionally separated by dashes"),
-		),
-	)
-	if err != nil {
-		return fmt.Errorf("invalid manifest: %w", err)
+	if err := validateHeader(volume.Version, volume.Name); err != nil {
+		return err
 	}
 
 	return ValidateLabels(volume.Labels)
 }
 
+// validateHeader reports whether a manifest's version and name are usable, which
+// every manifest kind requires the same way.
+func validateHeader(v, name string) error {
+	if v == "" {
+		return errors.New("invalid manifest: version is required")
+	}
+
+	if v != version {
+		return fmt.Errorf("invalid manifest: version must be %q", version)
+	}
+
+	if name == "" {
+		return errors.New("invalid manifest: name is required")
+	}
+
+	if len(name) > 63 {
+		return errors.New("invalid manifest: name must be at most 63 characters")
+	}
+
+	if !namePattern.MatchString(name) {
+		return errors.New("invalid manifest: name must be lowercase alphanumeric, optionally separated by dashes")
+	}
+
+	return nil
+}
+
 // Validate reports whether spec is a usable workload specification.
 func Validate(spec Spec) error {
-	err := validation.ValidateStruct(&spec,
-		validation.Field(&spec.Version,
-			validation.Required,
-			validation.In(version).Error(fmt.Sprintf("must be %q", version)),
-		),
-		validation.Field(&spec.Name,
-			validation.Required,
-			validation.Length(1, 63),
-			validation.Match(namePattern).Error("must be lowercase alphanumeric, optionally separated by dashes"),
-		),
-	)
-	if err != nil {
-		return fmt.Errorf("invalid manifest: %w", err)
-	}
-
-	if err = validateCount(spec); err != nil {
+	if err := validateHeader(spec.Version, spec.Name); err != nil {
 		return err
 	}
 
-	if err = validateRestart(spec.Restart); err != nil {
+	if err := validateCount(spec); err != nil {
 		return err
 	}
 
-	if err = validateSchedule(spec); err != nil {
+	if err := validateRestart(spec.Restart); err != nil {
 		return err
 	}
 
-	if err = ValidateLabels(spec.Labels); err != nil {
+	if err := validateSchedule(spec); err != nil {
+		return err
+	}
+
+	if err := ValidateLabels(spec.Labels); err != nil {
 		return err
 	}
 
@@ -636,11 +639,11 @@ func RuntimeOf(spec Spec) (Runtime, error) {
 }
 
 func validateContainer(spec Container) error {
-	err := validation.ValidateStruct(&spec,
-		validation.Field(&spec.Image, validation.Required),
-		validation.Field(&spec.Command, validation.By(validCommand)),
-	)
-	if err != nil {
+	if spec.Image == "" {
+		return errors.New("invalid container: image is required")
+	}
+
+	if err := validCommand(spec.Command); err != nil {
 		return fmt.Errorf("invalid container: %w", err)
 	}
 
@@ -676,9 +679,8 @@ func validateContainer(spec Container) error {
 // argument, which either means nothing or means something the operator did not write,
 // and a manifest that says nothing about it is easier to fix than a container that
 // behaves oddly.
-func validCommand(value any) error {
-	command, ok := value.([]string)
-	if !ok || len(command) == 0 {
+func validCommand(command []string) error {
+	if len(command) == 0 {
 		return nil
 	}
 
