@@ -612,7 +612,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 
 		checked := workload("example", service.WorkloadStateFailed)
-		checked.Health = service.Health{
+		checked.Healths = map[int]service.Health{0: {
 			Checked: true,
 			Result: health.Result{
 				Status:    health.StatusUnhealthy,
@@ -620,7 +620,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 				CheckedAt: time.Now(),
 				Error:     "/healthz answered 500",
 			},
-		}
+		}}
 
 		svc.EXPECT().Get(mock.Anything, "example").Return(checked, nil).Once()
 

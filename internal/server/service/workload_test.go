@@ -809,7 +809,7 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.ExpectState, got.State)
-			assert.Equal(t, tc.Checked, got.Health.Checked)
+			assert.Equal(t, tc.Checked, got.Healths[0].Checked)
 		})
 	}
 }

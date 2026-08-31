@@ -46,6 +46,12 @@ var (
 	// ErrWorkloadInUse is returned when a workload another one references is deleted
 	// without being forced.
 	ErrWorkloadInUse = errors.New("workload is in use")
+	// ErrNoSuchInstance is returned when a request selects an instance index the
+	// workload's count does not include.
+	ErrNoSuchInstance = errors.New("no such instance")
+	// ErrInstanceRequired is returned when a request must select one instance of a
+	// workload running several and selects none.
+	ErrInstanceRequired = errors.New("an instance must be selected")
 )
 
 type (
@@ -807,7 +813,7 @@ func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Worklo
 	for _, row := range rows {
 		message, at := s.lastError(row.Name)
 
-		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.health(row.Name), message, at)
+		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.healths(row.Name, observed[row.Name]), message, at)
 		if err != nil {
 			return nil, err
 		}
@@ -969,12 +975,28 @@ func (s *WorkloadService) Restart(ctx context.Context, name string) (Workload, e
 // The output is streamed rather than returned so that a workload with a lot to say
 // doesn't have to be held in memory in its entirety before any of it is sent.
 func (s *WorkloadService) Logs(ctx context.Context, out io.Writer, name string, options driver.LogOptions) error {
-	if _, err := s.workloads.Get(ctx, name); err != nil {
-		if errors.Is(err, database.ErrWorkloadNotFound) {
-			return ErrWorkloadNotFound
-		}
-
+	row, err := s.workloads.Get(ctx, name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return ErrWorkloadNotFound
+	case err != nil:
 		return fmt.Errorf("failed to load workload: %w", err)
+	}
+
+	spec, err := manifest.Decode(row.Spec)
+	if err != nil {
+		return err
+	}
+
+	if options.Instance != nil && (*options.Instance < 0 || *options.Instance >= spec.Count) {
+		return fmt.Errorf("%w: workload %s runs %d", ErrNoSuchInstance, name, spec.Count)
+	}
+
+	// A follow reads one stream until it ends. With several instances and no
+	// selector there is no one stream to read, and interleaving them would return
+	// output nothing could attribute.
+	if options.Follow && options.Instance == nil && spec.Count > 1 {
+		return fmt.Errorf("%w: workload %s runs %d instances and a follow reads one", ErrInstanceRequired, name, spec.Count)
 	}
 
 	// Every driver is asked. Which runtime holds the workload is knowable from its
@@ -1551,7 +1573,9 @@ func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (W
 
 	message, at := s.lastError(row.Name)
 
-	return newWorkload(row, s.observeWorkload(ctx, row), ports, s.health(row.Name), message, at)
+	instances := s.observeWorkload(ctx, row)
+
+	return newWorkload(row, instances, ports, s.healths(row.Name, instances), message, at)
 }
 
 // observeWorkload asks each driver what it is running for one workload.
@@ -1644,15 +1668,26 @@ func (s *WorkloadService) lastError(workload string) (string, time.Time) {
 	return message, at
 }
 
-// health returns what orca knows about a workload's health.
-func (s *WorkloadService) health(workload string) Health {
+// healths returns what orca knows about each instance's health, keyed by the
+// instance's index. Only the observed instances are asked after, since a result can
+// only exist for an instance that runs.
+func (s *WorkloadService) healths(workload string, instances []driver.Instance) map[int]Health {
 	if s.checker == nil {
-		return Health{}
+		return nil
 	}
 
-	result, checked := s.checker.Result(workload, 0)
+	healths := make(map[int]Health, len(instances))
 
-	return Health{Checked: checked, Result: result}
+	for _, instance := range instances {
+		if _, ok := healths[instance.Index]; ok {
+			continue
+		}
+
+		result, checked := s.checker.Result(workload, instance.Index)
+		healths[instance.Index] = Health{Checked: checked, Result: result}
+	}
+
+	return healths
 }
 
 // healthState reports the instance state a workload's health implies, so that a
@@ -1695,7 +1730,7 @@ func (r references) hashInputs(digest string) spechash.Inputs {
 	}
 }
 
-func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, reported Health, lastError string, lastErrorAt time.Time) (Workload, error) {
+func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, healths map[int]Health, lastError string, lastErrorAt time.Time) (Workload, error) {
 	spec, err := manifest.Decode(row.Spec)
 	if err != nil {
 		return Workload{}, err
@@ -1716,13 +1751,15 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 
 	// Health is folded into the instance states before the workload's own state is
 	// derived, so a container that is up but not working reads as failed rather than
-	// running — and is replaced by the same paced path a crashed one takes.
+	// running — and is replaced by the same paced path a crashed one takes. Each
+	// instance carries its own verdict: one failing its check must not condemn the
+	// others.
 	//
 	// The restart policy is applied after it, on the instances that have ended. An
 	// instance the policy retires is finished with, so a stale health result must not
 	// reopen the question of whether it is working.
 	for i := range instances {
-		instances[i].State = healthState(instances[i].State, reported)
+		instances[i].State = healthState(instances[i].State, healths[instances[i].Index])
 		instances[i].State = CompletionState(instances[i], policy)
 	}
 
@@ -1742,7 +1779,7 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 		Labels:      row.Labels,
 		Instances:   instances,
 		Ports:       newResolvedPorts(ports),
-		Health:      reported,
+		Healths:     healths,
 		State:       StateOf(instances, deleting, suspended),
 		Deleting:    deleting,
 		Suspended:   suspended,
@@ -1894,8 +1931,9 @@ type Workload struct {
 	Instances []driver.Instance
 	// The port mappings the server settled on, including any it allocated.
 	Ports []ResolvedPort
-	// What orca established about whether the workload is working.
-	Health Health
+	// What orca established about whether each instance is working, keyed by the
+	// instance's index.
+	Healths map[int]Health
 	// The workload's overall state, derived from its instances and whether it is
 	// being deleted or suspended.
 	State WorkloadState
