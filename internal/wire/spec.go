@@ -38,6 +38,10 @@ func ToSpec(spec api.WorkloadSpec) (manifest.Spec, error) {
 		Name:    spec.Name,
 	}
 
+	if spec.Count != nil {
+		out.Count = *spec.Count
+	}
+
 	restart, err := toRestart(spec.Restart)
 	if err != nil {
 		return manifest.Spec{}, err
@@ -289,6 +293,10 @@ func FromSpec(s manifest.Spec) api.WorkloadSpec {
 	spec := api.WorkloadSpec{
 		Version: s.Version,
 		Name:    s.Name,
+	}
+
+	if s.Count != 0 {
+		spec.Count = new(s.Count)
 	}
 
 	spec.Schedule = fromSchedule(s.Schedule)

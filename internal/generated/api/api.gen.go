@@ -564,6 +564,11 @@ type Instance struct {
 	// docker driver.
 	ID string `json:"id"`
 
+	// Index The index of the instance among the workload's instances, counted from
+	// zero up to the specification's count. Each index is converged on its
+	// own. Omitted for the first instance.
+	Index *int `json:"index,omitempty"`
+
 	// SpecHash The hash of the specification this instance was started from. When it
 	// differs from the workload's current hash, the instance is replaced.
 	SpecHash string `json:"specHash"`
@@ -789,6 +794,11 @@ type ResolvedPort struct {
 
 	// From The host port that reaches it.
 	From int `json:"from"`
+
+	// Instance The index of the workload instance the port reaches. Omitted for the
+	// first instance, so a workload running one instance reads as it always
+	// did.
+	Instance *int `json:"instance,omitempty"`
 
 	// Name What the specification called this port. Empty for one it did not name.
 	Name *string `json:"name,omitempty"`
@@ -1398,6 +1408,16 @@ type WorkloadSpec struct {
 	// something suspect, and a knob nobody should turn is surface for free.
 	Container *ContainerSpec `json:"container,omitempty"`
 
+	// Count How many instances of the workload to run. Omitted or zero means one.
+	// Each instance publishes the workload's ports on host ports of its own,
+	// so a count above one cannot be combined with a pinned host port — and
+	// an exec workload must pin every port, so its count is always one. A
+	// scheduled workload runs one instance by the same rule.
+	//
+	// On one node this buys throughput, not availability: the host is the
+	// failure domain, and a second instance does not survive it.
+	Count *int `json:"count,omitempty"`
+
 	// Env Environment variables set for the workload.
 	//
 	// These sit alongside the runtime blocks because any runtime that runs a
@@ -1660,6 +1680,15 @@ type GetWorkloadLogsParams struct {
 	// already ended. That request is refused rather than answered as an
 	// ordinary read, because there is nothing for it to follow.
 	Follow *bool `form:"follow,omitempty" json:"follow,omitempty"`
+
+	// Instance Read one instance's output, selected by its index. Omitted reads every
+	// instance.
+	//
+	// Required with `follow` when the workload runs more than one instance:
+	// a follow reads one stream until it ends, and interleaving several would
+	// return output nothing could attribute. An index the workload's count
+	// does not include is refused.
+	Instance *int `form:"instance,omitempty" json:"instance,omitempty"`
 
 	// Since Return only the output written at or after this instant.
 	//
@@ -4420,6 +4449,18 @@ func NewGetWorkloadLogsRequest(server string, name WorkloadName, params *GetWork
 		if params.Follow != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "follow", *params.Follow, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Instance != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "instance", *params.Instance, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -9719,6 +9760,19 @@ func (siw *ServerInterfaceWrapper) GetWorkloadLogs(w http.ResponseWriter, r *htt
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "follow"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "follow", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "instance" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "instance", r.URL.Query(), &params.Instance, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "instance"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "instance", Err: err})
 		}
 		return
 	}

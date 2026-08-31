@@ -268,6 +268,20 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: instance
+          in: query
+          required: false
+          description: |
+            Read one instance's output, selected by its index. Omitted reads every
+            instance.
+
+            Required with `follow` when the workload runs more than one instance:
+            a follow reads one stream until it ends, and interleaving several would
+            return output nothing could attribute. An index the workload's count
+            does not include is refused.
+          schema:
+            type: integer
+            minimum: 0
         - name: since
           in: query
           required: false
@@ -1226,6 +1240,18 @@ components:
           minLength: 1
           maxLength: 63
           examples: ["example"]
+        count:
+          type: integer
+          description: |
+            How many instances of the workload to run. Omitted or zero means one.
+            Each instance publishes the workload's ports on host ports of its own,
+            so a count above one cannot be combined with a pinned host port — and
+            an exec workload must pin every port, so its count is always one. A
+            scheduled workload runs one instance by the same rule.
+
+            On one node this buys throughput, not availability: the host is the
+            failure domain, and a second instance does not survive it.
+          minimum: 1
         schedule:
           $ref: "#/components/schemas/ScheduleSpec"
         labels:
@@ -1643,6 +1669,13 @@ components:
         settled on. This is what a caller uses to reach a workload.
       required: [to, from, protocol, dynamic]
       properties:
+        instance:
+          type: integer
+          description: |
+            The index of the workload instance the port reaches. Omitted for the
+            first instance, so a workload running one instance reads as it always
+            did.
+          minimum: 0
         name:
           type: string
           description: |
@@ -2082,6 +2115,13 @@ components:
           description: |
             The driver's opaque handle for this instance. A container ID for the
             docker driver.
+        index:
+          type: integer
+          description: |
+            The index of the instance among the workload's instances, counted from
+            zero up to the specification's count. Each index is converged on its
+            own. Omitted for the first instance.
+          minimum: 0
         state:
           $ref: "#/components/schemas/InstanceState"
         specHash:

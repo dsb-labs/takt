@@ -195,6 +195,8 @@ type (
 	// carrying the host port the server settled on. This is what a caller uses to
 	// reach the workload.
 	ResolvedPort struct {
+		// The index of the workload instance the port reaches.
+		Instance int
 		// What the specification called this port. Empty for one it did not name.
 		Name string
 		// The port the workload listens on inside its runtime.
@@ -1554,6 +1556,7 @@ func newResolvedPorts(ports []database.Port) []ResolvedPort {
 	resolved := make([]ResolvedPort, 0, len(ports))
 	for _, port := range ports {
 		resolved = append(resolved, ResolvedPort{
+			Instance: port.Instance,
 			Name:     port.Name,
 			To:       port.Container,
 			From:     port.Host,

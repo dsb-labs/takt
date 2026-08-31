@@ -448,6 +448,8 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 		options.Since = *request.Params.Since
 	}
 
+	options.Instance = request.Params.Instance
+
 	// A retained instance has already ended, so there is nothing for a follow of it to
 	// wait on. Refused rather than answered as an ordinary read, because a caller who
 	// asked to watch something should be told that it cannot be watched.
@@ -463,7 +465,8 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 	// first byte of a 200 has been sent there is no way to report a failure. Reading
 	// the logs can still fail midway through. Nothing can be done about that but stop
 	// writing, which is exactly why the cheap check happens first.
-	if _, err := a.workloads.Get(ctx, request.Name); err != nil {
+	workload, err := a.workloads.Get(ctx, request.Name)
+	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrWorkloadNotFound):
 			return api.GetWorkloadLogs404JSONResponse{
@@ -478,6 +481,25 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 				},
 			}, nil
 		}
+	}
+
+	// The instance rules are enforced before anything is written, for the reason the
+	// missing workload is. The service refuses both again, but a refusal that
+	// surfaced mid-stream could no longer become a status code.
+	if options.Instance != nil && (*options.Instance < 0 || *options.Instance >= workload.Spec.Count) {
+		return api.GetWorkloadLogs400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{
+				Error: fmt.Sprintf("workload %q has no instance %d", request.Name, *options.Instance),
+			},
+		}, nil
+	}
+
+	if options.Follow && options.Instance == nil && workload.Spec.Count > 1 {
+		return api.GetWorkloadLogs400JSONResponse{
+			BadRequestJSONResponse: api.BadRequestJSONResponse{
+				Error: fmt.Sprintf("select an instance to follow: workload %q runs %d", request.Name, workload.Spec.Count),
+			},
+		}, nil
 	}
 
 	return logsResponse{
@@ -618,6 +640,12 @@ func newResolvedPorts(ports []service.ResolvedPort) []api.ResolvedPort {
 			Dynamic:  port.Dynamic,
 		}
 
+		// Omitted for the first instance, so a workload running one instance
+		// reads exactly as it did before instances existed.
+		if port.Instance != 0 {
+			entry.Instance = new(port.Instance)
+		}
+
 		// Reported as absent rather than as an empty string for a port the
 		// specification did not name, which is how the field is sent everywhere else.
 		if port.Name != "" {
@@ -628,6 +656,17 @@ func newResolvedPorts(ports []service.ResolvedPort) []api.ResolvedPort {
 	}
 
 	return resolved
+}
+
+// indexOf reports an instance's index for the wire, omitted for the first instance
+// so a workload running one instance reads exactly as it did before indexes
+// existed.
+func indexOf(instance driver.Instance) *int {
+	if instance.Index == 0 {
+		return nil
+	}
+
+	return new(instance.Index)
 }
 
 // newWorkload maps the service's view of a workload onto the wire format.
@@ -673,6 +712,7 @@ func newWorkload(w service.Workload) api.Workload {
 			ID:       instance.ID,
 			SpecHash: instance.SpecHash,
 			State:    api.InstanceState(instance.State),
+			Index:    indexOf(instance),
 			// The instance's own verdict rather than a workload-wide one, so one
 			// instance failing its check does not read as all of them failing.
 			Health: instanceHealth(w.Healths[instance.Index], instance),
