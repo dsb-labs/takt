@@ -80,7 +80,7 @@ type (
 	Checker struct {
 		mux    sync.RWMutex
 		client *http.Client
-		checks map[string]*check
+		checks map[subject]*check
 		// Counts probes so each has an identity of its own. Guarded by mux rather
 		// than atomic, since it is only ever touched while holding it.
 		probes uint64
@@ -108,7 +108,15 @@ type (
 		probe  uint64
 	}
 
-	// The check type is one workload's check and the state of running it.
+	// The subject type identifies what one check probes: one instance of one
+	// workload. Each instance answers at an address of its own and fails on its
+	// own, so a verdict is never shared between them.
+	subject struct {
+		workload string
+		instance int
+	}
+
+	// The check type is one instance's check and the state of running it.
 	check struct {
 		spec    Check
 		started time.Time
@@ -131,7 +139,7 @@ type (
 func New(config Config) *Checker {
 	return &Checker{
 		instruments: newInstruments(telemetry.Meter(config.MeterProvider, scope)),
-		checks:      make(map[string]*check),
+		checks:      make(map[subject]*check),
 		// Buffered so that registering a check never blocks on the loop: a
 		// recomputation is already pending, which is all the signal conveys.
 		wake: make(chan struct{}, 1),
@@ -146,29 +154,32 @@ func New(config Config) *Checker {
 	}
 }
 
-// Set registers the check for a workload, replacing any it already had.
+// Set registers the check for one instance of a workload, replacing any it already
+// had.
 //
 // A check whose specification or address has changed starts afresh, since failures
 // counted against the old one say nothing about the new. An unchanged check keeps its
-// history, so re-applying a manifest doesn't reset a workload's start period and let
+// history, so re-applying a manifest doesn't reset an instance's start period and let
 // a broken workload look like it is starting again.
-func (c *Checker) Set(workload string, spec Check) {
+func (c *Checker) Set(workload string, instance int, spec Check) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
-	if existing, ok := c.checks[workload]; ok && existing.spec == spec {
+	key := subject{workload: workload, instance: instance}
+
+	if existing, ok := c.checks[key]; ok && existing.spec == spec {
 		return
 	}
 
 	// A probe against the specification being replaced may still be running. It is
-	// checking an address or a path this workload no longer has, so it is stopped
+	// checking an address or a path this instance no longer has, so it is stopped
 	// rather than left to finish: its verdict is meaningless, and on a workload that
 	// never answers it would otherwise hold a connection open for its whole timeout.
-	if existing, ok := c.checks[workload]; ok && existing.cancel != nil {
+	if existing, ok := c.checks[key]; ok && existing.cancel != nil {
 		existing.cancel()
 	}
 
-	c.checks[workload] = &check{
+	c.checks[key] = &check{
 		spec:    spec,
 		started: time.Now(),
 		result:  Result{Status: StatusStarting},
@@ -188,28 +199,49 @@ func (c *Checker) notify() {
 	}
 }
 
-// Forget drops the check for a workload, which the caller does once the workload is
-// gone so that results don't accumulate for work nothing runs any more.
+// Forget drops every check for a workload, which the caller does once the workload
+// is gone so that results don't accumulate for work nothing runs any more.
 func (c *Checker) Forget(workload string) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
-	// Nothing runs this workload any more, so a probe still in flight against it is
-	// work being done on behalf of something gone.
-	if existing, ok := c.checks[workload]; ok && existing.cancel != nil {
+	for key, existing := range c.checks {
+		if key.workload != workload {
+			continue
+		}
+
+		// Nothing runs this workload any more, so a probe still in flight against
+		// it is work being done on behalf of something gone.
+		if existing.cancel != nil {
+			existing.cancel()
+		}
+
+		delete(c.checks, key)
+	}
+}
+
+// ForgetInstance drops one instance's check, which the caller does when a workload's
+// count shrinks and the instance is gone while its workload stays.
+func (c *Checker) ForgetInstance(workload string, instance int) {
+	c.mux.Lock()
+	defer c.mux.Unlock()
+
+	key := subject{workload: workload, instance: instance}
+
+	if existing, ok := c.checks[key]; ok && existing.cancel != nil {
 		existing.cancel()
 	}
 
-	delete(c.checks, workload)
+	delete(c.checks, key)
 }
 
-// Result returns the most recent outcome for a workload, reporting false when it has
-// no check registered.
-func (c *Checker) Result(workload string) (Result, bool) {
+// Result returns the most recent outcome for one instance of a workload, reporting
+// false when it has no check registered.
+func (c *Checker) Result(workload string, instance int) (Result, bool) {
 	c.mux.RLock()
 	defer c.mux.RUnlock()
 
-	registered, ok := c.checks[workload]
+	registered, ok := c.checks[subject{workload: workload, instance: instance}]
 	if !ok {
 		return Result{}, false
 	}
@@ -304,7 +336,7 @@ func (c *Checker) wait() time.Duration {
 // checkDue starts a probe for every workload whose interval has elapsed, on probes so
 // that Run can wait for them at shutdown without waiting for them here.
 func (c *Checker) checkDue(ctx context.Context, probes *sync.WaitGroup) {
-	for workload, due := range c.due(ctx) {
+	for key, due := range c.due(ctx) {
 		probes.Go(func() {
 			// Releases the context whether the probe answered, timed out, or was
 			// cancelled by its check being replaced.
@@ -313,30 +345,32 @@ func (c *Checker) checkDue(ctx context.Context, probes *sync.WaitGroup) {
 			started := time.Now()
 			err := c.probe(due.ctx, due.spec)
 
+			// The workload alone: an instance label would multiply the series by
+			// the count for no question anyone asks of the aggregate.
 			c.instruments.duration.Record(due.ctx, time.Since(started).Seconds(), metric.WithAttributes(
-				attribute.String("workload", workload),
+				attribute.String("workload", key.workload),
 				telemetry.OutcomeOf(err).Attribute(),
 			))
 
-			c.record(workload, due.probe, err)
+			c.record(key, due.probe, err)
 		})
 	}
 }
 
 // due returns the checks that are ready to run, marking each as in flight so that a
-// second probe is not started for a workload still answering the first, and giving
+// second probe is not started for an instance still answering the first, and giving
 // each a context so that replacing or dropping the check stops its probe.
 //
 // The returned specifications are copies, so probing doesn't hold the lock and a check
 // in flight can't block a read of results.
-func (c *Checker) due(ctx context.Context) map[string]scheduled {
+func (c *Checker) due(ctx context.Context) map[subject]scheduled {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
 	now := time.Now()
-	due := make(map[string]scheduled, len(c.checks))
+	due := make(map[subject]scheduled, len(c.checks))
 
-	for workload, registered := range c.checks {
+	for key, registered := range c.checks {
 		if registered.inflight {
 			continue
 		}
@@ -350,7 +384,7 @@ func (c *Checker) due(ctx context.Context) map[string]scheduled {
 			registered.cancel = cancel
 			registered.probe = c.probes
 
-			due[workload] = scheduled{
+			due[key] = scheduled{
 				spec:   registered.spec,
 				ctx:    probeCtx,
 				cancel: cancel,
@@ -367,11 +401,11 @@ func (c *Checker) due(ctx context.Context) map[string]scheduled {
 // The probe identifier is the one stamped on the check when it was started, so a
 // result arriving after the check was replaced belongs to a specification that no
 // longer exists and is discarded rather than attributed to one it says nothing about.
-func (c *Checker) record(workload string, probe uint64, err error) {
+func (c *Checker) record(key subject, probe uint64, err error) {
 	c.mux.Lock()
 	defer c.mux.Unlock()
 
-	registered, ok := c.checks[workload]
+	registered, ok := c.checks[key]
 	if !ok {
 		// Forgotten while the check was in flight, so the result describes a workload
 		// nothing is running any more.

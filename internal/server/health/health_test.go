@@ -31,7 +31,7 @@ func TestChecker_Run(t *testing.T) {
 		t.Cleanup(server.Close)
 
 		checker := run(t)
-		checker.Set("example", check(server.Listener.Addr().String(), "/healthz"))
+		checker.Set("example", 0, check(server.Listener.Addr().String(), "/healthz"))
 
 		awaitStatus(t, checker, "example", health.StatusHealthy)
 	})
@@ -46,11 +46,11 @@ func TestChecker_Run(t *testing.T) {
 
 		// A process that is listening but answering errors is exactly what a check
 		// exists to catch: the runtime reports it running, and it cannot serve.
-		checker.Set("example", check(server.Listener.Addr().String(), "/healthz"))
+		checker.Set("example", 0, check(server.Listener.Addr().String(), "/healthz"))
 
 		awaitStatus(t, checker, "example", health.StatusUnhealthy)
 
-		result, ok := checker.Result("example")
+		result, ok := checker.Result("example", 0)
 		require.True(t, ok)
 		assert.Contains(t, result.Error, "500")
 	})
@@ -59,7 +59,7 @@ func TestChecker_Run(t *testing.T) {
 		checker := run(t)
 
 		// A port nothing holds, so the connection is refused rather than timing out.
-		checker.Set("example", check(freeAddress(t), "/healthz"))
+		checker.Set("example", 0, check(freeAddress(t), "/healthz"))
 
 		awaitStatus(t, checker, "example", health.StatusUnhealthy)
 	})
@@ -73,7 +73,7 @@ func TestChecker_Run(t *testing.T) {
 
 		// A workload speaking something other than HTTP is checked by connecting,
 		// which needs nothing of the protocol it speaks.
-		checker.Set("example", check(listener.Addr().String(), ""))
+		checker.Set("example", 0, check(listener.Addr().String(), ""))
 
 		awaitStatus(t, checker, "example", health.StatusHealthy)
 	})
@@ -94,7 +94,7 @@ func TestChecker_Run(t *testing.T) {
 		t.Cleanup(server.Close)
 
 		checker := run(t)
-		checker.Set("example", check(server.Listener.Addr().String(), "/healthz"))
+		checker.Set("example", 0, check(server.Listener.Addr().String(), "/healthz"))
 
 		awaitStatus(t, checker, "example", health.StatusUnhealthy)
 
@@ -103,7 +103,7 @@ func TestChecker_Run(t *testing.T) {
 		healthy.Store(true)
 		awaitStatus(t, checker, "example", health.StatusHealthy)
 
-		result, ok := checker.Result("example")
+		result, ok := checker.Result("example", 0)
 		require.True(t, ok)
 		assert.Zero(t, result.Failures)
 		assert.Empty(t, result.Error)
@@ -120,18 +120,18 @@ func TestChecker_Run_StartPeriod(t *testing.T) {
 	spec.StartPeriod = time.Minute
 	spec.Retries = 1
 
-	checker.Set("example", spec)
+	checker.Set("example", 0, spec)
 
 	// Failures inside the start period are expected rather than meaningful: a
 	// workload that takes time to become ready would otherwise be replaced for
 	// failing checks it was never going to pass yet.
 	require.Eventually(t, func() bool {
-		result, ok := checker.Result("example")
+		result, ok := checker.Result("example", 0)
 
 		return ok && result.Failures > 0
 	}, 5*time.Second, 50*time.Millisecond)
 
-	result, ok := checker.Result("example")
+	result, ok := checker.Result("example", 0)
 	require.True(t, ok)
 	assert.Equal(t, health.StatusStarting, result.Status)
 }
@@ -180,7 +180,7 @@ func TestChecker_Run_SlowProbeDoesNotDelayOthers(t *testing.T) {
 	slow := check(hung.Addr().String(), "/healthz")
 	slow.Interval = 3 * time.Second
 	slow.Timeout = 3 * time.Second
-	checker.Set("hung", slow)
+	checker.Set("hung", 0, slow)
 
 	select {
 	case <-connected:
@@ -191,10 +191,10 @@ func TestChecker_Run_SlowProbeDoesNotDelayOthers(t *testing.T) {
 	// A probe that blocks the loop would make this workload wait out the hung one's
 	// timeout before being checked at all, however short an interval it asked for.
 	started := time.Now()
-	checker.Set("example", check(server.Listener.Addr().String(), "/healthz"))
+	checker.Set("example", 0, check(server.Listener.Addr().String(), "/healthz"))
 
 	require.Eventuallyf(t, func() bool {
-		result, ok := checker.Result("example")
+		result, ok := checker.Result("example", 0)
 
 		return ok && result.Status == health.StatusHealthy
 	}, 5*time.Second, 5*time.Millisecond, "workload never became healthy")
@@ -234,7 +234,7 @@ func TestChecker_Run_DoesNotOverlapProbes(t *testing.T) {
 	spec := check(server.Listener.Addr().String(), "/healthz")
 	spec.Interval = 50 * time.Millisecond
 	spec.Timeout = time.Second
-	checker.Set("example", spec)
+	checker.Set("example", 0, spec)
 
 	awaitStatus(t, checker, "example", health.StatusHealthy)
 
@@ -250,14 +250,14 @@ func TestChecker_Set(t *testing.T) {
 		checker := run(t)
 		spec := check(freeAddress(t), "/healthz")
 
-		checker.Set("example", spec)
+		checker.Set("example", 0, spec)
 		awaitStatus(t, checker, "example", health.StatusUnhealthy)
 
 		// Re-applying an unchanged manifest must not reset the start period, or a
 		// broken workload would look like it had only just begun starting.
-		checker.Set("example", spec)
+		checker.Set("example", 0, spec)
 
-		result, ok := checker.Result("example")
+		result, ok := checker.Result("example", 0)
 		require.True(t, ok)
 		assert.Equal(t, health.StatusUnhealthy, result.Status)
 	})
@@ -265,16 +265,16 @@ func TestChecker_Set(t *testing.T) {
 	t.Run("starts afresh when the check changes", func(t *testing.T) {
 		checker := run(t)
 
-		checker.Set("example", check(freeAddress(t), "/healthz"))
+		checker.Set("example", 0, check(freeAddress(t), "/healthz"))
 		awaitStatus(t, checker, "example", health.StatusUnhealthy)
 
 		// Failures counted against the old check say nothing about a new one, so a
 		// changed address begins with a clean slate.
 		changed := check(freeAddress(t), "/readyz")
 		changed.StartPeriod = time.Minute
-		checker.Set("example", changed)
+		checker.Set("example", 0, changed)
 
-		result, ok := checker.Result("example")
+		result, ok := checker.Result("example", 0)
 		require.True(t, ok)
 		assert.Equal(t, health.StatusStarting, result.Status)
 		assert.Zero(t, result.Failures)
@@ -313,7 +313,7 @@ func TestChecker_Set_CancelsTheProbeItReplaces(t *testing.T) {
 	slow := check(hung.Addr().String(), "/healthz")
 	slow.Interval = time.Minute
 	slow.Timeout = time.Minute
-	checker.Set("example", slow)
+	checker.Set("example", 0, slow)
 
 	// Wait for the probe to be genuinely in flight before replacing it.
 	select {
@@ -325,7 +325,7 @@ func TestChecker_Set_CancelsTheProbeItReplaces(t *testing.T) {
 
 	// Replacing the check must not leave the old probe running for its whole minute:
 	// it is checking an address this workload no longer has.
-	checker.Set("example", check(server.Listener.Addr().String(), "/healthz"))
+	checker.Set("example", 0, check(server.Listener.Addr().String(), "/healthz"))
 
 	// The new check answers at once, which it could not do if it were waiting on the
 	// probe it replaced.
@@ -343,7 +343,7 @@ func TestChecker_Set_CancelsTheProbeItReplaces(t *testing.T) {
 
 	// And the cancelled probe must not be recorded against the check that replaced
 	// it, which it says nothing about.
-	result, ok := checker.Result("example")
+	result, ok := checker.Result("example", 0)
 	require.True(t, ok)
 	assert.Zero(t, result.Failures)
 	assert.Empty(t, result.Error)
@@ -353,16 +353,16 @@ func TestChecker_Forget(t *testing.T) {
 	t.Parallel()
 
 	checker := run(t)
-	checker.Set("example", check(freeAddress(t), "/healthz"))
+	checker.Set("example", 0, check(freeAddress(t), "/healthz"))
 
-	_, ok := checker.Result("example")
+	_, ok := checker.Result("example", 0)
 	require.True(t, ok)
 
 	checker.Forget("example")
 
 	// Results for work nothing runs any more would otherwise accumulate for the life
 	// of the server.
-	_, ok = checker.Result("example")
+	_, ok = checker.Result("example", 0)
 	assert.False(t, ok)
 }
 
@@ -386,7 +386,7 @@ func TestChecker_Metrics(t *testing.T) {
 
 	// A probe against an address nothing listens on is refused immediately, which
 	// is the cheapest way to get an outcome on record.
-	checker.Set("example", check(freeAddress(t), ""))
+	checker.Set("example", 0, check(freeAddress(t), ""))
 	awaitStatus(t, checker, "example", health.StatusUnhealthy)
 
 	var collected metricdata.ResourceMetrics
@@ -449,7 +449,7 @@ func awaitStatus(t *testing.T, checker *health.Checker, workload string, want he
 	t.Helper()
 
 	require.Eventuallyf(t, func() bool {
-		result, ok := checker.Result(workload)
+		result, ok := checker.Result(workload, 0)
 
 		return ok && result.Status == want
 	}, 10*time.Second, 50*time.Millisecond, "workload %q never reached %q", workload, want)

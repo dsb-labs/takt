@@ -792,7 +792,7 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 				{ID: "container-one", Workload: "example", State: driver.StateRunning},
 			}, nil).Once()
 
-			checker.EXPECT().Result("example").Return(tc.Result, tc.Checked)
+			checker.EXPECT().Result("example", 0).Return(tc.Result, tc.Checked)
 
 			repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 

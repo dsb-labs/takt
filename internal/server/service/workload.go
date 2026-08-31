@@ -174,7 +174,7 @@ type (
 	Checker interface {
 		// Result should return the most recent outcome for a workload, reporting
 		// false when it has no check registered.
-		Result(workload string) (health.Result, bool)
+		Result(workload string, instance int) (health.Result, bool)
 	}
 
 	// The WorkloadState type names what a workload is doing overall, derived from
@@ -1646,7 +1646,7 @@ func (s *WorkloadService) health(workload string) Health {
 		return Health{}
 	}
 
-	result, checked := s.checker.Result(workload)
+	result, checked := s.checker.Result(workload, 0)
 
 	return Health{Checked: checked, Result: result}
 }

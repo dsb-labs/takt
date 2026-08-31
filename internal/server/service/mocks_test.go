@@ -3918,8 +3918,8 @@ func (_m *MockChecker) EXPECT() *MockChecker_Expecter {
 }
 
 // Result provides a mock function for the type MockChecker
-func (_mock *MockChecker) Result(workload string) (health.Result, bool) {
-	ret := _mock.Called(workload)
+func (_mock *MockChecker) Result(workload string, instance int) (health.Result, bool) {
+	ret := _mock.Called(workload, instance)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Result")
@@ -3927,16 +3927,16 @@ func (_mock *MockChecker) Result(workload string) (health.Result, bool) {
 
 	var r0 health.Result
 	var r1 bool
-	if returnFunc, ok := ret.Get(0).(func(string) (health.Result, bool)); ok {
-		return returnFunc(workload)
+	if returnFunc, ok := ret.Get(0).(func(string, int) (health.Result, bool)); ok {
+		return returnFunc(workload, instance)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) health.Result); ok {
-		r0 = returnFunc(workload)
+	if returnFunc, ok := ret.Get(0).(func(string, int) health.Result); ok {
+		r0 = returnFunc(workload, instance)
 	} else {
 		r0 = ret.Get(0).(health.Result)
 	}
-	if returnFunc, ok := ret.Get(1).(func(string) bool); ok {
-		r1 = returnFunc(workload)
+	if returnFunc, ok := ret.Get(1).(func(string, int) bool); ok {
+		r1 = returnFunc(workload, instance)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
@@ -3950,18 +3950,24 @@ type MockChecker_Result_Call struct {
 
 // Result is a helper method to define mock.On call
 //   - workload string
-func (_e *MockChecker_Expecter) Result(workload any) *MockChecker_Result_Call {
-	return &MockChecker_Result_Call{Call: _e.mock.On("Result", workload)}
+//   - instance int
+func (_e *MockChecker_Expecter) Result(workload any, instance any) *MockChecker_Result_Call {
+	return &MockChecker_Result_Call{Call: _e.mock.On("Result", workload, instance)}
 }
 
-func (_c *MockChecker_Result_Call) Run(run func(workload string)) *MockChecker_Result_Call {
+func (_c *MockChecker_Result_Call) Run(run func(workload string, instance int)) *MockChecker_Result_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 string
 		if args[0] != nil {
 			arg0 = args[0].(string)
 		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
@@ -3972,7 +3978,7 @@ func (_c *MockChecker_Result_Call) Return(result health.Result, b bool) *MockChe
 	return _c
 }
 
-func (_c *MockChecker_Result_Call) RunAndReturn(run func(workload string) (health.Result, bool)) *MockChecker_Result_Call {
+func (_c *MockChecker_Result_Call) RunAndReturn(run func(workload string, instance int) (health.Result, bool)) *MockChecker_Result_Call {
 	_c.Call.Return(run)
 	return _c
 }

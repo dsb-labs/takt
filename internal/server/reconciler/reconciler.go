@@ -128,12 +128,12 @@ type (
 	// orca established about a workload's health.
 	Checker interface {
 		// Set should register the check for a workload, replacing any it already had.
-		Set(workload string, check health.Check)
+		Set(workload string, instance int, check health.Check)
 		// Forget should drop the check for a workload that no longer exists.
 		Forget(workload string)
 		// Result should return the most recent outcome for a workload, reporting
 		// false when it has no check registered.
-		Result(workload string) (health.Result, bool)
+		Result(workload string, instance int) (health.Result, bool)
 	}
 
 	// The Reconciler type drives the running state of the node towards the desired
@@ -896,7 +896,7 @@ func (r *Reconciler) register(ctx context.Context, rows []database.Workload, obs
 			// operator made a mistake.
 			r.logger.With("workload", row.Name, "error", err).Error("failed to resolve health check")
 		case ok && row.DeletedAt.IsZero() && row.SuspendedAt.IsZero() && !retired(restartPolicy(row), observed[row.Name]):
-			r.checker.Set(row.Name, check)
+			r.checker.Set(row.Name, 0, check)
 		default:
 			// The workload declares no check, or is on its way out, or is suspended,
 			// or has ended and will not be restarted. None is worth probing, and
@@ -1076,7 +1076,7 @@ func (r *Reconciler) checked(instance driver.Instance) driver.Instance {
 		return instance
 	}
 
-	result, ok := r.checker.Result(instance.Workload)
+	result, ok := r.checker.Result(instance.Workload, instance.Index)
 	if !ok {
 		return instance
 	}

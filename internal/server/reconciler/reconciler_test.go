@@ -508,7 +508,7 @@ func TestReconciler_Run_Health(t *testing.T) {
 			// The stored spec declares no check, so the reconciler has nothing to
 			// register — the result is what decides the outcome here.
 			checker.EXPECT().Forget("example").Maybe()
-			checker.EXPECT().Result("example").Return(tc.Result, tc.Checked)
+			checker.EXPECT().Result("example", 0).Return(tc.Result, tc.Checked)
 
 			if tc.ExpectRestart {
 				d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
@@ -575,15 +575,15 @@ func TestReconciler_Run_RegistersChecks(t *testing.T) {
 	// The address is resolved from the host port orca allocated, and probed over
 	// loopback so the check never leaves the host.
 	registered := make(chan health.Check, 1)
-	checker.EXPECT().Set("example", mock.Anything).
-		Run(func(_ string, check health.Check) {
+	checker.EXPECT().Set("example", 0, mock.Anything).
+		Run(func(_ string, _ int, check health.Check) {
 			select {
 			case registered <- check:
 			default:
 			}
 		}).Return()
 
-	checker.EXPECT().Result("example").Return(health.Result{Status: health.StatusHealthy}, true)
+	checker.EXPECT().Result("example", 0).Return(health.Result{Status: health.StatusHealthy}, true)
 
 	events := make(chan driver.Event)
 	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
@@ -711,15 +711,15 @@ func TestReconciler_Run_ProbesThePublishedAddress(t *testing.T) {
 			}, nil)
 
 			registered := make(chan health.Check, 1)
-			checker.EXPECT().Set("example", mock.Anything).
-				Run(func(_ string, check health.Check) {
+			checker.EXPECT().Set("example", 0, mock.Anything).
+				Run(func(_ string, _ int, check health.Check) {
 					select {
 					case registered <- check:
 					default:
 					}
 				}).Return()
 
-			checker.EXPECT().Result("example").Return(health.Result{Status: health.StatusHealthy}, true)
+			checker.EXPECT().Result("example", 0).Return(health.Result{Status: health.StatusHealthy}, true)
 
 			events := make(chan driver.Event)
 			d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
@@ -779,8 +779,8 @@ func TestReconciler_Run_ForgetsChecksOnReplacement(t *testing.T) {
 		"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
 	}, nil)
 
-	checker.EXPECT().Set("example", mock.Anything).Return()
-	checker.EXPECT().Result("example").
+	checker.EXPECT().Set("example", 0, mock.Anything).Return()
+	checker.EXPECT().Result("example", 0).
 		Return(health.Result{Status: health.StatusUnhealthy, Failures: 2}, true)
 
 	// The replacement must not inherit the departed container's verdict: it would be
