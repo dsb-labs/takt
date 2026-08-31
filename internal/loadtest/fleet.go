@@ -2,6 +2,7 @@ package loadtest
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/dsb-labs/orca/pkg/manifest"
@@ -255,6 +256,14 @@ func build(scenario Scenario, names Names, targets []string, name string, index,
 		if target := chooseTarget(targets, name, index); target != "" {
 			spec.Env[addressVariable] = fmt.Sprintf("${workload:%s:%s}", target, portName)
 		}
+	}
+
+	// More than one instance composes with neither a schedule nor a pinned host
+	// port, so the share falls on the workloads carrying neither rather than
+	// building a specification the server refuses.
+	pinned := slices.ContainsFunc(spec.Ports, func(p manifest.Port) bool { return p.From != 0 })
+	if !scheduled && !pinned && has(index, total, fleet.Instances) {
+		spec.Count = 3
 	}
 
 	spec.Defaults()

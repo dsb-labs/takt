@@ -12,6 +12,11 @@ dynamic-ports = 0.6
 fixed-ports = 0.4
 health-checks = 0.5
 
+# Drawn from the allocated share, since a pinned port cannot serve more than one
+# instance. Each instance holds a host port of its own, so this multiplies what the
+# allocator hands out.
+instances = 0.3
+
 [resources]
 secrets = 0
 variables = 0

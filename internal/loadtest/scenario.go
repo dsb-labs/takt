@@ -91,6 +91,13 @@ type (
 		// address is the host port orca published on the workload's behalf. A
 		// scenario asking for this without ports has nothing to point at.
 		References float64 `toml:"references"`
+		// The proportion running three instances rather than one, which is what
+		// multiplies port allocations and has the reconciler converge each
+		// instance on its own.
+		//
+		// A count composes with neither a schedule nor a pinned host port, so
+		// the share is drawn from the workloads that carry neither.
+		Instances float64 `toml:"instances"`
 	}
 
 	// The Resources type describes what a scenario creates for its fleet to read.
@@ -275,6 +282,7 @@ func (f Fleet) proportions() map[string]float64 {
 		"mounts-variable": f.MountsVariable,
 		"mounts-volume":   f.MountsVolume,
 		"references":      f.References,
+		"instances":       f.Instances,
 	}
 }
 
