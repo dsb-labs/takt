@@ -10,7 +10,7 @@ CREATE TABLE workload_port_old (
 INSERT INTO workload_port_old (workload_id, container_port, host_port, is_dynamic)
 SELECT workload_id, container_port, host_port, is_dynamic
 FROM workload_port
-WHERE protocol = 'tcp';
+WHERE protocol = 'tcp' AND instance = 0;
 
 DROP TABLE workload_port;
 
