@@ -3209,3 +3209,172 @@ func (s *Suite) TestRekeySurvivesAServerRestart() {
 
 	s.NotEmpty(rekey.PreviousKeyID)
 }
+
+// TestWorkloadRunsMultipleInstances covers count as an operator uses it: apply a
+// count, get that many instances at addresses of their own, and scale down to fewer.
+func (s *Suite) TestWorkloadRunsMultipleInstances() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name, manifest.Port{Name: "http", To: 80})
+	spec.Count = 3
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitInstances(name, 3)
+
+	// Three instances publish the same container port at three host ports, and
+	// every one of them really answers.
+	workload, err := s.client.Get(s.ctx(), name)
+	s.Require().NoError(err)
+	s.Require().Len(workload.Ports, 3)
+
+	hosts := make(map[int]struct{}, 3)
+	for _, port := range workload.Ports {
+		hosts[port.From] = struct{}{}
+		s.awaitListening("127.0.0.1:" + strconv.Itoa(port.From))
+	}
+
+	s.Len(hosts, 3, "each instance holds a host port of its own")
+
+	// Scaling down removes the high instance, its container, and its port rows.
+	spec.Count = 2
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	instances := s.awaitInstances(name, 2)
+	s.NotContains(instances, 2, "the removed index is gone")
+
+	s.Require().Eventuallyf(func() bool {
+		workload, err = s.client.Get(s.ctx(), name)
+
+		return err == nil && len(workload.Ports) == 2
+	}, convergeTimeout, 500*time.Millisecond, "the removed instance's ports were never released")
+}
+
+// TestOneInstanceReplacedAlone covers the point of per-instance convergence: one
+// instance dying is one replacement, and its siblings are untouched.
+func (s *Suite) TestOneInstanceReplacedAlone() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name)
+	spec.Count = 2
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	before := s.awaitInstances(name, 2)
+
+	s.Require().NoError(exec.Command("docker", "kill", before[1].ID).Run())
+
+	// The killed instance is replaced and the survivor is exactly the container it
+	// was. A workload-wide replacement would have moved both identifiers.
+	s.Require().Eventuallyf(func() bool {
+		workload, err := s.client.Get(s.ctx(), name)
+		if err != nil {
+			return false
+		}
+
+		after := make(map[int]client.Instance, len(workload.Instances))
+		for _, instance := range workload.Instances {
+			after[instance.Index] = instance
+		}
+
+		return len(after) == 2 &&
+			after[0].ID == before[0].ID &&
+			after[1].ID != before[1].ID &&
+			after[1].State == client.InstanceStateRunning
+	}, convergeTimeout, 500*time.Millisecond, "the killed instance was never replaced on its own")
+}
+
+// TestLogsSelectAnInstance covers the instance selector and the rules around it.
+func (s *Suite) TestLogsSelectAnInstance() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name)
+	spec.Count = 2
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitInstances(name, 2)
+
+	// One instance's output is one nginx announcing itself.
+	var logs strings.Builder
+	s.Require().NoError(s.client.Logs(s.ctx(), &logs, name, client.WithTail(50), client.WithInstance(1)))
+	s.Contains(logs.String(), "nginx")
+
+	// A follow with no selection has no one stream to read.
+	err = s.client.Logs(s.ctx(), &logs, name, client.WithFollow())
+	s.Require().Error(err)
+	s.Contains(err.Error(), "select an instance")
+
+	// An index the count does not include is refused rather than answered with
+	// nothing.
+	err = s.client.Logs(s.ctx(), &logs, name, client.WithInstance(5))
+	s.Require().Error(err)
+	s.Contains(err.Error(), "no instance")
+}
+
+// TestReadersSpreadAcrossInstances covers what scaling a referenced workload does to
+// its readers: each reader instance resolves the reference to an instance of its
+// own, and a count change rebalances them.
+func (s *Suite) TestReadersSpreadAcrossInstances() {
+	target, reader := s.workloadName()+"-target", s.workloadName()+"-reader"
+	s.T().Cleanup(func() { s.cleanup(reader) })
+	s.T().Cleanup(func() { s.cleanup(target) })
+
+	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(target, manifest.Port{Name: "http", To: 80}))
+	s.Require().NoError(err)
+
+	readers := s.containerSpec(reader)
+	readers.Count = 3
+	readers.Env = map[string]string{"PEER": "${workload:" + target + ":http}"}
+
+	_, _, err = s.client.Apply(s.ctx(), readers)
+	s.Require().NoError(err)
+
+	s.awaitInstances(reader, 3)
+
+	// One target instance, so every reader resolves the same address.
+	s.Len(s.peers(reader, 3), 1, "three readers of one instance share its address")
+
+	// Scaling the target up moves the arithmetic, and the readers roll onto the
+	// new capacity: three readers over three instances land one on each.
+	scaled := s.containerSpec(target, manifest.Port{Name: "http", To: 80})
+	scaled.Count = 3
+
+	_, _, err = s.client.Apply(s.ctx(), scaled)
+	s.Require().NoError(err)
+
+	s.Require().Eventuallyf(func() bool {
+		return len(s.peers(reader, 3)) == 3
+	}, convergeTimeout, time.Second, "the readers never spread across the target's instances")
+
+	// Scaling back down rolls them onto what remains.
+	_, _, err = s.client.Apply(s.ctx(), s.containerSpec(target, manifest.Port{Name: "http", To: 80}))
+	s.Require().NoError(err)
+
+	s.Require().Eventuallyf(func() bool {
+		return len(s.peers(reader, 3)) == 1
+	}, convergeTimeout, time.Second, "the readers never fell back to the remaining instance")
+}
+
+// TestExecWorkloadRunsMultipleInstances covers count on the exec runtime, whose
+// instances are processes with records and directories of their own.
+func (s *Suite) TestExecWorkloadRunsMultipleInstances() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.execSpec(name, "sh", "-c", "sleep 60")
+	spec.Count = 2
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	instances := s.awaitInstances(name, 2)
+	s.NotEqual(instances[0].ID, instances[1].ID, "two instances are two processes")
+}

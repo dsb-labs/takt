@@ -1040,7 +1040,11 @@ func (r *Reconciler) slotPorts(row database.Workload, index int) []database.Port
 // target's port moving replaces exactly the instances that were reading it, found
 // by comparison on the next pass rather than by anything remembering to tell them.
 func (r *Reconciler) slotHash(ctx context.Context, row database.Workload, index int) (string, error) {
-	if len(row.Workloads) == 0 || r.env == nil {
+	// This runs per slot per pass, so the common case of a workload referencing
+	// nothing must not cost a decode of its whole specification. A reference is
+	// stored verbatim in the canonical JSON, so the marker is present exactly when
+	// one exists — the same trick refresh uses for its signal key.
+	if r.env == nil || !bytes.Contains(row.Spec, []byte("${workload:")) {
 		return row.SpecHash, nil
 	}
 

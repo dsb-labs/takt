@@ -408,6 +408,76 @@ func (s *Suite) instanceID(name string) string {
 	return workload.Instances[0].ID
 }
 
+// awaitInstances waits for the named workload to be running the given number of
+// instances and returns them, keyed by index.
+func (s *Suite) awaitInstances(name string, count int) map[int]client.Instance {
+	var byIndex map[int]client.Instance
+
+	s.Require().Eventuallyf(func() bool {
+		workload, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(workload.Instances) != count {
+			return false
+		}
+
+		byIndex = make(map[int]client.Instance, count)
+		for _, instance := range workload.Instances {
+			if instance.State != client.InstanceStateRunning {
+				return false
+			}
+
+			byIndex[instance.Index] = instance
+		}
+
+		return len(byIndex) == count
+	}, convergeTimeout, 500*time.Millisecond, "workload %q never ran %d instances", name, count)
+
+	return byIndex
+}
+
+// runningContainers returns the containers docker reports as running for the named
+// workload, leaving out whatever a stop retained.
+func (s *Suite) runningContainers(workload string) []string {
+	out, err := exec.Command("docker", "ps", "--quiet",
+		"--filter", "label=orca.workload="+workload).Output()
+	s.Require().NoError(err)
+
+	return strings.Fields(string(out))
+}
+
+// peers returns the distinct addresses the named workload's running containers carry
+// in their PEER environment variable, reporting nil until the expected number of
+// containers is running.
+//
+// Asked of docker rather than of orca, because the resolved environment is
+// deliberately not reported by the API: what each instance was actually started with
+// is the only place the answer exists.
+func (s *Suite) peers(workload string, expected int) map[string]struct{} {
+	ids := s.runningContainers(workload)
+	if len(ids) != expected {
+		return nil
+	}
+
+	peers := make(map[string]struct{}, len(ids))
+
+	for _, id := range ids {
+		out, err := exec.Command("docker", "inspect",
+			"--format", "{{range .Config.Env}}{{println .}}{{end}}", id).Output()
+		if err != nil {
+			// The container may have been replaced between listing and inspecting,
+			// which the caller's retry absorbs.
+			return nil
+		}
+
+		for _, line := range strings.Split(string(out), "\n") {
+			if value, ok := strings.CutPrefix(strings.TrimSpace(line), "PEER="); ok {
+				peers[value] = struct{}{}
+			}
+		}
+	}
+
+	return peers
+}
+
 // awaitListening waits until something accepts connections at the given address,
 // which is how the tests prove a published port really reaches the container.
 func (s *Suite) awaitListening(address string) {
