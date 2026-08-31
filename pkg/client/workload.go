@@ -99,6 +99,9 @@ type (
 
 	// The ResolvedPort type is a port mapping as the server applied it.
 	ResolvedPort struct {
+		// The index of the workload instance the port reaches. Zero for a
+		// workload running one instance.
+		Instance int
 		// What the specification called the port, which is how the rest of a
 		// manifest refers to it. Empty for a port the specification did not name.
 		Name string
@@ -120,6 +123,9 @@ type (
 	Instance struct {
 		// The server's opaque handle for this instance.
 		ID string
+		// The index of the instance among the workload's instances, counted from
+		// zero up to the specification's count.
+		Index int
 		// The instance's current state.
 		State InstanceState
 		// The hash of the specification the instance was started from.
@@ -687,6 +693,7 @@ type (
 		previous bool
 		follow   bool
 		since    time.Time
+		instance *int
 	}
 )
 
@@ -722,6 +729,17 @@ func WithPrevious() LogOption {
 // instance that has already ended.
 func WithFollow() LogOption {
 	return func(c *logConfig) { c.follow = true }
+}
+
+// WithInstance modifies a read to return one instance's output, selected by its
+// index.
+//
+// Without it every instance's output is returned, except on a follow of a workload
+// running more than one instance, which the server refuses: a follow reads one
+// stream until it ends, and interleaving several would return output nothing could
+// attribute.
+func WithInstance(index int) LogOption {
+	return func(c *logConfig) { c.instance = new(index) }
 }
 
 // WithSince modifies a read to return only the output written at or after an instant.
@@ -765,6 +783,8 @@ func (c *Client) Logs(ctx context.Context, out io.Writer, name string, options .
 	if !config.since.IsZero() {
 		params.Since = &config.since
 	}
+
+	params.Instance = config.instance
 
 	// A follow is the one request that legitimately outlives the client's timeout, so
 	// it goes out over the client that has none. What ends it is the caller's context.
@@ -891,6 +911,10 @@ func newWorkload(w api.Workload) (Workload, error) {
 				Dynamic:  port.Dynamic,
 			}
 
+			if port.Instance != nil {
+				resolved.Instance = *port.Instance
+			}
+
 			if port.Name != nil {
 				resolved.Name = *port.Name
 			}
@@ -910,6 +934,10 @@ func newWorkload(w api.Workload) (Workload, error) {
 			State:    InstanceState(instance.State),
 			SpecHash: instance.SpecHash,
 			ExitCode: instance.ExitCode,
+		}
+
+		if instance.Index != nil {
+			mapped.Index = *instance.Index
 		}
 
 		if instance.StartedAt != nil {
