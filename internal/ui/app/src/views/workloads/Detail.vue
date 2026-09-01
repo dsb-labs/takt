@@ -178,25 +178,6 @@ function healthLabel(instance: {
               </dt>
               <dd>{{ spec?.count ?? 1 }}</dd>
             </div>
-            <div v-if="spec?.schedule" class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Schedule
-              </dt>
-              <dd class="font-mono text-xs leading-5">
-                {{ spec.schedule.cron }}
-              </dd>
-            </div>
-            <div
-              v-if="workload.data.value.nextRun"
-              class="flex gap-4 px-4 py-2.5"
-            >
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Next run
-              </dt>
-              <dd :title="absoluteTime(workload.data.value.nextRun)">
-                {{ relativeTime(workload.data.value.nextRun) }}
-              </dd>
-            </div>
             <div v-if="spec?.restart" class="flex gap-4 px-4 py-2.5">
               <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
                 Restart
@@ -270,6 +251,38 @@ function healthLabel(instance: {
               </dt>
               <dd :class="{ 'font-mono text-xs leading-5': label === 'Probe' }">
                 {{ value }}
+              </dd>
+            </div>
+          </dl>
+        </DetailCard>
+
+        <DetailCard v-if="spec?.schedule" title="Schedule">
+          <dl
+            class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
+          >
+            <div class="flex gap-4 px-4 py-2.5">
+              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
+                Cron
+              </dt>
+              <dd class="font-mono text-xs leading-5">
+                {{ spec.schedule.cron }}
+              </dd>
+            </div>
+            <div class="flex gap-4 px-4 py-2.5">
+              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
+                Overlap
+              </dt>
+              <dd>{{ spec.schedule.overlap ?? "replace" }}</dd>
+            </div>
+            <div
+              v-if="workload.data.value.nextRun"
+              class="flex gap-4 px-4 py-2.5"
+            >
+              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
+                Next run
+              </dt>
+              <dd :title="absoluteTime(workload.data.value.nextRun)">
+                {{ relativeTime(workload.data.value.nextRun) }}
               </dd>
             </div>
           </dl>
