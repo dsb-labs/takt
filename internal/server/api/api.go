@@ -119,6 +119,9 @@ func (a *API) Register(mux *http.ServeMux) {
 func Wrap(handler http.Handler, logger *slog.Logger, hosts []string) http.Handler {
 	for _, middleware := range []func(http.Handler) http.Handler{
 		Recovery(logger),
+		// Outside Recovery, so the 500 a recovered panic writes goes through
+		// the compressor the response's headers already promised.
+		Gzip,
 		Logging(logger),
 		// Ahead of anything that reaches a handler. Reaching this API is enough to run
 		// code on the host, and listening on loopback does not establish that the
