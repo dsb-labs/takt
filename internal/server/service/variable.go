@@ -269,13 +269,19 @@ func (s *VariableService) redeploy(ctx context.Context, name string) error {
 		return err
 	}
 
+	// One failed rehash does not stop the rest. The value has already landed, so
+	// every reader that can be moved onto it should be — stopping at the first
+	// failure would leave readers on the old value for no reason of their own.
+	// The failures are joined so the caller reports exactly which readers were
+	// left behind.
+	var failed []error
 	for _, workload := range usedBy {
 		if err = s.rehash(ctx, workload); err != nil {
-			return fmt.Errorf("failed to redeploy workload %s: %w", workload, err)
+			failed = append(failed, fmt.Errorf("failed to redeploy workload %s: %w", workload, err))
 		}
 	}
 
-	return nil
+	return errors.Join(failed...)
 }
 
 func (s *VariableService) hydrate(ctx context.Context, row database.Variable) (Variable, error) {

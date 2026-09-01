@@ -105,6 +105,38 @@ func TestVariableService_Set(t *testing.T) {
 		assert.Equal(t, []string{"one", "two"}, rehashed)
 	})
 
+	t.Run("keeps redeploying past a failed rehash", func(t *testing.T) {
+		variables := NewMockVariableRepository(t)
+
+		variables.EXPECT().Get(mock.Anything, "log-level").
+			Return(database.Variable{}, database.ErrVariableNotFound).Once()
+		variables.EXPECT().Upsert(mock.Anything, "log-level", "debug", mock.Anything).
+			Return(database.Variable{Name: "log-level", Value: "debug"}, nil).Once()
+		variables.EXPECT().UsedBy(mock.Anything, "log-level").
+			Return([]string{"one", "two", "three"}, nil).Once()
+
+		var rehashed []string
+		svc := service.NewVariableService(service.VariableServiceConfig{
+			Logger:    newTestLogger(t),
+			Variables: variables,
+			Rehash: func(_ context.Context, workload string) error {
+				if workload == "one" {
+					return errors.New("database is locked")
+				}
+
+				rehashed = append(rehashed, workload)
+
+				return nil
+			},
+		})
+
+		// The value has landed, so every reader that can be moved onto it is.
+		// The error still reports the one that was not.
+		_, _, err := svc.Set(t.Context(), "log-level", "debug", nil)
+		assert.ErrorContains(t, err, "one")
+		assert.Equal(t, []string{"two", "three"}, rehashed)
+	})
+
 	t.Run("redeploys nothing when the value is unchanged", func(t *testing.T) {
 		variables := NewMockVariableRepository(t)
 

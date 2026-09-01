@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -162,6 +163,39 @@ func TestSecretService_Set(t *testing.T) {
 		_, _, err := svc.Set(t.Context(), "db-password", []byte("hunter2"), nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"one", "two"}, rehashed)
+	})
+
+	t.Run("keeps redeploying past a failed rehash", func(t *testing.T) {
+		secrets := NewMockSecretRepository(t)
+
+		secrets.EXPECT().Get(mock.Anything, "db-password").
+			Return(database.Secret{}, database.ErrSecretNotFound).Once()
+		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(database.Secret{Name: "db-password", Revision: "rev-one"}, nil).Once()
+		secrets.EXPECT().UsedBy(mock.Anything, "db-password").
+			Return([]string{"one", "two", "three"}, nil).Once()
+
+		var rehashed []string
+		svc := service.NewSecretService(service.SecretServiceConfig{
+			Logger:  newTestLogger(t),
+			Secrets: secrets,
+			Cipher:  newTestCipher(t),
+			Rehash: func(_ context.Context, workload string) error {
+				if workload == "one" {
+					return errors.New("database is locked")
+				}
+
+				rehashed = append(rehashed, workload)
+
+				return nil
+			},
+		})
+
+		// The value has landed, so every reader that can be moved onto it is.
+		// The error still reports the one that was not.
+		_, _, err := svc.Set(t.Context(), "db-password", []byte("hunter2"), nil)
+		assert.ErrorContains(t, err, "one")
+		assert.Equal(t, []string{"two", "three"}, rehashed)
 	})
 
 	t.Run("refuses a name orca would not accept", func(t *testing.T) {
