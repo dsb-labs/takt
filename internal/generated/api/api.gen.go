@@ -1902,6 +1902,48 @@ type ClientInterface interface {
 	// Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
 	Rekey(ctx context.Context, body RekeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetHealth Report that the server is alive
+	//
+	// Answers as long as the process is serving requests. It says nothing about
+	// whether the server can do its job — that is what `/api/v1/ready` reports —
+	// so it
+	// suits a supervisor deciding whether to restart the process.
+	//
+	// Corresponds with GET /api/v1/health (the `GetHealth` operationId).
+	GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetMetrics Read the server's metrics
+	//
+	// Returns the server's metrics in the Prometheus text format, ready to be
+	// scraped with no collector in between.
+	//
+	// Workload names appear as label values. Anything that can reach this port
+	// can already run arbitrary workloads, so the names disclose nothing new —
+	// but they are disclosed.
+	//
+	// A scraper that addresses the server by hostname must have that hostname
+	// in the server's `hosts` configuration, or the request is refused with a
+	// 421. Address literals are always accepted.
+	//
+	// Corresponds with GET /api/v1/metrics (the `GetMetrics` operationId).
+	GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetReadiness Report whether the server can do its job
+	//
+	// Reports whether the database answers and every configured driver answered
+	// the most recent attempt to observe it. This is distinct from
+	// `/api/v1/health`: a
+	// server whose Docker daemon has gone away is alive but cannot converge
+	// container workloads, and the two need different answers.
+	//
+	// Driver answers are cached from the reconciler's own passes rather than
+	// fetched per request, so polling costs nothing and the answer is at most
+	// one reconcile interval plus the driver timeout old. Before the first pass
+	// completes, the server reports not ready.
+	//
+	// Corresponds with GET /api/v1/ready (the `GetReadiness` operationId).
+	GetReadiness(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListSecrets List secrets
 	//
 	// Returns the secrets the server holds, each with the workloads currently
@@ -2398,46 +2440,6 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/workloads/{name}/stop (the `StopWorkload` operationId).
 	StopWorkload(ctx context.Context, name WorkloadName, body StopWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// GetHealth Report that the server is alive
-	//
-	// Answers as long as the process is serving requests. It says nothing about
-	// whether the server can do its job — that is what `/ready` reports — so it
-	// suits a supervisor deciding whether to restart the process.
-	//
-	// Corresponds with GET /health (the `GetHealth` operationId).
-	GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// GetMetrics Read the server's metrics
-	//
-	// Returns the server's metrics in the Prometheus text format, ready to be
-	// scraped with no collector in between.
-	//
-	// Workload names appear as label values. Anything that can reach this port
-	// can already run arbitrary workloads, so the names disclose nothing new —
-	// but they are disclosed.
-	//
-	// A scraper that addresses the server by hostname must have that hostname
-	// in the server's `hosts` configuration, or the request is refused with a
-	// 421. Address literals are always accepted.
-	//
-	// Corresponds with GET /metrics (the `GetMetrics` operationId).
-	GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// GetReadiness Report whether the server can do its job
-	//
-	// Reports whether the database answers and every configured driver answered
-	// the most recent attempt to observe it. This is distinct from `/health`: a
-	// server whose Docker daemon has gone away is alive but cannot converge
-	// container workloads, and the two need different answers.
-	//
-	// Driver answers are cached from the reconciler's own passes rather than
-	// fetched per request, so polling costs nothing and the answer is at most
-	// one reconcile interval plus the driver timeout old. Before the first pass
-	// completes, the server reports not ready.
-	//
-	// Corresponds with GET /ready (the `GetReadiness` operationId).
-	GetReadiness(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 // GetBackup Download a backup of the node
@@ -2546,6 +2548,78 @@ func (c *Client) RekeyWithBody(ctx context.Context, contentType string, body io.
 // Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
 func (c *Client) Rekey(ctx context.Context, body RekeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRekeyRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetHealth Report that the server is alive
+//
+// Answers as long as the process is serving requests. It says nothing about
+// whether the server can do its job — that is what `/api/v1/ready` reports —
+// so it
+// suits a supervisor deciding whether to restart the process.
+//
+// Corresponds with GET /api/v1/health (the `GetHealth` operationId).
+func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetHealthRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetMetrics Read the server's metrics
+//
+// Returns the server's metrics in the Prometheus text format, ready to be
+// scraped with no collector in between.
+//
+// Workload names appear as label values. Anything that can reach this port
+// can already run arbitrary workloads, so the names disclose nothing new —
+// but they are disclosed.
+//
+// A scraper that addresses the server by hostname must have that hostname
+// in the server's `hosts` configuration, or the request is refused with a
+// 421. Address literals are always accepted.
+//
+// Corresponds with GET /api/v1/metrics (the `GetMetrics` operationId).
+func (c *Client) GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetMetricsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetReadiness Report whether the server can do its job
+//
+// Reports whether the database answers and every configured driver answered
+// the most recent attempt to observe it. This is distinct from
+// `/api/v1/health`: a
+// server whose Docker daemon has gone away is alive but cannot converge
+// container workloads, and the two need different answers.
+//
+// Driver answers are cached from the reconciler's own passes rather than
+// fetched per request, so polling costs nothing and the answer is at most
+// one reconcile interval plus the driver timeout old. Before the first pass
+// completes, the server reports not ready.
+//
+// Corresponds with GET /api/v1/ready (the `GetReadiness` operationId).
+func (c *Client) GetReadiness(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetReadinessRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -3363,76 +3437,6 @@ func (c *Client) StopWorkload(ctx context.Context, name WorkloadName, body StopW
 	return c.Client.Do(req)
 }
 
-// GetHealth Report that the server is alive
-//
-// Answers as long as the process is serving requests. It says nothing about
-// whether the server can do its job — that is what `/ready` reports — so it
-// suits a supervisor deciding whether to restart the process.
-//
-// Corresponds with GET /health (the `GetHealth` operationId).
-func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetHealthRequest(c.Server)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-// GetMetrics Read the server's metrics
-//
-// Returns the server's metrics in the Prometheus text format, ready to be
-// scraped with no collector in between.
-//
-// Workload names appear as label values. Anything that can reach this port
-// can already run arbitrary workloads, so the names disclose nothing new —
-// but they are disclosed.
-//
-// A scraper that addresses the server by hostname must have that hostname
-// in the server's `hosts` configuration, or the request is refused with a
-// 421. Address literals are always accepted.
-//
-// Corresponds with GET /metrics (the `GetMetrics` operationId).
-func (c *Client) GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetMetricsRequest(c.Server)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-// GetReadiness Report whether the server can do its job
-//
-// Reports whether the database answers and every configured driver answered
-// the most recent attempt to observe it. This is distinct from `/health`: a
-// server whose Docker daemon has gone away is alive but cannot converge
-// container workloads, and the two need different answers.
-//
-// Driver answers are cached from the reconciler's own passes rather than
-// fetched per request, so polling costs nothing and the answer is at most
-// one reconcile interval plus the driver timeout old. Before the first pass
-// completes, the server reports not ready.
-//
-// Corresponds with GET /ready (the `GetReadiness` operationId).
-func (c *Client) GetReadiness(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetReadinessRequest(c.Server)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
 // NewGetBackupRequest constructs an http.Request for the GetBackup method
 func NewGetBackupRequest(server string, params *GetBackupParams) (*http.Request, error) {
 	var err error
@@ -3523,6 +3527,87 @@ func NewRekeyRequestWithBody(server string, contentType string, body io.Reader) 
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetHealthRequest constructs an http.Request for the GetHealth method
+func NewGetHealthRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/health")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetMetricsRequest constructs an http.Request for the GetMetrics method
+func NewGetMetricsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/metrics")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetReadinessRequest constructs an http.Request for the GetReadiness method
+func NewGetReadinessRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/ready")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -4648,87 +4733,6 @@ func NewStopWorkloadRequestWithBody(server string, name WorkloadName, contentTyp
 	return req, nil
 }
 
-// NewGetHealthRequest constructs an http.Request for the GetHealth method
-func NewGetHealthRequest(server string) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/health")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
-// NewGetMetricsRequest constructs an http.Request for the GetMetrics method
-func NewGetMetricsRequest(server string) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/metrics")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
-// NewGetReadinessRequest constructs an http.Request for the GetReadiness method
-func NewGetReadinessRequest(server string) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/ready")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
-}
-
 func (c *Client) applyEditors(ctx context.Context, req *http.Request, additionalEditors []RequestEditorFn) error {
 	for _, r := range c.RequestEditors {
 		if err := r(ctx, req); err != nil {
@@ -4860,6 +4864,54 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
 	RekeyWithResponse(ctx context.Context, body RekeyJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyResponse, error)
+
+	// GetHealthWithResponse Report that the server is alive
+	//
+	// Answers as long as the process is serving requests. It says nothing about
+	// whether the server can do its job — that is what `/api/v1/ready` reports —
+	// so it
+	// suits a supervisor deciding whether to restart the process.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/health (the `GetHealth` operationId).
+	GetHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthResponse, error)
+
+	// GetMetricsWithResponse Read the server's metrics
+	//
+	// Returns the server's metrics in the Prometheus text format, ready to be
+	// scraped with no collector in between.
+	//
+	// Workload names appear as label values. Anything that can reach this port
+	// can already run arbitrary workloads, so the names disclose nothing new —
+	// but they are disclosed.
+	//
+	// A scraper that addresses the server by hostname must have that hostname
+	// in the server's `hosts` configuration, or the request is refused with a
+	// 421. Address literals are always accepted.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/metrics (the `GetMetrics` operationId).
+	GetMetricsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMetricsResponse, error)
+
+	// GetReadinessWithResponse Report whether the server can do its job
+	//
+	// Reports whether the database answers and every configured driver answered
+	// the most recent attempt to observe it. This is distinct from
+	// `/api/v1/health`: a
+	// server whose Docker daemon has gone away is alive but cannot converge
+	// container workloads, and the two need different answers.
+	//
+	// Driver answers are cached from the reconciler's own passes rather than
+	// fetched per request, so polling costs nothing and the answer is at most
+	// one reconcile interval plus the driver timeout old. Before the first pass
+	// completes, the server reports not ready.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/ready (the `GetReadiness` operationId).
+	GetReadinessWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReadinessResponse, error)
 
 	// ListSecretsWithResponse List secrets
 	//
@@ -5383,52 +5435,6 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/workloads/{name}/stop (the `StopWorkload` operationId).
 	StopWorkloadWithResponse(ctx context.Context, name WorkloadName, body StopWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*StopWorkloadResponse, error)
-
-	// GetHealthWithResponse Report that the server is alive
-	//
-	// Answers as long as the process is serving requests. It says nothing about
-	// whether the server can do its job — that is what `/ready` reports — so it
-	// suits a supervisor deciding whether to restart the process.
-	//
-	// Returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with GET /health (the `GetHealth` operationId).
-	GetHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthResponse, error)
-
-	// GetMetricsWithResponse Read the server's metrics
-	//
-	// Returns the server's metrics in the Prometheus text format, ready to be
-	// scraped with no collector in between.
-	//
-	// Workload names appear as label values. Anything that can reach this port
-	// can already run arbitrary workloads, so the names disclose nothing new —
-	// but they are disclosed.
-	//
-	// A scraper that addresses the server by hostname must have that hostname
-	// in the server's `hosts` configuration, or the request is refused with a
-	// 421. Address literals are always accepted.
-	//
-	// Returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with GET /metrics (the `GetMetrics` operationId).
-	GetMetricsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMetricsResponse, error)
-
-	// GetReadinessWithResponse Report whether the server can do its job
-	//
-	// Reports whether the database answers and every configured driver answered
-	// the most recent attempt to observe it. This is distinct from `/health`: a
-	// server whose Docker daemon has gone away is alive but cannot converge
-	// container workloads, and the two need different answers.
-	//
-	// Driver answers are cached from the reconciler's own passes rather than
-	// fetched per request, so polling costs nothing and the answer is at most
-	// one reconcile interval plus the driver timeout old. Before the first pass
-	// completes, the server reports not ready.
-	//
-	// Returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with GET /ready (the `GetReadiness` operationId).
-	GetReadinessWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReadinessResponse, error)
 }
 
 type GetBackupResponse struct {
@@ -5514,6 +5520,150 @@ func (r RekeyResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RekeyResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetHealthResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetHealthResult
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetHealthResponse) GetJSON200() *GetHealthResult {
+	return r.JSON200
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetHealthResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetHealthResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetHealthResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetHealthResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetHealthResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetMetricsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetMetricsResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetMetricsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetMetricsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetMetricsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetMetricsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetReadinessResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetReadinessResult
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *GetReadinessResult
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetReadinessResponse) GetJSON200() *GetReadinessResult {
+	return r.JSON200
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetReadinessResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetReadinessResponse) GetJSON503() *GetReadinessResult {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetReadinessResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetReadinessResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetReadinessResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetReadinessResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6849,150 +6999,6 @@ func (r StopWorkloadResponse) ContentType() string {
 	return ""
 }
 
-type GetHealthResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *GetHealthResult
-	// JSON500 the response for an HTTP 500 `application/json` response
-	JSON500 *InternalServerError
-}
-
-// GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetHealthResponse) GetJSON200() *GetHealthResult {
-	return r.JSON200
-}
-
-// GetJSON500 returns the response for an HTTP 500 `application/json` response
-func (r GetHealthResponse) GetJSON500() *InternalServerError {
-	return r.JSON500
-}
-
-// GetBody returns the raw response body bytes
-func (r GetHealthResponse) GetBody() []byte {
-	return r.Body
-}
-
-// Status returns HTTPResponse.Status
-func (r GetHealthResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetHealthResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r GetHealthResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
-type GetMetricsResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	// JSON500 the response for an HTTP 500 `application/json` response
-	JSON500 *InternalServerError
-}
-
-// GetJSON500 returns the response for an HTTP 500 `application/json` response
-func (r GetMetricsResponse) GetJSON500() *InternalServerError {
-	return r.JSON500
-}
-
-// GetBody returns the raw response body bytes
-func (r GetMetricsResponse) GetBody() []byte {
-	return r.Body
-}
-
-// Status returns HTTPResponse.Status
-func (r GetMetricsResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetMetricsResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r GetMetricsResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
-type GetReadinessResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *GetReadinessResult
-	// JSON500 the response for an HTTP 500 `application/json` response
-	JSON500 *InternalServerError
-	// JSON503 the response for an HTTP 503 `application/json` response
-	JSON503 *GetReadinessResult
-}
-
-// GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetReadinessResponse) GetJSON200() *GetReadinessResult {
-	return r.JSON200
-}
-
-// GetJSON500 returns the response for an HTTP 500 `application/json` response
-func (r GetReadinessResponse) GetJSON500() *InternalServerError {
-	return r.JSON500
-}
-
-// GetJSON503 returns the response for an HTTP 503 `application/json` response
-func (r GetReadinessResponse) GetJSON503() *GetReadinessResult {
-	return r.JSON503
-}
-
-// GetBody returns the raw response body bytes
-func (r GetReadinessResponse) GetBody() []byte {
-	return r.Body
-}
-
-// Status returns HTTPResponse.Status
-func (r GetReadinessResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetReadinessResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r GetReadinessResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
 // GetBackupWithResponse Download a backup of the node
 //
 // Returns a zip archive holding a consistent snapshot of orca's database,
@@ -7097,6 +7103,72 @@ func (c *ClientWithResponses) RekeyWithResponse(ctx context.Context, body RekeyJ
 		return nil, err
 	}
 	return ParseRekeyResponse(rsp)
+}
+
+// GetHealthWithResponse Report that the server is alive
+//
+// Answers as long as the process is serving requests. It says nothing about
+// whether the server can do its job — that is what `/api/v1/ready` reports —
+// so it
+// suits a supervisor deciding whether to restart the process.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/health (the `GetHealth` operationId).
+func (c *ClientWithResponses) GetHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthResponse, error) {
+	rsp, err := c.GetHealth(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetHealthResponse(rsp)
+}
+
+// GetMetricsWithResponse Read the server's metrics
+//
+// Returns the server's metrics in the Prometheus text format, ready to be
+// scraped with no collector in between.
+//
+// Workload names appear as label values. Anything that can reach this port
+// can already run arbitrary workloads, so the names disclose nothing new —
+// but they are disclosed.
+//
+// A scraper that addresses the server by hostname must have that hostname
+// in the server's `hosts` configuration, or the request is refused with a
+// 421. Address literals are always accepted.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/metrics (the `GetMetrics` operationId).
+func (c *ClientWithResponses) GetMetricsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMetricsResponse, error) {
+	rsp, err := c.GetMetrics(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetMetricsResponse(rsp)
+}
+
+// GetReadinessWithResponse Report whether the server can do its job
+//
+// Reports whether the database answers and every configured driver answered
+// the most recent attempt to observe it. This is distinct from
+// `/api/v1/health`: a
+// server whose Docker daemon has gone away is alive but cannot converge
+// container workloads, and the two need different answers.
+//
+// Driver answers are cached from the reconciler's own passes rather than
+// fetched per request, so polling costs nothing and the answer is at most
+// one reconcile interval plus the driver timeout old. Before the first pass
+// completes, the server reports not ready.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/ready (the `GetReadiness` operationId).
+func (c *ClientWithResponses) GetReadinessWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReadinessResponse, error) {
+	rsp, err := c.GetReadiness(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetReadinessResponse(rsp)
 }
 
 // ListSecretsWithResponse List secrets
@@ -7808,70 +7880,6 @@ func (c *ClientWithResponses) StopWorkloadWithResponse(ctx context.Context, name
 	return ParseStopWorkloadResponse(rsp)
 }
 
-// GetHealthWithResponse Report that the server is alive
-//
-// Answers as long as the process is serving requests. It says nothing about
-// whether the server can do its job — that is what `/ready` reports — so it
-// suits a supervisor deciding whether to restart the process.
-//
-// Returns a wrapper object for the known response body format(s).
-//
-// Corresponds with GET /health (the `GetHealth` operationId).
-func (c *ClientWithResponses) GetHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthResponse, error) {
-	rsp, err := c.GetHealth(ctx, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetHealthResponse(rsp)
-}
-
-// GetMetricsWithResponse Read the server's metrics
-//
-// Returns the server's metrics in the Prometheus text format, ready to be
-// scraped with no collector in between.
-//
-// Workload names appear as label values. Anything that can reach this port
-// can already run arbitrary workloads, so the names disclose nothing new —
-// but they are disclosed.
-//
-// A scraper that addresses the server by hostname must have that hostname
-// in the server's `hosts` configuration, or the request is refused with a
-// 421. Address literals are always accepted.
-//
-// Returns a wrapper object for the known response body format(s).
-//
-// Corresponds with GET /metrics (the `GetMetrics` operationId).
-func (c *ClientWithResponses) GetMetricsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMetricsResponse, error) {
-	rsp, err := c.GetMetrics(ctx, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetMetricsResponse(rsp)
-}
-
-// GetReadinessWithResponse Report whether the server can do its job
-//
-// Reports whether the database answers and every configured driver answered
-// the most recent attempt to observe it. This is distinct from `/health`: a
-// server whose Docker daemon has gone away is alive but cannot converge
-// container workloads, and the two need different answers.
-//
-// Driver answers are cached from the reconciler's own passes rather than
-// fetched per request, so polling costs nothing and the answer is at most
-// one reconcile interval plus the driver timeout old. Before the first pass
-// completes, the server reports not ready.
-//
-// Returns a wrapper object for the known response body format(s).
-//
-// Corresponds with GET /ready (the `GetReadiness` operationId).
-func (c *ClientWithResponses) GetReadinessWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReadinessResponse, error) {
-	rsp, err := c.GetReadiness(ctx, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetReadinessResponse(rsp)
-}
-
 // ParseGetBackupResponse parses an HTTP response from a GetBackupWithResponse call
 func ParseGetBackupResponse(rsp *http.Response) (*GetBackupResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -7925,6 +7933,105 @@ func ParseRekeyResponse(rsp *http.Response) (*RekeyResponse, error) {
 			return nil, err
 		}
 		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetHealthResponse parses an HTTP response from a GetHealthWithResponse call
+func ParseGetHealthResponse(rsp *http.Response) (*GetHealthResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetHealthResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetHealthResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetMetricsResponse parses an HTTP response from a GetMetricsWithResponse call
+func ParseGetMetricsResponse(rsp *http.Response) (*GetMetricsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetMetricsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetReadinessResponse parses an HTTP response from a GetReadinessWithResponse call
+func ParseGetReadinessResponse(rsp *http.Response) (*GetReadinessResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetReadinessResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetReadinessResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest GetReadinessResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	}
 
@@ -8930,105 +9037,6 @@ func ParseStopWorkloadResponse(rsp *http.Response) (*StopWorkloadResponse, error
 	return response, nil
 }
 
-// ParseGetHealthResponse parses an HTTP response from a GetHealthWithResponse call
-func ParseGetHealthResponse(rsp *http.Response) (*GetHealthResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &GetHealthResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest GetHealthResult
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest InternalServerError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON500 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseGetMetricsResponse parses an HTTP response from a GetMetricsWithResponse call
-func ParseGetMetricsResponse(rsp *http.Response) (*GetMetricsResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &GetMetricsResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest InternalServerError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON500 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseGetReadinessResponse parses an HTTP response from a GetReadinessWithResponse call
-func ParseGetReadinessResponse(rsp *http.Response) (*GetReadinessResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &GetReadinessResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest GetReadinessResult
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest InternalServerError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON500 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
-		var dest GetReadinessResult
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON503 = &dest
-
-	}
-
-	return response, nil
-}
-
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// GetBackup Download a backup of the node
@@ -9037,6 +9045,15 @@ type ServerInterface interface {
 	// Rekey Re-encrypt every secret under a new key
 	// (POST /api/v1/admin/rekey)
 	Rekey(w http.ResponseWriter, r *http.Request)
+	// GetHealth Report that the server is alive
+	// (GET /api/v1/health)
+	GetHealth(w http.ResponseWriter, r *http.Request)
+	// GetMetrics Read the server's metrics
+	// (GET /api/v1/metrics)
+	GetMetrics(w http.ResponseWriter, r *http.Request)
+	// GetReadiness Report whether the server can do its job
+	// (GET /api/v1/ready)
+	GetReadiness(w http.ResponseWriter, r *http.Request)
 	// ListSecrets List secrets
 	// (GET /api/v1/secrets)
 	ListSecrets(w http.ResponseWriter, r *http.Request, params ListSecretsParams)
@@ -9103,15 +9120,6 @@ type ServerInterface interface {
 	// StopWorkload Stop a workload
 	// (POST /api/v1/workloads/{name}/stop)
 	StopWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
-	// GetHealth Report that the server is alive
-	// (GET /health)
-	GetHealth(w http.ResponseWriter, r *http.Request)
-	// GetMetrics Read the server's metrics
-	// (GET /metrics)
-	GetMetrics(w http.ResponseWriter, r *http.Request)
-	// GetReadiness Report whether the server can do its job
-	// (GET /ready)
-	GetReadiness(w http.ResponseWriter, r *http.Request)
 }
 
 // ServerInterfaceWrapper converts contexts to parameters.
@@ -9161,6 +9169,48 @@ func (siw *ServerInterfaceWrapper) Rekey(w http.ResponseWriter, r *http.Request)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Rekey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetHealth operation middleware
+func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMetrics operation middleware
+func (siw *ServerInterfaceWrapper) GetMetrics(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMetrics(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReadiness operation middleware
+func (siw *ServerInterfaceWrapper) GetReadiness(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReadiness(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9890,48 +9940,6 @@ func (siw *ServerInterfaceWrapper) StopWorkload(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
-// GetHealth operation middleware
-func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetHealth(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetMetrics operation middleware
-func (siw *ServerInterfaceWrapper) GetMetrics(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetMetrics(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// GetReadiness operation middleware
-func (siw *ServerInterfaceWrapper) GetReadiness(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetReadiness(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -10076,9 +10084,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/variables/{name}", wrapper.SetVariable)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/admin/backup", wrapper.GetBackup)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/admin/rekey", wrapper.Rekey)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/health", wrapper.GetHealth)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/ready", wrapper.GetReadiness)
-	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/metrics", wrapper.GetMetrics)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/health", wrapper.GetHealth)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/ready", wrapper.GetReadiness)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/metrics", wrapper.GetMetrics)
 
 	return m
 }
@@ -10167,6 +10175,128 @@ func (response Rekey500JSONResponse) VisitRekeyResponse(w http.ResponseWriter) e
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHealthRequestObject struct {
+}
+
+type GetHealthResponseObject interface {
+	VisitGetHealthResponse(w http.ResponseWriter) error
+}
+
+type GetHealth200JSONResponse GetHealthResult
+
+func (response GetHealth200JSONResponse) VisitGetHealthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetHealth500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetHealth500JSONResponse) VisitGetHealthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetMetricsRequestObject struct {
+}
+
+type GetMetricsResponseObject interface {
+	VisitGetMetricsResponse(w http.ResponseWriter) error
+}
+
+type GetMetrics200TextResponse string
+
+func (response GetMetrics200TextResponse) VisitGetMetricsResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(200)
+
+	_, err := w.Write([]byte(fmt.Sprint(response)))
+	return err
+}
+
+type GetMetrics500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetMetrics500JSONResponse) VisitGetMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReadinessRequestObject struct {
+}
+
+type GetReadinessResponseObject interface {
+	VisitGetReadinessResponse(w http.ResponseWriter) error
+}
+
+type GetReadiness200JSONResponse GetReadinessResult
+
+func (response GetReadiness200JSONResponse) VisitGetReadinessResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReadiness500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetReadiness500JSONResponse) VisitGetReadinessResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetReadiness503JSONResponse GetReadinessResult
+
+func (response GetReadiness503JSONResponse) VisitGetReadinessResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -11577,128 +11707,6 @@ func (response StopWorkload500JSONResponse) VisitStopWorkloadResponse(w http.Res
 	return err
 }
 
-type GetHealthRequestObject struct {
-}
-
-type GetHealthResponseObject interface {
-	VisitGetHealthResponse(w http.ResponseWriter) error
-}
-
-type GetHealth200JSONResponse GetHealthResult
-
-func (response GetHealth200JSONResponse) VisitGetHealthResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetHealth500JSONResponse struct {
-	InternalServerErrorJSONResponse
-}
-
-func (response GetHealth500JSONResponse) VisitGetHealthResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetMetricsRequestObject struct {
-}
-
-type GetMetricsResponseObject interface {
-	VisitGetMetricsResponse(w http.ResponseWriter) error
-}
-
-type GetMetrics200TextResponse string
-
-func (response GetMetrics200TextResponse) VisitGetMetricsResponse(w http.ResponseWriter) error {
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(200)
-
-	_, err := w.Write([]byte(fmt.Sprint(response)))
-	return err
-}
-
-type GetMetrics500JSONResponse struct {
-	InternalServerErrorJSONResponse
-}
-
-func (response GetMetrics500JSONResponse) VisitGetMetricsResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetReadinessRequestObject struct {
-}
-
-type GetReadinessResponseObject interface {
-	VisitGetReadinessResponse(w http.ResponseWriter) error
-}
-
-type GetReadiness200JSONResponse GetReadinessResult
-
-func (response GetReadiness200JSONResponse) VisitGetReadinessResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetReadiness500JSONResponse struct {
-	InternalServerErrorJSONResponse
-}
-
-func (response GetReadiness500JSONResponse) VisitGetReadinessResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetReadiness503JSONResponse GetReadinessResult
-
-func (response GetReadiness503JSONResponse) VisitGetReadinessResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(503)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
 	// GetBackup Download a backup of the node
@@ -11707,6 +11715,15 @@ type StrictServerInterface interface {
 	// Rekey Re-encrypt every secret under a new key
 	// (POST /api/v1/admin/rekey)
 	Rekey(ctx context.Context, request RekeyRequestObject) (RekeyResponseObject, error)
+	// GetHealth Report that the server is alive
+	// (GET /api/v1/health)
+	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
+	// GetMetrics Read the server's metrics
+	// (GET /api/v1/metrics)
+	GetMetrics(ctx context.Context, request GetMetricsRequestObject) (GetMetricsResponseObject, error)
+	// GetReadiness Report whether the server can do its job
+	// (GET /api/v1/ready)
+	GetReadiness(ctx context.Context, request GetReadinessRequestObject) (GetReadinessResponseObject, error)
 	// ListSecrets List secrets
 	// (GET /api/v1/secrets)
 	ListSecrets(ctx context.Context, request ListSecretsRequestObject) (ListSecretsResponseObject, error)
@@ -11773,15 +11790,6 @@ type StrictServerInterface interface {
 	// StopWorkload Stop a workload
 	// (POST /api/v1/workloads/{name}/stop)
 	StopWorkload(ctx context.Context, request StopWorkloadRequestObject) (StopWorkloadResponseObject, error)
-	// GetHealth Report that the server is alive
-	// (GET /health)
-	GetHealth(ctx context.Context, request GetHealthRequestObject) (GetHealthResponseObject, error)
-	// GetMetrics Read the server's metrics
-	// (GET /metrics)
-	GetMetrics(ctx context.Context, request GetMetricsRequestObject) (GetMetricsResponseObject, error)
-	// GetReadiness Report whether the server can do its job
-	// (GET /ready)
-	GetReadiness(ctx context.Context, request GetReadinessRequestObject) (GetReadinessResponseObject, error)
 }
 
 type StrictHandlerFunc func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error)
@@ -11873,6 +11881,78 @@ func (sh *strictHandler) Rekey(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RekeyResponseObject); ok {
 		if err := validResponse.VisitRekeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetHealth operation middleware
+func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
+	var request GetHealthRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetHealth(ctx, request.(GetHealthRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetHealth")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetHealthResponseObject); ok {
+		if err := validResponse.VisitGetHealthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetMetrics operation middleware
+func (sh *strictHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
+	var request GetMetricsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetMetrics(ctx, request.(GetMetricsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetMetrics")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetMetricsResponseObject); ok {
+		if err := validResponse.VisitGetMetricsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetReadiness operation middleware
+func (sh *strictHandler) GetReadiness(w http.ResponseWriter, r *http.Request) {
+	var request GetReadinessRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetReadiness(ctx, request.(GetReadinessRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetReadiness")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetReadinessResponseObject); ok {
+		if err := validResponse.VisitGetReadinessResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -12511,78 +12591,6 @@ func (sh *strictHandler) StopWorkload(w http.ResponseWriter, r *http.Request, na
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(StopWorkloadResponseObject); ok {
 		if err := validResponse.VisitStopWorkloadResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetHealth operation middleware
-func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
-	var request GetHealthRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetHealth(ctx, request.(GetHealthRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetHealth")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetHealthResponseObject); ok {
-		if err := validResponse.VisitGetHealthResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetMetrics operation middleware
-func (sh *strictHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
-	var request GetMetricsRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetMetrics(ctx, request.(GetMetricsRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetMetrics")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetMetricsResponseObject); ok {
-		if err := validResponse.VisitGetMetricsResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
-// GetReadiness operation middleware
-func (sh *strictHandler) GetReadiness(w http.ResponseWriter, r *http.Request) {
-	var request GetReadinessRequestObject
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetReadiness(ctx, request.(GetReadinessRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetReadiness")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetReadinessResponseObject); ok {
-		if err := validResponse.VisitGetReadinessResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

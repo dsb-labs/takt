@@ -321,7 +321,7 @@ func TestGuard(t *testing.T) {
 			// targets orca by hostname needs the name in the configuration,
 			// while one targeting an address always passes. Pinned here because
 			// a scrape failing with a 421 is otherwise confusing to debug.
-			Path:         "/metrics",
+			Path:         "/api/v1/metrics",
 			Host:         "orca.internal:7373",
 			ExpectStatus: http.StatusMisdirectedRequest,
 		},

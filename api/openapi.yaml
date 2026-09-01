@@ -1082,14 +1082,15 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
-  /health:
+  /api/v1/health:
     get:
       operationId: getHealth
       tags: [system]
       summary: Report that the server is alive
       description: |
         Answers as long as the process is serving requests. It says nothing about
-        whether the server can do its job — that is what `/ready` reports — so it
+        whether the server can do its job — that is what `/api/v1/ready` reports —
+        so it
         suits a supervisor deciding whether to restart the process.
       responses:
         "200":
@@ -1101,14 +1102,15 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
-  /ready:
+  /api/v1/ready:
     get:
       operationId: getReadiness
       tags: [system]
       summary: Report whether the server can do its job
       description: |
         Reports whether the database answers and every configured driver answered
-        the most recent attempt to observe it. This is distinct from `/health`: a
+        the most recent attempt to observe it. This is distinct from
+        `/api/v1/health`: a
         server whose Docker daemon has gone away is alive but cannot converge
         container workloads, and the two need different answers.
 
@@ -1132,7 +1134,7 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
-  /metrics:
+  /api/v1/metrics:
     get:
       operationId: getMetrics
       tags: [system]

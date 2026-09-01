@@ -163,7 +163,7 @@ type (
 	// logs.
 	//
 	// Metrics need none of this: they are always collected and served by the
-	// /metrics endpoint.
+	// /api/v1/metrics endpoint.
 	TelemetryConfig struct {
 		// The OTLP endpoint traces and logs are exported to over HTTP, as a URL
 		// such as "http://collector.internal:4318". The scheme decides whether

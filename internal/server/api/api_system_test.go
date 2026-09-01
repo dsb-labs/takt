@@ -23,7 +23,7 @@ import (
 func TestSystemAPI_GetHealth(t *testing.T) {
 	t.Parallel()
 
-	resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), nil, "/health")
+	resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), nil, "/api/v1/health")
 
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.JSONEq(t, `{"status":"ok"}`, resp.Body.String())
@@ -88,7 +88,7 @@ func TestSystemAPI_GetReadiness(t *testing.T) {
 			observer := NewMockObserver(t)
 			observer.EXPECT().Observations().Return(tc.Observations).Once()
 
-			resp := doSystem(t, db, observer, nil, "/ready")
+			resp := doSystem(t, db, observer, nil, "/api/v1/ready")
 			assert.Equal(t, tc.ExpectStatus, resp.Code)
 
 			var body struct {
@@ -116,7 +116,7 @@ func TestSystemAPI_GetMetrics(t *testing.T) {
 		require.NoError(t, registry.Register(counter))
 		counter.Inc()
 
-		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), registry, "/metrics")
+		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), registry, "/api/v1/metrics")
 
 		assert.Equal(t, http.StatusOK, resp.Code)
 		assert.True(t, strings.HasPrefix(resp.Header().Get("Content-Type"), "text/plain"))
@@ -128,7 +128,7 @@ func TestSystemAPI_GetMetrics(t *testing.T) {
 			return nil, errors.New("collector broke")
 		})
 
-		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), failing, "/metrics")
+		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), failing, "/api/v1/metrics")
 
 		assert.Equal(t, http.StatusInternalServerError, resp.Code)
 		assert.Contains(t, resp.Body.String(), "failed to gather metrics")
