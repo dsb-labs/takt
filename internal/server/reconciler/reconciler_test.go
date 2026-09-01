@@ -455,6 +455,52 @@ func TestReconciler_Run_RestartsOnRequest(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_CoalescesDriverEvents(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return(nil, nil)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return nil, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	awaitPasses(t, r, 1)
+
+	// A burst of events is one piece of news. Each send is a synchronous handoff,
+	// so the whole burst lands inside the coalesce window and has to produce one
+	// pass rather than one each.
+	for range 20 {
+		events <- driver.Event{Workload: "example"}
+	}
+
+	awaitPasses(t, r, 2)
+	assert.EqualValues(t, 2, r.Passes())
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_Health(t *testing.T) {
 	t.Parallel()
 

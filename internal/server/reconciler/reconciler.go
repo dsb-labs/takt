@@ -320,6 +320,16 @@ const (
 	driverTimeout = 30 * time.Second
 	// How long starting a workload may take, including pulling its image.
 	startTimeout = 10 * time.Minute
+	// How long a pass triggered by a driver event waits to collect the events
+	// behind it before it runs.
+	//
+	// A burst of events is one piece of news: a mass teardown emits an event per
+	// container, and a pass observes the whole runtime anyway, so running a pass
+	// per event puts a full observation behind each of them. Measured on a
+	// thousand-workload teardown as over a thousand back-to-back passes. The
+	// window trades that for half a second of latency on the first event, which
+	// the reconcile interval dwarfs.
+	coalesceWindow = 500 * time.Millisecond
 	// The delay before the first restart of a failed instance, doubled on each
 	// consecutive failure up to maxBackoff.
 	baseBackoff = time.Second
@@ -419,8 +429,10 @@ func (r *Reconciler) Notify() {
 // Run reconciles until ctx is cancelled, returning nil on a clean shutdown.
 //
 // Passes run on a ticker, when the driver reports a change, and when Notify is
-// called. Passes never overlap: each is driven from this one goroutine, so a burst
-// of events coalesces into a single pass rather than racing.
+// called. Passes never overlap: each is driven from this one goroutine. A driver
+// event does not run a pass alone — the events behind it are collected for a
+// short window first, so a burst coalesces into one pass rather than queueing
+// one each.
 func (r *Reconciler) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -454,7 +466,29 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			}
 
 			r.logger.With("workload", event.Workload).Debug("reconciling after driver event")
+			coalesce(ctx, events)
 			r.reconcile(ctx)
+		}
+	}
+}
+
+// coalesce holds a pass back for the coalesce window, consuming the driver events
+// that arrive in it. The pass that follows observes the whole runtime, so the
+// discarded events tell it nothing it will not see for itself.
+func coalesce(ctx context.Context, events <-chan driver.Event) {
+	timer := time.NewTimer(coalesceWindow)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			return
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
 		}
 	}
 }
