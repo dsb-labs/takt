@@ -230,7 +230,7 @@ can read every secret sealed under it. See
 | `otlp-endpoint` | empty | The OTLP endpoint traces and logs are exported to. |
 
 Empty is the default, and exports nothing. Metrics need no configuration at all:
-the server always collects them and serves them at `/metrics`. See
+the server always collects them and serves them at `/api/v1/metrics`. See
 [Operating](operating.md#observability).
 
 Set this to a URL such as `http://collector.internal:4318` to export traces and
