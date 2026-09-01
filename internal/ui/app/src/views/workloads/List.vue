@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from "vue";
+
 import { useWorkloads } from "../../api/queries";
 import QueryInput from "../../components/QueryInput.vue";
 import SortHeader from "../../components/SortHeader.vue";
@@ -6,7 +8,7 @@ import StateBadge from "../../components/StateBadge.vue";
 import { relativeTime } from "../../format";
 import { useQueryFilter } from "../../filter";
 import { useSort } from "../../sort";
-import type { Workload } from "../../api/types";
+import type { Workload, WorkloadState } from "../../api/types";
 
 const { filter, queries } = useQueryFilter();
 const workloads = useWorkloads(() => queries.value);
@@ -34,6 +36,28 @@ function health(workload: Workload): { label: string; style: string } | null {
   return { label: "healthy", style: "text-emerald-700 dark:text-emerald-400" };
 }
 
+// counts summarises the listed workloads by state, in a fixed order so the
+// chips do not shuffle as states come and go.
+const counts = computed(() => {
+  const order: WorkloadState[] = [
+    "running",
+    "degraded",
+    "pending",
+    "failed",
+    "stopped",
+    "completed",
+    "suspended",
+    "terminating",
+  ];
+  const byState = new Map<WorkloadState, number>();
+  for (const workload of workloads.data.value ?? []) {
+    byState.set(workload.state, (byState.get(workload.state) ?? 0) + 1);
+  }
+  return order
+    .filter((state) => byState.has(state))
+    .map((state) => ({ state, count: byState.get(state)! }));
+});
+
 const sort = useSort(() => workloads.data.value, "name", {
   name: (w) => w.name,
   state: (w) => w.state,
@@ -49,6 +73,17 @@ const sort = useSort(() => workloads.data.value, "name", {
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-xl font-semibold">Workloads</h1>
       <QueryInput v-model="filter" />
+    </div>
+
+    <div v-if="counts.length" class="mt-4 flex flex-wrap gap-2">
+      <span
+        v-for="entry in counts"
+        :key="entry.state"
+        class="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white py-1 pr-2.5 pl-1 text-sm dark:border-slate-800 dark:bg-slate-900"
+      >
+        <StateBadge :state="entry.state" />
+        {{ entry.count }}
+      </span>
     </div>
 
     <div
