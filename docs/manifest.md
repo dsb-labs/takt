@@ -116,6 +116,11 @@ failure domain, and a second instance on the same host does not survive it losin
 power. Several copies of a single-threaded service across several cores is the case
 this serves.
 
+orca does not cap the count. The machine does: each instance costs a container or a
+process, memory, and — for a workload publishing ports — a host port per port from
+the configured range. A count the machine cannot serve fails at those limits rather
+than at validation.
+
 Instances share what the workload mounts. A volume is one directory on the host,
 and every instance reads and writes the same one. That is correct for data that is
 safe for concurrent writers and corrupting for anything that is not — a database
