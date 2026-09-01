@@ -19,14 +19,39 @@ export const router = createRouter({
       component: () => import("./views/SecretsView.vue"),
     },
     {
+      path: "/secrets/new",
+      name: "secret-new",
+      component: () => import("./views/SecretNewView.vue"),
+    },
+    {
+      path: "/secrets/:name",
+      name: "secret",
+      component: () => import("./views/SecretView.vue"),
+    },
+    {
       path: "/variables",
       name: "variables",
       component: () => import("./views/VariablesView.vue"),
     },
     {
+      path: "/variables/new",
+      name: "variable-new",
+      component: () => import("./views/VariableNewView.vue"),
+    },
+    {
+      path: "/variables/:name",
+      name: "variable",
+      component: () => import("./views/VariableView.vue"),
+    },
+    {
       path: "/volumes",
       name: "volumes",
       component: () => import("./views/VolumesView.vue"),
+    },
+    {
+      path: "/volumes/:name",
+      name: "volume",
+      component: () => import("./views/VolumeView.vue"),
     },
   ],
 });

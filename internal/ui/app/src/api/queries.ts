@@ -69,6 +69,48 @@ export function useVolumes() {
   });
 }
 
+export function useSecret(name: () => string) {
+  return useQuery({
+    queryKey: ["secrets", name],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/secrets/{name}", {
+        params: { path: { name: name() } },
+      });
+      if (error) throw new Error(error.error);
+      return data.secret;
+    },
+  });
+}
+
+export function useVariable(name: () => string) {
+  return useQuery({
+    queryKey: ["variables", name],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/variables/{name}", {
+        params: { path: { name: name() } },
+      });
+      if (error) throw new Error(error.error);
+      return data.variable;
+    },
+  });
+}
+
+export function useVolume(name: () => string) {
+  return useQuery({
+    queryKey: ["volumes", name],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/volumes/{name}", {
+        params: { path: { name: name() } },
+      });
+      if (error) throw new Error(error.error);
+      return data.volume;
+    },
+  });
+}
+
 export function useReadiness() {
   return useQuery({
     queryKey: ["readiness"],

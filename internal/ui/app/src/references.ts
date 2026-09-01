@@ -44,17 +44,16 @@ export function references(spec: WorkloadSpec): Reference[] {
   return refs;
 }
 
-// referenceTarget returns the route a reference links to. Secrets, variables
-// and volumes link to their list pages, another workload to its detail page.
+// referenceTarget returns the detail route a reference links to.
 export function referenceTarget(ref: Reference): string {
   switch (ref.kind) {
     case "workload":
       return `/workloads/${ref.name}`;
     case "secret":
-      return "/secrets";
+      return `/secrets/${ref.name}`;
     case "variable":
-      return "/variables";
+      return `/variables/${ref.name}`;
     case "volume":
-      return "/volumes";
+      return `/volumes/${ref.name}`;
   }
 }

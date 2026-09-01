@@ -4,6 +4,9 @@ import { client } from "./client";
 
 // Every mutation invalidates the queries reading what it changed, so the view
 // reflects the action on the next render rather than the next poll.
+//
+// Each delete takes a force flag. An unforced delete of something another
+// workload reads is refused with the reason, and the view offers to force it.
 
 export function useWorkloadAction(
   action: "stop" | "start" | "restart",
@@ -30,9 +33,9 @@ export function useDeleteWorkload(name: () => string) {
   const queries = useQueryClient();
 
   return useMutation({
-    mutationFn: async () => {
+    mutationFn: async (force: boolean) => {
       const { error } = await client.DELETE("/api/v1/workloads/{name}", {
-        params: { path: { name: name() } },
+        params: { path: { name: name() }, query: { force } },
       });
       if (error) throw new Error(error.error);
     },
@@ -55,13 +58,13 @@ export function useSetSecret() {
   });
 }
 
-export function useDeleteSecret() {
+export function useDeleteSecret(name: () => string) {
   const queries = useQueryClient();
 
   return useMutation({
-    mutationFn: async (name: string) => {
+    mutationFn: async (force: boolean) => {
       const { error } = await client.DELETE("/api/v1/secrets/{name}", {
-        params: { path: { name } },
+        params: { path: { name: name() }, query: { force } },
       });
       if (error) throw new Error(error.error);
     },
@@ -84,13 +87,13 @@ export function useSetVariable() {
   });
 }
 
-export function useDeleteVariable() {
+export function useDeleteVariable(name: () => string) {
   const queries = useQueryClient();
 
   return useMutation({
-    mutationFn: async (name: string) => {
+    mutationFn: async (force: boolean) => {
       const { error } = await client.DELETE("/api/v1/variables/{name}", {
-        params: { path: { name } },
+        params: { path: { name: name() }, query: { force } },
       });
       if (error) throw new Error(error.error);
     },
@@ -98,13 +101,13 @@ export function useDeleteVariable() {
   });
 }
 
-export function useDeleteVolume() {
+export function useDeleteVolume(name: () => string) {
   const queries = useQueryClient();
 
   return useMutation({
-    mutationFn: async (name: string) => {
+    mutationFn: async (force: boolean) => {
       const { error } = await client.DELETE("/api/v1/volumes/{name}", {
-        params: { path: { name } },
+        params: { path: { name: name() }, query: { force } },
       });
       if (error) throw new Error(error.error);
     },
