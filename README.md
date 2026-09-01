@@ -167,6 +167,7 @@ dependency keeps working without being re-applied.
 - [Operating orca](docs/operating.md) — exposure, state on disk, backups, volumes, and reading logs.
 - [Upgrading](docs/upgrading.md) — replacing the binary, and what survives it.
 - [Design](docs/design.md) — how reconciliation works and why it is built this way.
+- [Reconciliation](docs/reconciliation.md) — the reconciler's mechanics, with diagrams.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers building and testing orca.
 
