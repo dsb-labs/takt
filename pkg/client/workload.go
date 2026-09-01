@@ -587,13 +587,18 @@ func (c *Client) Start(ctx context.Context, name string, options ...LifecycleOpt
 			return false
 		}
 
-		// An instance that was not there before is the start having happened. One
-		// that was there and is running covers starting a workload that was never
-		// suspended, where nothing new appears because nothing had to.
+		// An instance that was not there before is the start having happened, once
+		// it has left pending. A container is reported from the moment it is
+		// created, so a wait satisfied by its existence alone races its startup
+		// and returns a workload that is not yet up. One that was there and is
+		// running covers starting a workload that was never suspended, where
+		// nothing new appears because nothing had to.
 		return slices.ContainsFunc(w.Instances, func(instance Instance) bool {
-			_, existed := before[instance.ID]
+			if _, existed := before[instance.ID]; !existed {
+				return instance.State != InstanceStatePending
+			}
 
-			return !existed || instance.State == InstanceStateRunning
+			return instance.State == InstanceStateRunning
 		})
 	})
 }
@@ -605,7 +610,7 @@ func (c *Client) Start(ctx context.Context, name string, options ...LifecycleOpt
 //
 // The replacement happens on the server's next pass, from the unchanged
 // specification, so the version does not move. Pass WithWait to block until an
-// instance that did not exist before the request has appeared.
+// instance that did not exist before the request has started.
 func (c *Client) Restart(ctx context.Context, name string, options ...LifecycleOption) (Workload, error) {
 	config := defaultLifecycleConfig()
 	for _, option := range options {
@@ -653,10 +658,13 @@ func (c *Client) Restart(ctx context.Context, name string, options ...LifecycleO
 	}
 
 	return c.waitFor(ctx, name, config.interval, func(w Workload) bool {
+		// The replacement counts once it has left pending, for the reason the
+		// start wait gives: a container is reported from the moment it is
+		// created, and one still starting is not yet the replacement being up.
 		return slices.ContainsFunc(w.Instances, func(instance Instance) bool {
 			_, existed := before[instance.ID]
 
-			return !existed
+			return !existed && instance.State != InstanceStatePending
 		})
 	})
 }

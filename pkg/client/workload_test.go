@@ -752,6 +752,52 @@ func TestClient_Start(t *testing.T) {
 		assert.Equal(t, client.WorkloadStateRunning, got.State)
 	})
 
+	t.Run("keeps waiting while the new instance is still starting", func(t *testing.T) {
+		var gets int
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				writeJSON(t, w, http.StatusAccepted, api.StartWorkloadResult{Workload: workload("example", api.WorkloadStateSuspended)})
+				return
+			}
+
+			// The first read is the client's snapshot. The read after it catches
+			// the replacement between being created and being up — a container is
+			// reported from that moment — and a wait satisfied by its existence
+			// alone would return a workload that is not yet running.
+			gets++
+			switch {
+			case gets == 1:
+				down := workload("example", api.WorkloadStateStopped)
+				down.Instances = &[]api.Instance{
+					{ID: "container-one", State: api.InstanceStateExited, SpecHash: "hash-one"},
+				}
+
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: down})
+			case gets == 2:
+				starting := workload("example", api.WorkloadStatePending)
+				starting.Instances = &[]api.Instance{
+					{ID: "container-two", State: api.InstanceStatePending, SpecHash: "hash-one"},
+				}
+
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: starting})
+			default:
+				up := workload("example", api.WorkloadStateRunning)
+				up.Instances = &[]api.Instance{
+					{ID: "container-two", State: api.InstanceStateRunning, SpecHash: "hash-one"},
+				}
+
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: up})
+			}
+		})
+
+		got, err := c.Start(t.Context(), "example", client.WithWaitInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, gets)
+		assert.Equal(t, client.WorkloadStateRunning, got.State)
+	})
+
 	t.Run("returns for a workload that was already running", func(t *testing.T) {
 		var gets int
 
@@ -846,6 +892,47 @@ func TestClient_Restart(t *testing.T) {
 		assert.Equal(t, 3, gets)
 		require.Len(t, got.Instances, 1)
 		assert.Equal(t, "container-two", got.Instances[0].ID)
+	})
+
+	t.Run("keeps waiting while the replacement is still starting", func(t *testing.T) {
+		var gets int
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				writeJSON(t, w, http.StatusAccepted, api.RestartWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+				return
+			}
+
+			// The read after the snapshot catches the replacement between being
+			// created and being up, which is not yet the replacement having
+			// happened.
+			gets++
+			switch {
+			case gets == 1:
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+			case gets == 2:
+				starting := workload("example", api.WorkloadStatePending)
+				starting.Instances = &[]api.Instance{
+					{ID: "container-two", State: api.InstanceStatePending, SpecHash: "hash-one"},
+				}
+
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: starting})
+			default:
+				replaced := workload("example", api.WorkloadStateRunning)
+				replaced.Instances = &[]api.Instance{
+					{ID: "container-two", State: api.InstanceStateRunning, SpecHash: "hash-one"},
+				}
+
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: replaced})
+			}
+		})
+
+		got, err := c.Restart(t.Context(), "example", client.WithWaitInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, gets)
+		require.Len(t, got.Instances, 1)
+		assert.Equal(t, client.InstanceStateRunning, got.Instances[0].State)
 	})
 
 	t.Run("reports a conflict for a suspended workload", func(t *testing.T) {
