@@ -106,6 +106,11 @@ function healthLabel(instance: {
               Restart
             </button>
           </Tooltip>
+          <DeleteControl
+            :subject="`the workload ${name}`"
+            :remove="(force) => deletion.mutateAsync(force)"
+            @deleted="router.push('/')"
+          />
         </div>
       </header>
 
@@ -317,14 +322,6 @@ function healthLabel(instance: {
         <DetailCard title="Logs">
           <LogViewer :workload="name" :count="spec?.count ?? 1" />
         </DetailCard>
-      </div>
-
-      <div class="mt-6">
-        <DeleteControl
-          :subject="`the workload ${name}`"
-          :remove="(force) => deletion.mutateAsync(force)"
-          @deleted="router.push('/')"
-        />
       </div>
     </template>
   </div>

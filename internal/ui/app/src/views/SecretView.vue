@@ -50,7 +50,16 @@ async function rotate(_: string, value: string) {
     </div>
 
     <template v-else-if="secret.data.value">
-      <h1 class="mt-4 text-xl font-semibold">{{ secret.data.value.name }}</h1>
+      <header class="mt-4 flex flex-wrap items-center gap-3">
+        <h1 class="text-xl font-semibold">{{ secret.data.value.name }}</h1>
+        <div class="ml-auto">
+          <DeleteControl
+            :subject="`the secret ${name}`"
+            :remove="(force) => deleteSecret.mutateAsync(force)"
+            @deleted="router.push('/secrets')"
+          />
+        </div>
+      </header>
 
       <div class="mt-6 grid gap-6 xl:grid-cols-2">
         <DetailCard title="Overview">
@@ -94,13 +103,9 @@ async function rotate(_: string, value: string) {
       <div class="mt-6">
         <DetailCard title="Rotate">
           <div class="px-4 py-4">
-            <p class="mb-3 text-sm text-slate-500 dark:text-slate-400">
-              Set a new value. The current value is never shown, and every
-              workload reading this secret picks the new one up.
-            </p>
             <ValueForm
               submit-label="Rotate"
-              placeholder="The new value"
+              placeholder="The new value. The current one is never shown."
               :busy="setSecret.isPending.value"
               @submit="rotate"
             />
@@ -109,18 +114,10 @@ async function rotate(_: string, value: string) {
               v-if="rotated"
               class="mt-3 text-sm text-emerald-700 dark:text-emerald-400"
             >
-              Rotated. The revision above changed with it.
+              Rotated.
             </p>
           </div>
         </DetailCard>
-      </div>
-
-      <div class="mt-6">
-        <DeleteControl
-          :subject="`the secret ${name}`"
-          :remove="(force) => deleteSecret.mutateAsync(force)"
-          @deleted="router.push('/secrets')"
-        />
       </div>
     </template>
   </div>

@@ -2,8 +2,10 @@
 import { ref } from "vue";
 
 // A form for a value that may be an entire pasted file, so the input is a
-// textarea rather than a line. When withName is set the form also asks for
-// the name, which is what creating needs and editing does not.
+// textarea rather than a line. The surrounding card names what the value is,
+// so the textarea carries no label of its own — the placeholder says what to
+// put in it. When withName is set the form also asks for the name, which is
+// what creating needs and editing does not.
 const props = defineProps<{
   submitLabel: string;
   placeholder?: string;
@@ -33,15 +35,13 @@ const value = ref(props.initialValue ?? "");
       />
     </label>
 
-    <label class="flex flex-col gap-1 text-sm">
-      Value
-      <textarea
-        v-model="value"
-        rows="8"
-        :placeholder="placeholder"
-        class="rounded-md border border-slate-300 bg-white px-2 py-1.5 font-mono text-sm dark:border-slate-700 dark:bg-slate-800"
-      ></textarea>
-    </label>
+    <textarea
+      v-model="value"
+      rows="8"
+      aria-label="Value"
+      :placeholder="placeholder"
+      class="rounded-md border border-slate-300 bg-white px-2 py-1.5 font-mono text-sm dark:border-slate-700 dark:bg-slate-800"
+    ></textarea>
 
     <div>
       <button

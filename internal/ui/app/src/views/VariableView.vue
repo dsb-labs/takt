@@ -50,7 +50,16 @@ async function save(_: string, value: string) {
     </div>
 
     <template v-else-if="variable.data.value">
-      <h1 class="mt-4 text-xl font-semibold">{{ variable.data.value.name }}</h1>
+      <header class="mt-4 flex flex-wrap items-center gap-3">
+        <h1 class="text-xl font-semibold">{{ variable.data.value.name }}</h1>
+        <div class="ml-auto">
+          <DeleteControl
+            :subject="`the variable ${name}`"
+            :remove="(force) => deleteVariable.mutateAsync(force)"
+            @deleted="router.push('/variables')"
+          />
+        </div>
+      </header>
 
       <div class="mt-6 grid gap-6 xl:grid-cols-2">
         <DetailCard title="Overview">
@@ -98,19 +107,10 @@ async function save(_: string, value: string) {
               v-if="saved"
               class="mt-3 text-sm text-emerald-700 dark:text-emerald-400"
             >
-              Saved. Every workload reading this variable picks the new value
-              up.
+              Saved.
             </p>
           </div>
         </DetailCard>
-      </div>
-
-      <div class="mt-6">
-        <DeleteControl
-          :subject="`the variable ${name}`"
-          :remove="(force) => deleteVariable.mutateAsync(force)"
-          @deleted="router.push('/variables')"
-        />
       </div>
     </template>
   </div>

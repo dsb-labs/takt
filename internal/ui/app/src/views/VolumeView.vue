@@ -33,7 +33,16 @@ const deleteVolume = useDeleteVolume(() => name.value);
     </div>
 
     <template v-else-if="volume.data.value">
-      <h1 class="mt-4 text-xl font-semibold">{{ volume.data.value.name }}</h1>
+      <header class="mt-4 flex flex-wrap items-center gap-3">
+        <h1 class="text-xl font-semibold">{{ volume.data.value.name }}</h1>
+        <div class="ml-auto">
+          <DeleteControl
+            :subject="`the volume ${name} and its data`"
+            :remove="(force) => deleteVolume.mutateAsync(force)"
+            @deleted="router.push('/volumes')"
+          />
+        </div>
+      </header>
 
       <div class="mt-6 grid gap-6 xl:grid-cols-2">
         <DetailCard title="Overview">
@@ -64,14 +73,6 @@ const deleteVolume = useDeleteVolume(() => name.value);
             <UsedByLinks :used-by="volume.data.value.usedBy" />
           </div>
         </DetailCard>
-      </div>
-
-      <div class="mt-6">
-        <DeleteControl
-          :subject="`the volume ${name} and its data`"
-          :remove="(force) => deleteVolume.mutateAsync(force)"
-          @deleted="router.push('/volumes')"
-        />
       </div>
     </template>
   </div>
