@@ -13,8 +13,7 @@ export const router = createRouter({
     {
       path: "/workloads/:name",
       name: "workload",
-      component: PlaceholderView,
-      props: { title: "Workload" },
+      component: () => import("./views/WorkloadView.vue"),
     },
     {
       path: "/secrets",
