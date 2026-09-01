@@ -32,6 +32,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/secret"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/internal/server/telemetry"
+	"github.com/dsb-labs/orca/internal/ui"
 )
 
 // Run starts the orca server using the given configuration and blocks until the
@@ -313,6 +314,17 @@ func Run(ctx context.Context, config Config) error {
 		}),
 		Admin: api.NewAdminAPI(api.AdminAPIConfig{Logger: logger, Admin: adminSvc}),
 	}).Register(mux)
+
+	webUI, err := ui.Handler()
+	if err != nil {
+		return fmt.Errorf("failed to load the web ui: %w", err)
+	}
+
+	// The UI holds the root and the API holds /api/v1, and the mux prefers the
+	// most specific pattern, so every API route wins over this catch-all. It is
+	// registered for GET only: the UI is pages and assets, and nothing writes
+	// to it.
+	mux.Handle("GET /", webUI)
 
 	server := &http.Server{
 		Addr: config.HTTP.Address,

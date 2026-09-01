@@ -90,6 +90,20 @@ func (a *API) Register(mux *http.ServeMux) {
 	api.HandlerWithOptions(api.NewStrictHandler(a, nil), api.StdHTTPServerOptions{
 		BaseRouter: mux,
 	})
+
+	// A path under the API prefix that no operation claims is answered in the
+	// API's own error shape. Without this it would fall through to whatever else
+	// the mux serves at the root — which, with the web UI mounted there, would
+	// answer a mistyped API request with an HTML page.
+	//
+	// Registered once per method rather than for every method at once. A pattern
+	// with no method overlaps the UI's GET catch-all at the root without either
+	// being the more specific, and the mux refuses to hold both.
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		mux.HandleFunc(method+" /api/v1/", func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, http.StatusNotFound, "not found")
+		})
+	}
 }
 
 // Wrap returns handler with the middleware the server puts in front of it.
