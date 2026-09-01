@@ -4,10 +4,12 @@ import { useRoute, useRouter } from "vue-router";
 
 import { useDeleteWorkload, useWorkloadAction } from "../api/mutations";
 import { useWorkload } from "../api/queries";
+import DeleteControl from "../components/DeleteControl.vue";
 import DetailCard from "../components/DetailCard.vue";
 import ErrorBanner from "../components/ErrorBanner.vue";
 import LogViewer from "../components/LogViewer.vue";
 import StateBadge from "../components/StateBadge.vue";
+import Tooltip from "../components/Tooltip.vue";
 import { absoluteTime, relativeTime } from "../format";
 import { referenceTarget, references } from "../references";
 
@@ -27,18 +29,6 @@ async function act(action: { mutateAsync: () => Promise<unknown> }) {
   actionError.value = "";
   try {
     await action.mutateAsync();
-  } catch (cause) {
-    actionError.value = cause instanceof Error ? cause.message : String(cause);
-  }
-}
-
-async function remove() {
-  if (!confirm(`Delete the workload "${name.value}" and stop its instances?`))
-    return;
-  actionError.value = "";
-  try {
-    await deletion.mutateAsync();
-    await router.push("/");
   } catch (cause) {
     actionError.value = cause instanceof Error ? cause.message : String(cause);
   }
@@ -101,24 +91,21 @@ function healthLabel(instance: {
           >
             Stop
           </button>
-          <button
-            class="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
-            :disabled="workload.data.value.suspended"
-            :title="
+          <Tooltip
+            :text="
               workload.data.value.suspended
                 ? 'A suspended workload has nothing to restart. Start it instead.'
                 : undefined
             "
-            @click="act(restart)"
           >
-            Restart
-          </button>
-          <button
-            class="rounded-md border border-rose-300 px-3 py-1.5 text-rose-700 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-400 dark:hover:bg-rose-950"
-            @click="remove"
-          >
-            Delete
-          </button>
+            <button
+              class="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+              :disabled="workload.data.value.suspended"
+              @click="act(restart)"
+            >
+              Restart
+            </button>
+          </Tooltip>
         </div>
       </header>
 
@@ -330,6 +317,14 @@ function healthLabel(instance: {
         <DetailCard title="Logs">
           <LogViewer :workload="name" :count="spec?.count ?? 1" />
         </DetailCard>
+      </div>
+
+      <div class="mt-6">
+        <DeleteControl
+          :subject="`the workload ${name}`"
+          :remove="(force) => deletion.mutateAsync(force)"
+          @deleted="router.push('/')"
+        />
       </div>
     </template>
   </div>
