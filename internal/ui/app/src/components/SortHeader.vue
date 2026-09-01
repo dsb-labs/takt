@@ -11,7 +11,11 @@ const emit = defineEmits<{ sort: [name: string] }>();
       @click="emit('sort', name)"
     >
       <slot />
-      <span v-if="sortKey === name">{{ descending ? "▼" : "▲" }}</span>
+      <!-- Always occupies its width, so choosing a column does not resize
+           the table under the pointer. -->
+      <span class="w-3" :class="{ invisible: sortKey !== name }">
+        {{ descending ? "▼" : "▲" }}
+      </span>
     </button>
   </th>
 </template>
