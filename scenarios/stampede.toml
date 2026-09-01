@@ -34,6 +34,11 @@ mounts-secret = 0.30
 mounts-variable = 0.30
 mounts-volume = 0.10
 
+# Drawn from the workloads with neither a schedule nor a pinned port. Each instance
+# holds ports and state of its own, so this multiplies the allocator's work and has
+# the reconciler converge each instance separately.
+instances = 0.30
+
 [resources]
 secrets = 50
 variables = 50
