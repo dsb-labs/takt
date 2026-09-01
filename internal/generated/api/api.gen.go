@@ -206,6 +206,7 @@ func (e Runtime) Valid() bool {
 // Defines values for WorkloadState.
 const (
 	WorkloadStateCompleted   WorkloadState = "completed"
+	WorkloadStateDegraded    WorkloadState = "degraded"
 	WorkloadStateFailed      WorkloadState = "failed"
 	WorkloadStatePending     WorkloadState = "pending"
 	WorkloadStateRunning     WorkloadState = "running"
@@ -218,6 +219,8 @@ const (
 func (e WorkloadState) Valid() bool {
 	switch e {
 	case WorkloadStateCompleted:
+		return true
+	case WorkloadStateDegraded:
 		return true
 	case WorkloadStateFailed:
 		return true
@@ -1380,6 +1383,10 @@ type Workload struct {
 	// A suspended workload was stopped by an operator and stays down until it is
 	// started again. Neither stopped nor completed fits: the server does not
 	// intend to fix it, and its restart policy did not ask for it to end.
+	//
+	// A degraded workload runs more than one instance and has at least one up
+	// and at least one failed. It serves traffic, and an operator reading only
+	// this state still learns that part of it does not.
 	State WorkloadState `json:"state"`
 
 	// Suspended Whether the workload has been stopped and is intentionally not
@@ -1544,6 +1551,10 @@ type WorkloadSpec struct {
 // A suspended workload was stopped by an operator and stays down until it is
 // started again. Neither stopped nor completed fits: the server does not
 // intend to fix it, and its restart policy did not ask for it to end.
+//
+// A degraded workload runs more than one instance and has at least one up
+// and at least one failed. It serves traffic, and an operator reading only
+// this state still learns that part of it does not.
 type WorkloadState string
 
 // SecretName defines model for SecretName.

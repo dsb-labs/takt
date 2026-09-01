@@ -62,6 +62,7 @@ func TestStatesCoverTheWireFormat(t *testing.T) {
 		states := []client.WorkloadState{
 			client.WorkloadStatePending,
 			client.WorkloadStateRunning,
+			client.WorkloadStateDegraded,
 			client.WorkloadStateTerminating,
 			client.WorkloadStateStopped,
 			client.WorkloadStateCompleted,
@@ -125,10 +126,10 @@ func countValid(t *testing.T, valid func(string) bool) int {
 	t.Helper()
 
 	candidates := []string{
-		"pending", "running", "terminating", "stopped", "completed", "exited",
-		"failed", "starting", "healthy", "unhealthy", "created", "paused",
-		"restarting", "removing", "dead", "succeeded", "cancelled", "unknown",
-		"suspended",
+		"pending", "running", "degraded", "terminating", "stopped", "completed",
+		"exited", "failed", "starting", "healthy", "unhealthy", "created",
+		"paused", "restarting", "removing", "dead", "succeeded", "cancelled",
+		"unknown", "suspended",
 	}
 
 	var count int

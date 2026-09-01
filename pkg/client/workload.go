@@ -160,6 +160,9 @@ const (
 	WorkloadStatePending WorkloadState = "pending"
 	// WorkloadStateRunning indicates the workload's instances are up.
 	WorkloadStateRunning WorkloadState = "running"
+	// WorkloadStateDegraded indicates the workload has at least one instance up and
+	// at least one failed. It serves traffic, and part of it does not work.
+	WorkloadStateDegraded WorkloadState = "degraded"
 	// WorkloadStateTerminating indicates the workload is being torn down and will
 	// shortly disappear.
 	WorkloadStateTerminating WorkloadState = "terminating"
