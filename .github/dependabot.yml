@@ -24,3 +24,9 @@ updates:
       ui:
         patterns:
           - "*"
+    ignore:
+      # typescript-eslint refuses to run against TypeScript 7. Remove this
+      # once https://github.com/typescript-eslint/typescript-eslint/issues/10940
+      # lands support.
+      - dependency-name: typescript
+        versions: [">=7.0"]
