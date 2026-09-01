@@ -33,6 +33,42 @@ export function useWorkload(name: () => string) {
   });
 }
 
+export function useSecrets() {
+  return useQuery({
+    queryKey: ["secrets"],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/secrets");
+      if (error) throw new Error(error.error);
+      return data.secrets;
+    },
+  });
+}
+
+export function useVariables() {
+  return useQuery({
+    queryKey: ["variables"],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/variables");
+      if (error) throw new Error(error.error);
+      return data.variables;
+    },
+  });
+}
+
+export function useVolumes() {
+  return useQuery({
+    queryKey: ["volumes"],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/volumes");
+      if (error) throw new Error(error.error);
+      return data.volumes;
+    },
+  });
+}
+
 export function useReadiness() {
   return useQuery({
     queryKey: ["readiness"],

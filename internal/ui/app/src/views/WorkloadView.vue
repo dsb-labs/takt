@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { useRoute } from "vue-router";
+import { computed, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
+import { useDeleteWorkload, useWorkloadAction } from "../api/mutations";
 import { useWorkload } from "../api/queries";
 import DetailCard from "../components/DetailCard.vue";
+import ErrorBanner from "../components/ErrorBanner.vue";
 import LogViewer from "../components/LogViewer.vue";
 import StateBadge from "../components/StateBadge.vue";
 import { absoluteTime, relativeTime } from "../format";
@@ -13,6 +15,34 @@ const route = useRoute();
 const name = computed(() => route.params.name as string);
 
 const workload = useWorkload(() => name.value);
+
+const router = useRouter();
+const stop = useWorkloadAction("stop", () => name.value);
+const start = useWorkloadAction("start", () => name.value);
+const restart = useWorkloadAction("restart", () => name.value);
+const deletion = useDeleteWorkload(() => name.value);
+const actionError = ref("");
+
+async function act(action: { mutateAsync: () => Promise<unknown> }) {
+  actionError.value = "";
+  try {
+    await action.mutateAsync();
+  } catch (cause) {
+    actionError.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+async function remove() {
+  if (!confirm(`Delete the workload "${name.value}" and stop its instances?`))
+    return;
+  actionError.value = "";
+  try {
+    await deletion.mutateAsync();
+    await router.push("/");
+  } catch (cause) {
+    actionError.value = cause instanceof Error ? cause.message : String(cause);
+  }
+}
 
 const spec = computed(() => workload.data.value?.spec);
 const refs = computed(() => (spec.value ? references(spec.value) : []));
@@ -55,7 +85,44 @@ function healthLabel(instance: {
           {{ workload.data.value.runtime }} · version
           {{ workload.data.value.version }}
         </span>
+
+        <div class="ml-auto flex gap-2 text-sm">
+          <button
+            v-if="workload.data.value.suspended"
+            class="bg-ocean-600 hover:bg-ocean-700 rounded-md px-3 py-1.5 font-medium text-white"
+            @click="act(start)"
+          >
+            Start
+          </button>
+          <button
+            v-else
+            class="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+            @click="act(stop)"
+          >
+            Stop
+          </button>
+          <button
+            class="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+            :disabled="workload.data.value.suspended"
+            :title="
+              workload.data.value.suspended
+                ? 'A suspended workload has nothing to restart. Start it instead.'
+                : undefined
+            "
+            @click="act(restart)"
+          >
+            Restart
+          </button>
+          <button
+            class="rounded-md border border-rose-300 px-3 py-1.5 text-rose-700 hover:bg-rose-50 dark:border-rose-900 dark:text-rose-400 dark:hover:bg-rose-950"
+            @click="remove"
+          >
+            Delete
+          </button>
+        </div>
       </header>
+
+      <ErrorBanner v-if="actionError" :message="actionError" />
 
       <div
         v-if="workload.data.value.lastError"

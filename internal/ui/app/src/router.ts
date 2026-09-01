@@ -1,7 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
 
-import PlaceholderView from "./views/PlaceholderView.vue";
-
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -18,20 +16,17 @@ export const router = createRouter({
     {
       path: "/secrets",
       name: "secrets",
-      component: PlaceholderView,
-      props: { title: "Secrets" },
+      component: () => import("./views/SecretsView.vue"),
     },
     {
       path: "/variables",
       name: "variables",
-      component: PlaceholderView,
-      props: { title: "Variables" },
+      component: () => import("./views/VariablesView.vue"),
     },
     {
       path: "/volumes",
       name: "volumes",
-      component: PlaceholderView,
-      props: { title: "Volumes" },
+      component: () => import("./views/VolumesView.vue"),
     },
   ],
 });
