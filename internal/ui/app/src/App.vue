@@ -1,8 +1,20 @@
 <script setup lang="ts">
+import { useRoute } from "vue-router";
+
 import { version } from "../package.json";
 import { useReadiness } from "./api/queries";
 
+const route = useRoute();
 const readiness = useReadiness();
+
+// active reports whether a section owns the current page, so a detail page
+// keeps its section highlighted. Workload pages live under the root.
+function active(to: string): boolean {
+  if (to === "/") {
+    return route.path === "/" || route.path.startsWith("/workloads");
+  }
+  return route.path.startsWith(to);
+}
 
 // The version goreleaser wrote into package.json at release time. A build from
 // the repository still carries the placeholder, which reads better as "dev".
@@ -31,13 +43,19 @@ const navigation = [
         }}</span>
       </RouterLink>
 
-      <nav class="flex gap-1 px-2 pb-2 sm:flex-col sm:pb-0">
+      <nav
+        class="flex divide-slate-100 border-y border-slate-100 sm:flex-col sm:divide-y dark:divide-slate-800 dark:border-slate-800"
+      >
         <RouterLink
           v-for="item in navigation"
           :key="item.to"
           :to="item.to"
-          class="rounded-md px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-          exact-active-class="bg-ocean-50 text-ocean-800 hover:bg-ocean-50 hover:text-ocean-800 dark:bg-ocean-950 dark:text-ocean-200 dark:hover:bg-ocean-950 dark:hover:text-ocean-200"
+          class="px-4 py-2.5 text-sm font-medium"
+          :class="
+            active(item.to)
+              ? 'bg-ocean-50 text-ocean-800 dark:bg-ocean-950 dark:text-ocean-200'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100'
+          "
         >
           {{ item.name }}
         </RouterLink>
