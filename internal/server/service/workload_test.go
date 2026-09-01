@@ -947,6 +947,37 @@ func TestWorkloadService_Get_State(t *testing.T) {
 			},
 			Expected: state.Stopped,
 		},
+		{
+			// Running must not mask the failure: the workload serves traffic, and
+			// an operator reading the list still learns that part of it does not.
+			Name: "a failed sibling beside a running instance is degraded",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", Index: 0, State: driver.StateRunning},
+				{ID: "container-two", Workload: "example", Index: 1, State: driver.StateFailed, ExitCode: 1},
+			},
+			Expected: state.Degraded,
+		},
+		{
+			// A clean exit is a restart in progress rather than a failure, so it
+			// does not degrade the siblings still up.
+			Name: "a clean exit beside a running instance stays running",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", Index: 0, State: driver.StateRunning},
+				{ID: "container-two", Workload: "example", Index: 1, State: driver.StateExited},
+			},
+			Expected: state.Running,
+		},
+		{
+			// The failure is a sibling's own doing when another instance still
+			// runs, so a departing predecessor does not excuse it.
+			Name: "a failed sibling degrades a workload mid-replacement",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", Index: 0, State: driver.StateTerminating},
+				{ID: "container-two", Workload: "example", Index: 0, State: driver.StateRunning},
+				{ID: "container-three", Workload: "example", Index: 1, State: driver.StateFailed, ExitCode: 1},
+			},
+			Expected: state.Degraded,
+		},
 	}
 
 	for _, tc := range tt {

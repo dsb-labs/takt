@@ -22,6 +22,9 @@ const (
 	Pending Workload = "pending"
 	// Running is a workload with an instance up.
 	Running Workload = "running"
+	// Degraded is a workload with at least one instance up and at least one
+	// failed. It serves traffic, and part of it does not work.
+	Degraded Workload = "degraded"
 	// Terminating is a workload being torn down, or one whose instance is on its
 	// way out.
 	Terminating Workload = "terminating"
@@ -42,6 +45,7 @@ const (
 // something by all of them.
 var Workloads = []Workload{
 	Completed,
+	Degraded,
 	Failed,
 	Pending,
 	Running,
@@ -88,10 +92,13 @@ func Completion(instance driver.Instance, restart *manifest.Restart) driver.Stat
 // stopped nor completed would be true — the server does not intend to fix it, and
 // its restart policy did not ask for the end.
 //
-// Otherwise running wins: a workload whose replacement is already up while its
-// predecessor is still going away is running, not terminating. Then teardown in
-// progress is reported ahead of how the departing instance ended, since the exit is
-// a consequence of the teardown rather than news in its own right. Failure outranks
+// Otherwise running wins, with one exception: a running instance beside a failed
+// one reads as degraded, because the failure is a sibling's own doing rather than
+// a consequence of anything routine — and running would mask it. A clean exit or
+// a terminating predecessor beside a running instance stays running, since a
+// restart and a rolling replacement are both routine. Then teardown in progress
+// is reported ahead of how the departing instance ended, since the exit is a
+// consequence of the teardown rather than news in its own right. Failure outranks
 // a clean exit, and a workload with no instances at all is pending, because the
 // reconciler has yet to start it.
 func Of(instances []driver.Instance, deleting, suspended bool) Workload {
@@ -107,11 +114,11 @@ func Of(instances []driver.Instance, deleting, suspended bool) Workload {
 		return Pending
 	}
 
-	var terminating, failed, exited, completed bool
+	var running, terminating, failed, exited, completed bool
 	for _, instance := range instances {
 		switch instance.State {
 		case driver.StateRunning:
-			return Running
+			running = true
 		case driver.StateTerminating:
 			terminating = true
 		case driver.StateFailed:
@@ -127,6 +134,10 @@ func Of(instances []driver.Instance, deleting, suspended bool) Workload {
 	// and one failed instance is failed: the completion is true but it is not the fact
 	// an operator needs first.
 	switch {
+	case running && failed:
+		return Degraded
+	case running:
+		return Running
 	case terminating:
 		return Terminating
 	case failed:
