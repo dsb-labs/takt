@@ -32,3 +32,8 @@ export function relativeTime(instant: string): string {
 export function absoluteTime(instant: string): string {
   return new Date(instant).toLocaleString();
 }
+
+// pluralize renders a count with its noun: "1 workload", "3 workloads".
+export function pluralize(count: number, noun: string): string {
+  return count === 1 ? `1 ${noun}` : `${count} ${noun}s`;
+}

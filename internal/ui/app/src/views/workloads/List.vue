@@ -1,10 +1,17 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
+
 import { useWorkloads } from "../../api/queries";
+import QueryInput from "../../components/QueryInput.vue";
+import SortHeader from "../../components/SortHeader.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import { relativeTime } from "../../format";
+import { useSort } from "../../sort";
 import type { Workload } from "../../api/types";
 
-const workloads = useWorkloads();
+const filter = ref("");
+const queries = computed(() => filter.value.split(/\s+/).filter(Boolean));
+const workloads = useWorkloads(() => queries.value);
 
 function runningInstances(workload: Workload): string {
   const instances = workload.instances ?? [];
@@ -28,15 +35,23 @@ function health(workload: Workload): { label: string; style: string } | null {
   }
   return { label: "healthy", style: "text-emerald-700 dark:text-emerald-400" };
 }
+
+const sort = useSort(() => workloads.data.value, "name", {
+  name: (w) => w.name,
+  state: (w) => w.state,
+  health: (w) => health(w)?.label ?? "",
+  runtime: (w) => w.runtime,
+  instances: (w) => runningInstances(w),
+  nextRun: (w) => w.nextRun ?? "",
+});
 </script>
 
 <template>
   <div>
-    <h1 class="text-xl font-semibold">Workloads</h1>
-    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
-      Everything the server holds a specification for, and what each one is
-      doing.
-    </p>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h1 class="text-xl font-semibold">Workloads</h1>
+      <QueryInput v-model="filter" />
+    </div>
 
     <div
       v-if="workloads.isError.value"
@@ -52,14 +67,50 @@ function health(workload: Workload): { label: string; style: string } | null {
       <table class="w-full text-left text-sm">
         <thead>
           <tr
-            class="border-b border-slate-200 text-xs text-slate-500 uppercase dark:border-slate-800 dark:text-slate-400"
+            class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
           >
-            <th class="px-4 py-3 font-medium">Name</th>
-            <th class="px-4 py-3 font-medium">State</th>
-            <th class="px-4 py-3 font-medium">Health</th>
-            <th class="px-4 py-3 font-medium">Runtime</th>
-            <th class="px-4 py-3 font-medium">Instances</th>
-            <th class="px-4 py-3 font-medium">Next run</th>
+            <SortHeader
+              name="name"
+              :sort-key="sort.key.value"
+              :descending="sort.descending.value"
+              @sort="sort.toggle"
+              >Name</SortHeader
+            >
+            <SortHeader
+              name="state"
+              :sort-key="sort.key.value"
+              :descending="sort.descending.value"
+              @sort="sort.toggle"
+              >State</SortHeader
+            >
+            <SortHeader
+              name="health"
+              :sort-key="sort.key.value"
+              :descending="sort.descending.value"
+              @sort="sort.toggle"
+              >Health</SortHeader
+            >
+            <SortHeader
+              name="runtime"
+              :sort-key="sort.key.value"
+              :descending="sort.descending.value"
+              @sort="sort.toggle"
+              >Runtime</SortHeader
+            >
+            <SortHeader
+              name="instances"
+              :sort-key="sort.key.value"
+              :descending="sort.descending.value"
+              @sort="sort.toggle"
+              >Instances</SortHeader
+            >
+            <SortHeader
+              name="nextRun"
+              :sort-key="sort.key.value"
+              :descending="sort.descending.value"
+              @sort="sort.toggle"
+              >Next run</SortHeader
+            >
           </tr>
         </thead>
         <tbody>
@@ -71,16 +122,16 @@ function health(workload: Workload): { label: string; style: string } | null {
               Loading…
             </td>
           </tr>
-          <tr v-else-if="workloads.data.value?.length === 0">
+          <tr v-else-if="sort.sorted.value.length === 0">
             <td
               colspan="6"
               class="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
             >
-              No workloads. Apply a manifest with the CLI to create one.
+              No workloads.
             </td>
           </tr>
           <tr
-            v-for="workload in workloads.data.value"
+            v-for="workload in sort.sorted.value"
             :key="workload.name"
             class="border-b border-slate-100 last:border-b-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
           >
@@ -94,8 +145,6 @@ function health(workload: Workload): { label: string; style: string } | null {
             </td>
             <td class="px-4 py-3">
               <StateBadge :state="workload.state" />
-              <!-- The full text lives on the detail page. The dot says it is
-                   there without a column the error's length can distort. -->
               <span
                 v-if="workload.lastError"
                 class="ml-1.5 inline-block h-2 w-2 rounded-full bg-rose-500 align-middle"

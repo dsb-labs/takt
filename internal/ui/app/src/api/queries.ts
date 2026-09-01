@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/vue-query";
+import { computed } from "vue";
 
 import { client } from "./client";
 
@@ -7,12 +8,14 @@ import { client } from "./client";
 // to, and the reconciler itself only looks this often.
 export const pollInterval = 5000;
 
-export function useWorkloads() {
+export function useWorkloads(query: () => string[]) {
   return useQuery({
-    queryKey: ["workloads"],
+    queryKey: ["workloads", computed(query)],
     refetchInterval: pollInterval,
     queryFn: async () => {
-      const { data, error } = await client.GET("/api/v1/workloads");
+      const { data, error } = await client.GET("/api/v1/workloads", {
+        params: { query: { query: query() } },
+      });
       if (error) throw new Error(error.error);
       return data.workloads;
     },
@@ -21,7 +24,7 @@ export function useWorkloads() {
 
 export function useWorkload(name: () => string) {
   return useQuery({
-    queryKey: ["workloads", name],
+    queryKey: ["workloads", computed(name)],
     refetchInterval: pollInterval,
     queryFn: async () => {
       const { data, error } = await client.GET("/api/v1/workloads/{name}", {
@@ -33,36 +36,42 @@ export function useWorkload(name: () => string) {
   });
 }
 
-export function useSecrets() {
+export function useSecrets(query: () => string[]) {
   return useQuery({
-    queryKey: ["secrets"],
+    queryKey: ["secrets", computed(query)],
     refetchInterval: pollInterval,
     queryFn: async () => {
-      const { data, error } = await client.GET("/api/v1/secrets");
+      const { data, error } = await client.GET("/api/v1/secrets", {
+        params: { query: { query: query() } },
+      });
       if (error) throw new Error(error.error);
       return data.secrets;
     },
   });
 }
 
-export function useVariables() {
+export function useVariables(query: () => string[]) {
   return useQuery({
-    queryKey: ["variables"],
+    queryKey: ["variables", computed(query)],
     refetchInterval: pollInterval,
     queryFn: async () => {
-      const { data, error } = await client.GET("/api/v1/variables");
+      const { data, error } = await client.GET("/api/v1/variables", {
+        params: { query: { query: query() } },
+      });
       if (error) throw new Error(error.error);
       return data.variables;
     },
   });
 }
 
-export function useVolumes() {
+export function useVolumes(query: () => string[]) {
   return useQuery({
-    queryKey: ["volumes"],
+    queryKey: ["volumes", computed(query)],
     refetchInterval: pollInterval,
     queryFn: async () => {
-      const { data, error } = await client.GET("/api/v1/volumes");
+      const { data, error } = await client.GET("/api/v1/volumes", {
+        params: { query: { query: query() } },
+      });
       if (error) throw new Error(error.error);
       return data.volumes;
     },
@@ -71,7 +80,7 @@ export function useVolumes() {
 
 export function useSecret(name: () => string) {
   return useQuery({
-    queryKey: ["secrets", name],
+    queryKey: ["secrets", computed(name)],
     refetchInterval: pollInterval,
     queryFn: async () => {
       const { data, error } = await client.GET("/api/v1/secrets/{name}", {
@@ -85,7 +94,7 @@ export function useSecret(name: () => string) {
 
 export function useVariable(name: () => string) {
   return useQuery({
-    queryKey: ["variables", name],
+    queryKey: ["variables", computed(name)],
     refetchInterval: pollInterval,
     queryFn: async () => {
       const { data, error } = await client.GET("/api/v1/variables/{name}", {
@@ -99,7 +108,7 @@ export function useVariable(name: () => string) {
 
 export function useVolume(name: () => string) {
   return useQuery({
-    queryKey: ["volumes", name],
+    queryKey: ["volumes", computed(name)],
     refetchInterval: pollInterval,
     queryFn: async () => {
       const { data, error } = await client.GET("/api/v1/volumes/{name}", {

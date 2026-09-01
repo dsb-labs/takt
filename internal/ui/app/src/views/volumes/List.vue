@@ -1,33 +1,70 @@
 <script setup lang="ts">
-import { useVolumes } from "../../api/queries";
-import { absoluteTime, relativeTime } from "../../format";
+import { computed, ref } from "vue";
 
-const volumes = useVolumes();
+import { useVolumes } from "../../api/queries";
+import ErrorBanner from "../../components/ErrorBanner.vue";
+import QueryInput from "../../components/QueryInput.vue";
+import SortHeader from "../../components/SortHeader.vue";
+import { absoluteTime, pluralize, relativeTime } from "../../format";
+import { useSort } from "../../sort";
+
+const filter = ref("");
+const queries = computed(() => filter.value.split(/\s+/).filter(Boolean));
+const volumes = useVolumes(() => queries.value);
+
+const sort = useSort(() => volumes.data.value, "name", {
+  name: (v) => v.name,
+  created: (v) => v.createdAt,
+  usedBy: (v) => v.usedBy?.length ?? 0,
+});
 </script>
 
 <template>
   <div>
-    <h1 class="text-xl font-semibold">Volumes</h1>
-    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
-      Directories that outlive the workloads mounting them. Creation stays in
-      the CLI, where the manifest lives.
-    </p>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <h1 class="text-xl font-semibold">Volumes</h1>
+      <QueryInput v-model="filter" />
+    </div>
+
+    <ErrorBanner
+      v-if="volumes.isError.value"
+      :message="`Failed to list volumes: ${volumes.error.value?.message}`"
+    />
 
     <div
+      v-else
       class="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
     >
       <table class="w-full text-left text-sm">
         <thead>
           <tr
-            class="border-b border-slate-200 text-xs text-slate-500 uppercase dark:border-slate-800 dark:text-slate-400"
+            class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
           >
-            <th class="px-4 py-3 font-medium">Name</th>
-            <th class="px-4 py-3 font-medium">Created</th>
-            <th class="px-4 py-3 font-medium">Used by</th>
+            <SortHeader
+              name="name"
+              :sort-key="sort.key.value"
+              :descending="sort.descending.value"
+              @sort="sort.toggle"
+              >Name</SortHeader
+            >
+            <SortHeader
+              name="created"
+              :sort-key="sort.key.value"
+              :descending="sort.descending.value"
+              @sort="sort.toggle"
+              >Created</SortHeader
+            >
+            <SortHeader
+              name="usedBy"
+              :sort-key="sort.key.value"
+              :descending="sort.descending.value"
+              @sort="sort.toggle"
+              >Used by</SortHeader
+            >
           </tr>
         </thead>
         <tbody>
-          <tr v-if="volumes.data.value?.length === 0">
+          <tr v-if="sort.sorted.value.length === 0">
             <td
               colspan="3"
               class="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
@@ -36,7 +73,7 @@ const volumes = useVolumes();
             </td>
           </tr>
           <tr
-            v-for="volume in volumes.data.value"
+            v-for="volume in sort.sorted.value"
             :key="volume.name"
             class="border-b border-slate-100 last:border-b-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
           >
@@ -57,7 +94,7 @@ const volumes = useVolumes();
             <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
               {{
                 volume.usedBy?.length
-                  ? `${volume.usedBy.length} workloads`
+                  ? pluralize(volume.usedBy.length, "workload")
                   : "unused"
               }}
             </td>

@@ -31,9 +31,6 @@ async function save(name: string, value: string) {
     </nav>
 
     <h1 class="mt-4 text-xl font-semibold">Set a variable</h1>
-    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
-      Setting a name that already exists replaces its value.
-    </p>
 
     <div class="mt-6 max-w-2xl">
       <DetailCard title="Variable">
