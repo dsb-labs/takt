@@ -27,6 +27,24 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: internal/ui/app/yarn.lock
+
+      # The tagged version is written into package.json before the build so
+      # the UI shows it, and the file is restored afterwards: the bundle has
+      # already captured the version, and goreleaser refuses a dirty tree.
+      - name: Build the web ui
+        working-directory: internal/ui/app
+        run: |
+          yarn version --no-git-tag-version --new-version "${GITHUB_REF_NAME#v}"
+          yarn install --frozen-lockfile
+          yarn build
+          git checkout -- package.json
+
       - name: Run goreleaser
         uses: goreleaser/goreleaser-action@v7
         with:
