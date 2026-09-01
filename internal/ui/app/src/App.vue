@@ -76,6 +76,23 @@ const navigation = [
     </aside>
 
     <main class="min-w-0 flex-1 p-4 sm:p-8">
+      <!-- Visible rather than only the sidebar dot: a server that cannot do
+           its job is the context for everything else on the page. -->
+      <div
+        v-if="readiness.data.value && !readiness.data.value.ready"
+        class="mb-6 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300"
+      >
+        <p class="font-medium">The server is not ready.</p>
+        <ul
+          v-if="readiness.data.value.reasons?.length"
+          class="mt-1 list-inside list-disc"
+        >
+          <li v-for="reason in readiness.data.value.reasons" :key="reason">
+            {{ reason }}
+          </li>
+        </ul>
+      </div>
+
       <RouterView />
     </main>
   </div>
