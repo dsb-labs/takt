@@ -333,8 +333,10 @@ function healthLabel(instance: {
               >
                 <td class="px-4 py-2.5">{{ instance.index ?? 0 }}</td>
                 <td class="px-4 py-2.5 font-mono text-xs">
+                  <!-- Fixed to the width of the truncated ID, so the shorter
+                       "copied" text does not resize the table. -->
                   <button
-                    class="hover:text-ocean-700 dark:hover:text-ocean-300"
+                    class="hover:text-ocean-700 dark:hover:text-ocean-300 inline-block w-[12ch] text-left"
                     :title="`${instance.id} — click to copy`"
                     @click="copyID(instance.id)"
                   >
