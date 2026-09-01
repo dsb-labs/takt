@@ -627,6 +627,27 @@ func TestDriver_Stop(t *testing.T) {
 
 		require.NoError(t, d.Stop(t.Context(), "", "example"))
 	})
+
+	t.Run("keeps stopping past a container that fails", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "zero-only", Labels: map[string]string{docker.LabelInstance: "0", docker.LabelAttempt: "1"}},
+			{ID: "one-only", Labels: map[string]string{docker.LabelInstance: "1", docker.LabelAttempt: "1"}},
+		}, nil).Once()
+
+		// The first instance's stop fails, and the second is still stopped: a
+		// deadline under a saturated daemon must not throw the remaining
+		// instances back to the next pass unattempted. Nothing is removed —
+		// each instance's only container is its retained corpse.
+		client.EXPECT().ContainerStop(mock.Anything, "zero-only", mock.Anything).
+			Return(errors.New("context deadline exceeded")).Once()
+		client.EXPECT().ContainerStop(mock.Anything, "one-only", mock.Anything).Return(nil).Once()
+
+		d := testDriver(t, client)
+
+		assert.Error(t, d.Stop(t.Context(), "", "example"))
+	})
 }
 
 func TestDriver_StopInstance(t *testing.T) {
@@ -686,6 +707,27 @@ func TestDriver_Discard(t *testing.T) {
 		d := testDriver(t, client)
 
 		require.NoError(t, d.Discard(t.Context(), "", "example"))
+	})
+
+	t.Run("keeps discarding past a container that fails", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{ID: "container-one", Labels: map[string]string{docker.LabelAttempt: "1"}},
+			{ID: "container-two", Labels: map[string]string{docker.LabelAttempt: "2"}},
+		}, nil).Once()
+
+		// The first container's stop fails and the second is still discarded, so
+		// the progress a pass makes under a saturated daemon is kept rather than
+		// redone from the start on the next one.
+		client.EXPECT().ContainerStop(mock.Anything, "container-one", mock.Anything).
+			Return(errors.New("context deadline exceeded")).Once()
+		client.EXPECT().ContainerStop(mock.Anything, "container-two", mock.Anything).Return(nil).Once()
+		client.EXPECT().ContainerRemove(mock.Anything, "container-two", mock.Anything).Return(nil).Once()
+
+		d := testDriver(t, client)
+
+		assert.Error(t, d.Discard(t.Context(), "", "example"))
 	})
 
 	t.Run("removes one instance including what a stop retained for it", func(t *testing.T) {

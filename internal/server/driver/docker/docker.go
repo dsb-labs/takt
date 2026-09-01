@@ -289,10 +289,22 @@ func (d *Driver) StopInstance(ctx context.Context, _, workload string, instance 
 // fails with "container is running", which would leave the container behind for
 // every future pass to trip over. The stop is still issued first so the container
 // gets its grace period rather than being killed outright.
+//
+// One container failing does not stop the rest. A workload runs a container per
+// instance, and returning at the first failure — a deadline, under a saturated
+// daemon — would throw the remaining instances back to the next pass with the
+// work not even attempted. A container whose stop failed keeps its remnants for
+// that pass instead, so a forced remove never skips the grace period.
 func (d *Driver) stop(ctx context.Context, workload string, containers []container.Summary) error {
+	var failed []error
+
+	unstopped := make(map[string]struct{}, len(containers))
 	for _, c := range containers {
 		if err := d.client.ContainerStop(ctx, c.ID, container.StopOptions{}); err != nil {
-			return fmt.Errorf("failed to stop container: %w", err)
+			failed = append(failed, fmt.Errorf("failed to stop container: %w", err))
+			unstopped[c.ID] = struct{}{}
+
+			continue
 		}
 
 		d.logger.With("workload", workload, "container", c.ID).Debug("container stopped")
@@ -301,6 +313,10 @@ func (d *Driver) stop(ctx context.Context, workload string, containers []contain
 	superseded := supersededBy(containers)
 
 	for _, c := range containers {
+		if _, ok := unstopped[c.ID]; ok {
+			continue
+		}
+
 		if !superseded[c.ID] {
 			d.logger.With("workload", workload, "container", c.ID).Debug("retained a stopped container so its output survives")
 
@@ -308,11 +324,11 @@ func (d *Driver) stop(ctx context.Context, workload string, containers []contain
 		}
 
 		if err := d.remove(ctx, c.ID); err != nil {
-			return err
+			failed = append(failed, err)
 		}
 	}
 
-	return nil
+	return errors.Join(failed...)
 }
 
 // Discard stops and removes everything the driver holds for the named workload,
@@ -346,20 +362,29 @@ func (d *Driver) DiscardInstance(ctx context.Context, _, workload string, instan
 	return d.discard(ctx, workload, ofInstance(containers, instance))
 }
 
+// One container failing does not stop the rest, for the reason stop gives: the
+// containers already discarded stay discarded, so a pass under a saturated daemon
+// makes progress a deadline cannot take back.
 func (d *Driver) discard(ctx context.Context, workload string, containers []container.Summary) error {
+	var failed []error
+
 	for _, c := range containers {
 		if err := d.client.ContainerStop(ctx, c.ID, container.StopOptions{}); err != nil {
-			return fmt.Errorf("failed to stop container: %w", err)
+			failed = append(failed, fmt.Errorf("failed to stop container: %w", err))
+
+			continue
 		}
 
 		if err := d.remove(ctx, c.ID); err != nil {
-			return err
+			failed = append(failed, err)
+
+			continue
 		}
 
 		d.logger.With("workload", workload, "container", c.ID).Debug("container discarded")
 	}
 
-	return nil
+	return errors.Join(failed...)
 }
 
 func (d *Driver) remove(ctx context.Context, id string) error {
