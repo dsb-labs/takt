@@ -6,6 +6,7 @@ import { useDeleteVariable, useSetVariable } from "../../api/mutations";
 import { useVariable } from "../../api/queries";
 import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
+import LabelsCard from "../../components/LabelsCard.vue";
 import ErrorBanner from "../../components/ErrorBanner.vue";
 import UsedByLinks from "../../components/UsedByLinks.vue";
 import ValueForm from "../../components/ValueForm.vue";
@@ -90,6 +91,8 @@ async function save(_: string, value: string) {
             <UsedByLinks :used-by="variable.data.value.usedBy" />
           </div>
         </DetailCard>
+
+        <LabelsCard :labels="variable.data.value.labels" target="/variables" />
       </div>
 
       <div class="mt-6">

@@ -6,6 +6,7 @@ import { useDeleteWorkload, useWorkloadAction } from "../../api/mutations";
 import { useWorkload } from "../../api/queries";
 import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
+import LabelsCard from "../../components/LabelsCard.vue";
 import ErrorBanner from "../../components/ErrorBanner.vue";
 import LogViewer from "../../components/LogViewer.vue";
 import SpecView from "../../components/SpecView.vue";
@@ -287,6 +288,8 @@ function healthLabel(instance: {
             </div>
           </dl>
         </DetailCard>
+
+        <LabelsCard :labels="spec?.labels" target="/" />
       </div>
 
       <div class="mt-6 grid gap-6 xl:grid-cols-2">

@@ -6,6 +6,7 @@ import { useDeleteVolume } from "../../api/mutations";
 import { useVolume } from "../../api/queries";
 import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
+import LabelsCard from "../../components/LabelsCard.vue";
 import UsedByLinks from "../../components/UsedByLinks.vue";
 import { absoluteTime, relativeTime } from "../../format";
 
@@ -73,6 +74,8 @@ const deleteVolume = useDeleteVolume(() => name.value);
             <UsedByLinks :used-by="volume.data.value.usedBy" />
           </div>
         </DetailCard>
+
+        <LabelsCard :labels="volume.data.value.labels" target="/volumes" />
       </div>
     </template>
   </div>

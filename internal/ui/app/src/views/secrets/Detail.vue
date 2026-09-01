@@ -6,6 +6,7 @@ import { useDeleteSecret, useSetSecret } from "../../api/mutations";
 import { useSecret } from "../../api/queries";
 import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
+import LabelsCard from "../../components/LabelsCard.vue";
 import ErrorBanner from "../../components/ErrorBanner.vue";
 import UsedByLinks from "../../components/UsedByLinks.vue";
 import ValueForm from "../../components/ValueForm.vue";
@@ -98,6 +99,8 @@ async function rotate(_: string, value: string) {
             <UsedByLinks :used-by="secret.data.value.usedBy" />
           </div>
         </DetailCard>
+
+        <LabelsCard :labels="secret.data.value.labels" target="/secrets" />
       </div>
 
       <div class="mt-6">
