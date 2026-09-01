@@ -1,16 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-
 import { useWorkloads } from "../../api/queries";
 import QueryInput from "../../components/QueryInput.vue";
 import SortHeader from "../../components/SortHeader.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import { relativeTime } from "../../format";
+import { useQueryFilter } from "../../filter";
 import { useSort } from "../../sort";
 import type { Workload } from "../../api/types";
 
-const filter = ref("");
-const queries = computed(() => filter.value.split(/\s+/).filter(Boolean));
+const { filter, queries } = useQueryFilter();
 const workloads = useWorkloads(() => queries.value);
 
 function runningInstances(workload: Workload): string {

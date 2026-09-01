@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-
 import { useSecrets } from "../../api/queries";
 import ErrorBanner from "../../components/ErrorBanner.vue";
 import QueryInput from "../../components/QueryInput.vue";
 import SortHeader from "../../components/SortHeader.vue";
 import { absoluteTime, pluralize, relativeTime } from "../../format";
+import { useQueryFilter } from "../../filter";
 import { useSort } from "../../sort";
 
-const filter = ref("");
-const queries = computed(() => filter.value.split(/\s+/).filter(Boolean));
+const { filter, queries } = useQueryFilter();
 const secrets = useSecrets(() => queries.value);
 
 const sort = useSort(() => secrets.data.value, "name", {
