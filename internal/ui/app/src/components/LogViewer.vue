@@ -6,6 +6,10 @@ import Tooltip from "./Tooltip.vue";
 const props = defineProps<{ workload: string; count: number }>();
 
 const tail = ref(100);
+// How far back to read, in minutes. Zero reads everything the tail allows.
+// The server applies this to container workloads and ignores it for exec
+// ones, whose output carries no timestamps to filter on.
+const since = ref(0);
 const instance = ref<"all" | number>("all");
 const previous = ref(false);
 const follow = ref(false);
@@ -30,6 +34,12 @@ let controller: AbortController | undefined;
 function params(): string {
   const query = new URLSearchParams();
   query.set("tail", String(tail.value));
+  if (since.value > 0) {
+    query.set(
+      "since",
+      new Date(Date.now() - since.value * 60_000).toISOString(),
+    );
+  }
   if (instance.value !== "all") query.set("instance", String(instance.value));
   if (previous.value) query.set("previous", "true");
   if (follow.value) query.set("follow", "true");
@@ -116,7 +126,7 @@ watch(followDisabled, (disabled) => {
   if (disabled) follow.value = false;
 });
 
-watch([tail, instance, previous, follow], () => void load());
+watch([tail, since, instance, previous, follow], () => void load());
 
 void load();
 
@@ -155,6 +165,26 @@ onUnmounted(() => controller?.abort());
           <option :value="10000">10000</option>
         </select>
       </label>
+
+      <Tooltip
+        text="Container workloads only. Exec output carries no timestamps to filter on."
+      >
+        <label
+          class="flex items-center gap-1.5 text-slate-600 dark:text-slate-400"
+        >
+          Since
+          <select
+            v-model.number="since"
+            class="rounded-md border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-800"
+          >
+            <option :value="0">start</option>
+            <option :value="5">5m</option>
+            <option :value="15">15m</option>
+            <option :value="60">1h</option>
+            <option :value="1440">24h</option>
+          </select>
+        </label>
+      </Tooltip>
 
       <label
         class="flex items-center gap-1.5 text-slate-600 dark:text-slate-400"
