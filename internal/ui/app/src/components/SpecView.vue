@@ -21,6 +21,9 @@ const highlighted = computed(
 </script>
 
 <template>
+  <!-- The highlighter escapes the content, so the markup carries only its own
+       token spans. -->
+  <!-- eslint-disable vue/no-v-html -->
   <pre
     class="overflow-auto bg-slate-950 px-4 py-3 font-mono text-xs leading-relaxed text-slate-200"
   ><code v-html="highlighted"></code></pre>

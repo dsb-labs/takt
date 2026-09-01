@@ -233,23 +233,23 @@ function healthLabel(instance: {
           <table v-else class="w-full text-left text-sm">
             <tbody>
               <tr
-                v-for="(ref, index) in refs"
+                v-for="(reference, index) in refs"
                 :key="index"
                 class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
               >
                 <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
-                  {{ ref.kind }}
+                  {{ reference.kind }}
                 </td>
                 <td class="px-4 py-2.5 font-medium">
                   <RouterLink
-                    :to="referenceTarget(ref)"
+                    :to="referenceTarget(reference)"
                     class="text-ocean-700 dark:text-ocean-300 hover:underline"
                   >
-                    {{ ref.name }}
+                    {{ reference.name }}
                   </RouterLink>
                 </td>
                 <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
-                  {{ ref.via }}
+                  {{ reference.via }}
                 </td>
               </tr>
             </tbody>
