@@ -1,7 +1,12 @@
 <script setup lang="ts">
+import { version } from "../package.json";
 import { useReadiness } from "./api/queries";
 
 const readiness = useReadiness();
+
+// The version goreleaser wrote into package.json at release time. A build from
+// the repository still carries the placeholder, which reads better as "dev".
+const displayVersion = version === "0.0.0" ? "dev" : `v${version}`;
 
 const navigation = [
   { name: "Workloads", to: "/" },
@@ -21,6 +26,9 @@ const navigation = [
       <RouterLink to="/" class="flex items-center gap-2.5 px-4 py-4">
         <img src="/orca.svg" alt="" class="h-7 w-7" />
         <span class="text-lg font-semibold tracking-tight">orca</span>
+        <span class="mt-0.5 text-xs text-slate-400 dark:text-slate-500">{{
+          displayVersion
+        }}</span>
       </RouterLink>
 
       <nav class="flex gap-1 px-2 pb-2 sm:flex-col sm:pb-0">
