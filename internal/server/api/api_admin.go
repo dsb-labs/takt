@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/orca/internal/server/middleware"
 	"github.com/dsb-labs/orca/internal/server/service"
 )
 
@@ -83,7 +84,7 @@ func (a *AdminAPI) GetBackup(ctx context.Context, request api.GetBackupRequestOb
 		// The connection's own writer, which is the only one that can be given a
 		// deadline. Nil when nothing put it there, and the transfer then lives
 		// under whatever deadline the server set for every request.
-		conn: Connection(ctx),
+		conn: middleware.Connection(ctx),
 	}, nil
 }
 

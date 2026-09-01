@@ -1,82 +1,18 @@
-package api_test
+package middleware_test
 
 import (
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/api"
+	"github.com/dsb-labs/orca/internal/server/middleware"
 )
-
-func TestLimit(t *testing.T) {
-	t.Parallel()
-
-	// The handler reads the body the way a real one does, so the limit is exercised
-	// where it actually bites rather than asserted on in isolation.
-	read := func(w http.ResponseWriter, r *http.Request) {
-		if _, err := io.ReadAll(r.Body); err != nil {
-			w.WriteHeader(http.StatusRequestEntityTooLarge)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-	}
-
-	tt := []struct {
-		Name         string
-		Body         string
-		ExpectStatus int
-	}{
-		{
-			Name:         "accepts a body within the limit",
-			Body:         strings.Repeat("a", 1024),
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			Name: "refuses a body over the limit",
-			// A specification is a hand-written document, so anything past a
-			// megabyte is either a mistake or an attempt to see how much the server
-			// will hold.
-			Body:         strings.Repeat("a", (1<<20)+1),
-			ExpectStatus: http.StatusRequestEntityTooLarge,
-		},
-	}
-
-	for _, tc := range tt {
-		t.Run(tc.Name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPut, "/api/v1/workloads/example", strings.NewReader(tc.Body))
-			resp := httptest.NewRecorder()
-
-			api.Limit(http.HandlerFunc(read)).ServeHTTP(resp, req)
-
-			assert.Equal(t, tc.ExpectStatus, resp.Code)
-		})
-	}
-}
-
-func TestLimit_NoBody(t *testing.T) {
-	t.Parallel()
-
-	// A GET carries no body, and wrapping a nil one would panic rather than limit
-	// anything.
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/workloads", nil)
-	resp := httptest.NewRecorder()
-
-	var called bool
-	api.Limit(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		called = true
-	})).ServeHTTP(resp, req)
-
-	require.True(t, called)
-}
 
 func TestWrap(t *testing.T) {
 	t.Parallel()
@@ -157,7 +93,7 @@ func TestWrap(t *testing.T) {
 			resp := httptest.NewRecorder()
 			logger := slog.New(slog.NewTextHandler(t.Output(), nil))
 
-			api.Wrap(handler, logger, nil).ServeHTTP(resp, req)
+			middleware.Wrap(handler, logger, nil).ServeHTTP(resp, req)
 
 			assert.Equal(t, tc.ExpectStatus, resp.Code)
 		})
@@ -186,48 +122,9 @@ func TestWrap_LetsAHandlerFlush(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workloads/example/logs", nil)
 	req.Host = "127.0.0.1:7373"
 
-	api.Wrap(handler, logger, nil).ServeHTTP(httptest.NewRecorder(), req)
+	middleware.Wrap(handler, logger, nil).ServeHTTP(httptest.NewRecorder(), req)
 
 	require.NoError(t, flushed)
-}
-
-// TestStream_LetsAHandlerClearTheWriteDeadline covers what the outermost middleware
-// exists for.
-//
-// A followed log read is open for as long as its workload runs, which is longer than
-// the deadline the server sets for a request that answers and stops. Unlike a flush,
-// there is no reaching past the wrappers for this: http.ResponseController stops at the
-// first one that cannot unwrap, so the writer has to be kept aside before any of them
-// take it.
-//
-// A real server rather than a recorder, since a recorder has no deadline to clear and
-// would pass whether the middleware worked or not.
-func TestStream_LetsAHandlerClearTheWriteDeadline(t *testing.T) {
-	t.Parallel()
-
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	cleared := make(chan error, 1)
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn := api.Connection(r.Context())
-		if conn == nil {
-			cleared <- errors.New("the connection's own writer never reached the handler")
-
-			return
-		}
-
-		cleared <- http.NewResponseController(conn).SetWriteDeadline(time.Time{})
-	})
-
-	server := httptest.NewServer(api.Stream(api.Wrap(handler, logger, nil)))
-	t.Cleanup(server.Close)
-
-	resp, err := server.Client().Get(server.URL + "/api/v1/workloads/example/logs")
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-
-	require.NoError(t, <-cleared)
 }
 
 func TestWrap_RecoveryIsLogged(t *testing.T) {
@@ -244,7 +141,7 @@ func TestWrap_RecoveryIsLogged(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(&recorded, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	api.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	middleware.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic("something a handler did not expect")
 	}), logger, nil).ServeHTTP(resp, req)
 
@@ -255,208 +152,4 @@ func TestWrap_RecoveryIsLogged(t *testing.T) {
 	assert.Contains(t, logged, "something a handler did not expect")
 	assert.Contains(t, logged, "http request")
 	assert.Contains(t, logged, "status=500")
-}
-
-func TestGuard(t *testing.T) {
-	t.Parallel()
-
-	tt := []struct {
-		Name         string
-		Path         string
-		Host         string
-		Origin       string
-		Permitted    []string
-		ExpectStatus int
-	}{
-		{
-			Name:         "accepts the loopback address the server listens on",
-			Host:         "127.0.0.1:7373",
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			Name:         "accepts localhost",
-			Host:         "localhost:7373",
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			Name: "accepts an address literal on any interface",
-			// Reaching orca by an address means the caller knew where it was, and an
-			// address is not something an attacker can point at a victim's loopback.
-			Host:         "10.0.0.5:7373",
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			Name:         "accepts an IPv6 literal",
-			Host:         "[::1]:7373",
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			Name: "refuses a name the operator did not permit",
-			// The DNS rebinding case: the attacker owns the name, points it at
-			// 127.0.0.1, and the browser sends this on behalf of a page the operator
-			// merely visited.
-			Host:         "orca.evil.example.com:7373",
-			ExpectStatus: http.StatusMisdirectedRequest,
-		},
-		{
-			Name:         "accepts a name the operator permitted",
-			Host:         "orca.internal:7373",
-			Permitted:    []string{"orca.internal"},
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			Name:         "compares a permitted name without regard to case",
-			Host:         "ORCA.Internal:7373",
-			Permitted:    []string{"orca.internal"},
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			Name:         "refuses an empty host",
-			Host:         "",
-			ExpectStatus: http.StatusMisdirectedRequest,
-		},
-		{
-			Name: "refuses a scrape addressed by an unpermitted hostname",
-			// The guard covers /metrics like everything else: a scraper that
-			// targets orca by hostname needs the name in the configuration,
-			// while one targeting an address always passes. Pinned here because
-			// a scrape failing with a 421 is otherwise confusing to debug.
-			Path:         "/api/v1/metrics",
-			Host:         "orca.internal:7373",
-			ExpectStatus: http.StatusMisdirectedRequest,
-		},
-		{
-			Name: "refuses a cross-origin request",
-			// No page legitimately speaks to this API, so an Origin naming somewhere
-			// else is a page acting on its own behalf.
-			Host:         "127.0.0.1:7373",
-			Origin:       "http://evil.example.com",
-			ExpectStatus: http.StatusForbidden,
-		},
-		{
-			Name:         "accepts an origin naming the server itself",
-			Host:         "127.0.0.1:7373",
-			Origin:       "http://127.0.0.1:7373",
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			Name: "refuses an opaque origin",
-			// What a sandboxed page sends. It names nowhere this API is served from.
-			Host:         "127.0.0.1:7373",
-			Origin:       "null",
-			ExpectStatus: http.StatusForbidden,
-		},
-	}
-
-	for _, tc := range tt {
-		t.Run(tc.Name, func(t *testing.T) {
-			path := tc.Path
-			if path == "" {
-				path = "/api/v1/workloads"
-			}
-
-			req := httptest.NewRequest(http.MethodGet, path, nil)
-			req.Host = tc.Host
-
-			if tc.Origin != "" {
-				req.Header.Set("Origin", tc.Origin)
-			}
-
-			resp := httptest.NewRecorder()
-			logger := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError}))
-
-			api.Guard(logger, tc.Permitted)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusOK)
-			})).ServeHTTP(resp, req)
-
-			assert.Equal(t, tc.ExpectStatus, resp.Code)
-		})
-	}
-}
-
-func TestRequireJSON(t *testing.T) {
-	t.Parallel()
-
-	tt := []struct {
-		Name         string
-		Method       string
-		ContentType  string
-		NoBody       bool
-		ExpectStatus int
-	}{
-		{
-			Name:         "accepts a json body",
-			Method:       http.MethodPut,
-			ContentType:  "application/json",
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			Name:         "accepts a json body declaring a charset",
-			Method:       http.MethodPut,
-			ContentType:  "application/json; charset=utf-8",
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			Name: "refuses a plain text body",
-			// One of the content types a browser sends across origins without asking
-			// permission first, which is what makes requiring json worth doing.
-			Method:       http.MethodPost,
-			ContentType:  "text/plain",
-			ExpectStatus: http.StatusUnsupportedMediaType,
-		},
-		{
-			Name:         "refuses a form encoded body",
-			Method:       http.MethodPost,
-			ContentType:  "application/x-www-form-urlencoded",
-			ExpectStatus: http.StatusUnsupportedMediaType,
-		},
-		{
-			Name:         "refuses a body declaring nothing",
-			Method:       http.MethodPut,
-			ContentType:  "",
-			ExpectStatus: http.StatusUnsupportedMediaType,
-		},
-		{
-			Name:         "lets a request with no body through",
-			Method:       http.MethodGet,
-			ExpectStatus: http.StatusOK,
-		},
-		{
-			// Every write this API serves carries a JSON object, including a rekey,
-			// which sends an empty one. A bodyless POST is therefore never a request
-			// this API meant to serve, and it is one a browser may send across
-			// origins without asking permission first.
-			Name:         "refuses a post with no body",
-			Method:       http.MethodPost,
-			NoBody:       true,
-			ExpectStatus: http.StatusUnsupportedMediaType,
-		},
-		{
-			Name:         "lets a delete through",
-			Method:       http.MethodDelete,
-			ExpectStatus: http.StatusOK,
-		},
-	}
-
-	for _, tc := range tt {
-		t.Run(tc.Name, func(t *testing.T) {
-			body := "{}"
-			if tc.NoBody {
-				body = ""
-			}
-
-			req := httptest.NewRequest(tc.Method, "/api/v1/workloads/example", strings.NewReader(body))
-			if tc.ContentType != "" {
-				req.Header.Set("Content-Type", tc.ContentType)
-			}
-
-			resp := httptest.NewRecorder()
-
-			api.RequireJSON(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusOK)
-			})).ServeHTTP(resp, req)
-
-			assert.Equal(t, tc.ExpectStatus, resp.Code)
-		})
-	}
 }

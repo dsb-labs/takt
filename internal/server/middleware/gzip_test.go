@@ -1,4 +1,4 @@
-package api_test
+package middleware_test
 
 import (
 	"compress/gzip"
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/api"
+	"github.com/dsb-labs/orca/internal/server/middleware"
 )
 
 func TestGzip(t *testing.T) {
@@ -92,7 +92,7 @@ func TestGzip(t *testing.T) {
 			}
 
 			w := httptest.NewRecorder()
-			api.Gzip(tc.Handler).ServeHTTP(w, req)
+			middleware.Gzip(tc.Handler).ServeHTTP(w, req)
 
 			assert.Equal(t, tc.ExpectEncoding, w.Header().Get("Content-Encoding"))
 
@@ -122,7 +122,7 @@ func TestGzip(t *testing.T) {
 func TestGzip_Flush(t *testing.T) {
 	t.Parallel()
 
-	handler := api.Gzip(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := middleware.Gzip(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("first line\n"))
 		require.NoError(t, http.NewResponseController(w).Flush())
 	}))

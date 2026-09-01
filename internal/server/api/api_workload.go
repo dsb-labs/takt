@@ -11,6 +11,7 @@ import (
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/orca/internal/server/middleware"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/service"
 	"github.com/dsb-labs/orca/internal/wire"
@@ -507,7 +508,7 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 		// The connection's own writer, which is the only one that can be given a
 		// deadline. Nil when nothing put it there, and the read then lives under
 		// whatever deadline the server set for every request.
-		conn: Connection(ctx),
+		conn: middleware.Connection(ctx),
 		write: func(w io.Writer) error {
 			return a.workloads.Logs(ctx, w, request.Name, options)
 		},

@@ -25,6 +25,7 @@ import (
 	"github.com/dsb-labs/orca/internal/server/driver/docker"
 	"github.com/dsb-labs/orca/internal/server/driver/exec"
 	"github.com/dsb-labs/orca/internal/server/health"
+	"github.com/dsb-labs/orca/internal/server/middleware"
 	"github.com/dsb-labs/orca/internal/server/mount"
 	"github.com/dsb-labs/orca/internal/server/port"
 	"github.com/dsb-labs/orca/internal/server/reconciler"
@@ -334,7 +335,7 @@ func Run(ctx context.Context, config Config) error {
 		// Outside the telemetry handler, which is the only place a handler can still
 		// reach the connection's own writer: everything below wraps it, and none of
 		// those wrappers carries a write deadline.
-		Handler: api.Stream(otelhttp.NewHandler(api.Wrap(mux, logger, config.HTTP.Hosts), "orca",
+		Handler: middleware.Stream(otelhttp.NewHandler(middleware.Wrap(mux, logger, config.HTTP.Hosts), "orca",
 			otelhttp.WithMeterProvider(tel.MeterProvider()),
 			otelhttp.WithTracerProvider(tel.TracerProvider()),
 			otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(
