@@ -2,14 +2,14 @@
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { useDeleteVariable, useSetVariable } from "../api/mutations";
-import { useVariable } from "../api/queries";
-import DeleteControl from "../components/DeleteControl.vue";
-import DetailCard from "../components/DetailCard.vue";
-import ErrorBanner from "../components/ErrorBanner.vue";
-import UsedByLinks from "../components/UsedByLinks.vue";
-import ValueForm from "../components/ValueForm.vue";
-import { absoluteTime, relativeTime } from "../format";
+import { useDeleteVariable, useSetVariable } from "../../api/mutations";
+import { useVariable } from "../../api/queries";
+import DeleteControl from "../../components/DeleteControl.vue";
+import DetailCard from "../../components/DetailCard.vue";
+import ErrorBanner from "../../components/ErrorBanner.vue";
+import UsedByLinks from "../../components/UsedByLinks.vue";
+import ValueForm from "../../components/ValueForm.vue";
+import { absoluteTime, relativeTime } from "../../format";
 
 const route = useRoute();
 const router = useRouter();

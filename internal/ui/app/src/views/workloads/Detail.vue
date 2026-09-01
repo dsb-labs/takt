@@ -2,16 +2,16 @@
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { useDeleteWorkload, useWorkloadAction } from "../api/mutations";
-import { useWorkload } from "../api/queries";
-import DeleteControl from "../components/DeleteControl.vue";
-import DetailCard from "../components/DetailCard.vue";
-import ErrorBanner from "../components/ErrorBanner.vue";
-import LogViewer from "../components/LogViewer.vue";
-import StateBadge from "../components/StateBadge.vue";
-import Tooltip from "../components/Tooltip.vue";
-import { absoluteTime, relativeTime } from "../format";
-import { referenceTarget, references } from "../references";
+import { useDeleteWorkload, useWorkloadAction } from "../../api/mutations";
+import { useWorkload } from "../../api/queries";
+import DeleteControl from "../../components/DeleteControl.vue";
+import DetailCard from "../../components/DetailCard.vue";
+import ErrorBanner from "../../components/ErrorBanner.vue";
+import LogViewer from "../../components/LogViewer.vue";
+import StateBadge from "../../components/StateBadge.vue";
+import Tooltip from "../../components/Tooltip.vue";
+import { absoluteTime, relativeTime } from "../../format";
+import { referenceTarget, references } from "../../references";
 
 const route = useRoute();
 const name = computed(() => route.params.name as string);

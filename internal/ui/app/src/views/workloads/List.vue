@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { useWorkloads } from "../api/queries";
-import StateBadge from "../components/StateBadge.vue";
-import { relativeTime } from "../format";
-import type { Workload } from "../api/types";
+import { useWorkloads } from "../../api/queries";
+import StateBadge from "../../components/StateBadge.vue";
+import { relativeTime } from "../../format";
+import type { Workload } from "../../api/types";
 
 const workloads = useWorkloads();
 

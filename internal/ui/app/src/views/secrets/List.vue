@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { useSecrets } from "../api/queries";
-import { absoluteTime, relativeTime } from "../format";
+import { useSecrets } from "../../api/queries";
+import { absoluteTime, relativeTime } from "../../format";
 
 const secrets = useSecrets();
 </script>

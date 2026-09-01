@@ -5,53 +5,53 @@ export const router = createRouter({
   routes: [
     {
       path: "/",
-      name: "dashboard",
-      component: () => import("./views/DashboardView.vue"),
+      name: "workloads",
+      component: () => import("./views/workloads/List.vue"),
     },
     {
       path: "/workloads/:name",
       name: "workload",
-      component: () => import("./views/WorkloadView.vue"),
+      component: () => import("./views/workloads/Detail.vue"),
     },
     {
       path: "/secrets",
       name: "secrets",
-      component: () => import("./views/SecretsView.vue"),
+      component: () => import("./views/secrets/List.vue"),
     },
     {
       path: "/secrets/new",
       name: "secret-new",
-      component: () => import("./views/SecretNewView.vue"),
+      component: () => import("./views/secrets/New.vue"),
     },
     {
       path: "/secrets/:name",
       name: "secret",
-      component: () => import("./views/SecretView.vue"),
+      component: () => import("./views/secrets/Detail.vue"),
     },
     {
       path: "/variables",
       name: "variables",
-      component: () => import("./views/VariablesView.vue"),
+      component: () => import("./views/variables/List.vue"),
     },
     {
       path: "/variables/new",
       name: "variable-new",
-      component: () => import("./views/VariableNewView.vue"),
+      component: () => import("./views/variables/New.vue"),
     },
     {
       path: "/variables/:name",
       name: "variable",
-      component: () => import("./views/VariableView.vue"),
+      component: () => import("./views/variables/Detail.vue"),
     },
     {
       path: "/volumes",
       name: "volumes",
-      component: () => import("./views/VolumesView.vue"),
+      component: () => import("./views/volumes/List.vue"),
     },
     {
       path: "/volumes/:name",
       name: "volume",
-      component: () => import("./views/VolumeView.vue"),
+      component: () => import("./views/volumes/Detail.vue"),
     },
   ],
 });

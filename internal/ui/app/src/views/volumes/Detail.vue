@@ -2,12 +2,12 @@
 import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { useDeleteVolume } from "../api/mutations";
-import { useVolume } from "../api/queries";
-import DeleteControl from "../components/DeleteControl.vue";
-import DetailCard from "../components/DetailCard.vue";
-import UsedByLinks from "../components/UsedByLinks.vue";
-import { absoluteTime, relativeTime } from "../format";
+import { useDeleteVolume } from "../../api/mutations";
+import { useVolume } from "../../api/queries";
+import DeleteControl from "../../components/DeleteControl.vue";
+import DetailCard from "../../components/DetailCard.vue";
+import UsedByLinks from "../../components/UsedByLinks.vue";
+import { absoluteTime, relativeTime } from "../../format";
 
 const route = useRoute();
 const router = useRouter();

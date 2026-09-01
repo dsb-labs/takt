@@ -1,17 +1,26 @@
 <script setup lang="ts">
-import { useVolumes } from "../api/queries";
-import { absoluteTime, relativeTime } from "../format";
+import { useVariables } from "../../api/queries";
+import { absoluteTime, relativeTime } from "../../format";
 
-const volumes = useVolumes();
+const variables = useVariables();
 </script>
 
 <template>
   <div>
-    <h1 class="text-xl font-semibold">Volumes</h1>
-    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
-      Directories that outlive the workloads mounting them. Creation stays in
-      the CLI, where the manifest lives.
-    </p>
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-xl font-semibold">Variables</h1>
+        <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
+          Plain configuration values workloads read by reference.
+        </p>
+      </div>
+      <RouterLink
+        to="/variables/new"
+        class="bg-ocean-600 hover:bg-ocean-700 rounded-md px-3 py-1.5 text-sm font-medium text-white"
+      >
+        Set a variable
+      </RouterLink>
+    </div>
 
     <div
       class="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
@@ -22,42 +31,42 @@ const volumes = useVolumes();
             class="border-b border-slate-200 text-xs text-slate-500 uppercase dark:border-slate-800 dark:text-slate-400"
           >
             <th class="px-4 py-3 font-medium">Name</th>
-            <th class="px-4 py-3 font-medium">Created</th>
+            <th class="px-4 py-3 font-medium">Updated</th>
             <th class="px-4 py-3 font-medium">Used by</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-if="volumes.data.value?.length === 0">
+          <tr v-if="variables.data.value?.length === 0">
             <td
               colspan="3"
               class="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
             >
-              No volumes. Apply a volume manifest with the CLI to create one.
+              No variables.
             </td>
           </tr>
           <tr
-            v-for="volume in volumes.data.value"
-            :key="volume.name"
+            v-for="variable in variables.data.value"
+            :key="variable.name"
             class="border-b border-slate-100 last:border-b-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
           >
             <td class="px-4 py-3 font-medium">
               <RouterLink
-                :to="`/volumes/${volume.name}`"
+                :to="`/variables/${variable.name}`"
                 class="text-ocean-700 dark:text-ocean-300 hover:underline"
               >
-                {{ volume.name }}
+                {{ variable.name }}
               </RouterLink>
             </td>
             <td
               class="px-4 py-3 text-slate-600 dark:text-slate-400"
-              :title="absoluteTime(volume.createdAt)"
+              :title="absoluteTime(variable.updatedAt)"
             >
-              {{ relativeTime(volume.createdAt) }}
+              {{ relativeTime(variable.updatedAt) }}
             </td>
             <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
               {{
-                volume.usedBy?.length
-                  ? `${volume.usedBy.length} workloads`
+                variable.usedBy?.length
+                  ? `${variable.usedBy.length} workloads`
                   : "unused"
               }}
             </td>
