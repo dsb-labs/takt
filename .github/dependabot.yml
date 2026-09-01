@@ -12,3 +12,7 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+  - package-ecosystem: npm
+    directory: "/internal/ui/app"
+    schedule:
+      interval: weekly

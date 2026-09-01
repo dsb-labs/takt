@@ -1,0 +1,50 @@
+name: ui
+
+concurrency:
+  group: ${{ github.workflow }}/${{ github.ref_name }}
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'internal/ui/**'
+      - 'api/openapi.yaml'
+      - '.github/workflows/ui.yml'
+  pull_request:
+    paths:
+      - 'internal/ui/**'
+      - 'api/openapi.yaml'
+      - '.github/workflows/ui.yml'
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: internal/ui/app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          cache-dependency-path: internal/ui/app/yarn.lock
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Check formatting
+        run: yarn format:check
+
+      - name: Run generators
+        run: |
+          yarn generate
+          git add .
+          git diff --staged --exit-code
+
+      - name: Build
+        run: yarn build
