@@ -38,6 +38,10 @@ work nothing asked for sees everything, and convergence sees only what is live.
 
 ## Reconciliation
 
+[Reconciliation](reconciliation.md) walks through the mechanics — when a pass
+runs, the order it works in, and how one workload moves through it. This section
+gives the shape.
+
 A pass reads the full desired state, asks every driver what it is running, and acts on
 the difference:
 
