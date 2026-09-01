@@ -2,6 +2,9 @@ module github.com/dsb-labs/orca
 
 go 1.26
 
+// The UI toolchain vendors packages that ship Go files of their own.
+ignore ./internal/ui/app/node_modules
+
 tool (
 	github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen
 	github.com/vektra/mockery/v3
