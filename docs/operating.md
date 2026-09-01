@@ -642,7 +642,9 @@ The metrics to alert on first:
 - `orca_reconcile_passes_total` stops increasing when the reconciler has stopped
   converging, which is exactly the failure a log does not surface.
 - `orca_workloads{state="failed"}` counts workloads in the failed state, derived
-  by the same rules `orca workload get` reports.
+  by the same rules `orca workload get` reports. `state="degraded"` counts the
+  workloads still serving with a failed instance among them, which is the earlier
+  warning for a workload running several.
 - `orca_ports_used` against `orca_ports_capacity` warns before an apply fails
   with no free port. Usage carries a `protocol` label, because the range holds as
   many UDP ports as TCP ones.

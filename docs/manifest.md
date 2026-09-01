@@ -101,8 +101,9 @@ count: 3
 
 How many instances of the workload to run. One when omitted. Each instance is
 converged on its own: it is started, health-checked, restarted and replaced
-independently, so one instance crashing does not touch the others. A specification
-change rolls across the instances one reconcile pass at a time.
+independently, so one instance crashing does not touch the others. While one is
+down and a sibling still runs, the workload reports the `degraded` state. A
+specification change rolls across the instances one reconcile pass at a time.
 
 Each instance publishes the workload's ports on host ports of its own, which is why
 a count above one cannot be combined with a pinned `from`: one host port cannot

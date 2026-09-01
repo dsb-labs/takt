@@ -708,6 +708,7 @@ opens nothing the node holds. See
 |---|---|
 | `pending` | Nothing is running yet. |
 | `running` | The workload's instances are up. |
+| `degraded` | At least one instance is up and at least one has failed. |
 | `terminating` | The workload is being torn down. |
 | `stopped` | An instance ended cleanly, and the restart policy will run it again. |
 | `completed` | The workload ended, and its restart policy asks for nothing more. |
