@@ -4,6 +4,27 @@
  * The orca palette. Surfaces are near-black and white like the animal, and the
  * accent is the deep ocean blue between them.
  */
+/*
+ * Highlighting for the YAML specification view, over the same dark surface
+ * the log view uses in both colour schemes.
+ */
+.hljs-attr {
+  color: var(--color-ocean-300);
+}
+
+.hljs-string {
+  color: var(--color-emerald-300);
+}
+
+.hljs-number,
+.hljs-literal {
+  color: var(--color-amber-300);
+}
+
+.hljs-comment {
+  color: var(--color-slate-500);
+}
+
 @theme {
   --color-ocean-50: oklch(0.97 0.01 240);
   --color-ocean-100: oklch(0.93 0.02 240);

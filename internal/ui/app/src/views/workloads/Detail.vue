@@ -8,6 +8,7 @@ import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
 import ErrorBanner from "../../components/ErrorBanner.vue";
 import LogViewer from "../../components/LogViewer.vue";
+import SpecView from "../../components/SpecView.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import Tooltip from "../../components/Tooltip.vue";
 import { absoluteTime, relativeTime } from "../../format";
@@ -41,21 +42,29 @@ const command = computed(() => {
   return runtime?.command?.join(" ");
 });
 
-// check describes what the health check does, with the defaults the server
-// applies when the specification leaves a field unset.
+// check lists what the health check does as rows, with the defaults the
+// server applies when the specification leaves a field unset.
 const check = computed(() => {
   const health = spec.value?.health;
   if (!health) return null;
 
-  const probe = health.http ? `GET ${health.http}` : "TCP connect";
-  const port = health.port ? ` on port ${health.port}` : "";
-  const retries = health.retries ?? 3;
+  const rows: [string, string][] = [
+    ["Probe", health.http ? `GET ${health.http}` : "TCP connect"],
+  ];
+  if (health.port) rows.push(["Port", health.port]);
+  rows.push(
+    ["Interval", health.interval ?? "10s"],
+    ["Timeout", health.timeout ?? "2s"],
+    ["Retries", String(health.retries ?? 3)],
+    ["Start period", health.startPeriod ?? "30s"],
+  );
 
-  return {
-    probe: probe + port,
-    cadence: `every ${health.interval ?? "10s"}, ${health.timeout ?? "2s"} timeout, failed after ${retries} misses, ${health.startPeriod ?? "30s"} start period`,
-  };
+  return rows;
 });
+
+// The address the page was loaded from is the host the ports are published
+// on, so a host port links straight to what it forwards to.
+const host = window.location.hostname;
 
 function healthLabel(instance: {
   health?: { status: string; failures?: number };
@@ -194,20 +203,6 @@ function healthLabel(instance: {
               </dt>
               <dd>{{ spec.restart.policy }}</dd>
             </div>
-            <div v-if="check" class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Health check
-              </dt>
-              <dd class="font-mono text-xs leading-5">{{ check.probe }}</dd>
-            </div>
-            <div v-if="check" class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Check cadence
-              </dt>
-              <dd class="text-slate-600 dark:text-slate-400">
-                {{ check.cadence }}
-              </dd>
-            </div>
             <div class="flex gap-4 px-4 py-2.5">
               <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
                 Created
@@ -259,6 +254,25 @@ function healthLabel(instance: {
               </tr>
             </tbody>
           </table>
+        </DetailCard>
+
+        <DetailCard v-if="check" title="Health check">
+          <dl
+            class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
+          >
+            <div
+              v-for="[label, value] in check"
+              :key="label"
+              class="flex gap-4 px-4 py-2.5"
+            >
+              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
+                {{ label }}
+              </dt>
+              <dd :class="{ 'font-mono text-xs leading-5': label === 'Probe' }">
+                {{ value }}
+              </dd>
+            </div>
+          </dl>
         </DetailCard>
       </div>
 
@@ -334,7 +348,18 @@ function healthLabel(instance: {
               >
                 <td class="px-4 py-2.5">{{ port.instance ?? 0 }}</td>
                 <td class="px-4 py-2.5">{{ port.name || "—" }}</td>
-                <td class="px-4 py-2.5 font-mono text-xs">{{ port.from }}</td>
+                <td class="px-4 py-2.5 font-mono text-xs">
+                  <a
+                    v-if="port.protocol === 'tcp'"
+                    :href="`http://${host}:${port.from}`"
+                    target="_blank"
+                    rel="noopener"
+                    class="text-ocean-700 dark:text-ocean-300 hover:underline"
+                  >
+                    {{ port.from }}
+                  </a>
+                  <template v-else>{{ port.from }}</template>
+                </td>
                 <td class="px-4 py-2.5 font-mono text-xs">{{ port.to }}</td>
                 <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
                   {{ port.protocol }}
@@ -351,6 +376,12 @@ function healthLabel(instance: {
       <div class="mt-6">
         <DetailCard title="Logs">
           <LogViewer :workload="name" :count="spec?.count ?? 1" />
+        </DetailCard>
+      </div>
+
+      <div v-if="spec" class="mt-6">
+        <DetailCard title="Specification">
+          <SpecView :spec="spec" />
         </DetailCard>
       </div>
     </template>
