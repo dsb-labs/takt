@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 
+import Tooltip from "./Tooltip.vue";
+
 const props = defineProps<{ workload: string; count: number }>();
 
 const tail = ref(100);
@@ -39,43 +41,74 @@ async function scrollToEnd() {
   output.value?.scrollTo({ top: output.value.scrollHeight });
 }
 
-// load fetches the logs once, or keeps reading for as long as the response
-// stays open when following. A plain fetch rather than the typed client: the
-// response is a stream of text, not a JSON body to decode.
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+// read fetches the logs once and appends what arrives. A plain fetch rather
+// than the typed client: the response is a stream of text, not a JSON body to
+// decode.
+async function read(signal: AbortSignal) {
+  const response = await fetch(
+    `/api/v1/workloads/${props.workload}/logs?${params()}`,
+    { signal },
+  );
+  if (!response.ok) {
+    const body = (await response.json()) as { error?: string };
+    throw new Error(body.error ?? `the server answered ${response.status}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("the response carries no body");
+
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return;
+    text.value += decoder.decode(value, { stream: true });
+    await scrollToEnd();
+  }
+}
+
+// load reads the logs, and while following keeps reading. A followed stream
+// ends when its instance ends — a restart replaces the instance — so the loop
+// marks the break, waits, and asks again rather than going quiet.
 async function load() {
   controller?.abort();
-  controller = new AbortController();
+  const mine = new AbortController();
+  controller = mine;
 
   text.value = "";
   error.value = "";
-  loading.value = true;
 
-  try {
-    const response = await fetch(
-      `/api/v1/workloads/${props.workload}/logs?${params()}`,
-      { signal: controller.signal },
-    );
-    if (!response.ok) {
-      const body = (await response.json()) as { error?: string };
-      throw new Error(body.error ?? `the server answered ${response.status}`);
+  for (;;) {
+    loading.value = true;
+    try {
+      await read(mine.signal);
+    } catch (cause) {
+      if (mine.signal.aborted) return;
+
+      // While following, a refusal is transient: the replacement instance may
+      // not exist yet. The loop retries instead of reporting it.
+      if (!follow.value) {
+        error.value = cause instanceof Error ? cause.message : String(cause);
+      }
+    } finally {
+      loading.value = false;
     }
 
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error("the response carries no body");
+    if (!follow.value || mine.signal.aborted) return;
 
-    const decoder = new TextDecoder();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      text.value += decoder.decode(value, { stream: true });
-      await scrollToEnd();
-    }
-  } catch (cause) {
-    if (!(cause instanceof DOMException && cause.name === "AbortError")) {
-      error.value = cause instanceof Error ? cause.message : String(cause);
-    }
-  } finally {
-    loading.value = false;
+    text.value += "\n--- the instance ended, waiting for its replacement ---\n";
+    await scrollToEnd();
+    await sleep(2000, mine.signal);
+    if (mine.signal.aborted) return;
   }
 }
 
@@ -130,23 +163,26 @@ onUnmounted(() => controller?.abort());
         Previous
       </label>
 
-      <label
-        class="flex items-center gap-1.5 text-slate-600 dark:text-slate-400"
-        :class="{ 'opacity-50': followDisabled }"
-        :title="
+      <Tooltip
+        :text="
           followDisabled
             ? 'A follow reads one live instance, so pick an instance and turn previous off.'
             : undefined
         "
       >
-        <input
-          v-model="follow"
-          type="checkbox"
-          :disabled="followDisabled"
-          class="accent-ocean-600"
-        />
-        Follow
-      </label>
+        <label
+          class="flex items-center gap-1.5 text-slate-600 dark:text-slate-400"
+          :class="{ 'opacity-50': followDisabled }"
+        >
+          <input
+            v-model="follow"
+            type="checkbox"
+            :disabled="followDisabled"
+            class="accent-ocean-600"
+          />
+          Follow
+        </label>
+      </Tooltip>
 
       <button
         v-if="!follow"
