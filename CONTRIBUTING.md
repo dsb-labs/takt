@@ -175,6 +175,21 @@ The target runs the server through `scripts/delegated.sh`, so it can enforce
 resource limits on exec workloads. A plain `go run . serve dev.toml` works too, and
 refuses manifests naming limits on exec workloads when the shell is not delegated.
 
+### The web UI
+
+The UI sources live under `internal/ui/app`, a Vue and TypeScript project built by
+Vite. `make ui` builds the bundle into `internal/ui/dist`, which the binary embeds
+on the next build. A binary built without the bundle still serves the API, and
+answers page requests with a message saying the UI is not in the build.
+
+For working on the UI itself, run `make dev-ui` beside `make dev`. It starts the
+Vite dev server with hot reload and proxies API requests to the server on
+localhost:7373.
+
+The request and response types are generated from `api/openapi.yaml` into
+`src/api/schema.d.ts` and committed. After changing the spec, run `yarn generate`
+in `internal/ui/app` — CI fails on drift the same way it does for the Go code.
+
 ## The capability the dev loop wants
 
 Deleting a volume a container wrote as another user needs `CAP_DAC_OVERRIDE` — see
