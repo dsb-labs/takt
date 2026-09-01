@@ -11,6 +11,23 @@ function runningInstances(workload: Workload): string {
   const running = instances.filter((i) => i.state === "running").length;
   return `${running}/${workload.spec.count ?? 1}`;
 }
+
+// health summarises the checks across a workload's instances: the worst
+// answer wins, and a workload with no checks reports nothing.
+function health(workload: Workload): { label: string; style: string } | null {
+  const statuses = (workload.instances ?? [])
+    .map((i) => i.health?.status)
+    .filter((s) => s !== undefined);
+  if (statuses.length === 0) return null;
+
+  if (statuses.includes("unhealthy")) {
+    return { label: "unhealthy", style: "text-rose-700 dark:text-rose-400" };
+  }
+  if (statuses.includes("starting")) {
+    return { label: "starting", style: "text-sky-700 dark:text-sky-400" };
+  }
+  return { label: "healthy", style: "text-emerald-700 dark:text-emerald-400" };
+}
 </script>
 
 <template>
@@ -39,10 +56,10 @@ function runningInstances(workload: Workload): string {
           >
             <th class="px-4 py-3 font-medium">Name</th>
             <th class="px-4 py-3 font-medium">State</th>
+            <th class="px-4 py-3 font-medium">Health</th>
             <th class="px-4 py-3 font-medium">Runtime</th>
             <th class="px-4 py-3 font-medium">Instances</th>
             <th class="px-4 py-3 font-medium">Next run</th>
-            <th class="px-4 py-3 font-medium">Last error</th>
           </tr>
         </thead>
         <tbody>
@@ -75,7 +92,22 @@ function runningInstances(workload: Workload): string {
                 {{ workload.name }}
               </RouterLink>
             </td>
-            <td class="px-4 py-3"><StateBadge :state="workload.state" /></td>
+            <td class="px-4 py-3">
+              <StateBadge :state="workload.state" />
+              <!-- The full text lives on the detail page. The dot says it is
+                   there without a column the error's length can distort. -->
+              <span
+                v-if="workload.lastError"
+                class="ml-1.5 inline-block h-2 w-2 rounded-full bg-rose-500 align-middle"
+                :title="workload.lastError"
+              ></span>
+            </td>
+            <td class="px-4 py-3">
+              <span v-if="health(workload)" :class="health(workload)!.style">
+                {{ health(workload)!.label }}
+              </span>
+              <span v-else class="text-slate-400 dark:text-slate-500">—</span>
+            </td>
             <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
               {{ workload.runtime }}
             </td>
@@ -84,12 +116,6 @@ function runningInstances(workload: Workload): string {
             </td>
             <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
               {{ workload.nextRun ? relativeTime(workload.nextRun) : "—" }}
-            </td>
-            <td
-              class="max-w-md truncate px-4 py-3 text-slate-600 dark:text-slate-400"
-              :title="workload.lastError"
-            >
-              {{ workload.lastError ?? "—" }}
             </td>
           </tr>
         </tbody>
