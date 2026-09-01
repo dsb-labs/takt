@@ -24,6 +24,17 @@ import (
 // daemon rather than by orca.
 const convergeTimeout = 5 * time.Minute
 
+// teardownBudget reports how long a run waits for its fleet to be torn down.
+//
+// Scaled with the fleet rather than fixed, because teardown is bounded by the
+// daemon and roughly linear in what it holds: a thousand-workload run measured
+// about twenty-five minutes. A budget the fleet outgrows has the run cancelling
+// its own deletes and reporting a teardown it interrupted, which reads as a leak
+// where there is none.
+func teardownBudget(workloads int) time.Duration {
+	return max(convergeTimeout, time.Duration(workloads)*2*time.Second)
+}
+
 // The Config type contains fields used to perform a load test.
 type Config struct {
 	// The scenario to run.
@@ -205,10 +216,10 @@ func applyAll(ctx context.Context, config Config, collected *collector, workload
 // Workloads built to fail are left out. One that exits non-zero on purpose never
 // reaches running, so counting it would report a working scenario as a failing one.
 func converge(ctx context.Context, config Config, workloads []Workload) (int, []string) {
-	wanted := make(map[string]struct{}, len(workloads))
+	wanted := make(map[string]int, len(workloads))
 	for _, workload := range workloads {
 		if !workload.Fails {
-			wanted[workload.Spec.Name] = struct{}{}
+			wanted[workload.Spec.Name] = workload.Spec.Count
 		}
 	}
 
@@ -235,7 +246,7 @@ func converge(ctx context.Context, config Config, workloads []Workload) (int, []
 	return len(running), nil
 }
 
-func observed(ctx context.Context, config Config, wanted map[string]struct{}) map[string]struct{} {
+func observed(ctx context.Context, config Config, wanted map[string]int) map[string]struct{} {
 	running := make(map[string]struct{}, len(wanted))
 
 	listed, err := config.Client.List(ctx)
@@ -244,11 +255,16 @@ func observed(ctx context.Context, config Config, wanted map[string]struct{}) ma
 	}
 
 	for _, workload := range listed {
-		if _, ok := wanted[workload.Name]; !ok {
+		count, ok := wanted[workload.Name]
+		if !ok {
 			continue
 		}
 
-		if workload.State == client.WorkloadStateRunning || workload.State == client.WorkloadStateCompleted {
+		// A completed workload is a scheduled one that ran, which is as converged as
+		// it gets. Anything else has to have every instance its count asks for up
+		// rather than one: a workload's state reads as running from a single
+		// instance, which would pass a fleet whose counts never started.
+		if workload.State == client.WorkloadStateCompleted || instancesRunning(workload) >= count {
 			running[workload.Name] = struct{}{}
 		}
 	}
@@ -256,7 +272,19 @@ func observed(ctx context.Context, config Config, wanted map[string]struct{}) ma
 	return running
 }
 
-func missing(wanted, running map[string]struct{}) []string {
+// instancesRunning reports how many of a workload's instances are up.
+func instancesRunning(workload client.Workload) int {
+	var up int
+	for _, instance := range workload.Instances {
+		if instance.State == client.InstanceStateRunning {
+			up++
+		}
+	}
+
+	return up
+}
+
+func missing(wanted map[string]int, running map[string]struct{}) []string {
 	var absent []string
 	for name := range wanted {
 		if _, ok := running[name]; !ok {
@@ -365,7 +393,7 @@ func weighted(weights Weights) []string {
 }
 
 func teardown(ctx context.Context, config Config, collected *collector, names Names) {
-	ctx, cancel := context.WithTimeout(ctx, convergeTimeout)
+	ctx, cancel := context.WithTimeout(ctx, teardownBudget(len(names.Workloads)))
 	defer cancel()
 
 	var group errgroup.Group
@@ -486,7 +514,7 @@ func gone(ctx context.Context, config Config, names Names) error {
 		wanted[name] = struct{}{}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, convergeTimeout)
+	ctx, cancel := context.WithTimeout(ctx, teardownBudget(len(names.Workloads)))
 	defer cancel()
 
 	for {
