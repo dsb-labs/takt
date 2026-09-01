@@ -14,6 +14,10 @@ const instance = ref<"all" | number>("all");
 const previous = ref(false);
 const follow = ref(false);
 const text = ref("");
+// Whether the text on screen belongs to a superseded request. It stays
+// visible until the replacement's first bytes arrive, so changing a control
+// repaints the content in place rather than blanking the box.
+const stale = ref(false);
 const error = ref("");
 const loading = ref(false);
 const output = ref<HTMLElement>();
@@ -81,6 +85,10 @@ async function read(signal: AbortSignal) {
   for (;;) {
     const { done, value } = await reader.read();
     if (done) return;
+    if (stale.value) {
+      text.value = "";
+      stale.value = false;
+    }
     text.value += decoder.decode(value, { stream: true });
     await scrollToEnd();
   }
@@ -94,13 +102,19 @@ async function load() {
   const mine = new AbortController();
   controller = mine;
 
-  text.value = "";
+  stale.value = true;
   error.value = "";
 
   for (;;) {
     loading.value = true;
     try {
       await read(mine.signal);
+
+      // A response that carried nothing still replaces what it superseded.
+      if (stale.value) {
+        text.value = "";
+        stale.value = false;
+      }
     } catch (cause) {
       if (mine.signal.aborted) return;
 
@@ -237,10 +251,12 @@ onUnmounted(() => controller?.abort());
       Failed to read logs: {{ error }}
     </div>
 
+    <!-- A fixed height rather than a cap, and rendered whether or not there
+         is anything to show, so nothing below the box moves as the content
+         changes. -->
     <pre
-      v-else
       ref="output"
-      class="max-h-96 overflow-auto border-t border-slate-200 bg-slate-950 px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-slate-200 dark:border-slate-800"
+      class="h-96 overflow-auto border-t border-slate-200 bg-slate-950 px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-slate-200 dark:border-slate-800"
       >{{ text || (loading ? "Loading…" : "No output.") }}</pre>
   </div>
 </template>
