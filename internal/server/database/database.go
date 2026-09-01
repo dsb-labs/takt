@@ -69,6 +69,10 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 	// outright — an operator applying a directory of manifests in parallel loses
 	// most of them — because SQLite permits one writer at a time and orca has
 	// several: the API accepting applies and the reconciler finishing deletions.
+	// Thirty seconds rather than SQLite's suggested five, because a rotation
+	// under load queues a write per reading workload: a stampede run measured the
+	// writer queue running deeper than five seconds, and a write that gives up
+	// then leaves a rotation half applied or a deletion unmarked.
 	//
 	// journal_mode=wal lets readers run while a write is in progress, which matters
 	// because reads are not rare here: every list and get reads the workload table
@@ -92,7 +96,7 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 
 	db, err := otelsql.Open("sqlite", config.Path+
 		"?_pragma=foreign_keys(1)"+
-		"&_pragma=busy_timeout(5000)"+
+		"&_pragma=busy_timeout(30000)"+
 		"&_pragma=journal_mode(wal)"+
 		"&_txlock=immediate", options...)
 	if err != nil {
