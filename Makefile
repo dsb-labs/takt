@@ -2,7 +2,7 @@
 # cgroup subtree, which is what lets orca enforce resource limits on exec
 # workloads — see the "Delegation" section of docs/operating.md.
 
-.PHONY: test e2e dev lint generate
+.PHONY: test e2e dev lint generate ui dev-ui
 
 test:
 	./scripts/delegated.sh go test -short -race ./...
@@ -19,6 +19,19 @@ dev:
 
 lint:
 	go tool staticcheck ./...
+
+# The web UI bundle the server embeds. This needs node and yarn where the go
+# targets do not: a binary built without the bundle still works, and serves a
+# page saying the UI is not in the build.
+ui:
+	yarn --cwd internal/ui/app install --frozen-lockfile
+	yarn --cwd internal/ui/app build
+
+# The Vite dev server for working on the UI, which proxies API requests to a
+# server started with make dev.
+dev-ui:
+	yarn --cwd internal/ui/app install --frozen-lockfile
+	yarn --cwd internal/ui/app dev
 
 generate:
 	go generate ./...
