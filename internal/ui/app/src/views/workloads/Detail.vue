@@ -67,6 +67,18 @@ const check = computed(() => {
 // on, so a host port links straight to what it forwards to.
 const host = window.location.hostname;
 
+// The driver's handle for an instance — a container ID for the docker
+// runtime — is what a docker logs or docker exec wants pasted.
+const copiedID = ref("");
+
+async function copyID(id: string) {
+  await navigator.clipboard.writeText(id);
+  copiedID.value = id;
+  setTimeout(() => {
+    if (copiedID.value === id) copiedID.value = "";
+  }, 1500);
+}
+
 function healthLabel(instance: {
   health?: { status: string; failures?: number };
 }): string {
@@ -306,6 +318,7 @@ function healthLabel(instance: {
                 class="border-b border-slate-200 text-xs text-slate-500 uppercase dark:border-slate-800 dark:text-slate-400"
               >
                 <th class="px-4 py-2 font-medium">Index</th>
+                <th class="px-4 py-2 font-medium">ID</th>
                 <th class="px-4 py-2 font-medium">State</th>
                 <th class="px-4 py-2 font-medium">Health</th>
                 <th class="px-4 py-2 font-medium">Started</th>
@@ -319,6 +332,19 @@ function healthLabel(instance: {
                 class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
               >
                 <td class="px-4 py-2.5">{{ instance.index ?? 0 }}</td>
+                <td class="px-4 py-2.5 font-mono text-xs">
+                  <button
+                    class="hover:text-ocean-700 dark:hover:text-ocean-300"
+                    :title="`${instance.id} — click to copy`"
+                    @click="copyID(instance.id)"
+                  >
+                    {{
+                      copiedID === instance.id
+                        ? "copied"
+                        : instance.id.slice(0, 12)
+                    }}
+                  </button>
+                </td>
                 <td class="px-4 py-2.5">{{ instance.state }}</td>
                 <td class="px-4 py-2.5" :title="instance.health?.error">
                   {{ healthLabel(instance) }}
