@@ -609,6 +609,28 @@ level = "debug"
 Every log line carries the workload it concerns, so filtering by name shows one
 workload's history.
 
+## The web UI
+
+The server serves a web UI from the root of its listener. Open the server's address
+in a browser to reach it. The UI lists every workload with its state, instances,
+ports, next run and last error, and shows what each workload references: the
+secrets, variables, volumes and workloads its specification names. It reads logs,
+with a live follow for one instance. It can stop, start, restart and delete a
+workload, rotate a secret, and set a variable.
+
+The UI is a consumer of the JSON API and nothing more. It has no login, so the
+exposure stance above applies to it exactly as it applies to the API: anyone who
+can reach the port can restart workloads and rotate secrets from a browser, as
+they already can with curl. The UI never shows a secret's value, because the API
+never returns one.
+
+Applying a specification stays in the CLI, where the manifest lives. The UI acts
+on what is already applied.
+
+A binary built without the bundle still serves the API, and answers every page
+request with a message saying the UI is not in the build. Build the bundle with
+`make ui` before building the binary. Released packages include it.
+
 ## Observability
 
 The server describes itself on three endpoints, served from the same listener as
