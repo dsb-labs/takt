@@ -126,6 +126,8 @@ The scenarios live in `scenarios/`:
 | `ports.toml` | the host port allocator, pinned and allocated together |
 | `secrets.toml` | rotation, which redeploys every workload reading the value |
 | `failures.toml` | restart backoff and giving up |
+| `references.toml` | workloads reading each other's addresses, applied in two waves |
+| `stampede.toml` | a thousand workloads with every feature at once, churned hard |
 
 Add one by adding a file. The package's tests parse every scenario in the directory
 and build each into specifications, checked against the same validation an operator's
