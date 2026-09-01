@@ -41,6 +41,22 @@ const command = computed(() => {
   return runtime?.command?.join(" ");
 });
 
+// check describes what the health check does, with the defaults the server
+// applies when the specification leaves a field unset.
+const check = computed(() => {
+  const health = spec.value?.health;
+  if (!health) return null;
+
+  const probe = health.http ? `GET ${health.http}` : "TCP connect";
+  const port = health.port ? ` on port ${health.port}` : "";
+  const retries = health.retries ?? 3;
+
+  return {
+    probe: probe + port,
+    cadence: `every ${health.interval ?? "10s"}, ${health.timeout ?? "2s"} timeout, failed after ${retries} misses, ${health.startPeriod ?? "30s"} start period`,
+  };
+});
+
 function healthLabel(instance: {
   health?: { status: string; failures?: number };
 }): string {
@@ -177,6 +193,20 @@ function healthLabel(instance: {
                 Restart
               </dt>
               <dd>{{ spec.restart.policy }}</dd>
+            </div>
+            <div v-if="check" class="flex gap-4 px-4 py-2.5">
+              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
+                Health check
+              </dt>
+              <dd class="font-mono text-xs leading-5">{{ check.probe }}</dd>
+            </div>
+            <div v-if="check" class="flex gap-4 px-4 py-2.5">
+              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
+                Check cadence
+              </dt>
+              <dd class="text-slate-600 dark:text-slate-400">
+                {{ check.cadence }}
+              </dd>
             </div>
             <div class="flex gap-4 px-4 py-2.5">
               <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
