@@ -337,19 +337,44 @@ await workload.suspense().catch(() => {});
               >
                 <td class="px-4 py-2.5">{{ instance.index ?? 0 }}</td>
                 <td class="px-4 py-2.5 font-mono text-xs">
-                  <!-- Fixed to the width of the truncated ID, so the shorter
-                       "copied" text does not resize the table. -->
-                  <button
-                    class="hover:text-ocean-700 dark:hover:text-ocean-300 inline-block w-[12ch] text-left"
-                    :title="`${instance.id} — click to copy`"
-                    @click="copyID(instance.id)"
-                  >
-                    {{
-                      copiedID === instance.id
-                        ? "copied"
-                        : instance.id.slice(0, 12)
-                    }}
-                  </button>
+                  <span class="inline-flex items-center gap-1.5">
+                    <span :title="instance.id">{{
+                      instance.id.slice(0, 12)
+                    }}</span>
+                    <button
+                      class="hover:text-ocean-700 dark:hover:text-ocean-300 text-slate-400 dark:text-slate-500"
+                      title="Copy the full ID"
+                      @click="copyID(instance.id)"
+                    >
+                      <svg
+                        v-if="copiedID !== instance.id"
+                        class="h-3.5 w-3.5"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <rect x="9" y="9" width="13" height="13" rx="2" />
+                        <path
+                          d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                        />
+                      </svg>
+                      <svg
+                        v-else
+                        class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <path d="M20 6 9 17l-5-5" />
+                      </svg>
+                    </button>
+                  </span>
                 </td>
                 <td class="px-4 py-2.5">{{ instance.state }}</td>
                 <td class="px-4 py-2.5" :title="instance.health?.error">
