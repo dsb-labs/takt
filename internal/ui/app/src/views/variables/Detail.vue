@@ -33,6 +33,10 @@ async function save(_: string, value: string) {
     editError.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
+
+// Awaited so Suspense holds the previous view until this one has its
+// data. A failure is left for the error banner this view already renders.
+await variable.suspense().catch(() => {});
 </script>
 
 <template>

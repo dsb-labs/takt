@@ -16,6 +16,10 @@ const sort = useSort(() => secrets.data.value, "name", {
   updated: (s) => s.updatedAt,
   usedBy: (s) => s.usedBy?.length ?? 0,
 });
+
+// Awaited so Suspense holds the previous view until this one has its
+// data. A failure is left for the error banner this view already renders.
+await secrets.suspense().catch(() => {});
 </script>
 
 <template>

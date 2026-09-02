@@ -15,6 +15,10 @@ const sort = useSort(() => volumes.data.value, "name", {
   created: (v) => v.createdAt,
   usedBy: (v) => v.usedBy?.length ?? 0,
 });
+
+// Awaited so Suspense holds the previous view until this one has its
+// data. A failure is left for the error banner this view already renders.
+await volumes.suspense().catch(() => {});
 </script>
 
 <template>

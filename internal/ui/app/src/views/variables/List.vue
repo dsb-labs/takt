@@ -15,6 +15,10 @@ const sort = useSort(() => variables.data.value, "name", {
   updated: (v) => v.updatedAt,
   usedBy: (v) => v.usedBy?.length ?? 0,
 });
+
+// Awaited so Suspense holds the previous view until this one has its
+// data. A failure is left for the error banner this view already renders.
+await variables.suspense().catch(() => {});
 </script>
 
 <template>

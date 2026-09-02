@@ -88,6 +88,10 @@ function healthLabel(instance: {
     ? `${instance.health.status} (${failures} failed)`
     : instance.health.status;
 }
+
+// Awaited so Suspense holds the previous view until this one has its
+// data. A failure is left for the error banner this view already renders.
+await workload.suspense().catch(() => {});
 </script>
 
 <template>

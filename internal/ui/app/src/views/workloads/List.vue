@@ -66,6 +66,10 @@ const sort = useSort(() => workloads.data.value, "name", {
   instances: (w) => runningInstances(w),
   nextRun: (w) => w.nextRun ?? "",
 });
+
+// Awaited so Suspense holds the previous view until this one has its
+// data. A failure is left for the error banner this view already renders.
+await workloads.suspense().catch(() => {});
 </script>
 
 <template>

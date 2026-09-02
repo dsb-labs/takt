@@ -33,6 +33,10 @@ async function rotate(_: string, value: string) {
     rotateError.value = cause instanceof Error ? cause.message : String(cause);
   }
 }
+
+// Awaited so Suspense holds the previous view until this one has its
+// data. A failure is left for the error banner this view already renders.
+await secret.suspense().catch(() => {});
 </script>
 
 <template>

@@ -93,7 +93,17 @@ const navigation = [
         </ul>
       </div>
 
-      <RouterView />
+      <!-- Suspense keeps the current view on screen until the next one has
+           its data, so navigation swaps a finished page in rather than
+           flashing an empty one. Each view awaits its query in async setup. -->
+      <!-- Keyed on the path, not the full URL: moving between two detail
+           pages remounts the view so Suspense applies, while the filter
+           writing to the query string does not. -->
+      <RouterView v-slot="{ Component }">
+        <Suspense>
+          <component :is="Component" :key="$route.path" />
+        </Suspense>
+      </RouterView>
     </main>
   </div>
 </template>

@@ -16,6 +16,10 @@ const name = computed(() => route.params.name as string);
 
 const volume = useVolume(() => name.value);
 const deleteVolume = useDeleteVolume(() => name.value);
+
+// Awaited so Suspense holds the previous view until this one has its
+// data. A failure is left for the error banner this view already renders.
+await volume.suspense().catch(() => {});
 </script>
 
 <template>
