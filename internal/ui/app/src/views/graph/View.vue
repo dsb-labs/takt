@@ -18,7 +18,7 @@ import ErrorBanner from "../../components/ErrorBanner.vue";
 import QueryInput from "../../components/QueryInput.vue";
 import { useQueryFilter } from "../../filter";
 import { buildGraph, layout } from "../../graph";
-import GraphNode from "./Node.vue";
+import GraphNode from "../../components/GraphNode.vue";
 
 import "@vue-flow/core/dist/style.css";
 
