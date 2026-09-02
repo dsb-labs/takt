@@ -32,7 +32,19 @@ const hideUnconnected = ref(false);
 const nodes = ref<Node[]>([]);
 const edges = ref<Edge[]>([]);
 
-const { fitView } = useVueFlow();
+const { fitView, onNodesInitialized } = useVueFlow();
+
+// Whether a fresh layout is waiting for its nodes to be measured. A fit that
+// runs before the canvas has measured newly added nodes computes its bounds
+// from the ones it already knew, which is why removing nodes recentred and
+// adding them back did not.
+let pendingFit = false;
+
+onNodesInitialized(() => {
+  if (!pendingFit) return;
+  pendingFit = false;
+  void fitView({ padding: 0.1 });
+});
 
 // The layout runs only when the set of nodes or edges changes. A poll that
 // changes nothing but a workload's state recolours the nodes in place, so the
@@ -86,6 +98,9 @@ watch(
     }));
 
     // A new layout can land outside the viewport, so the view follows it.
+    // Twice: once now for layouts that only removed nodes, and once more
+    // when any added nodes have been measured.
+    pendingFit = true;
     void nextTick(() => fitView({ padding: 0.1 }));
   },
   { immediate: true },
