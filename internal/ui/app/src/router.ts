@@ -14,6 +14,11 @@ export const router = createRouter({
       component: () => import("./views/workloads/Detail.vue"),
     },
     {
+      path: "/graph",
+      name: "graph",
+      component: () => import("./views/graph/View.vue"),
+    },
+    {
       path: "/secrets",
       name: "secrets",
       component: () => import("./views/secrets/List.vue"),
