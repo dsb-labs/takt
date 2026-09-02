@@ -34,15 +34,18 @@ export const nodeHeight = 48;
 
 // buildGraph assembles the reference graph from the four lists. Edges come
 // from each workload's specification, the same derivation the references card
-// uses. With connectedOnly set, resources nothing references are left out,
+// uses.
+//
+// With resourcesConnectedOnly set, resources nothing references are left out,
 // which is what a filtered graph wants: the neighbourhood of the workloads
-// shown rather than every stray resource.
+// shown rather than every stray resource. With hideUnconnected set, every
+// node without an edge goes, workloads included.
 export function buildGraph(
   workloads: Workload[],
   secrets: Secret[],
   variables: Variable[],
   volumes: Volume[],
-  connectedOnly: boolean,
+  options: { resourcesConnectedOnly: boolean; hideUnconnected: boolean },
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes = new Map<string, GraphNode>();
   const edges = new Map<string, GraphEdge>();
@@ -62,7 +65,7 @@ export function buildGraph(
     return id;
   };
 
-  if (!connectedOnly) {
+  if (!options.resourcesConnectedOnly && !options.hideUnconnected) {
     for (const secret of secrets) resource("secret", secret.name);
     for (const variable of variables) resource("variable", variable.name);
     for (const volume of volumes) resource("volume", volume.name);
@@ -85,7 +88,17 @@ export function buildGraph(
     }
   }
 
-  return { nodes: [...nodes.values()], edges: [...edges.values()] };
+  let kept = [...nodes.values()];
+  if (options.hideUnconnected) {
+    const connected = new Set<string>();
+    for (const edge of edges.values()) {
+      connected.add(edge.source);
+      connected.add(edge.target);
+    }
+    kept = kept.filter((node) => connected.has(node.id));
+  }
+
+  return { nodes: kept, edges: [...edges.values()] };
 }
 
 // layout places the nodes in layers along the dependency direction, and

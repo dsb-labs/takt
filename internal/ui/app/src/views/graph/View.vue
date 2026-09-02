@@ -1,6 +1,12 @@
 <script setup lang="ts">
-import { MarkerType, VueFlow, type Edge, type Node } from "@vue-flow/core";
-import { ref, watch } from "vue";
+import {
+  MarkerType,
+  VueFlow,
+  useVueFlow,
+  type Edge,
+  type Node,
+} from "@vue-flow/core";
+import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
 import {
   useSecrets,
@@ -22,8 +28,11 @@ const secrets = useSecrets(() => []);
 const variables = useVariables(() => []);
 const volumes = useVolumes(() => []);
 
+const hideUnconnected = ref(false);
 const nodes = ref<Node[]>([]);
 const edges = ref<Edge[]>([]);
+
+const { fitView } = useVueFlow();
 
 // The layout runs only when the set of nodes or edges changes. A poll that
 // changes nothing but a workload's state recolours the nodes in place, so the
@@ -31,14 +40,17 @@ const edges = ref<Edge[]>([]);
 let structure = "";
 
 watch(
-  [workloads.data, secrets.data, variables.data, volumes.data],
+  [workloads.data, secrets.data, variables.data, volumes.data, hideUnconnected],
   () => {
     const graph = buildGraph(
       workloads.data.value ?? [],
       secrets.data.value ?? [],
       variables.data.value ?? [],
       volumes.data.value ?? [],
-      queries.value.length > 0,
+      {
+        resourcesConnectedOnly: queries.value.length > 0,
+        hideUnconnected: hideUnconnected.value,
+      },
     );
 
     const key = graph.nodes
@@ -72,9 +84,27 @@ watch(
       markerEnd: { type: MarkerType.ArrowClosed, color: "#94a3b8" },
       style: { stroke: "#94a3b8" },
     }));
+
+    // A new layout can land outside the viewport, so the view follows it.
+    void nextTick(() => fitView({ padding: 0.1 }));
   },
   { immediate: true },
 );
+
+// The canvas only fits itself once, so a resized window keeps the old
+// framing until the view is told to fit again.
+let refit: number | undefined;
+
+function onResize() {
+  clearTimeout(refit);
+  refit = window.setTimeout(() => fitView({ padding: 0.1 }), 150);
+}
+
+onMounted(() => window.addEventListener("resize", onResize));
+onUnmounted(() => {
+  clearTimeout(refit);
+  window.removeEventListener("resize", onResize);
+});
 
 // Awaited so Suspense holds the previous view until this one has its data.
 // Failures are left for the error banner this view already renders.
@@ -90,7 +120,19 @@ await Promise.all([
   <div>
     <div class="flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-xl font-semibold">Graph</h1>
-      <QueryInput v-model="filter" />
+      <div class="flex items-center gap-4">
+        <label
+          class="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-400"
+        >
+          <input
+            v-model="hideUnconnected"
+            type="checkbox"
+            class="accent-ocean-600"
+          />
+          Hide unconnected
+        </label>
+        <QueryInput v-model="filter" />
+      </div>
     </div>
 
     <ErrorBanner
@@ -100,7 +142,7 @@ await Promise.all([
 
     <div
       v-else
-      class="mt-6 h-[calc(100vh-11rem)] min-h-96 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+      class="mt-6 h-[calc(100vh-11rem)] min-h-96 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
     >
       <VueFlow
         :nodes="nodes"
