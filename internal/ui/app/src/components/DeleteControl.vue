@@ -55,8 +55,10 @@ async function run() {
       class="fixed inset-0 z-20 flex items-center justify-center bg-black/50 p-4"
       @click.self="open = false"
     >
+      <!-- Teleported outside the app root, so the base text colour set there
+           does not reach this panel and it has to carry its own. -->
       <div
-        class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900"
+        class="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 text-slate-900 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
       >
         <h2 class="text-lg font-semibold">Delete {{ subject }}?</h2>
 
