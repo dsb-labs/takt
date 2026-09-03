@@ -192,20 +192,20 @@ await workload.suspense().catch(() => {});
           <dl
             class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
           >
-            <div v-if="command" class="flex gap-4 px-4 py-2.5">
+            <div v-if="spec?.container" class="flex gap-4 px-4 py-2.5">
               <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                {{ spec?.container ? "Image" : "Command" }}
+                Image
               </dt>
               <dd class="font-mono text-xs leading-5 break-all">
-                {{ spec?.container ? spec.container.image : command }}
+                {{ spec.container.image }}
               </dd>
             </div>
-            <div v-if="spec?.container?.command" class="flex gap-4 px-4 py-2.5">
+            <div v-if="command" class="flex gap-4 px-4 py-2.5">
               <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
                 Command
               </dt>
               <dd class="font-mono text-xs leading-5 break-all">
-                {{ spec.container.command.join(" ") }}
+                {{ command }}
               </dd>
             </div>
             <div class="flex gap-4 px-4 py-2.5">
