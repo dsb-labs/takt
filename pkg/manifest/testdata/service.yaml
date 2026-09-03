@@ -1,0 +1,10 @@
+version: v1
+name: example
+labels:
+  app: web
+target:
+  labels:
+    app: web
+    tier: backend
+  port: 8080
+  protocol: tcp

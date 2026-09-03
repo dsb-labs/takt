@@ -1,0 +1,7 @@
+version: v1
+name: example
+target:
+  labels:
+    app: dns
+  port: 53
+  protocol: udp

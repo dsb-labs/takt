@@ -1,9 +1,9 @@
-// Package manifest provides parsing and validation of orca workload manifests.
+// Package manifest provides parsing and validation of orca resource manifests.
 //
-// A manifest is the YAML file an operator writes to describe a workload. Parsing
-// it is a client-side concern: it produces a Spec, which is what the client
-// submits, so the OpenAPI document remains the only description of the wire format
-// and the server never has to understand YAML.
+// A manifest is the YAML file an operator writes to describe a resource. Parsing
+// it is a client-side concern: it produces the value the client submits, so the
+// OpenAPI document remains the only description of the wire format and the server
+// never has to understand YAML.
 package manifest
 
 import (

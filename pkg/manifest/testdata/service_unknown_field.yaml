@@ -1,0 +1,8 @@
+version: v1
+name: example
+backends:
+  - 127.0.0.1:8080
+target:
+  labels:
+    app: web
+  port: 8080

@@ -1,0 +1,6 @@
+version: v1
+name: example
+target:
+  labels:
+    orca.example: value
+  port: 8080

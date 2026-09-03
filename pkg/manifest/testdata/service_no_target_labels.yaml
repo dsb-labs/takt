@@ -1,0 +1,5 @@
+version: v1
+name: example
+target:
+  labels: {}
+  port: 8080
