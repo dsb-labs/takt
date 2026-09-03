@@ -2,6 +2,7 @@ import dagre from "@dagrejs/dagre";
 
 import type {
   Secret,
+  Service,
   Variable,
   Volume,
   Workload,
@@ -13,7 +14,7 @@ import { references } from "./references";
 // the resources a workload can reference.
 export type GraphNode = {
   id: string;
-  kind: "workload" | "secret" | "variable" | "volume";
+  kind: "workload" | "secret" | "variable" | "volume" | "service";
   name: string;
   state?: WorkloadState;
 };
@@ -32,9 +33,10 @@ export type GraphEdge = {
 export const nodeWidth = 180;
 export const nodeHeight = 48;
 
-// buildGraph assembles the reference graph from the four lists. Edges come
-// from each workload's specification, the same derivation the references card
-// uses.
+// buildGraph assembles the reference graph from the five lists. Workload
+// edges come from each specification, the same derivation the references card
+// uses. Service edges come from label selection: a service points at every
+// workload carrying its target labels.
 //
 // With resourcesConnectedOnly set, resources nothing references are left out,
 // which is what a filtered graph wants: the neighbourhood of the workloads
@@ -45,6 +47,7 @@ export function buildGraph(
   secrets: Secret[],
   variables: Variable[],
   volumes: Volume[],
+  services: Service[],
   options: { resourcesConnectedOnly: boolean; hideUnconnected: boolean },
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes = new Map<string, GraphNode>();
@@ -69,6 +72,7 @@ export function buildGraph(
     for (const secret of secrets) resource("secret", secret.name);
     for (const variable of variables) resource("variable", variable.name);
     for (const volume of volumes) resource("volume", volume.name);
+    for (const service of services) resource("service", service.name);
   }
 
   for (const workload of workloads) {
@@ -84,6 +88,23 @@ export function buildGraph(
         source,
         target,
         via: existing ? `${existing.via}, ${ref.via}` : ref.via,
+      });
+    }
+  }
+
+  for (const service of services) {
+    const wanted = Object.entries(service.target.labels ?? {});
+    for (const workload of workloads) {
+      const labels = workload.spec.labels ?? {};
+      if (!wanted.every(([key, value]) => labels[key] === value)) continue;
+
+      const source = resource("service", service.name);
+      const id = `${source}->workload:${workload.name}`;
+      edges.set(id, {
+        id,
+        source,
+        target: `workload:${workload.name}`,
+        via: "selects",
       });
     }
   }

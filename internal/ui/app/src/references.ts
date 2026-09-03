@@ -4,7 +4,7 @@ import type { WorkloadSpec } from "./api/types";
 // variable or another workload expanded into its environment, or a volume,
 // secret or variable mounted as a file.
 export type Reference = {
-  kind: "secret" | "variable" | "volume" | "workload";
+  kind: "secret" | "variable" | "volume" | "workload" | "service";
   name: string;
   via: string;
 };
@@ -55,5 +55,7 @@ export function referenceTarget(ref: Reference): string {
       return `/variables/${ref.name}`;
     case "volume":
       return `/volumes/${ref.name}`;
+    case "service":
+      return `/services/${ref.name}`;
   }
 }

@@ -13,6 +13,7 @@ const accents: Record<GraphNode["kind"], string> = {
   secret: "border-l-amber-500",
   variable: "border-l-emerald-500",
   volume: "border-l-violet-500",
+  service: "border-l-rose-500",
 };
 
 const stateDots: Record<string, string> = {

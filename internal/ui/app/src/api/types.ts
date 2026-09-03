@@ -12,4 +12,5 @@ export type VolumeMount = components["schemas"]["VolumeMount"];
 export type Secret = components["schemas"]["Secret"];
 export type Variable = components["schemas"]["Variable"];
 export type Volume = components["schemas"]["Volume"];
+export type Service = components["schemas"]["Service"];
 export type Readiness = components["schemas"]["GetReadinessResult"];

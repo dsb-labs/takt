@@ -10,6 +10,7 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
 import {
   useSecrets,
+  useServices,
   useVariables,
   useVolumes,
   useWorkloads,
@@ -27,6 +28,7 @@ const workloads = useWorkloads(() => queries.value);
 const secrets = useSecrets(() => []);
 const variables = useVariables(() => []);
 const volumes = useVolumes(() => []);
+const services = useServices(() => []);
 
 const hideUnconnected = ref(false);
 const nodes = ref<Node[]>([]);
@@ -52,13 +54,21 @@ onNodesInitialized(() => {
 let structure = "";
 
 watch(
-  [workloads.data, secrets.data, variables.data, volumes.data, hideUnconnected],
+  [
+    workloads.data,
+    secrets.data,
+    variables.data,
+    volumes.data,
+    services.data,
+    hideUnconnected,
+  ],
   () => {
     const graph = buildGraph(
       workloads.data.value ?? [],
       secrets.data.value ?? [],
       variables.data.value ?? [],
       volumes.data.value ?? [],
+      services.data.value ?? [],
       {
         resourcesConnectedOnly: queries.value.length > 0,
         hideUnconnected: hideUnconnected.value,
@@ -128,6 +138,7 @@ await Promise.all([
   secrets.suspense(),
   variables.suspense(),
   volumes.suspense(),
+  services.suspense(),
 ]).catch(() => {});
 </script>
 
