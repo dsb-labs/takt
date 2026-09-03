@@ -243,9 +243,8 @@ func NewWorkload(row database.Workload) (Workload, error) {
 		SpecHash: row.SpecHash,
 		Labels:   row.Labels,
 		Spec:     spec,
+		Env:      spec.Env,
 	}
-
-	w.Env = spec.Env
 
 	if len(spec.Ports) > 0 {
 		w.Ports = make([]Port, 0, len(spec.Ports))

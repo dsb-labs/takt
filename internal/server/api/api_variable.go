@@ -68,7 +68,7 @@ func (a *VariableAPI) internalError(operation string, err error) string {
 func (a *VariableAPI) SetVariable(ctx context.Context, request api.SetVariableRequestObject) (api.SetVariableResponseObject, error) {
 	if request.Body == nil {
 		return api.SetVariable400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: "request body is required"},
+			Error: "request body is required",
 		}, nil
 	}
 
@@ -76,13 +76,11 @@ func (a *VariableAPI) SetVariable(ctx context.Context, request api.SetVariableRe
 	switch {
 	case errors.Is(err, service.ErrInvalidVariable):
 		return api.SetVariable400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case err != nil:
 		return api.SetVariable500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("set variable", err),
-			},
+			Error: a.internalError("set variable", err),
 		}, nil
 	}
 
@@ -102,15 +100,11 @@ func (a *VariableAPI) GetVariable(ctx context.Context, request api.GetVariableRe
 	switch {
 	case errors.Is(err, service.ErrVariableNotFound):
 		return api.GetVariable404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("variable %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("variable %q does not exist", request.Name),
 		}, nil
 	case err != nil:
 		return api.GetVariable500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("get variable", err),
-			},
+			Error: a.internalError("get variable", err),
 		}, nil
 	}
 
@@ -129,13 +123,11 @@ func (a *VariableAPI) ListVariables(ctx context.Context, request api.ListVariabl
 	switch {
 	case errors.Is(err, service.ErrInvalidQuery):
 		return api.ListVariables400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case err != nil:
 		return api.ListVariables500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("list variables", err),
-			},
+			Error: a.internalError("list variables", err),
 		}, nil
 	}
 
@@ -158,9 +150,7 @@ func (a *VariableAPI) DeleteVariable(ctx context.Context, request api.DeleteVari
 	switch {
 	case errors.Is(err, service.ErrVariableNotFound):
 		return api.DeleteVariable404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("variable %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("variable %q does not exist", request.Name),
 		}, nil
 	case errors.Is(err, service.ErrVariableInUse):
 		// The workloads reading it are named, because the caller's next question is
@@ -168,9 +158,7 @@ func (a *VariableAPI) DeleteVariable(ctx context.Context, request api.DeleteVari
 		return api.DeleteVariable409JSONResponse{Error: err.Error()}, nil
 	case err != nil:
 		return api.DeleteVariable500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("delete variable", err),
-			},
+			Error: a.internalError("delete variable", err),
 		}, nil
 	}
 

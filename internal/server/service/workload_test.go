@@ -3438,16 +3438,12 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 
 		var wg sync.WaitGroup
 		for i := range workloads {
-			wg.Add(1)
-
-			go func() {
-				defer wg.Done()
-
+			wg.Go(func() {
 				spec := containerSpec(workloadName(i), "example/example:latest")
 				spec.Ports = []manifest.Port{{To: 8080}}
 
 				applied[i], _, errs[i] = svc.Apply(t.Context(), spec)
-			}()
+			})
 		}
 
 		wg.Wait()

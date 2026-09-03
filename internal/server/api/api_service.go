@@ -68,7 +68,7 @@ func (a *ServiceAPI) internalError(operation string, err error) string {
 func (a *ServiceAPI) ApplyService(ctx context.Context, request api.ApplyServiceRequestObject) (api.ApplyServiceResponseObject, error) {
 	if request.Body == nil {
 		return api.ApplyService400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: "request body is required"},
+			Error: "request body is required",
 		}, nil
 	}
 
@@ -76,9 +76,7 @@ func (a *ServiceAPI) ApplyService(ctx context.Context, request api.ApplyServiceR
 	// else is a mistake worth reporting rather than quietly resolving either way.
 	if request.Body.Name != request.Name {
 		return api.ApplyService400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{
-				Error: fmt.Sprintf("the specification names %q but the path names %q", request.Body.Name, request.Name),
-			},
+			Error: fmt.Sprintf("the specification names %q but the path names %q", request.Body.Name, request.Name),
 		}, nil
 	}
 
@@ -86,13 +84,11 @@ func (a *ServiceAPI) ApplyService(ctx context.Context, request api.ApplyServiceR
 	switch {
 	case errors.Is(err, service.ErrInvalidService):
 		return api.ApplyService400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case err != nil:
 		return api.ApplyService500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("apply service", err),
-			},
+			Error: a.internalError("apply service", err),
 		}, nil
 	}
 
@@ -109,15 +105,11 @@ func (a *ServiceAPI) GetService(ctx context.Context, request api.GetServiceReque
 	switch {
 	case errors.Is(err, service.ErrServiceNotFound):
 		return api.GetService404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("service %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("service %q does not exist", request.Name),
 		}, nil
 	case err != nil:
 		return api.GetService500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("get service", err),
-			},
+			Error: a.internalError("get service", err),
 		}, nil
 	}
 
@@ -136,13 +128,11 @@ func (a *ServiceAPI) ListServices(ctx context.Context, request api.ListServicesR
 	switch {
 	case errors.Is(err, service.ErrInvalidQuery):
 		return api.ListServices400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case err != nil:
 		return api.ListServices500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("list services", err),
-			},
+			Error: a.internalError("list services", err),
 		}, nil
 	}
 
@@ -164,15 +154,11 @@ func (a *ServiceAPI) DeleteService(ctx context.Context, request api.DeleteServic
 	switch {
 	case errors.Is(err, service.ErrServiceNotFound):
 		return api.DeleteService404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("service %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("service %q does not exist", request.Name),
 		}, nil
 	case err != nil:
 		return api.DeleteService500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("delete service", err),
-			},
+			Error: a.internalError("delete service", err),
 		}, nil
 	}
 

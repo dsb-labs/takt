@@ -720,9 +720,8 @@ func (s *WorkloadService) store(ctx context.Context, resolved resolution) (datab
 			Secrets:   resolved.read.secrets,
 			Variables: resolved.read.variables,
 			Workloads: resolved.read.workloads,
+			Labels:    spec.Labels,
 		}
-
-		row.Labels = spec.Labels
 
 		// The row and its ports are written together, so a claim that loses a race
 		// leaves no workload behind for the reconciler to start against ports

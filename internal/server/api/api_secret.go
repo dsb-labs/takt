@@ -71,7 +71,7 @@ func (a *SecretAPI) internalError(operation string, err error) string {
 func (a *SecretAPI) SetSecret(ctx context.Context, request api.SetSecretRequestObject) (api.SetSecretResponseObject, error) {
 	if request.Body == nil {
 		return api.SetSecret400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: "request body is required"},
+			Error: "request body is required",
 		}, nil
 	}
 
@@ -79,13 +79,11 @@ func (a *SecretAPI) SetSecret(ctx context.Context, request api.SetSecretRequestO
 	switch {
 	case errors.Is(err, service.ErrInvalidSecret):
 		return api.SetSecret400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case err != nil:
 		return api.SetSecret500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("set secret", err),
-			},
+			Error: a.internalError("set secret", err),
 		}, nil
 	}
 
@@ -105,15 +103,11 @@ func (a *SecretAPI) GetSecret(ctx context.Context, request api.GetSecretRequestO
 	switch {
 	case errors.Is(err, service.ErrSecretNotFound):
 		return api.GetSecret404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("secret %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("secret %q does not exist", request.Name),
 		}, nil
 	case err != nil:
 		return api.GetSecret500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("get secret", err),
-			},
+			Error: a.internalError("get secret", err),
 		}, nil
 	}
 
@@ -132,13 +126,11 @@ func (a *SecretAPI) ListSecrets(ctx context.Context, request api.ListSecretsRequ
 	switch {
 	case errors.Is(err, service.ErrInvalidQuery):
 		return api.ListSecrets400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case err != nil:
 		return api.ListSecrets500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("list secrets", err),
-			},
+			Error: a.internalError("list secrets", err),
 		}, nil
 	}
 
@@ -161,9 +153,7 @@ func (a *SecretAPI) DeleteSecret(ctx context.Context, request api.DeleteSecretRe
 	switch {
 	case errors.Is(err, service.ErrSecretNotFound):
 		return api.DeleteSecret404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("secret %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("secret %q does not exist", request.Name),
 		}, nil
 	case errors.Is(err, service.ErrSecretInUse):
 		// The workloads reading it are named, because the caller's next question is
@@ -171,9 +161,7 @@ func (a *SecretAPI) DeleteSecret(ctx context.Context, request api.DeleteSecretRe
 		return api.DeleteSecret409JSONResponse{Error: err.Error()}, nil
 	case err != nil:
 		return api.DeleteSecret500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("delete secret", err),
-			},
+			Error: a.internalError("delete secret", err),
 		}, nil
 	}
 

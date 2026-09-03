@@ -72,9 +72,7 @@ func (a *AdminAPI) GetBackup(ctx context.Context, request api.GetBackupRequestOb
 	backup, err := a.admin.PrepareBackup(ctx, options)
 	if err != nil {
 		return api.GetBackup500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("prepare backup", err),
-			},
+			Error: a.internalError("prepare backup", err),
 		}, nil
 	}
 
@@ -143,9 +141,7 @@ func (a *AdminAPI) Rekey(ctx context.Context, _ api.RekeyRequestObject) (api.Rek
 	rekey, err := a.admin.Rekey(ctx)
 	if err != nil {
 		return api.Rekey500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("rekey the node", err),
-			},
+			Error: a.internalError("rekey the node", err),
 		}, nil
 	}
 

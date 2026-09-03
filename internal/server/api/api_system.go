@@ -119,9 +119,7 @@ func (a *SystemAPI) GetMetrics(_ context.Context, _ api.GetMetricsRequestObject)
 	families, err := a.metrics.Gather()
 	if err != nil {
 		return api.GetMetrics500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("gather metrics", err),
-			},
+			Error: a.internalError("gather metrics", err),
 		}, nil
 	}
 

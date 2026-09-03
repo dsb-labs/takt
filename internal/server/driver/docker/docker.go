@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -183,9 +184,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	attempt := nextAttempt(held, w.Instance)
 
 	labels := make(map[string]string, len(w.Labels)+5)
-	for k, v := range w.Labels {
-		labels[k] = v
-	}
+	maps.Copy(labels, w.Labels)
 	labels[LabelWorkload] = w.Name
 	labels[LabelSpecHash] = w.SpecHash
 	labels[LabelVersion] = strconv.Itoa(w.Version)

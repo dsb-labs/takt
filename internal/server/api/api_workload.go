@@ -136,7 +136,7 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 	spec, err := a.submitted(request.Body, request.Name)
 	if err != nil {
 		return api.ApplyWorkload400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	}
 
@@ -174,13 +174,11 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		// endpoint creates the workload it is given, so it is never the workload being
 		// applied that is missing.
 		return api.ApplyWorkload400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case err != nil:
 		return api.ApplyWorkload500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("apply workload", err),
-			},
+			Error: a.internalError("apply workload", err),
 		}, nil
 	}
 
@@ -197,7 +195,7 @@ func (a *WorkloadAPI) DryRunWorkload(ctx context.Context, request api.DryRunWork
 	spec, err := a.submitted(request.Body, request.Name)
 	if err != nil {
 		return api.DryRunWorkload400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	}
 
@@ -222,13 +220,11 @@ func (a *WorkloadAPI) DryRunWorkload(ctx context.Context, request api.DryRunWork
 		// Reported exactly as the apply reports it, so that a dry run which passes
 		// is a statement about the apply rather than about the request.
 		return api.DryRunWorkload400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case err != nil:
 		return api.DryRunWorkload500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("dry run workload", err),
-			},
+			Error: a.internalError("dry run workload", err),
 		}, nil
 	}
 
@@ -262,15 +258,11 @@ func (a *WorkloadAPI) GetWorkload(ctx context.Context, request api.GetWorkloadRe
 	switch {
 	case errors.Is(err, service.ErrWorkloadNotFound):
 		return api.GetWorkload404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("workload %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("workload %q does not exist", request.Name),
 		}, nil
 	case err != nil:
 		return api.GetWorkload500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("get workload", err),
-			},
+			Error: a.internalError("get workload", err),
 		}, nil
 	}
 
@@ -289,13 +281,11 @@ func (a *WorkloadAPI) ListWorkloads(ctx context.Context, request api.ListWorkloa
 	switch {
 	case errors.Is(err, service.ErrInvalidQuery):
 		return api.ListWorkloads400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case err != nil:
 		return api.ListWorkloads500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("list workloads", err),
-			},
+			Error: a.internalError("list workloads", err),
 		}, nil
 	}
 
@@ -319,9 +309,7 @@ func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWork
 	switch {
 	case errors.Is(err, service.ErrWorkloadNotFound):
 		return api.DeleteWorkload404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("workload %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("workload %q does not exist", request.Name),
 		}, nil
 	case errors.Is(err, service.ErrWorkloadInUse):
 		// The workloads referencing it are named, because the caller's next question
@@ -329,9 +317,7 @@ func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWork
 		return api.DeleteWorkload409JSONResponse{Error: err.Error()}, nil
 	case err != nil:
 		return api.DeleteWorkload500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("delete workload", err),
-			},
+			Error: a.internalError("delete workload", err),
 		}, nil
 	}
 
@@ -348,9 +334,7 @@ func (a *WorkloadAPI) StopWorkload(ctx context.Context, request api.StopWorkload
 	switch {
 	case errors.Is(err, service.ErrWorkloadNotFound):
 		return api.StopWorkload404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("workload %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("workload %q does not exist", request.Name),
 		}, nil
 	case errors.Is(err, service.ErrWorkloadDeleting):
 		return api.StopWorkload409JSONResponse{
@@ -358,9 +342,7 @@ func (a *WorkloadAPI) StopWorkload(ctx context.Context, request api.StopWorkload
 		}, nil
 	case err != nil:
 		return api.StopWorkload500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("stop workload", err),
-			},
+			Error: a.internalError("stop workload", err),
 		}, nil
 	}
 
@@ -376,9 +358,7 @@ func (a *WorkloadAPI) StartWorkload(ctx context.Context, request api.StartWorklo
 	switch {
 	case errors.Is(err, service.ErrWorkloadNotFound):
 		return api.StartWorkload404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("workload %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("workload %q does not exist", request.Name),
 		}, nil
 	case errors.Is(err, service.ErrWorkloadDeleting):
 		return api.StartWorkload409JSONResponse{
@@ -386,9 +366,7 @@ func (a *WorkloadAPI) StartWorkload(ctx context.Context, request api.StartWorklo
 		}, nil
 	case err != nil:
 		return api.StartWorkload500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("start workload", err),
-			},
+			Error: a.internalError("start workload", err),
 		}, nil
 	}
 
@@ -404,9 +382,7 @@ func (a *WorkloadAPI) RestartWorkload(ctx context.Context, request api.RestartWo
 	switch {
 	case errors.Is(err, service.ErrWorkloadNotFound):
 		return api.RestartWorkload404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("workload %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("workload %q does not exist", request.Name),
 		}, nil
 	case errors.Is(err, service.ErrWorkloadDeleting):
 		return api.RestartWorkload409JSONResponse{
@@ -418,9 +394,7 @@ func (a *WorkloadAPI) RestartWorkload(ctx context.Context, request api.RestartWo
 		}, nil
 	case err != nil:
 		return api.RestartWorkload500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("restart workload", err),
-			},
+			Error: a.internalError("restart workload", err),
 		}, nil
 	}
 
@@ -456,9 +430,7 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 	// asked to watch something should be told that it cannot be watched.
 	if options.Follow && options.Previous {
 		return api.GetWorkloadLogs400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{
-				Error: "cannot follow the previous instance, which has already ended",
-			},
+			Error: "cannot follow the previous instance, which has already ended",
 		}, nil
 	}
 
@@ -471,15 +443,11 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 		switch {
 		case errors.Is(err, service.ErrWorkloadNotFound):
 			return api.GetWorkloadLogs404JSONResponse{
-				NotFoundJSONResponse: api.NotFoundJSONResponse{
-					Error: fmt.Sprintf("workload %q does not exist", request.Name),
-				},
+				Error: fmt.Sprintf("workload %q does not exist", request.Name),
 			}, nil
 		default:
 			return api.GetWorkloadLogs500JSONResponse{
-				InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-					Error: a.internalError("read workload logs", err),
-				},
+				Error: a.internalError("read workload logs", err),
 			}, nil
 		}
 	}
@@ -489,17 +457,13 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 	// surfaced mid-stream could no longer become a status code.
 	if options.Instance != nil && (*options.Instance < 0 || *options.Instance >= workload.Spec.Count) {
 		return api.GetWorkloadLogs400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{
-				Error: fmt.Sprintf("workload %q has no instance %d", request.Name, *options.Instance),
-			},
+			Error: fmt.Sprintf("workload %q has no instance %d", request.Name, *options.Instance),
 		}, nil
 	}
 
 	if options.Follow && options.Instance == nil && workload.Spec.Count > 1 {
 		return api.GetWorkloadLogs400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{
-				Error: fmt.Sprintf("select an instance to follow: workload %q runs %d", request.Name, workload.Spec.Count),
-			},
+			Error: fmt.Sprintf("select an instance to follow: workload %q runs %d", request.Name, workload.Spec.Count),
 		}, nil
 	}
 
@@ -607,9 +571,9 @@ func (w *flushWriter) Write(p []byte) (int, error) {
 // where the runtime's is whatever the image happened to carry.
 func instanceHealth(reported service.Health, instance driver.Instance) *api.InstanceHealth {
 	if reported.Checked {
-		result := api.InstanceHealth{Status: api.HealthStatus(reported.Result.Status)}
+		result := api.InstanceHealth{Status: api.HealthStatus(reported.Result.Status),
 
-		result.Failures = new(reported.Result.Failures)
+			Failures: new(reported.Result.Failures)}
 
 		if !reported.Result.CheckedAt.IsZero() {
 			result.CheckedAt = new(reported.Result.CheckedAt)

@@ -64,7 +64,7 @@ func (a *VolumeAPI) internalError(operation string, err error) string {
 func (a *VolumeAPI) CreateVolume(ctx context.Context, request api.CreateVolumeRequestObject) (api.CreateVolumeResponseObject, error) {
 	if request.Body == nil {
 		return api.CreateVolume400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: "request body is required"},
+			Error: "request body is required",
 		}, nil
 	}
 
@@ -72,7 +72,7 @@ func (a *VolumeAPI) CreateVolume(ctx context.Context, request api.CreateVolumeRe
 	switch {
 	case errors.Is(err, service.ErrInvalidVolume):
 		return api.CreateVolume400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case errors.Is(err, service.ErrVolumeExists):
 		// A volume holds data, so creating one that already exists is reported
@@ -83,9 +83,7 @@ func (a *VolumeAPI) CreateVolume(ctx context.Context, request api.CreateVolumeRe
 		}, nil
 	case err != nil:
 		return api.CreateVolume500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("create volume", err),
-			},
+			Error: a.internalError("create volume", err),
 		}, nil
 	}
 
@@ -96,7 +94,7 @@ func (a *VolumeAPI) CreateVolume(ctx context.Context, request api.CreateVolumeRe
 func (a *VolumeAPI) UpdateVolume(ctx context.Context, request api.UpdateVolumeRequestObject) (api.UpdateVolumeResponseObject, error) {
 	if request.Body == nil {
 		return api.UpdateVolume400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: "request body is required"},
+			Error: "request body is required",
 		}, nil
 	}
 
@@ -104,19 +102,15 @@ func (a *VolumeAPI) UpdateVolume(ctx context.Context, request api.UpdateVolumeRe
 	switch {
 	case errors.Is(err, service.ErrInvalidVolume):
 		return api.UpdateVolume400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case errors.Is(err, service.ErrVolumeNotFound):
 		return api.UpdateVolume404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("volume %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("volume %q does not exist", request.Name),
 		}, nil
 	case err != nil:
 		return api.UpdateVolume500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("update volume", err),
-			},
+			Error: a.internalError("update volume", err),
 		}, nil
 	}
 
@@ -129,15 +123,11 @@ func (a *VolumeAPI) GetVolume(ctx context.Context, request api.GetVolumeRequestO
 	switch {
 	case errors.Is(err, service.ErrVolumeNotFound):
 		return api.GetVolume404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("volume %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("volume %q does not exist", request.Name),
 		}, nil
 	case err != nil:
 		return api.GetVolume500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("get volume", err),
-			},
+			Error: a.internalError("get volume", err),
 		}, nil
 	}
 
@@ -156,13 +146,11 @@ func (a *VolumeAPI) ListVolumes(ctx context.Context, request api.ListVolumesRequ
 	switch {
 	case errors.Is(err, service.ErrInvalidQuery):
 		return api.ListVolumes400JSONResponse{
-			BadRequestJSONResponse: api.BadRequestJSONResponse{Error: err.Error()},
+			Error: err.Error(),
 		}, nil
 	case err != nil:
 		return api.ListVolumes500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("list volumes", err),
-			},
+			Error: a.internalError("list volumes", err),
 		}, nil
 	}
 
@@ -186,9 +174,7 @@ func (a *VolumeAPI) DeleteVolume(ctx context.Context, request api.DeleteVolumeRe
 	switch {
 	case errors.Is(err, service.ErrVolumeNotFound):
 		return api.DeleteVolume404JSONResponse{
-			NotFoundJSONResponse: api.NotFoundJSONResponse{
-				Error: fmt.Sprintf("volume %q does not exist", request.Name),
-			},
+			Error: fmt.Sprintf("volume %q does not exist", request.Name),
 		}, nil
 	case errors.Is(err, service.ErrVolumeInUse):
 		// The workloads holding it are named, because the caller's next question is
@@ -196,9 +182,7 @@ func (a *VolumeAPI) DeleteVolume(ctx context.Context, request api.DeleteVolumeRe
 		return api.DeleteVolume409JSONResponse{Error: err.Error()}, nil
 	case err != nil:
 		return api.DeleteVolume500JSONResponse{
-			InternalServerErrorJSONResponse: api.InternalServerErrorJSONResponse{
-				Error: a.internalError("delete volume", err),
-			},
+			Error: a.internalError("delete volume", err),
 		}, nil
 	}
 

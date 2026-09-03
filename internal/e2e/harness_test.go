@@ -468,7 +468,7 @@ func (s *Suite) peers(workload string, expected int) map[string]struct{} {
 			return nil
 		}
 
-		for _, line := range strings.Split(string(out), "\n") {
+		for line := range strings.SplitSeq(string(out), "\n") {
 			if value, ok := strings.CutPrefix(strings.TrimSpace(line), "PEER="); ok {
 				peers[value] = struct{}{}
 			}
@@ -520,7 +520,7 @@ func (s *Suite) publishedPorts(workload string) []string {
 	s.Require().NoError(err)
 
 	published := make([]string, 0, 2)
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		mapping, _, ok := strings.Cut(line, " -> ")
 		if !ok {
 			continue

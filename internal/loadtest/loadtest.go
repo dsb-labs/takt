@@ -325,10 +325,8 @@ func churn(ctx context.Context, config Config, collected *collector, names Names
 	var wg sync.WaitGroup
 
 	for worker := range scenario.Churn.Workers {
-		wg.Add(1)
 
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 
 			// Seeded per worker so that the workers do not all perform the same
 			// sequence of operations against the same workloads.
@@ -337,7 +335,7 @@ func churn(ctx context.Context, config Config, collected *collector, names Names
 			for ctx.Err() == nil {
 				perform(ctx, config, collected, names, choices[rng.IntN(len(choices))], rng)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()

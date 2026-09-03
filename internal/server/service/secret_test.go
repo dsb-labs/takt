@@ -530,17 +530,13 @@ func TestSecretService_RekeyIsAtomicForReaders(t *testing.T) {
 	var wg sync.WaitGroup
 
 	for range 20 {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			// Whichever side of the rekey this lands on, the value has to come back
 			// intact. A read that straddled it would fail to decrypt.
 			value, err := svc.Value(t.Context(), "db-password")
 			assert.NoError(t, err)
 			assert.Equal(t, "hunter2", value)
-		}()
+		})
 	}
 
 	_, _, err = svc.Rekey(t.Context(), new, "new")

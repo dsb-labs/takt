@@ -439,8 +439,7 @@ func (d *Driver) supervise(ctx context.Context, workload string, instance int, p
 
 		code := 0
 
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
+		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
 			code = exit.ExitCode()
 		}
 

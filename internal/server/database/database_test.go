@@ -47,9 +47,7 @@ func TestOpen_ConcurrentWrites(t *testing.T) {
 	errs := make(chan error, 50)
 
 	for i := range 50 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 
 			_, _, err := repo.Upsert(t.Context(), Workload{
 				Name:     fmt.Sprintf("example-%d", i),
@@ -60,7 +58,7 @@ func TestOpen_ConcurrentWrites(t *testing.T) {
 			if err != nil {
 				errs <- err
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
