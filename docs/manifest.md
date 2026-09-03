@@ -115,7 +115,8 @@ what a schedule means.
 **On one node, a count buys throughput rather than availability.** The host is the
 failure domain, and a second instance on the same host does not survive it losing
 power. Several copies of a single-threaded service across several cores is the case
-this serves.
+this serves. A [service](services.md) reports every instance's address, so an
+external load balancer can spread requests across them.
 
 orca does not cap the count. The machine does: each instance costs a container or a
 process, memory, and — for a workload publishing ports — a host port per port from
@@ -438,6 +439,8 @@ workload's own name and instance, so a reader running several instances spreads 
 evenly across the target's. Changing the target's count moves the arithmetic and the
 readers are redeployed onto the new spread, rolling one instance per pass. A single
 reader keeps sending everything to one instance — orca does not balance requests.
+Something that balances per request needs every instance's address, which is what a
+[service](services.md) reports.
 
 The address is not a URL. orca does not know what the workload speaks, so a bare
 address composes into whatever you are writing.

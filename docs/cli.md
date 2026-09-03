@@ -19,6 +19,11 @@ orca volume list                        List volumes                         (al
 orca volume get <name>                  Show a single volume
 orca volume delete <name>               Delete a volume and the data it holds (alias: rm)
 
+orca service apply <manifest>           Create or update a service from a manifest file
+orca service list                       List services                        (alias: ls)
+orca service get <name>                 Show a single service
+orca service delete <name>              Delete a service                     (alias: rm)
+
 orca secret set <name>                  Set a secret's value
 orca secret list                        List secrets                         (alias: ls)
 orca secret get <name>                  Show a single secret
@@ -418,6 +423,51 @@ resolves, so this is for a volume whose workloads are known not to need it.
 
 A workload being torn down still counts as holding a volume. Its work is still running
 until the reconciler has stopped it, so the data it mounts is still in use.
+
+## service apply
+
+```sh
+orca service apply service.yaml
+```
+
+Creates or updates a service from a manifest file. The stored selection becomes what
+the manifest says, however many times it is applied. See [Services](services.md) for
+the manifest and what a service selects.
+
+The workloads the target selects do not have to exist. A service applied ahead of its
+workloads reports no backends until they arrive.
+
+## service list
+
+```sh
+orca service list
+orca service list --query '$.labels.env=prod'
+```
+
+| Flag | Description |
+|---|---|
+| `--query`, `-q` | A `path=value` query into the service's labels. Repeatable. |
+
+Each service reports its target and the backends it currently selects. A query
+reaches only the service's own labels, not its target's.
+
+## service get
+
+```sh
+orca service get web
+```
+
+Prints one service: its target, and the address of every selected instance that is
+running, passing its check when the workload declares one, and not being torn down.
+
+## service delete
+
+```sh
+orca service delete web
+```
+
+The workloads the service selected keep running. What stops is the service reporting
+their addresses.
 
 ## secret set
 
