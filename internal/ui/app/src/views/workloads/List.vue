@@ -63,7 +63,8 @@ const sort = useSort(() => workloads.data.value, "name", {
   state: (w) => w.state,
   health: (w) => health(w)?.label ?? "",
   runtime: (w) => w.runtime,
-  instances: (w) => runningInstances(w),
+  instances: (w) =>
+    (w.instances ?? []).filter((i) => i.state === "running").length,
   nextRun: (w) => w.nextRun ?? "",
 });
 
@@ -151,15 +152,7 @@ await workloads.suspense().catch(() => {});
           </tr>
         </thead>
         <tbody>
-          <tr v-if="workloads.isPending.value">
-            <td
-              colspan="6"
-              class="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
-            >
-              Loading…
-            </td>
-          </tr>
-          <tr v-else-if="sort.sorted.value.length === 0">
+          <tr v-if="sort.sorted.value.length === 0">
             <td
               colspan="6"
               class="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
