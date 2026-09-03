@@ -3378,3 +3378,85 @@ func (s *Suite) TestExecWorkloadRunsMultipleInstances() {
 	instances := s.awaitInstances(name, 2)
 	s.NotEqual(instances[0].ID, instances[1].ID, "two instances are two processes")
 }
+
+// TestServiceReportsBackends covers the service resource end to end: a service
+// selects workloads by label and reports the address of every running instance,
+// the backends drain when the workload stops, and deleting the service leaves
+// the workloads alone.
+func (s *Suite) TestServiceReportsBackends() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name, manifest.Port{To: 80})
+	spec.Count = 2
+	spec.Labels = map[string]string{"service-e2e": name}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.awaitInstances(name, 2)
+
+	// The service is applied after the workload here, but nothing depends on
+	// the order: a service is a question asked of whatever is running.
+	applied, err := s.client.ApplyService(s.ctx(), manifest.Service{
+		Version: "v1",
+		Name:    name,
+		Target: manifest.ServiceTarget{
+			Labels: map[string]string{"service-e2e": name},
+			Port:   80,
+		},
+	})
+	s.Require().NoError(err)
+	s.T().Cleanup(func() {
+		if s.client != nil {
+			_ = s.client.DeleteService(context.Background(), name)
+		}
+	})
+
+	// The protocol was left unset, so the stored target reports the default.
+	s.Equal(manifest.ProtocolTCP, applied.Target.Protocol)
+
+	backends := s.awaitBackends(name, 2)
+
+	// Each backend names the workload and instance its address reaches, and
+	// each instance holds a host port of its own.
+	addresses := make(map[string]struct{}, 2)
+	for _, backend := range backends {
+		s.Equal(name, backend.Workload)
+		addresses[backend.Address] = struct{}{}
+	}
+	s.Len(addresses, 2, "two instances are two addresses")
+
+	// A stopped workload has no running instances, so the backends drain
+	// without the service changing.
+	_, err = s.client.Stop(s.ctx(), name, client.WithWait())
+	s.Require().NoError(err)
+	s.awaitBackends(name, 0)
+
+	// Deleting the service removes only the record of it.
+	s.Require().NoError(s.client.DeleteService(s.ctx(), name))
+
+	_, err = s.client.GetService(s.ctx(), name)
+	s.ErrorIs(err, client.ErrServiceNotFound)
+
+	_, err = s.client.Get(s.ctx(), name)
+	s.Require().NoError(err, "deleting the service must leave the workload")
+}
+
+// awaitBackends waits for the named service to report the given number of
+// backends and returns them.
+func (s *Suite) awaitBackends(name string, count int) []client.ServiceBackend {
+	var backends []client.ServiceBackend
+
+	s.Require().Eventuallyf(func() bool {
+		service, err := s.client.GetService(s.ctx(), name)
+		if err != nil {
+			return false
+		}
+
+		backends = service.Backends
+
+		return len(backends) == count
+	}, convergeTimeout, 500*time.Millisecond, "service %q never reported %d backends", name, count)
+
+	return backends
+}
