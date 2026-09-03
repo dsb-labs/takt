@@ -299,10 +299,21 @@ func Run(ctx context.Context, config Config) error {
 		Reconciler: reconcile,
 	})
 
+	serviceSvc := service.NewServiceService(service.ServiceServiceConfig{
+		Logger:   logger,
+		Services: database.NewServiceRepository(db),
+		// The workload service rather than the repository: a backend is a
+		// question about observed instances, which only the hydrated listing
+		// answers.
+		Workloads: svc,
+		Address:   workloadAddress,
+	})
+
 	mux := http.NewServeMux()
 	api.New(api.Config{
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: volumeSvc}),
+		Services:  api.NewServiceAPI(api.ServiceAPIConfig{Logger: logger, Services: serviceSvc}),
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: secretSvc}),
 		Variables: api.NewVariableAPI(api.VariableAPIConfig{Logger: logger, Variables: variableSvc}),
 		System: api.NewSystemAPI(api.SystemAPIConfig{

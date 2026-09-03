@@ -34,6 +34,7 @@ type (
 	API struct {
 		*WorkloadAPI
 		*VolumeAPI
+		*ServiceAPI
 		*SecretAPI
 		*VariableAPI
 		*SystemAPI
@@ -46,6 +47,8 @@ type (
 		Workloads *WorkloadAPI
 		// The endpoints serving volumes.
 		Volumes *VolumeAPI
+		// The endpoints serving services.
+		Services *ServiceAPI
 		// The endpoints serving secrets.
 		Secrets *SecretAPI
 		// The endpoints serving variables.
@@ -67,6 +70,7 @@ func New(config Config) *API {
 	return &API{
 		WorkloadAPI: config.Workloads,
 		VolumeAPI:   config.Volumes,
+		ServiceAPI:  config.Services,
 		SecretAPI:   config.Secrets,
 		VariableAPI: config.Variables,
 		SystemAPI:   config.System,

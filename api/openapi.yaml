@@ -26,6 +26,8 @@ tags:
     description: Submission and inspection of workloads.
   - name: volumes
     description: Storage that outlives the workloads mounting it.
+  - name: services
+    description: Named selections of workload instances to balance requests across.
   - name: secrets
     description: Values a workload can read and an operator cannot.
   - name: variables
@@ -679,6 +681,132 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v1/services:
+    get:
+      operationId: listServices
+      tags: [services]
+      summary: List services
+      description: |
+        Returns the services the server holds, each with its backends resolved at
+        the time of the request.
+
+        Repeating the `query` parameter narrows the result: a service is returned
+        only when it satisfies every query given.
+      parameters:
+        - name: query
+          in: query
+          required: false
+          description: |
+            A `path=value` filter over the service's labels, where the path is a
+            JSON path such as `$.labels.app`. May be repeated, in which case a
+            service must match all of them. A query can reach only the service's
+            own labels, not its target's.
+          schema:
+            type: array
+            items:
+              type: string
+              examples: ["$.labels.app=web"]
+      responses:
+        "200":
+          description: The matching services.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListServicesResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/services/{name}:
+    parameters:
+      - $ref: "#/components/parameters/ServiceName"
+
+    get:
+      operationId: getService
+      tags: [services]
+      summary: Get a single service
+      description: |
+        Returns the service with the given name, with its backends resolved at the
+        time of the request.
+      responses:
+        "200":
+          description: The requested service.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetServiceResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      operationId: applyService
+      tags: [services]
+      summary: Create or update a service
+      description: |
+        Applies the given specification as the desired state for the named service.
+        The operation is idempotent: the stored selection becomes what the
+        specification says, however many times it is applied.
+
+        The specification's name must match the name in the path.
+
+        The workloads the target selects do not have to exist. A service is a
+        question asked of whatever is running, so one applied ahead of its
+        workloads reports no backends until they arrive.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ServiceSpec"
+      responses:
+        "200":
+          description: The service already existed and was updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyServiceResult"
+        "201":
+          description: The service was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyServiceResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: deleteService
+      tags: [services]
+      summary: Delete a service
+      description: |
+        Removes the service.
+
+        The workloads it selected are their own resources and keep running. What
+        stops is the service reporting their addresses.
+
+        Deletion is synchronous, unlike a workload's. There is nothing running to
+        wind down, only a row to remove.
+      responses:
+        "200":
+          description: |
+            The service was removed.
+
+            The body is an object with nothing in it yet, rather than no body at
+            all, for the reason a deleted volume's is.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteServiceResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /api/v1/secrets:
     get:
       operationId: listSecrets
@@ -1177,6 +1305,16 @@ components:
       in: path
       required: true
       description: The name that identifies the volume.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 63
+
+    ServiceName:
+      name: name
+      in: path
+      required: true
+      description: The name that identifies the service.
       schema:
         type: string
         minLength: 1
@@ -1867,6 +2005,106 @@ components:
         labels:
           $ref: "#/components/schemas/Labels"
 
+    ServiceSpec:
+      type: object
+      description: |
+        The desired state of a service: a name, and the selection of workload
+        instances it balances requests across.
+      required: [version, name, target]
+      properties:
+        version:
+          type: string
+          description: The manifest schema version. Only "v1" is understood.
+          examples: ["v1"]
+        name:
+          type: string
+          description: |
+            The name that identifies the service. The name "stream" is reserved.
+          minLength: 1
+          maxLength: 63
+          examples: ["example"]
+        labels:
+          $ref: "#/components/schemas/Labels"
+        target:
+          $ref: "#/components/schemas/ServiceTarget"
+
+    ServiceTarget:
+      type: object
+      description: |
+        What a service selects: the labels a workload must carry for its instances
+        to be selected, and which of their ports the service addresses.
+      required: [labels, port]
+      properties:
+        labels:
+          $ref: "#/components/schemas/Labels"
+          description: |
+            The labels a workload must carry for its instances to be selected. A
+            workload matches only when it carries every one of them, and at least
+            one is required: a service selecting everything is more likely a
+            mistake than an intent.
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: |
+            The port the selected instances listen on, written as the port inside
+            the workload. Always a number rather than a port's name, because the
+            selected workloads need not agree on their names.
+        protocol:
+          type: string
+          enum: [tcp, udp]
+          description: The transport protocol of the port. Omitted means tcp.
+
+    Service:
+      type: object
+      description: |
+        A service, together with the backends its target selected when the
+        response was written.
+      required: [name, target, createdAt, updatedAt]
+      properties:
+        name:
+          type: string
+          description: The name that identifies the service.
+        labels:
+          $ref: "#/components/schemas/Labels"
+        target:
+          $ref: "#/components/schemas/ServiceTarget"
+        backends:
+          type: array
+          description: |
+            The selected instances that are fit to serve: observed running,
+            passing their check when the workload declares one, and not being
+            torn down. Absent when nothing selected is fit to serve, which is
+            also what a target selecting nothing reports.
+          items:
+            $ref: "#/components/schemas/ServiceBackend"
+        createdAt:
+          type: string
+          format: date-time
+          description: When the service was created.
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the service was last modified.
+
+    ServiceBackend:
+      type: object
+      description: One address a service balances requests across.
+      required: [workload, instance, address]
+      properties:
+        workload:
+          type: string
+          description: The name of the workload the instance belongs to.
+        instance:
+          type: integer
+          description: The index of the instance among the workload's instances.
+        address:
+          type: string
+          description: |
+            The host address that reaches the instance's target port, as
+            "host:port".
+          examples: ["203.0.113.10:20000"]
+
     SecretSpec:
       type: object
       description: |
@@ -2240,8 +2478,8 @@ components:
     Labels:
       type: object
       description: |
-        Key-value pairs attached to a workload, volume, secret or variable, which
-        the list query filter matches against.
+        Key-value pairs attached to a workload, volume, service, secret or
+        variable, which the list query filter matches against.
 
         Keys are lowercase alphanumeric, optionally separated by dots, dashes,
         underscores or slashes, up to 63 characters, so a key like
@@ -2469,6 +2707,43 @@ components:
         otherwise return nothing. And an object with no fields can gain one, where a
         response with no body cannot gain anything without becoming a different kind
         of response.
+
+    ListServicesResult:
+      type: object
+      description: |
+        The body returned when services are listed.
+
+        An object rather than a bare array, so that something later reported about
+        a listing as a whole is a new field rather than a change of type.
+      required: [services]
+      properties:
+        services:
+          type: array
+          description: The services the server holds.
+          items:
+            $ref: "#/components/schemas/Service"
+
+    GetServiceResult:
+      type: object
+      description: The body returned when a single service is read.
+      required: [service]
+      properties:
+        service:
+          $ref: "#/components/schemas/Service"
+
+    ApplyServiceResult:
+      type: object
+      description: The body returned when a service is applied.
+      required: [service]
+      properties:
+        service:
+          $ref: "#/components/schemas/Service"
+
+    DeleteServiceResult:
+      type: object
+      description: |
+        The body returned when a service is deleted, which has nothing in it yet.
+        It exists for the reasons DeleteVolumeResult does.
 
     ListSecretsResult:
       type: object

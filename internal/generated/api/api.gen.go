@@ -127,16 +127,16 @@ func (e OverlapPolicy) Valid() bool {
 
 // Defines values for Protocol.
 const (
-	TCP Protocol = "tcp"
-	UDP Protocol = "udp"
+	ProtocolTCP Protocol = "tcp"
+	ProtocolUDP Protocol = "udp"
 )
 
 // Valid indicates whether the value is a known member of the Protocol enum.
 func (e Protocol) Valid() bool {
 	switch e {
-	case TCP:
+	case ProtocolTCP:
 		return true
-	case UDP:
+	case ProtocolUDP:
 		return true
 	default:
 		return false
@@ -203,6 +203,24 @@ func (e Runtime) Valid() bool {
 	}
 }
 
+// Defines values for ServiceTargetProtocol.
+const (
+	ServiceTargetProtocolTCP ServiceTargetProtocol = "tcp"
+	ServiceTargetProtocolUDP ServiceTargetProtocol = "udp"
+)
+
+// Valid indicates whether the value is a known member of the ServiceTargetProtocol enum.
+func (e ServiceTargetProtocol) Valid() bool {
+	switch e {
+	case ServiceTargetProtocolTCP:
+		return true
+	case ServiceTargetProtocolUDP:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WorkloadState.
 const (
 	WorkloadStateCompleted   WorkloadState = "completed"
@@ -237,6 +255,13 @@ func (e WorkloadState) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// ApplyServiceResult The body returned when a service is applied.
+type ApplyServiceResult struct {
+	// Service A service, together with the backends its target selected when the
+	// response was written.
+	Service Service `json:"service"`
 }
 
 // ApplyWorkloadResult The body returned when a workload is applied.
@@ -334,6 +359,10 @@ type CreateVolumeResult struct {
 // DeleteSecretResult The body returned when a secret is deleted, which has nothing in it yet, for
 // the same reason deleting a volume returns one.
 type DeleteSecretResult = map[string]interface{}
+
+// DeleteServiceResult The body returned when a service is deleted, which has nothing in it yet.
+// It exists for the reasons DeleteVolumeResult does.
+type DeleteServiceResult = map[string]interface{}
 
 // DeleteVariableResult The body returned when a variable is deleted, which has nothing in it yet, for
 // the same reason deleting a secret returns one.
@@ -459,6 +488,13 @@ type GetSecretResult struct {
 	// of orca: once set, the only thing that sees the value is a workload being
 	// started.
 	Secret Secret `json:"secret"`
+}
+
+// GetServiceResult The body returned when a single service is read.
+type GetServiceResult struct {
+	// Service A service, together with the backends its target selected when the
+	// response was written.
+	Service Service `json:"service"`
 }
 
 // GetVariableResult The body returned when a single variable is read.
@@ -616,8 +652,8 @@ type InstanceHealth struct {
 // driver observed. Completed adds what the policy makes of that.
 type InstanceState string
 
-// Labels Key-value pairs attached to a workload, volume, secret or variable, which
-// the list query filter matches against.
+// Labels Key-value pairs attached to a workload, volume, service, secret or
+// variable, which the list query filter matches against.
 //
 // Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 // underscores or slashes, up to 63 characters, so a key like
@@ -638,6 +674,15 @@ type Labels map[string]string
 type ListSecretsResult struct {
 	// Secrets The secrets the server holds.
 	Secrets []Secret `json:"secrets"`
+}
+
+// ListServicesResult The body returned when services are listed.
+//
+// An object rather than a bare array, so that something later reported about
+// a listing as a whole is a new field rather than a change of type.
+type ListServicesResult struct {
+	// Services The services the server holds.
+	Services []Service `json:"services"`
 }
 
 // ListVariablesResult The body returned when variables are listed.
@@ -961,8 +1006,8 @@ type Secret struct {
 	// CreatedAt When the secret was created.
 	CreatedAt time.Time `json:"createdAt"`
 
-	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
-	// the list query filter matches against.
+	// Labels Key-value pairs attached to a workload, volume, service, secret or
+	// variable, which the list query filter matches against.
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
@@ -1010,8 +1055,8 @@ type Secret struct {
 // to write down but the value, and writing that down is what a secret exists to
 // avoid.
 type SecretSpec struct {
-	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
-	// the list query filter matches against.
+	// Labels Key-value pairs attached to a workload, volume, service, secret or
+	// variable, which the list query filter matches against.
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
@@ -1031,6 +1076,115 @@ type SecretSpec struct {
 	// environment variable, which is different from one that is not set.
 	Value string `json:"value"`
 }
+
+// Service A service, together with the backends its target selected when the
+// response was written.
+type Service struct {
+	// Backends The selected instances that are fit to serve: observed running,
+	// passing their check when the workload declares one, and not being
+	// torn down. Absent when nothing selected is fit to serve, which is
+	// also what a target selecting nothing reports.
+	Backends *[]ServiceBackend `json:"backends,omitempty"`
+
+	// CreatedAt When the service was created.
+	CreatedAt time.Time `json:"createdAt"`
+
+	// Labels Key-value pairs attached to a workload, volume, service, secret or
+	// variable, which the list query filter matches against.
+	//
+	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+	// underscores or slashes, up to 63 characters, so a key like
+	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// server writes its own labels under it.
+	//
+	// Values are free text without control characters, up to 256 bytes. An empty
+	// value is allowed.
+	//
+	// The same rules everywhere. A label on a secret is as readable as the
+	// secret's name, which is worth knowing before putting anything in one.
+	Labels *Labels `json:"labels,omitempty"`
+
+	// Name The name that identifies the service.
+	Name string `json:"name"`
+
+	// Target What a service selects: the labels a workload must carry for its instances
+	// to be selected, and which of their ports the service addresses.
+	Target ServiceTarget `json:"target"`
+
+	// UpdatedAt When the service was last modified.
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// ServiceBackend One address a service balances requests across.
+type ServiceBackend struct {
+	// Address The host address that reaches the instance's target port, as
+	// "host:port".
+	//
+	//
+	// Examples: 203.0.113.10:20000
+	Address string `json:"address"`
+
+	// Instance The index of the instance among the workload's instances.
+	Instance int `json:"instance"`
+
+	// Workload The name of the workload the instance belongs to.
+	Workload string `json:"workload"`
+}
+
+// ServiceSpec The desired state of a service: a name, and the selection of workload
+// instances it balances requests across.
+type ServiceSpec struct {
+	// Labels Key-value pairs attached to a workload, volume, service, secret or
+	// variable, which the list query filter matches against.
+	//
+	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
+	// underscores or slashes, up to 63 characters, so a key like
+	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// server writes its own labels under it.
+	//
+	// Values are free text without control characters, up to 256 bytes. An empty
+	// value is allowed.
+	//
+	// The same rules everywhere. A label on a secret is as readable as the
+	// secret's name, which is worth knowing before putting anything in one.
+	Labels *Labels `json:"labels,omitempty"`
+
+	// Name The name that identifies the service. The name "stream" is reserved.
+	//
+	//
+	// Examples: example
+	Name string `json:"name"`
+
+	// Target What a service selects: the labels a workload must carry for its instances
+	// to be selected, and which of their ports the service addresses.
+	Target ServiceTarget `json:"target"`
+
+	// Version The manifest schema version. Only "v1" is understood.
+	//
+	// Examples: v1
+	Version string `json:"version"`
+}
+
+// ServiceTarget What a service selects: the labels a workload must carry for its instances
+// to be selected, and which of their ports the service addresses.
+type ServiceTarget struct {
+	// Labels The labels a workload must carry for its instances to be selected. A
+	// workload matches only when it carries every one of them, and at least
+	// one is required: a service selecting everything is more likely a
+	// mistake than an intent.
+	Labels Labels `json:"labels"`
+
+	// Port The port the selected instances listen on, written as the port inside
+	// the workload. Always a number rather than a port's name, because the
+	// selected workloads need not agree on their names.
+	Port int `json:"port"`
+
+	// Protocol The transport protocol of the port. Omitted means tcp.
+	Protocol *ServiceTargetProtocol `json:"protocol,omitempty"`
+}
+
+// ServiceTargetProtocol The transport protocol of the port. Omitted means tcp.
+type ServiceTargetProtocol string
 
 // SetSecretResult The body returned when a secret is set.
 type SetSecretResult struct {
@@ -1097,8 +1251,8 @@ type Variable struct {
 	// CreatedAt When the variable was created.
 	CreatedAt time.Time `json:"createdAt"`
 
-	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
-	// the list query filter matches against.
+	// Labels Key-value pairs attached to a workload, volume, service, secret or
+	// variable, which the list query filter matches against.
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
@@ -1134,8 +1288,8 @@ type Variable struct {
 // workload or a volume a variable is not described by a manifest: there is
 // nothing to write down but the value.
 type VariableSpec struct {
-	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
-	// the list query filter matches against.
+	// Labels Key-value pairs attached to a workload, volume, service, secret or
+	// variable, which the list query filter matches against.
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
@@ -1161,8 +1315,8 @@ type Volume struct {
 	// CreatedAt When the volume was created.
 	CreatedAt time.Time `json:"createdAt"`
 
-	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
-	// the list query filter matches against.
+	// Labels Key-value pairs attached to a workload, volume, service, secret or
+	// variable, which the list query filter matches against.
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
@@ -1293,8 +1447,8 @@ type VolumeMount struct {
 // VolumeSpec The desired state of a volume, which is no more than its name. A volume holds
 // data and has nothing to configure.
 type VolumeSpec struct {
-	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
-	// the list query filter matches against.
+	// Labels Key-value pairs attached to a workload, volume, service, secret or
+	// variable, which the list query filter matches against.
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
@@ -1458,8 +1612,8 @@ type WorkloadSpec struct {
 	// rather than ignored.
 	Health *HealthSpec `json:"health,omitempty"`
 
-	// Labels Key-value pairs attached to a workload, volume, secret or variable, which
-	// the list query filter matches against.
+	// Labels Key-value pairs attached to a workload, volume, service, secret or
+	// variable, which the list query filter matches against.
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
@@ -1560,6 +1714,9 @@ type WorkloadState string
 // SecretName defines model for SecretName.
 type SecretName = string
 
+// ServiceName defines model for ServiceName.
+type ServiceName = string
+
 // VariableName defines model for VariableName.
 type VariableName = string
 
@@ -1612,6 +1769,15 @@ type DeleteSecretParams struct {
 	// running until something replaces them, and then fail to start until the
 	// secret exists again.
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+}
+
+// ListServicesParams defines parameters for ListServices.
+type ListServicesParams struct {
+	// Query A `path=value` filter over the service's labels, where the path is a
+	// JSON path such as `$.labels.app`. May be repeated, in which case a
+	// service must match all of them. A query can reach only the service's
+	// own labels, not its target's.
+	Query *[]string `form:"query,omitempty" json:"query,omitempty"`
 }
 
 // ListVariablesParams defines parameters for ListVariables.
@@ -1717,6 +1883,9 @@ type RekeyJSONRequestBody = RekeyRequest
 
 // SetSecretJSONRequestBody defines body for SetSecret for application/json ContentType.
 type SetSecretJSONRequestBody = SecretSpec
+
+// ApplyServiceJSONRequestBody defines body for ApplyService for application/json ContentType.
+type ApplyServiceJSONRequestBody = ServiceSpec
 
 // SetVariableJSONRequestBody defines body for SetVariable for application/json ContentType.
 type SetVariableJSONRequestBody = VariableSpec
@@ -2019,6 +2188,72 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
 	SetSecret(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListServices List services
+	//
+	// Returns the services the server holds, each with its backends resolved at
+	// the time of the request.
+	//
+	// Repeating the `query` parameter narrows the result: a service is returned
+	// only when it satisfies every query given.
+	//
+	// Corresponds with GET /api/v1/services (the `ListServices` operationId).
+	ListServices(ctx context.Context, params *ListServicesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteService Delete a service
+	//
+	// Removes the service.
+	//
+	// The workloads it selected are their own resources and keep running. What
+	// stops is the service reporting their addresses.
+	//
+	// Deletion is synchronous, unlike a workload's. There is nothing running to
+	// wind down, only a row to remove.
+	//
+	// Corresponds with DELETE /api/v1/services/{name} (the `DeleteService` operationId).
+	DeleteService(ctx context.Context, name ServiceName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetService Get a single service
+	//
+	// Returns the service with the given name, with its backends resolved at the
+	// time of the request.
+	//
+	// Corresponds with GET /api/v1/services/{name} (the `GetService` operationId).
+	GetService(ctx context.Context, name ServiceName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApplyServiceWithBody Create or update a service
+	//
+	// Applies the given specification as the desired state for the named service.
+	// The operation is idempotent: the stored selection becomes what the
+	// specification says, however many times it is applied.
+	//
+	// The specification's name must match the name in the path.
+	//
+	// The workloads the target selects do not have to exist. A service is a
+	// question asked of whatever is running, so one applied ahead of its
+	// workloads reports no backends until they arrive.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
+	ApplyServiceWithBody(ctx context.Context, name ServiceName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApplyService Create or update a service
+	//
+	// Applies the given specification as the desired state for the named service.
+	// The operation is idempotent: the stored selection becomes what the
+	// specification says, however many times it is applied.
+	//
+	// The specification's name must match the name in the path.
+	//
+	// The workloads the target selects do not have to exist. A service is a
+	// question asked of whatever is running, so one applied ahead of its
+	// workloads reports no backends until they arrive.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
+	ApplyService(ctx context.Context, name ServiceName, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListVariables List variables
 	//
@@ -2746,6 +2981,122 @@ func (c *Client) SetSecretWithBody(ctx context.Context, name SecretName, content
 // Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
 func (c *Client) SetSecret(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewSetSecretRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListServices List services
+//
+// Returns the services the server holds, each with its backends resolved at
+// the time of the request.
+//
+// Repeating the `query` parameter narrows the result: a service is returned
+// only when it satisfies every query given.
+//
+// Corresponds with GET /api/v1/services (the `ListServices` operationId).
+func (c *Client) ListServices(ctx context.Context, params *ListServicesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListServicesRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteService Delete a service
+//
+// Removes the service.
+//
+// The workloads it selected are their own resources and keep running. What
+// stops is the service reporting their addresses.
+//
+// Deletion is synchronous, unlike a workload's. There is nothing running to
+// wind down, only a row to remove.
+//
+// Corresponds with DELETE /api/v1/services/{name} (the `DeleteService` operationId).
+func (c *Client) DeleteService(ctx context.Context, name ServiceName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteServiceRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetService Get a single service
+//
+// Returns the service with the given name, with its backends resolved at the
+// time of the request.
+//
+// Corresponds with GET /api/v1/services/{name} (the `GetService` operationId).
+func (c *Client) GetService(ctx context.Context, name ServiceName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetServiceRequest(c.Server, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ApplyServiceWithBody Create or update a service
+//
+// Applies the given specification as the desired state for the named service.
+// The operation is idempotent: the stored selection becomes what the
+// specification says, however many times it is applied.
+//
+// The specification's name must match the name in the path.
+//
+// The workloads the target selects do not have to exist. A service is a
+// question asked of whatever is running, so one applied ahead of its
+// workloads reports no backends until they arrive.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
+func (c *Client) ApplyServiceWithBody(ctx context.Context, name ServiceName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyServiceRequestWithBody(c.Server, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ApplyService Create or update a service
+//
+// Applies the given specification as the desired state for the named service.
+// The operation is idempotent: the stored selection becomes what the
+// specification says, however many times it is applied.
+//
+// The specification's name must match the name in the path.
+//
+// The workloads the target selects do not have to exist. A service is a
+// question asked of whatever is running, so one applied ahead of its
+// workloads reports no backends until they arrive.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
+func (c *Client) ApplyService(ctx context.Context, name ServiceName, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyServiceRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3789,6 +4140,175 @@ func NewSetSecretRequestWithBody(server string, name SecretName, contentType str
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/secrets/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListServicesRequest constructs an http.Request for the ListServices method
+func NewListServicesRequest(server string, params *ListServicesParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/services")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Query != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "query", *params.Query, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDeleteServiceRequest constructs an http.Request for the DeleteService method
+func NewDeleteServiceRequest(server string, name ServiceName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/services/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetServiceRequest constructs an http.Request for the GetService method
+func NewGetServiceRequest(server string, name ServiceName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/services/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewApplyServiceRequest calls the generic ApplyService builder with application/json body
+func NewApplyServiceRequest(server string, name ServiceName, body ApplyServiceJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewApplyServiceRequestWithBody(server, name, "application/json", bodyReader)
+}
+
+// NewApplyServiceRequestWithBody constructs an http.Request for the ApplyService method, with any body, and a specified content type
+func NewApplyServiceRequestWithBody(server string, name ServiceName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/services/%s", pathParam0)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -4995,6 +5515,78 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
 	SetSecretWithResponse(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSecretResponse, error)
 
+	// ListServicesWithResponse List services
+	//
+	// Returns the services the server holds, each with its backends resolved at
+	// the time of the request.
+	//
+	// Repeating the `query` parameter narrows the result: a service is returned
+	// only when it satisfies every query given.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/services (the `ListServices` operationId).
+	ListServicesWithResponse(ctx context.Context, params *ListServicesParams, reqEditors ...RequestEditorFn) (*ListServicesResponse, error)
+
+	// DeleteServiceWithResponse Delete a service
+	//
+	// Removes the service.
+	//
+	// The workloads it selected are their own resources and keep running. What
+	// stops is the service reporting their addresses.
+	//
+	// Deletion is synchronous, unlike a workload's. There is nothing running to
+	// wind down, only a row to remove.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/services/{name} (the `DeleteService` operationId).
+	DeleteServiceWithResponse(ctx context.Context, name ServiceName, reqEditors ...RequestEditorFn) (*DeleteServiceResponse, error)
+
+	// GetServiceWithResponse Get a single service
+	//
+	// Returns the service with the given name, with its backends resolved at the
+	// time of the request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/services/{name} (the `GetService` operationId).
+	GetServiceWithResponse(ctx context.Context, name ServiceName, reqEditors ...RequestEditorFn) (*GetServiceResponse, error)
+
+	// ApplyServiceWithBodyWithResponse Create or update a service
+	//
+	// Applies the given specification as the desired state for the named service.
+	// The operation is idempotent: the stored selection becomes what the
+	// specification says, however many times it is applied.
+	//
+	// The specification's name must match the name in the path.
+	//
+	// The workloads the target selects do not have to exist. A service is a
+	// question asked of whatever is running, so one applied ahead of its
+	// workloads reports no backends until they arrive.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
+	ApplyServiceWithBodyWithResponse(ctx context.Context, name ServiceName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error)
+
+	// ApplyServiceWithResponse Create or update a service
+	//
+	// Applies the given specification as the desired state for the named service.
+	// The operation is idempotent: the stored selection becomes what the
+	// specification says, however many times it is applied.
+	//
+	// The specification's name must match the name in the path.
+	//
+	// The workloads the target selects do not have to exist. A service is a
+	// question asked of whatever is running, so one applied ahead of its
+	// workloads reports no backends until they arrive.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
+	ApplyServiceWithResponse(ctx context.Context, name ServiceName, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error)
+
 	// ListVariablesWithResponse List variables
 	//
 	// Returns the variables the server holds, each with its value and the workloads
@@ -5898,6 +6490,233 @@ func (r SetSecretResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r SetSecretResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListServicesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ListServicesResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListServicesResponse) GetJSON200() *ListServicesResult {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListServicesResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListServicesResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListServicesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListServicesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListServicesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListServicesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteServiceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeleteServiceResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DeleteServiceResponse) GetJSON200() *DeleteServiceResult {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeleteServiceResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r DeleteServiceResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteServiceResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteServiceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteServiceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteServiceResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetServiceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetServiceResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetServiceResponse) GetJSON200() *GetServiceResult {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetServiceResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetServiceResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetServiceResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetServiceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetServiceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetServiceResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ApplyServiceResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ApplyServiceResult
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *ApplyServiceResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ApplyServiceResponse) GetJSON200() *ApplyServiceResult {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r ApplyServiceResponse) GetJSON201() *ApplyServiceResult {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ApplyServiceResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ApplyServiceResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ApplyServiceResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ApplyServiceResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ApplyServiceResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ApplyServiceResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -7283,6 +8102,108 @@ func (c *ClientWithResponses) SetSecretWithResponse(ctx context.Context, name Se
 	return ParseSetSecretResponse(rsp)
 }
 
+// ListServicesWithResponse List services
+//
+// Returns the services the server holds, each with its backends resolved at
+// the time of the request.
+//
+// Repeating the `query` parameter narrows the result: a service is returned
+// only when it satisfies every query given.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/services (the `ListServices` operationId).
+func (c *ClientWithResponses) ListServicesWithResponse(ctx context.Context, params *ListServicesParams, reqEditors ...RequestEditorFn) (*ListServicesResponse, error) {
+	rsp, err := c.ListServices(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListServicesResponse(rsp)
+}
+
+// DeleteServiceWithResponse Delete a service
+//
+// Removes the service.
+//
+// The workloads it selected are their own resources and keep running. What
+// stops is the service reporting their addresses.
+//
+// Deletion is synchronous, unlike a workload's. There is nothing running to
+// wind down, only a row to remove.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/services/{name} (the `DeleteService` operationId).
+func (c *ClientWithResponses) DeleteServiceWithResponse(ctx context.Context, name ServiceName, reqEditors ...RequestEditorFn) (*DeleteServiceResponse, error) {
+	rsp, err := c.DeleteService(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteServiceResponse(rsp)
+}
+
+// GetServiceWithResponse Get a single service
+//
+// Returns the service with the given name, with its backends resolved at the
+// time of the request.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/services/{name} (the `GetService` operationId).
+func (c *ClientWithResponses) GetServiceWithResponse(ctx context.Context, name ServiceName, reqEditors ...RequestEditorFn) (*GetServiceResponse, error) {
+	rsp, err := c.GetService(ctx, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetServiceResponse(rsp)
+}
+
+// ApplyServiceWithBodyWithResponse Create or update a service
+//
+// Applies the given specification as the desired state for the named service.
+// The operation is idempotent: the stored selection becomes what the
+// specification says, however many times it is applied.
+//
+// The specification's name must match the name in the path.
+//
+// The workloads the target selects do not have to exist. A service is a
+// question asked of whatever is running, so one applied ahead of its
+// workloads reports no backends until they arrive.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
+func (c *ClientWithResponses) ApplyServiceWithBodyWithResponse(ctx context.Context, name ServiceName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error) {
+	rsp, err := c.ApplyServiceWithBody(ctx, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApplyServiceResponse(rsp)
+}
+
+// ApplyServiceWithResponse Create or update a service
+//
+// Applies the given specification as the desired state for the named service.
+// The operation is idempotent: the stored selection becomes what the
+// specification says, however many times it is applied.
+//
+// The specification's name must match the name in the path.
+//
+// The workloads the target selects do not have to exist. A service is a
+// question asked of whatever is running, so one applied ahead of its
+// workloads reports no backends until they arrive.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
+func (c *ClientWithResponses) ApplyServiceWithResponse(ctx context.Context, name ServiceName, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error) {
+	rsp, err := c.ApplyService(ctx, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApplyServiceResponse(rsp)
+}
+
 // ListVariablesWithResponse List variables
 //
 // Returns the variables the server holds, each with its value and the workloads
@@ -8212,6 +9133,173 @@ func ParseSetSecretResponse(rsp *http.Response) (*SetSecretResponse, error) {
 	return response, nil
 }
 
+// ParseListServicesResponse parses an HTTP response from a ListServicesWithResponse call
+func ParseListServicesResponse(rsp *http.Response) (*ListServicesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListServicesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ListServicesResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteServiceResponse parses an HTTP response from a DeleteServiceWithResponse call
+func ParseDeleteServiceResponse(rsp *http.Response) (*DeleteServiceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteServiceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeleteServiceResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetServiceResponse parses an HTTP response from a GetServiceWithResponse call
+func ParseGetServiceResponse(rsp *http.Response) (*GetServiceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetServiceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetServiceResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseApplyServiceResponse parses an HTTP response from a ApplyServiceWithResponse call
+func ParseApplyServiceResponse(rsp *http.Response) (*ApplyServiceResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ApplyServiceResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ApplyServiceResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ApplyServiceResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListVariablesResponse parses an HTTP response from a ListVariablesWithResponse call
 func ParseListVariablesResponse(rsp *http.Response) (*ListVariablesResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -9066,6 +10154,18 @@ type ServerInterface interface {
 	// SetSecret Set a secret's value
 	// (PUT /api/v1/secrets/{name})
 	SetSecret(w http.ResponseWriter, r *http.Request, name SecretName)
+	// ListServices List services
+	// (GET /api/v1/services)
+	ListServices(w http.ResponseWriter, r *http.Request, params ListServicesParams)
+	// DeleteService Delete a service
+	// (DELETE /api/v1/services/{name})
+	DeleteService(w http.ResponseWriter, r *http.Request, name ServiceName)
+	// GetService Get a single service
+	// (GET /api/v1/services/{name})
+	GetService(w http.ResponseWriter, r *http.Request, name ServiceName)
+	// ApplyService Create or update a service
+	// (PUT /api/v1/services/{name})
+	ApplyService(w http.ResponseWriter, r *http.Request, name ServiceName)
 	// ListVariables List variables
 	// (GET /api/v1/variables)
 	ListVariables(w http.ResponseWriter, r *http.Request, params ListVariablesParams)
@@ -9338,6 +10438,117 @@ func (siw *ServerInterfaceWrapper) SetSecret(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetSecret(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListServices operation middleware
+func (siw *ServerInterfaceWrapper) ListServices(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListServicesParams
+
+	// ------------- Optional query parameter "query" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", r.URL.Query(), &params.Query, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "query"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "query", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListServices(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteService operation middleware
+func (siw *ServerInterfaceWrapper) DeleteService(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ServiceName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteService(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetService operation middleware
+func (siw *ServerInterfaceWrapper) GetService(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ServiceName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetService(w, r, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyService operation middleware
+func (siw *ServerInterfaceWrapper) ApplyService(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name ServiceName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyService(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10074,6 +11285,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.DeleteVolume)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.GetVolume)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.UpdateVolume)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/services", wrapper.ListServices)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/services/{name}", wrapper.DeleteService)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/services/{name}", wrapper.GetService)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/services/{name}", wrapper.ApplyService)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/secrets", wrapper.ListSecrets)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/secrets/{name}", wrapper.DeleteSecret)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/secrets/{name}", wrapper.GetSecret)
@@ -10528,6 +11743,229 @@ type SetSecret500JSONResponse struct {
 }
 
 func (response SetSecret500JSONResponse) VisitSetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServicesRequestObject struct {
+	Params ListServicesParams
+}
+
+type ListServicesResponseObject interface {
+	VisitListServicesResponse(w http.ResponseWriter) error
+}
+
+type ListServices200JSONResponse ListServicesResult
+
+func (response ListServices200JSONResponse) VisitListServicesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServices400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListServices400JSONResponse) VisitListServicesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServices500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response ListServices500JSONResponse) VisitListServicesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteServiceRequestObject struct {
+	Name ServiceName `json:"name"`
+}
+
+type DeleteServiceResponseObject interface {
+	VisitDeleteServiceResponse(w http.ResponseWriter) error
+}
+
+type DeleteService200JSONResponse DeleteServiceResult
+
+func (response DeleteService200JSONResponse) VisitDeleteServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteService404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteService404JSONResponse) VisitDeleteServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteService500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response DeleteService500JSONResponse) VisitDeleteServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServiceRequestObject struct {
+	Name ServiceName `json:"name"`
+}
+
+type GetServiceResponseObject interface {
+	VisitGetServiceResponse(w http.ResponseWriter) error
+}
+
+type GetService200JSONResponse GetServiceResult
+
+func (response GetService200JSONResponse) VisitGetServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetService404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetService404JSONResponse) VisitGetServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetService500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetService500JSONResponse) VisitGetServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyServiceRequestObject struct {
+	Name ServiceName `json:"name"`
+	Body *ApplyServiceJSONRequestBody
+}
+
+type ApplyServiceResponseObject interface {
+	VisitApplyServiceResponse(w http.ResponseWriter) error
+}
+
+type ApplyService200JSONResponse ApplyServiceResult
+
+func (response ApplyService200JSONResponse) VisitApplyServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyService201JSONResponse ApplyServiceResult
+
+func (response ApplyService201JSONResponse) VisitApplyServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyService400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApplyService400JSONResponse) VisitApplyServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyService500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response ApplyService500JSONResponse) VisitApplyServiceResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -11736,6 +13174,18 @@ type StrictServerInterface interface {
 	// SetSecret Set a secret's value
 	// (PUT /api/v1/secrets/{name})
 	SetSecret(ctx context.Context, request SetSecretRequestObject) (SetSecretResponseObject, error)
+	// ListServices List services
+	// (GET /api/v1/services)
+	ListServices(ctx context.Context, request ListServicesRequestObject) (ListServicesResponseObject, error)
+	// DeleteService Delete a service
+	// (DELETE /api/v1/services/{name})
+	DeleteService(ctx context.Context, request DeleteServiceRequestObject) (DeleteServiceResponseObject, error)
+	// GetService Get a single service
+	// (GET /api/v1/services/{name})
+	GetService(ctx context.Context, request GetServiceRequestObject) (GetServiceResponseObject, error)
+	// ApplyService Create or update a service
+	// (PUT /api/v1/services/{name})
+	ApplyService(ctx context.Context, request ApplyServiceRequestObject) (ApplyServiceResponseObject, error)
 	// ListVariables List variables
 	// (GET /api/v1/variables)
 	ListVariables(ctx context.Context, request ListVariablesRequestObject) (ListVariablesResponseObject, error)
@@ -12065,6 +13515,117 @@ func (sh *strictHandler) SetSecret(w http.ResponseWriter, r *http.Request, name 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(SetSecretResponseObject); ok {
 		if err := validResponse.VisitSetSecretResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListServices operation middleware
+func (sh *strictHandler) ListServices(w http.ResponseWriter, r *http.Request, params ListServicesParams) {
+	var request ListServicesRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListServices(ctx, request.(ListServicesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListServices")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListServicesResponseObject); ok {
+		if err := validResponse.VisitListServicesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteService operation middleware
+func (sh *strictHandler) DeleteService(w http.ResponseWriter, r *http.Request, name ServiceName) {
+	var request DeleteServiceRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteService(ctx, request.(DeleteServiceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteService")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteServiceResponseObject); ok {
+		if err := validResponse.VisitDeleteServiceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetService operation middleware
+func (sh *strictHandler) GetService(w http.ResponseWriter, r *http.Request, name ServiceName) {
+	var request GetServiceRequestObject
+
+	request.Name = name
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetService(ctx, request.(GetServiceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetService")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetServiceResponseObject); ok {
+		if err := validResponse.VisitGetServiceResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyService operation middleware
+func (sh *strictHandler) ApplyService(w http.ResponseWriter, r *http.Request, name ServiceName) {
+	var request ApplyServiceRequestObject
+
+	request.Name = name
+
+	var body ApplyServiceJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyService(ctx, request.(ApplyServiceRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyService")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyServiceResponseObject); ok {
+		if err := validResponse.VisitApplyServiceResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
