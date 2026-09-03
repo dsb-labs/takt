@@ -49,6 +49,16 @@ export const router = createRouter({
       component: () => import("./views/variables/Detail.vue"),
     },
     {
+      path: "/services",
+      name: "services",
+      component: () => import("./views/services/List.vue"),
+    },
+    {
+      path: "/services/:name",
+      name: "service",
+      component: () => import("./views/services/Detail.vue"),
+    },
+    {
       path: "/volumes",
       name: "volumes",
       component: () => import("./views/volumes/List.vue"),

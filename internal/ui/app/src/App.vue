@@ -25,6 +25,7 @@ const navigation = [
   { name: "Secrets", to: "/secrets" },
   { name: "Variables", to: "/variables" },
   { name: "Volumes", to: "/volumes" },
+  { name: "Services", to: "/services" },
   { name: "Graph", to: "/graph" },
 ];
 </script>

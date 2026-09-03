@@ -101,6 +101,23 @@ export function useDeleteVariable(name: () => string) {
   });
 }
 
+// A service's delete takes no force: nothing ever holds a service, so the
+// argument DeleteControl passes is accepted and ignored.
+export function useDeleteService(name: () => string) {
+  const queries = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (force: boolean) => {
+      void force;
+      const { error } = await client.DELETE("/api/v1/services/{name}", {
+        params: { path: { name: name() } },
+      });
+      if (error) throw new Error(error.error);
+    },
+    onSuccess: () => queries.invalidateQueries({ queryKey: ["services"] }),
+  });
+}
+
 export function useDeleteVolume(name: () => string) {
   const queries = useQueryClient();
 

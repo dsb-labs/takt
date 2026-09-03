@@ -78,6 +78,34 @@ export function useVolumes(query: () => string[]) {
   });
 }
 
+export function useServices(query: () => string[]) {
+  return useQuery({
+    queryKey: ["services", computed(query)],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/services", {
+        params: { query: { query: query() } },
+      });
+      if (error) throw new Error(error.error);
+      return data.services;
+    },
+  });
+}
+
+export function useService(name: () => string) {
+  return useQuery({
+    queryKey: ["services", computed(name)],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/services/{name}", {
+        params: { path: { name: name() } },
+      });
+      if (error) throw new Error(error.error);
+      return data.service;
+    },
+  });
+}
+
 export function useSecret(name: () => string) {
   return useQuery({
     queryKey: ["secrets", computed(name)],

@@ -328,6 +328,76 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/services": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List services
+     * @description Returns the services the server holds, each with its backends resolved at
+     *     the time of the request.
+     *
+     *     Repeating the `query` parameter narrows the result: a service is returned
+     *     only when it satisfies every query given.
+     */
+    get: operations["listServices"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/services/{name}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The name that identifies the service. */
+        name: components["parameters"]["ServiceName"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get a single service
+     * @description Returns the service with the given name, with its backends resolved at the
+     *     time of the request.
+     */
+    get: operations["getService"];
+    /**
+     * Create or update a service
+     * @description Applies the given specification as the desired state for the named service.
+     *     The operation is idempotent: the stored selection becomes what the
+     *     specification says, however many times it is applied.
+     *
+     *     The specification's name must match the name in the path.
+     *
+     *     The workloads the target selects do not have to exist. A service is a
+     *     question asked of whatever is running, so one applied ahead of its
+     *     workloads reports no backends until they arrive.
+     */
+    put: operations["applyService"];
+    post?: never;
+    /**
+     * Delete a service
+     * @description Removes the service.
+     *
+     *     The workloads it selected are their own resources and keep running. What
+     *     stops is the service reporting their addresses.
+     *
+     *     Deletion is synchronous, unlike a workload's. There is nothing running to
+     *     wind down, only a row to remove.
+     */
+    delete: operations["deleteService"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/secrets": {
     parameters: {
       query?: never;
@@ -1201,6 +1271,88 @@ export interface components {
       labels?: components["schemas"]["Labels"];
     };
     /**
+     * @description The desired state of a service: a name, and the selection of workload
+     *     instances it balances requests across.
+     */
+    ServiceSpec: {
+      /**
+       * @description The manifest schema version. Only "v1" is understood.
+       * @example v1
+       */
+      version: string;
+      /**
+       * @description The name that identifies the service. The name "stream" is reserved.
+       * @example example
+       */
+      name: string;
+      labels?: components["schemas"]["Labels"];
+      target: components["schemas"]["ServiceTarget"];
+    };
+    /**
+     * @description What a service selects: the labels a workload must carry for its instances
+     *     to be selected, and which of their ports the service addresses.
+     */
+    ServiceTarget: {
+      /**
+       * @description The labels a workload must carry for its instances to be selected. A
+       *     workload matches only when it carries every one of them, and at least
+       *     one is required: a service selecting everything is more likely a
+       *     mistake than an intent.
+       */
+      labels: components["schemas"]["Labels"];
+      /**
+       * @description The port the selected instances listen on, written as the port inside
+       *     the workload. Always a number rather than a port's name, because the
+       *     selected workloads need not agree on their names.
+       */
+      port: number;
+      /**
+       * @description The transport protocol of the port. Omitted means tcp.
+       * @enum {string}
+       */
+      protocol?: "tcp" | "udp";
+    };
+    /**
+     * @description A service, together with the backends its target selected when the
+     *     response was written.
+     */
+    Service: {
+      /** @description The name that identifies the service. */
+      name: string;
+      labels?: components["schemas"]["Labels"];
+      target: components["schemas"]["ServiceTarget"];
+      /**
+       * @description The selected instances that are fit to serve: observed running,
+       *     passing their check when the workload declares one, and not being
+       *     torn down. Absent when nothing selected is fit to serve, which is
+       *     also what a target selecting nothing reports.
+       */
+      backends?: components["schemas"]["ServiceBackend"][];
+      /**
+       * Format: date-time
+       * @description When the service was created.
+       */
+      createdAt: string;
+      /**
+       * Format: date-time
+       * @description When the service was last modified.
+       */
+      updatedAt: string;
+    };
+    /** @description One address a service balances requests across. */
+    ServiceBackend: {
+      /** @description The name of the workload the instance belongs to. */
+      workload: string;
+      /** @description The index of the instance among the workload's instances. */
+      instance: number;
+      /**
+       * @description The host address that reaches the instance's target port, as
+       *     "host:port".
+       * @example 203.0.113.10:20000
+       */
+      address: string;
+    };
+    /**
      * @description The value to store as a secret.
      *
      *     The name is not part of this. It travels in the path, because unlike a
@@ -1515,8 +1667,8 @@ export interface components {
       error: string;
     };
     /**
-     * @description Key-value pairs attached to a workload, volume, secret or variable, which
-     *     the list query filter matches against.
+     * @description Key-value pairs attached to a workload, volume, service, secret or
+     *     variable, which the list query filter matches against.
      *
      *     Keys are lowercase alphanumeric, optionally separated by dots, dashes,
      *     underscores or slashes, up to 63 characters, so a key like
@@ -1687,6 +1839,29 @@ export interface components {
      */
     DeleteVolumeResult: Record<string, never>;
     /**
+     * @description The body returned when services are listed.
+     *
+     *     An object rather than a bare array, so that something later reported about
+     *     a listing as a whole is a new field rather than a change of type.
+     */
+    ListServicesResult: {
+      /** @description The services the server holds. */
+      services: components["schemas"]["Service"][];
+    };
+    /** @description The body returned when a single service is read. */
+    GetServiceResult: {
+      service: components["schemas"]["Service"];
+    };
+    /** @description The body returned when a service is applied. */
+    ApplyServiceResult: {
+      service: components["schemas"]["Service"];
+    };
+    /**
+     * @description The body returned when a service is deleted, which has nothing in it yet.
+     *     It exists for the reasons DeleteVolumeResult does.
+     */
+    DeleteServiceResult: Record<string, never>;
+    /**
      * @description The body returned when secrets are listed.
      *
      *     An object rather than a bare array, for the same reason listing volumes
@@ -1801,6 +1976,8 @@ export interface components {
     WorkloadName: string;
     /** @description The name that identifies the volume. */
     VolumeName: string;
+    /** @description The name that identifies the service. */
+    ServiceName: string;
     /** @description The name that identifies the secret. */
     SecretName: string;
     /** @description The name that identifies the variable. */
@@ -2391,6 +2568,129 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  listServices: {
+    parameters: {
+      query?: {
+        /**
+         * @description A `path=value` filter over the service's labels, where the path is a
+         *     JSON path such as `$.labels.app`. May be repeated, in which case a
+         *     service must match all of them. A query can reach only the service's
+         *     own labels, not its target's.
+         */
+        query?: string[];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The matching services. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ListServicesResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  getService: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The name that identifies the service. */
+        name: components["parameters"]["ServiceName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The requested service. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GetServiceResult"];
+        };
+      };
+      404: components["responses"]["NotFound"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  applyService: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The name that identifies the service. */
+        name: components["parameters"]["ServiceName"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ServiceSpec"];
+      };
+    };
+    responses: {
+      /** @description The service already existed and was updated. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApplyServiceResult"];
+        };
+      };
+      /** @description The service was created. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApplyServiceResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  deleteService: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The name that identifies the service. */
+        name: components["parameters"]["ServiceName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /**
+       * @description The service was removed.
+       *
+       *     The body is an object with nothing in it yet, rather than no body at
+       *     all, for the reason a deleted volume's is.
+       */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeleteServiceResult"];
+        };
+      };
+      404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
   };
