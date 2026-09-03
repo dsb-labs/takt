@@ -1,3 +1,5 @@
+import type { HealthStatus } from "./api/types";
+
 // Formatting helpers shared by the views.
 
 const relative = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
@@ -39,7 +41,9 @@ export function pluralize(count: number, noun: string): string {
 }
 
 // healthStyles colours a health status the same way everywhere it appears.
-export const healthStyles: Record<string, string> = {
+// Keyed by the schema's own status type, so a renamed status fails the build
+// rather than rendering uncoloured.
+export const healthStyles: Record<HealthStatus, string> = {
   healthy: "text-emerald-700 dark:text-emerald-400",
   unhealthy: "text-rose-700 dark:text-rose-400",
   starting: "text-sky-700 dark:text-sky-400",

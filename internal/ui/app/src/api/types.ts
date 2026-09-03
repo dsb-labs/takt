@@ -6,6 +6,7 @@ export type Workload = components["schemas"]["Workload"];
 export type WorkloadState = components["schemas"]["WorkloadState"];
 export type Instance = components["schemas"]["Instance"];
 export type InstanceHealth = components["schemas"]["InstanceHealth"];
+export type HealthStatus = components["schemas"]["HealthStatus"];
 export type ResolvedPort = components["schemas"]["ResolvedPort"];
 export type WorkloadSpec = components["schemas"]["WorkloadSpec"];
 export type VolumeMount = components["schemas"]["VolumeMount"];
