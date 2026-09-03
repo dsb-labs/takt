@@ -8,7 +8,7 @@ import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
 import LabelsCard from "../../components/LabelsCard.vue";
 import ErrorBanner from "../../components/ErrorBanner.vue";
-import UsedByLinks from "../../components/UsedByLinks.vue";
+import UsedByCard from "../../components/UsedByCard.vue";
 import ValueForm from "../../components/ValueForm.vue";
 import { absoluteTime, relativeTime } from "../../format";
 
@@ -98,11 +98,7 @@ await secret.suspense().catch(() => {});
           </dl>
         </DetailCard>
 
-        <DetailCard title="Used by">
-          <div class="px-4 py-3 text-sm">
-            <UsedByLinks :used-by="secret.data.value.usedBy" />
-          </div>
-        </DetailCard>
+        <UsedByCard :used-by="secret.data.value.usedBy" />
 
         <LabelsCard :labels="secret.data.value.labels" target="/secrets" />
       </div>

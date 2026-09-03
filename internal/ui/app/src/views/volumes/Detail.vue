@@ -7,7 +7,7 @@ import { useVolume } from "../../api/queries";
 import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
 import LabelsCard from "../../components/LabelsCard.vue";
-import UsedByLinks from "../../components/UsedByLinks.vue";
+import UsedByCard from "../../components/UsedByCard.vue";
 import { absoluteTime, relativeTime } from "../../format";
 
 const route = useRoute();
@@ -73,11 +73,7 @@ await volume.suspense().catch(() => {});
           </dl>
         </DetailCard>
 
-        <DetailCard title="Used by">
-          <div class="px-4 py-3 text-sm">
-            <UsedByLinks :used-by="volume.data.value.usedBy" />
-          </div>
-        </DetailCard>
+        <UsedByCard :used-by="volume.data.value.usedBy" />
 
         <LabelsCard :labels="volume.data.value.labels" target="/volumes" />
       </div>
