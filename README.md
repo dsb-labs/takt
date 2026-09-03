@@ -161,6 +161,7 @@ dependency keeps working without being re-applied.
 
 - [Manifest reference](docs/manifest.md) — every field a workload can name.
 - [Command line](docs/cli.md) — every command and flag.
+- [Services](docs/services.md) — reporting the addresses of a labelled set of instances for a load balancer.
 - [Secrets](docs/secrets.md) — storing a value a workload can read and you cannot.
 - [Variables](docs/variables.md) — storing a value both you and a workload can read.
 - [Configuration](docs/configuration.md) — the server's TOML file.
