@@ -30,3 +30,11 @@ export function useQueryFilter() {
 
   return { filter, queries };
 }
+
+// labelQuery builds the query that filters a list by one label. The key is
+// quoted in the JSON path because label keys may contain dots, which would
+// otherwise read as path separators. A key cannot contain a quote, so the
+// quoting cannot be escaped.
+export function labelQuery(key: string, value: string): string {
+  return `$.labels."${key}"=${value}`;
+}

@@ -9,6 +9,7 @@ import DetailCard from "../../components/DetailCard.vue";
 import LabelsCard from "../../components/LabelsCard.vue";
 import SortHeader from "../../components/SortHeader.vue";
 import { absoluteTime, relativeTime } from "../../format";
+import { labelQuery } from "../../filter";
 import { useSort } from "../../sort";
 
 const route = useRoute();
@@ -95,7 +96,7 @@ await service.suspense().catch(() => {});
             <RouterLink
               v-for="(value, key) in service.data.value.target.labels"
               :key="key"
-              :to="{ path: '/', query: { query: `$.labels.${key}=${value}` } }"
+              :to="{ path: '/', query: { query: labelQuery(key, value) } }"
               class="hover:border-ocean-300 hover:text-ocean-700 dark:hover:border-ocean-700 dark:hover:text-ocean-300 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
               :title="`Show the workloads labelled ${key}=${value}`"
             >
