@@ -6,10 +6,12 @@ import { useDeleteSecret, useSetSecret } from "../../api/mutations";
 import { useSecret } from "../../api/queries";
 import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
+import DetailPage from "../../components/DetailPage.vue";
 import LabelsCard from "../../components/LabelsCard.vue";
 import ErrorBanner from "../../components/ErrorBanner.vue";
 import UsedByCard from "../../components/UsedByCard.vue";
 import ValueForm from "../../components/ValueForm.vue";
+import OverviewRow from "../../components/OverviewRow.vue";
 import { absoluteTime, relativeTime } from "../../format";
 
 const route = useRoute();
@@ -40,61 +42,43 @@ await secret.suspense().catch(() => {});
 </script>
 
 <template>
-  <div>
-    <nav class="text-sm text-slate-500 dark:text-slate-400">
-      <RouterLink to="/secrets" class="hover:underline">Secrets</RouterLink>
-      <span class="mx-1">/</span>
-      <span class="text-slate-900 dark:text-slate-100">{{ name }}</span>
-    </nav>
+  <DetailPage
+    section="Secrets"
+    section-to="/secrets"
+    :name="name"
+    :error="
+      secret.isError.value
+        ? `Failed to read the secret: ${secret.error.value?.message}`
+        : ''
+    "
+  >
+    <template #actions>
+      <DeleteControl
+        :subject="`the secret ${name}`"
+        :remove="(force) => deleteSecret.mutateAsync(force)"
+        @deleted="router.push('/secrets')"
+      />
+    </template>
 
-    <div
-      v-if="secret.isError.value"
-      class="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300"
-    >
-      Failed to read the secret: {{ secret.error.value?.message }}
-    </div>
-
-    <template v-else-if="secret.data.value">
-      <header class="mt-4 flex flex-wrap items-center gap-3">
-        <h1 class="text-xl font-semibold">{{ secret.data.value.name }}</h1>
-        <div class="ml-auto">
-          <DeleteControl
-            :subject="`the secret ${name}`"
-            :remove="(force) => deleteSecret.mutateAsync(force)"
-            @deleted="router.push('/secrets')"
-          />
-        </div>
-      </header>
-
+    <template v-if="secret.data.value">
       <div class="mt-6 grid gap-6 xl:grid-cols-2">
         <DetailCard title="Overview">
           <dl
             class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
           >
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Revision
-              </dt>
-              <dd class="font-mono text-xs leading-5">
-                {{ secret.data.value.revision }}
-              </dd>
-            </div>
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Created
-              </dt>
-              <dd :title="absoluteTime(secret.data.value.createdAt)">
-                {{ relativeTime(secret.data.value.createdAt) }}
-              </dd>
-            </div>
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Updated
-              </dt>
-              <dd :title="absoluteTime(secret.data.value.updatedAt)">
-                {{ relativeTime(secret.data.value.updatedAt) }}
-              </dd>
-            </div>
+            <OverviewRow label="Revision" mono>{{
+              secret.data.value.revision
+            }}</OverviewRow>
+            <OverviewRow
+              label="Created"
+              :title="absoluteTime(secret.data.value.createdAt)"
+              >{{ relativeTime(secret.data.value.createdAt) }}</OverviewRow
+            >
+            <OverviewRow
+              label="Updated"
+              :title="absoluteTime(secret.data.value.updatedAt)"
+              >{{ relativeTime(secret.data.value.updatedAt) }}</OverviewRow
+            >
           </dl>
         </DetailCard>
 
@@ -123,5 +107,5 @@ await secret.suspense().catch(() => {});
         </DetailCard>
       </div>
     </template>
-  </div>
+  </DetailPage>
 </template>

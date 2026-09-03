@@ -6,8 +6,10 @@ import { useDeleteService } from "../../api/mutations";
 import { useService } from "../../api/queries";
 import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
+import DetailPage from "../../components/DetailPage.vue";
 import LabelsCard from "../../components/LabelsCard.vue";
 import SortHeader from "../../components/SortHeader.vue";
+import OverviewRow from "../../components/OverviewRow.vue";
 import { absoluteTime, relativeTime } from "../../format";
 import { labelQuery } from "../../filter";
 import { useSort } from "../../sort";
@@ -31,63 +33,45 @@ await service.suspense().catch(() => {});
 </script>
 
 <template>
-  <div>
-    <nav class="text-sm text-slate-500 dark:text-slate-400">
-      <RouterLink to="/services" class="hover:underline">Services</RouterLink>
-      <span class="mx-1">/</span>
-      <span class="text-slate-900 dark:text-slate-100">{{ name }}</span>
-    </nav>
+  <DetailPage
+    section="Services"
+    section-to="/services"
+    :name="name"
+    :error="
+      service.isError.value
+        ? `Failed to read the service: ${service.error.value?.message}`
+        : ''
+    "
+  >
+    <template #actions>
+      <DeleteControl
+        :subject="`the service ${name}`"
+        :remove="(force) => deleteService.mutateAsync(force)"
+        @deleted="router.push('/services')"
+      />
+    </template>
 
-    <div
-      v-if="service.isError.value"
-      class="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300"
-    >
-      Failed to read the service: {{ service.error.value?.message }}
-    </div>
-
-    <template v-else-if="service.data.value">
-      <header class="mt-4 flex flex-wrap items-center gap-3">
-        <h1 class="text-xl font-semibold">{{ service.data.value.name }}</h1>
-        <div class="ml-auto">
-          <DeleteControl
-            :subject="`the service ${name}`"
-            :remove="(force) => deleteService.mutateAsync(force)"
-            @deleted="router.push('/services')"
-          />
-        </div>
-      </header>
-
+    <template v-if="service.data.value">
       <div class="mt-6 grid gap-6 xl:grid-cols-2">
         <DetailCard title="Overview">
           <dl
             class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
           >
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Target port
-              </dt>
-              <dd class="font-mono text-xs leading-5">
-                {{ service.data.value.target.port }}/{{
-                  service.data.value.target.protocol ?? "tcp"
-                }}
-              </dd>
-            </div>
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Created
-              </dt>
-              <dd :title="absoluteTime(service.data.value.createdAt)">
-                {{ relativeTime(service.data.value.createdAt) }}
-              </dd>
-            </div>
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Updated
-              </dt>
-              <dd :title="absoluteTime(service.data.value.updatedAt)">
-                {{ relativeTime(service.data.value.updatedAt) }}
-              </dd>
-            </div>
+            <OverviewRow label="Target port" mono
+              >{{ service.data.value.target.port }}/{{
+                service.data.value.target.protocol ?? "tcp"
+              }}</OverviewRow
+            >
+            <OverviewRow
+              label="Created"
+              :title="absoluteTime(service.data.value.createdAt)"
+              >{{ relativeTime(service.data.value.createdAt) }}</OverviewRow
+            >
+            <OverviewRow
+              label="Updated"
+              :title="absoluteTime(service.data.value.updatedAt)"
+              >{{ relativeTime(service.data.value.updatedAt) }}</OverviewRow
+            >
           </dl>
         </DetailCard>
 
@@ -164,5 +148,5 @@ await service.suspense().catch(() => {});
         <LabelsCard :labels="service.data.value.labels" target="/services" />
       </div>
     </template>
-  </div>
+  </DetailPage>
 </template>

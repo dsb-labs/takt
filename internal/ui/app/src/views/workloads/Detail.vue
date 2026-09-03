@@ -6,6 +6,7 @@ import { useDeleteWorkload, useWorkloadAction } from "../../api/mutations";
 import { useWorkload } from "../../api/queries";
 import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
+import DetailPage from "../../components/DetailPage.vue";
 import LabelsCard from "../../components/LabelsCard.vue";
 import ErrorBanner from "../../components/ErrorBanner.vue";
 import LogViewer from "../../components/LogViewer.vue";
@@ -14,6 +15,7 @@ import SortHeader from "../../components/SortHeader.vue";
 import SpecView from "../../components/SpecView.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import Tooltip from "../../components/Tooltip.vue";
+import OverviewRow from "../../components/OverviewRow.vue";
 import { absoluteTime, healthStyles, relativeTime } from "../../format";
 import { references } from "../../references";
 import { useSort } from "../../sort";
@@ -124,67 +126,65 @@ await workload.suspense().catch(() => {});
 </script>
 
 <template>
-  <div>
-    <nav class="text-sm text-slate-500 dark:text-slate-400">
-      <RouterLink to="/" class="hover:underline">Workloads</RouterLink>
-      <span class="mx-1">/</span>
-      <span class="text-slate-900 dark:text-slate-100">{{ name }}</span>
-    </nav>
-
-    <div
-      v-if="workload.isError.value"
-      class="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300"
-    >
-      Failed to read the workload: {{ workload.error.value?.message }}
-    </div>
-
-    <template v-else-if="workload.data.value">
-      <header class="mt-4 flex flex-wrap items-center gap-3">
-        <h1 class="text-xl font-semibold">{{ workload.data.value.name }}</h1>
+  <DetailPage
+    section="Workloads"
+    section-to="/"
+    :name="name"
+    :error="
+      workload.isError.value
+        ? `Failed to read the workload: ${workload.error.value?.message}`
+        : ''
+    "
+  >
+    <template #header>
+      <template v-if="workload.data.value">
         <StateBadge :state="workload.data.value.state" />
         <span class="text-sm text-slate-500 dark:text-slate-400">
           {{ workload.data.value.runtime }} · version
           {{ workload.data.value.version }}
         </span>
-
-        <div class="ml-auto flex gap-2 text-sm">
+      </template>
+    </template>
+    <template #actions>
+      <template v-if="workload.data.value">
+        <button
+          v-if="workload.data.value.suspended"
+          class="bg-ocean-600 hover:bg-ocean-700 rounded-md px-3 py-1.5 font-medium text-white"
+          @click="act(start)"
+        >
+          Start
+        </button>
+        <button
+          v-else
+          class="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+          @click="act(stop)"
+        >
+          Stop
+        </button>
+        <Tooltip
+          :text="
+            workload.data.value.suspended
+              ? 'A suspended workload has nothing to restart. Start it instead.'
+              : undefined
+          "
+        >
           <button
-            v-if="workload.data.value.suspended"
-            class="bg-ocean-600 hover:bg-ocean-700 rounded-md px-3 py-1.5 font-medium text-white"
-            @click="act(start)"
+            class="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
+            :disabled="workload.data.value.suspended"
+            @click="act(restart)"
           >
-            Start
+            Restart
           </button>
-          <button
-            v-else
-            class="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-            @click="act(stop)"
-          >
-            Stop
-          </button>
-          <Tooltip
-            :text="
-              workload.data.value.suspended
-                ? 'A suspended workload has nothing to restart. Start it instead.'
-                : undefined
-            "
-          >
-            <button
-              class="rounded-md border border-slate-300 px-3 py-1.5 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-800"
-              :disabled="workload.data.value.suspended"
-              @click="act(restart)"
-            >
-              Restart
-            </button>
-          </Tooltip>
-          <DeleteControl
-            :subject="`the workload ${name}`"
-            :remove="(force) => deletion.mutateAsync(force)"
-            @deleted="router.push('/')"
-          />
-        </div>
-      </header>
+        </Tooltip>
+        <DeleteControl
+          :subject="`the workload ${name}`"
+          :remove="(force) => deletion.mutateAsync(force)"
+          @deleted="router.push('/')"
+        />
+      </template>
+    </template>
 
+    <template v-if="workload.data.value">
       <ErrorBanner v-if="actionError" :message="actionError" />
 
       <div
@@ -202,50 +202,26 @@ await workload.suspense().catch(() => {});
           <dl
             class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
           >
-            <div v-if="spec?.container" class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Image
-              </dt>
-              <dd class="font-mono text-xs leading-5 break-all">
-                {{ spec.container.image }}
-              </dd>
-            </div>
-            <div v-if="command" class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Command
-              </dt>
-              <dd class="font-mono text-xs leading-5 break-all">
-                {{ command }}
-              </dd>
-            </div>
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Count
-              </dt>
-              <dd>{{ spec?.count ?? 1 }}</dd>
-            </div>
-            <div v-if="spec?.restart" class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Restart
-              </dt>
-              <dd>{{ spec.restart.policy }}</dd>
-            </div>
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Created
-              </dt>
-              <dd :title="absoluteTime(workload.data.value.createdAt)">
-                {{ relativeTime(workload.data.value.createdAt) }}
-              </dd>
-            </div>
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Updated
-              </dt>
-              <dd :title="absoluteTime(workload.data.value.updatedAt)">
-                {{ relativeTime(workload.data.value.updatedAt) }}
-              </dd>
-            </div>
+            <OverviewRow v-if="spec?.container" label="Image" mono>{{
+              spec.container.image
+            }}</OverviewRow>
+            <OverviewRow v-if="command" label="Command" mono>{{
+              command
+            }}</OverviewRow>
+            <OverviewRow label="Count">{{ spec?.count ?? 1 }}</OverviewRow>
+            <OverviewRow v-if="spec?.restart" label="Restart">{{
+              spec.restart.policy
+            }}</OverviewRow>
+            <OverviewRow
+              label="Created"
+              :title="absoluteTime(workload.data.value.createdAt)"
+              >{{ relativeTime(workload.data.value.createdAt) }}</OverviewRow
+            >
+            <OverviewRow
+              label="Updated"
+              :title="absoluteTime(workload.data.value.updatedAt)"
+              >{{ relativeTime(workload.data.value.updatedAt) }}</OverviewRow
+            >
           </dl>
         </DetailCard>
 
@@ -266,7 +242,7 @@ await workload.suspense().catch(() => {});
               <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
                 {{ label }}
               </dt>
-              <dd :class="{ 'font-mono text-xs leading-5': label === 'Probe' }">
+              <dd :class="{ 'font-mono text-xs leading-5': label === 'Path' }">
                 {{ value }}
               </dd>
             </div>
@@ -277,20 +253,12 @@ await workload.suspense().catch(() => {});
           <dl
             class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
           >
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Cron
-              </dt>
-              <dd class="font-mono text-xs leading-5">
-                {{ spec.schedule.cron }}
-              </dd>
-            </div>
-            <div class="flex gap-4 px-4 py-2.5">
-              <dt class="w-32 shrink-0 text-slate-500 dark:text-slate-400">
-                Overlap
-              </dt>
-              <dd>{{ spec.schedule.overlap ?? "replace" }}</dd>
-            </div>
+            <OverviewRow label="Cron" mono>{{
+              spec.schedule.cron
+            }}</OverviewRow>
+            <OverviewRow label="Overlap">{{
+              spec.schedule.overlap ?? "replace"
+            }}</OverviewRow>
             <div
               v-if="workload.data.value.nextRun"
               class="flex gap-4 px-4 py-2.5"
@@ -490,5 +458,5 @@ await workload.suspense().catch(() => {});
         </DetailCard>
       </div>
     </template>
-  </div>
+  </DetailPage>
 </template>
