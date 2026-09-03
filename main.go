@@ -17,6 +17,7 @@ import (
 	"github.com/dsb-labs/orca/cmd/dev"
 	"github.com/dsb-labs/orca/cmd/secret"
 	"github.com/dsb-labs/orca/cmd/serve"
+	"github.com/dsb-labs/orca/cmd/service"
 	"github.com/dsb-labs/orca/cmd/variable"
 	"github.com/dsb-labs/orca/cmd/volume"
 	"github.com/dsb-labs/orca/cmd/workload"
@@ -77,6 +78,7 @@ func main() {
 		serve.Command(),
 		workload.Command(),
 		volume.Command(),
+		service.Command(),
 		secret.Command(),
 		variable.Command(),
 		admin.Command(),
