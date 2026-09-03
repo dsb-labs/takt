@@ -9,12 +9,13 @@ import DetailCard from "../../components/DetailCard.vue";
 import LabelsCard from "../../components/LabelsCard.vue";
 import ErrorBanner from "../../components/ErrorBanner.vue";
 import LogViewer from "../../components/LogViewer.vue";
+import ReferenceCard from "../../components/ReferenceCard.vue";
 import SortHeader from "../../components/SortHeader.vue";
 import SpecView from "../../components/SpecView.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import Tooltip from "../../components/Tooltip.vue";
 import { absoluteTime, healthStyles, relativeTime } from "../../format";
-import { referenceTarget, references } from "../../references";
+import { references } from "../../references";
 import { useSort } from "../../sort";
 
 const route = useRoute();
@@ -39,7 +40,16 @@ async function act(action: { mutateAsync: () => Promise<unknown> }) {
 }
 
 const spec = computed(() => workload.data.value?.spec);
+
+// The references, split by kind so each gets a card of its own. A kind the
+// workload reads nothing of renders no card.
 const refs = computed(() => (spec.value ? references(spec.value) : []));
+const refsOf = (kind: string) =>
+  computed(() => refs.value.filter((ref) => ref.kind === kind));
+const volumeRefs = refsOf("volume");
+const secretRefs = refsOf("secret");
+const variableRefs = refsOf("variable");
+const workloadRefs = refsOf("workload");
 const command = computed(() => {
   const runtime = spec.value?.container ?? spec.value?.exec;
   return runtime?.command?.join(" ");
@@ -239,39 +249,10 @@ await workload.suspense().catch(() => {});
           </dl>
         </DetailCard>
 
-        <DetailCard title="References">
-          <p
-            v-if="refs.length === 0"
-            class="px-4 py-6 text-sm text-slate-500 dark:text-slate-400"
-          >
-            This workload references no secrets, variables, volumes or other
-            workloads.
-          </p>
-          <table v-else class="w-full text-left text-sm">
-            <tbody>
-              <tr
-                v-for="(reference, index) in refs"
-                :key="index"
-                class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
-              >
-                <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
-                  {{ reference.kind }}
-                </td>
-                <td class="px-4 py-2.5 font-medium">
-                  <RouterLink
-                    :to="referenceTarget(reference)"
-                    class="text-ocean-700 dark:text-ocean-300 hover:underline"
-                  >
-                    {{ reference.name }}
-                  </RouterLink>
-                </td>
-                <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
-                  {{ reference.via }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </DetailCard>
+        <ReferenceCard title="Volumes" :refs="volumeRefs" />
+        <ReferenceCard title="Secrets" :refs="secretRefs" />
+        <ReferenceCard title="Variables" :refs="variableRefs" />
+        <ReferenceCard title="Workloads" :refs="workloadRefs" />
 
         <DetailCard v-if="check" title="Health check">
           <dl
