@@ -2,8 +2,9 @@
 import { computed } from "vue";
 
 import { useWorkloads } from "../../api/queries";
+import ErrorBanner from "../../components/ErrorBanner.vue";
+import ListTable from "../../components/ListTable.vue";
 import QueryInput from "../../components/QueryInput.vue";
-import SortHeader from "../../components/SortHeader.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import { relativeTime, healthStyles } from "../../format";
 import { useQueryFilter } from "../../filter";
@@ -28,12 +29,12 @@ function health(workload: Workload): { label: string; style: string } | null {
   if (statuses.length === 0) return null;
 
   if (statuses.includes("unhealthy")) {
-    return { label: "unhealthy", style: healthStyles.unhealthy! };
+    return { label: "unhealthy", style: healthStyles.unhealthy };
   }
   if (statuses.includes("starting")) {
-    return { label: "starting", style: healthStyles.starting! };
+    return { label: "starting", style: healthStyles.starting };
   }
-  return { label: "healthy", style: healthStyles.healthy! };
+  return { label: "healthy", style: healthStyles.healthy };
 }
 
 // counts summarises the listed workloads by state, in a fixed order so the
@@ -57,6 +58,15 @@ const counts = computed(() => {
     .filter((state) => byState.has(state))
     .map((state) => ({ state, count: byState.get(state)! }));
 });
+
+const columns = [
+  { name: "name", label: "Name" },
+  { name: "state", label: "State" },
+  { name: "health", label: "Health" },
+  { name: "runtime", label: "Runtime" },
+  { name: "instances", label: "Instances" },
+  { name: "nextRun", label: "Next run" },
+];
 
 const sort = useSort(() => workloads.data.value, "name", {
   name: (w) => w.name,
@@ -91,114 +101,51 @@ await workloads.suspense().catch(() => {});
       </span>
     </div>
 
-    <div
+    <ErrorBanner
       v-if="workloads.isError.value"
-      class="mt-6 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300"
-    >
-      Failed to list workloads: {{ workloads.error.value?.message }}
-    </div>
+      :message="`Failed to list workloads: ${workloads.error.value?.message}`"
+    />
 
-    <div
+    <ListTable
       v-else
-      class="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+      :columns="columns"
+      :sort="sort"
+      :row-key="(w) => w.name"
+      empty="No workloads."
     >
-      <table class="w-full text-left text-sm">
-        <thead>
-          <tr
-            class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
+      <template #row="{ item: workload }">
+        <td class="px-4 py-3 font-medium">
+          <RouterLink
+            :to="`/workloads/${workload.name}`"
+            class="text-ocean-700 dark:text-ocean-300 hover:underline"
           >
-            <SortHeader
-              name="name"
-              :sort-key="sort.key.value"
-              :descending="sort.descending.value"
-              @sort="sort.toggle"
-              >Name</SortHeader
-            >
-            <SortHeader
-              name="state"
-              :sort-key="sort.key.value"
-              :descending="sort.descending.value"
-              @sort="sort.toggle"
-              >State</SortHeader
-            >
-            <SortHeader
-              name="health"
-              :sort-key="sort.key.value"
-              :descending="sort.descending.value"
-              @sort="sort.toggle"
-              >Health</SortHeader
-            >
-            <SortHeader
-              name="runtime"
-              :sort-key="sort.key.value"
-              :descending="sort.descending.value"
-              @sort="sort.toggle"
-              >Runtime</SortHeader
-            >
-            <SortHeader
-              name="instances"
-              :sort-key="sort.key.value"
-              :descending="sort.descending.value"
-              @sort="sort.toggle"
-              >Instances</SortHeader
-            >
-            <SortHeader
-              name="nextRun"
-              :sort-key="sort.key.value"
-              :descending="sort.descending.value"
-              @sort="sort.toggle"
-              >Next run</SortHeader
-            >
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="sort.sorted.value.length === 0">
-            <td
-              colspan="6"
-              class="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
-            >
-              No workloads.
-            </td>
-          </tr>
-          <tr
-            v-for="workload in sort.sorted.value"
-            :key="workload.name"
-            class="border-b border-slate-100 last:border-b-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
-          >
-            <td class="px-4 py-3 font-medium">
-              <RouterLink
-                :to="`/workloads/${workload.name}`"
-                class="text-ocean-700 dark:text-ocean-300 hover:underline"
-              >
-                {{ workload.name }}
-              </RouterLink>
-            </td>
-            <td class="px-4 py-3">
-              <StateBadge :state="workload.state" />
-              <span
-                v-if="workload.lastError"
-                class="ml-1.5 inline-block h-2 w-2 rounded-full bg-rose-500 align-middle"
-                :title="workload.lastError"
-              ></span>
-            </td>
-            <td class="px-4 py-3">
-              <span v-if="health(workload)" :class="health(workload)!.style">
-                {{ health(workload)!.label }}
-              </span>
-              <span v-else class="text-slate-400 dark:text-slate-500">—</span>
-            </td>
-            <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
-              {{ workload.runtime }}
-            </td>
-            <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
-              {{ runningInstances(workload) }}
-            </td>
-            <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
-              {{ workload.nextRun ? relativeTime(workload.nextRun) : "—" }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+            {{ workload.name }}
+          </RouterLink>
+        </td>
+        <td class="px-4 py-3">
+          <StateBadge :state="workload.state" />
+          <span
+            v-if="workload.lastError"
+            class="ml-1.5 inline-block h-2 w-2 rounded-full bg-rose-500 align-middle"
+            :title="workload.lastError"
+          ></span>
+        </td>
+        <td class="px-4 py-3">
+          <span v-if="health(workload)" :class="health(workload)!.style">
+            {{ health(workload)!.label }}
+          </span>
+          <span v-else class="text-slate-400 dark:text-slate-500">—</span>
+        </td>
+        <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
+          {{ workload.runtime }}
+        </td>
+        <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
+          {{ runningInstances(workload) }}
+        </td>
+        <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
+          {{ workload.nextRun ? relativeTime(workload.nextRun) : "—" }}
+        </td>
+      </template>
+    </ListTable>
   </div>
 </template>
