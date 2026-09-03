@@ -34,6 +34,11 @@ var (
 	// ErrInvalidVolumeName is returned when a name is not usable as a single segment
 	// of a request path.
 	ErrInvalidVolumeName = errors.New("invalid volume name")
+	// ErrServiceNotFound is returned when no service exists with the given name.
+	ErrServiceNotFound = errors.New("service not found")
+	// ErrInvalidServiceName is returned when a name is not usable as a single
+	// segment of a request path.
+	ErrInvalidServiceName = errors.New("invalid service name")
 	// ErrSecretNotFound is returned when no secret exists with the given name.
 	ErrSecretNotFound = errors.New("secret not found")
 	// ErrSecretInUse is returned when a secret a workload reads is deleted without
