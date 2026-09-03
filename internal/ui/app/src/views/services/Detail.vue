@@ -83,10 +83,6 @@ await service.suspense().catch(() => {});
         </DetailCard>
 
         <DetailCard title="Selects">
-          <p class="px-4 pt-3 text-sm text-slate-500 dark:text-slate-400">
-            Workloads carrying every one of these labels. Each links to the
-            workloads it selects.
-          </p>
           <div class="flex flex-wrap gap-2 px-4 py-3">
             <RouterLink
               v-for="(value, key) in service.data.value.target.labels"

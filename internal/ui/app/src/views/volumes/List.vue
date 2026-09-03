@@ -71,7 +71,7 @@ await volumes.suspense().catch(() => {});
               colspan="3"
               class="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
             >
-              No volumes. Apply a volume manifest with the CLI to create one.
+              No volumes.
             </td>
           </tr>
           <tr
