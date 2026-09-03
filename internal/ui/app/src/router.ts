@@ -70,3 +70,24 @@ export const router = createRouter({
     },
   ],
 });
+
+// The tab names what the page shows, so several open tabs can be told apart.
+// A detail page names its resource and a list page names its section.
+const sections: Record<string, string> = {
+  workloads: "Workloads",
+  graph: "Graph",
+  secrets: "Secrets",
+  "secret-new": "New secret",
+  variables: "Variables",
+  "variable-new": "New variable",
+  volumes: "Volumes",
+  services: "Services",
+};
+
+router.afterEach((to) => {
+  const name =
+    typeof to.params.name === "string"
+      ? to.params.name
+      : sections[String(to.name)];
+  document.title = name ? `${name} · orca` : "orca";
+});
