@@ -9,11 +9,13 @@ import DetailCard from "../../components/DetailCard.vue";
 import LabelsCard from "../../components/LabelsCard.vue";
 import ErrorBanner from "../../components/ErrorBanner.vue";
 import LogViewer from "../../components/LogViewer.vue";
+import SortHeader from "../../components/SortHeader.vue";
 import SpecView from "../../components/SpecView.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import Tooltip from "../../components/Tooltip.vue";
-import { absoluteTime, relativeTime } from "../../format";
+import { absoluteTime, healthStyles, relativeTime } from "../../format";
 import { referenceTarget, references } from "../../references";
+import { useSort } from "../../sort";
 
 const route = useRoute();
 const name = computed(() => route.params.name as string);
@@ -49,9 +51,8 @@ const check = computed(() => {
   const health = spec.value?.health;
   if (!health) return null;
 
-  const rows: [string, string][] = [
-    ["Probe", health.http ? `GET ${health.http}` : "TCP connect"],
-  ];
+  const rows: [string, string][] = [];
+  if (health.http) rows.push(["Path", health.http]);
   if (health.port) rows.push(["Port", health.port]);
   rows.push(
     ["Interval", health.interval ?? "10s"],
@@ -88,6 +89,24 @@ function healthLabel(instance: {
     ? `${instance.health.status} (${failures} failed)`
     : instance.health.status;
 }
+
+const instanceSort = useSort(() => workload.data.value?.instances, "index", {
+  index: (i) => i.index ?? 0,
+  id: (i) => i.id,
+  state: (i) => i.state,
+  health: (i) => i.health?.status ?? "",
+  started: (i) => i.startedAt ?? "",
+  exit: (i) => i.exitCode ?? -1,
+});
+
+const portSort = useSort(() => workload.data.value?.ports, "instance", {
+  instance: (p) => p.instance ?? 0,
+  name: (p) => p.name ?? "",
+  host: (p) => p.from,
+  workload: (p) => p.to,
+  protocol: (p) => p.protocol ?? "",
+  allocation: (p) => (p.dynamic ? 1 : 0),
+});
 
 // Awaited so Suspense holds the previous view until this one has its
 // data. A failure is left for the error banner this view already renders.
@@ -316,81 +335,101 @@ await workload.suspense().catch(() => {});
           >
             Nothing is running.
           </p>
-          <table v-else class="w-full text-left text-sm">
-            <thead>
-              <tr
-                class="border-b border-slate-200 text-xs text-slate-500 uppercase dark:border-slate-800 dark:text-slate-400"
-              >
-                <th class="px-4 py-2 font-medium">Index</th>
-                <th class="px-4 py-2 font-medium">ID</th>
-                <th class="px-4 py-2 font-medium">State</th>
-                <th class="px-4 py-2 font-medium">Health</th>
-                <th class="px-4 py-2 font-medium">Started</th>
-                <th class="px-4 py-2 font-medium">Exit code</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="instance in workload.data.value.instances"
-                :key="instance.id"
-                class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
-              >
-                <td class="px-4 py-2.5">{{ instance.index ?? 0 }}</td>
-                <td class="px-4 py-2.5 font-mono text-xs">
-                  <span class="inline-flex items-center gap-1.5">
-                    <span :title="instance.id">{{
-                      instance.id.slice(0, 12)
-                    }}</span>
-                    <button
-                      class="hover:text-ocean-700 dark:hover:text-ocean-300 text-slate-400 dark:text-slate-500"
-                      title="Copy the full ID"
-                      @click="copyID(instance.id)"
-                    >
-                      <svg
-                        v-if="copiedID !== instance.id"
-                        class="h-3.5 w-3.5"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead>
+                <tr
+                  class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
+                >
+                  <SortHeader
+                    v-for="[column, label] in [
+                      ['index', 'Index'],
+                      ['id', 'ID'],
+                      ['state', 'State'],
+                      ['health', 'Health'],
+                      ['started', 'Started'],
+                      ['exit', 'Exit code'],
+                    ]"
+                    :key="column"
+                    :name="column!"
+                    :sort-key="instanceSort.key.value"
+                    :descending="instanceSort.descending.value"
+                    @sort="instanceSort.toggle"
+                    >{{ label }}</SortHeader
+                  >
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="instance in instanceSort.sorted.value"
+                  :key="instance.id"
+                  class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
+                >
+                  <td class="px-4 py-2.5">{{ instance.index ?? 0 }}</td>
+                  <td class="px-4 py-2.5 font-mono text-xs">
+                    <span class="inline-flex items-center gap-1.5">
+                      <span :title="instance.id">{{
+                        instance.id.slice(0, 12)
+                      }}</span>
+                      <button
+                        class="hover:text-ocean-700 dark:hover:text-ocean-300 text-slate-400 dark:text-slate-500"
+                        title="Copy the full ID"
+                        @click="copyID(instance.id)"
                       >
-                        <rect x="9" y="9" width="13" height="13" rx="2" />
-                        <path
-                          d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
-                        />
-                      </svg>
-                      <svg
-                        v-else
-                        class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      >
-                        <path d="M20 6 9 17l-5-5" />
-                      </svg>
-                    </button>
-                  </span>
-                </td>
-                <td class="px-4 py-2.5">{{ instance.state }}</td>
-                <td class="px-4 py-2.5" :title="instance.health?.error">
-                  {{ healthLabel(instance) }}
-                </td>
-                <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
-                  {{
-                    instance.startedAt ? relativeTime(instance.startedAt) : "—"
-                  }}
-                </td>
-                <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
-                  {{ instance.exitCode ?? "—" }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                        <svg
+                          v-if="copiedID !== instance.id"
+                          class="h-3.5 w-3.5"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <rect x="9" y="9" width="13" height="13" rx="2" />
+                          <path
+                            d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                          />
+                        </svg>
+                        <svg
+                          v-else
+                          class="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        >
+                          <path d="M20 6 9 17l-5-5" />
+                        </svg>
+                      </button>
+                    </span>
+                  </td>
+                  <td class="px-4 py-2.5">{{ instance.state }}</td>
+                  <td
+                    class="px-4 py-2.5"
+                    :class="
+                      instance.health && healthStyles[instance.health.status]
+                    "
+                    :title="instance.health?.error"
+                  >
+                    {{ healthLabel(instance) }}
+                  </td>
+                  <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
+                    {{
+                      instance.startedAt
+                        ? relativeTime(instance.startedAt)
+                        : "—"
+                    }}
+                  </td>
+                  <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
+                    {{ instance.exitCode ?? "—" }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </DetailCard>
 
         <DetailCard title="Ports">
@@ -400,49 +439,61 @@ await workload.suspense().catch(() => {});
           >
             This workload publishes no ports.
           </p>
-          <table v-else class="w-full text-left text-sm">
-            <thead>
-              <tr
-                class="border-b border-slate-200 text-xs text-slate-500 uppercase dark:border-slate-800 dark:text-slate-400"
-              >
-                <th class="px-4 py-2 font-medium">Instance</th>
-                <th class="px-4 py-2 font-medium">Name</th>
-                <th class="px-4 py-2 font-medium">Host</th>
-                <th class="px-4 py-2 font-medium">Workload</th>
-                <th class="px-4 py-2 font-medium">Protocol</th>
-                <th class="px-4 py-2 font-medium">Allocation</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(port, index) in workload.data.value.ports"
-                :key="index"
-                class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
-              >
-                <td class="px-4 py-2.5">{{ port.instance ?? 0 }}</td>
-                <td class="px-4 py-2.5">{{ port.name || "—" }}</td>
-                <td class="px-4 py-2.5 font-mono text-xs">
-                  <a
-                    v-if="port.protocol === 'tcp'"
-                    :href="`http://${host}:${port.from}`"
-                    target="_blank"
-                    rel="noopener"
-                    class="text-ocean-700 dark:text-ocean-300 hover:underline"
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead>
+                <tr
+                  class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
+                >
+                  <SortHeader
+                    v-for="[column, label] in [
+                      ['instance', 'Instance'],
+                      ['name', 'Name'],
+                      ['host', 'Host'],
+                      ['workload', 'Workload'],
+                      ['protocol', 'Protocol'],
+                      ['allocation', 'Allocation'],
+                    ]"
+                    :key="column"
+                    :name="column!"
+                    :sort-key="portSort.key.value"
+                    :descending="portSort.descending.value"
+                    @sort="portSort.toggle"
+                    >{{ label }}</SortHeader
                   >
-                    {{ port.from }}
-                  </a>
-                  <template v-else>{{ port.from }}</template>
-                </td>
-                <td class="px-4 py-2.5 font-mono text-xs">{{ port.to }}</td>
-                <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
-                  {{ port.protocol }}
-                </td>
-                <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
-                  {{ port.dynamic ? "dynamic" : "pinned" }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="port in portSort.sorted.value"
+                  :key="`${port.instance}-${port.to}-${port.protocol}`"
+                  class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
+                >
+                  <td class="px-4 py-2.5">{{ port.instance ?? 0 }}</td>
+                  <td class="px-4 py-2.5">{{ port.name || "—" }}</td>
+                  <td class="px-4 py-2.5 font-mono text-xs">
+                    <a
+                      v-if="port.protocol === 'tcp'"
+                      :href="`http://${host}:${port.from}`"
+                      target="_blank"
+                      rel="noopener"
+                      class="text-ocean-700 dark:text-ocean-300 hover:underline"
+                    >
+                      {{ port.from }}
+                    </a>
+                    <template v-else>{{ port.from }}</template>
+                  </td>
+                  <td class="px-4 py-2.5 font-mono text-xs">{{ port.to }}</td>
+                  <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
+                    {{ port.protocol }}
+                  </td>
+                  <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
+                    {{ port.dynamic ? "dynamic" : "pinned" }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </DetailCard>
       </div>
 

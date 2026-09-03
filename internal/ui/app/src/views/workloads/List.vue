@@ -5,7 +5,7 @@ import { useWorkloads } from "../../api/queries";
 import QueryInput from "../../components/QueryInput.vue";
 import SortHeader from "../../components/SortHeader.vue";
 import StateBadge from "../../components/StateBadge.vue";
-import { relativeTime } from "../../format";
+import { relativeTime, healthStyles } from "../../format";
 import { useQueryFilter } from "../../filter";
 import { useSort } from "../../sort";
 import type { Workload, WorkloadState } from "../../api/types";
@@ -28,12 +28,12 @@ function health(workload: Workload): { label: string; style: string } | null {
   if (statuses.length === 0) return null;
 
   if (statuses.includes("unhealthy")) {
-    return { label: "unhealthy", style: "text-rose-700 dark:text-rose-400" };
+    return { label: "unhealthy", style: healthStyles.unhealthy! };
   }
   if (statuses.includes("starting")) {
-    return { label: "starting", style: "text-sky-700 dark:text-sky-400" };
+    return { label: "starting", style: healthStyles.starting! };
   }
-  return { label: "healthy", style: "text-emerald-700 dark:text-emerald-400" };
+  return { label: "healthy", style: healthStyles.healthy! };
 }
 
 // counts summarises the listed workloads by state, in a fixed order so the

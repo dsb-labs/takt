@@ -7,7 +7,9 @@ import { useService } from "../../api/queries";
 import DeleteControl from "../../components/DeleteControl.vue";
 import DetailCard from "../../components/DetailCard.vue";
 import LabelsCard from "../../components/LabelsCard.vue";
+import SortHeader from "../../components/SortHeader.vue";
 import { absoluteTime, relativeTime } from "../../format";
+import { useSort } from "../../sort";
 
 const route = useRoute();
 const router = useRouter();
@@ -15,6 +17,12 @@ const name = computed(() => route.params.name as string);
 
 const service = useService(() => name.value);
 const deleteService = useDeleteService(() => name.value);
+
+const backendSort = useSort(() => service.data.value?.backends, "instance", {
+  workload: (b) => b.workload,
+  instance: (b) => b.instance,
+  address: (b) => b.address,
+});
 
 // Awaited so Suspense holds the previous view until this one has its
 // data. A failure is left for the error banner this view already renders.
@@ -103,41 +111,53 @@ await service.suspense().catch(() => {});
           >
             No backends. Nothing the target selects is running and fit to serve.
           </p>
-          <table v-else class="w-full text-left text-sm">
-            <thead>
-              <tr
-                class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
-              >
-                <th class="px-4 py-2 font-medium">Workload</th>
-                <th class="px-4 py-2 font-medium">Instance</th>
-                <th class="px-4 py-2 font-medium">Address</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="backend in service.data.value.backends"
-                :key="`${backend.workload}-${backend.instance}`"
-                class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
-              >
-                <td class="px-4 py-2.5 font-medium">
-                  <RouterLink
-                    :to="`/workloads/${backend.workload}`"
-                    class="text-ocean-700 dark:text-ocean-300 hover:underline"
-                  >
-                    {{ backend.workload }}
-                  </RouterLink>
-                </td>
-                <td class="px-4 py-2.5 text-slate-600 dark:text-slate-400">
-                  {{ backend.instance }}
-                </td>
-                <td
-                  class="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-400"
+          <div v-else class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead>
+                <tr
+                  class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
                 >
-                  {{ backend.address }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                  <SortHeader
+                    v-for="[column, label] in [
+                      ['workload', 'Workload'],
+                      ['instance', 'Instance'],
+                      ['address', 'Address'],
+                    ]"
+                    :key="column"
+                    :name="column!"
+                    :sort-key="backendSort.key.value"
+                    :descending="backendSort.descending.value"
+                    @sort="backendSort.toggle"
+                    >{{ label }}</SortHeader
+                  >
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="backend in backendSort.sorted.value"
+                  :key="`${backend.workload}-${backend.instance}`"
+                  class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
+                >
+                  <td class="px-4 py-2.5 font-medium">
+                    <RouterLink
+                      :to="`/workloads/${backend.workload}`"
+                      class="text-ocean-700 dark:text-ocean-300 hover:underline"
+                    >
+                      {{ backend.workload }}
+                    </RouterLink>
+                  </td>
+                  <td class="px-4 py-2.5 text-slate-600 dark:text-slate-400">
+                    {{ backend.instance }}
+                  </td>
+                  <td
+                    class="px-4 py-2.5 font-mono text-xs text-slate-600 dark:text-slate-400"
+                  >
+                    {{ backend.address }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </DetailCard>
 
         <LabelsCard :labels="service.data.value.labels" target="/services" />

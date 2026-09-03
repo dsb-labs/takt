@@ -37,3 +37,10 @@ export function absoluteTime(instant: string): string {
 export function pluralize(count: number, noun: string): string {
   return count === 1 ? `1 ${noun}` : `${count} ${noun}s`;
 }
+
+// healthStyles colours a health status the same way everywhere it appears.
+export const healthStyles: Record<string, string> = {
+  healthy: "text-emerald-700 dark:text-emerald-400",
+  unhealthy: "text-rose-700 dark:text-rose-400",
+  starting: "text-sky-700 dark:text-sky-400",
+};
