@@ -1,6 +1,6 @@
 module github.com/dsb-labs/orca
 
-go 1.26
+go 1.27
 
 // The UI toolchain vendors packages that ship Go files of their own.
 ignore ./internal/ui/app/node_modules
@@ -137,7 +137,7 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gotest.tools/gotestsum v1.13.0 // indirect
-	honnef.co/go/tools v0.7.0 // indirect
+	honnef.co/go/tools v0.8.1 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
