@@ -642,7 +642,7 @@ func TestParse(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			f, err := os.Open(filepath.Join("testdata", tc.File))
+			f, err := os.Open(filepath.Join("testdata", "workload", tc.File))
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, f.Close()) })
 
@@ -922,7 +922,7 @@ container:
 func TestParse_EveryFieldDecodes(t *testing.T) {
 	t.Parallel()
 
-	f, err := os.Open(filepath.Join("testdata", "container.yaml"))
+	f, err := os.Open(filepath.Join("testdata", "workload", "container.yaml"))
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, f.Close()) })
 

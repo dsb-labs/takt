@@ -22,7 +22,7 @@ func TestParseService(t *testing.T) {
 	}{
 		{
 			Name: "a full service manifest",
-			File: "service.yaml",
+			File: "service/service.yaml",
 			Expected: manifest.Service{
 				Version: "v1",
 				Name:    "example",
@@ -38,7 +38,7 @@ func TestParseService(t *testing.T) {
 			// A manifest naming no protocol asks for TCP, resolved here so nothing
 			// downstream has to decide what an unset protocol means.
 			Name: "a minimal service manifest takes the protocol default",
-			File: "service_minimal.yaml",
+			File: "service/service_minimal.yaml",
 			Expected: manifest.Service{
 				Version: "v1",
 				Name:    "example",
@@ -51,7 +51,7 @@ func TestParseService(t *testing.T) {
 		},
 		{
 			Name: "a udp service manifest",
-			File: "service_udp.yaml",
+			File: "service/service_udp.yaml",
 			Expected: manifest.Service{
 				Version: "v1",
 				Name:    "example",
@@ -66,60 +66,60 @@ func TestParseService(t *testing.T) {
 			// A service selecting nothing would select everything, which is more
 			// likely a mistake than an intent.
 			Name:         "rejects a manifest naming no target",
-			File:         "service_no_target.yaml",
+			File:         "service/service_no_target.yaml",
 			ExpectsError: true,
 		},
 		{
 			Name:         "rejects a target naming no labels",
-			File:         "service_no_target_labels.yaml",
+			File:         "service/service_no_target_labels.yaml",
 			ExpectsError: true,
 		},
 		{
 			Name:         "rejects a port outside the usable range",
-			File:         "service_bad_port.yaml",
+			File:         "service/service_bad_port.yaml",
 			ExpectsError: true,
 		},
 		{
 			// The selected workloads need not agree on their port names, so a
 			// target names the port itself rather than a port name.
 			Name:         "rejects a port written as a name",
-			File:         "service_named_port.yaml",
+			File:         "service/service_named_port.yaml",
 			ExpectsError: true,
 		},
 		{
 			Name:         "rejects a protocol orca cannot publish",
-			File:         "service_bad_protocol.yaml",
+			File:         "service/service_bad_protocol.yaml",
 			ExpectsError: true,
 		},
 		{
 			// The service API serves its own routes under the path a service of
 			// that name would occupy.
 			Name:         "rejects the reserved name",
-			File:         "service_reserved_name.yaml",
+			File:         "service/service_reserved_name.yaml",
 			ExpectsError: true,
 		},
 		{
 			// A service's labels answer to the same rules a workload's do,
 			// reserved prefix included, so an operator learns them once.
 			Name:         "rejects a label orca reserves for itself",
-			File:         "service_bad_label.yaml",
+			File:         "service/service_bad_label.yaml",
 			ExpectsError: true,
 		},
 		{
 			Name:         "rejects a target label orca reserves for itself",
-			File:         "service_bad_target_label.yaml",
+			File:         "service/service_bad_target_label.yaml",
 			ExpectsError: true,
 		},
 		{
 			Name:         "rejects an unknown field",
-			File:         "service_unknown_field.yaml",
+			File:         "service/service_unknown_field.yaml",
 			ExpectsError: true,
 		},
 		{
 			// Which resource a file describes is decided by what it is given to,
 			// so a workload manifest handed to this reads as unknown keys.
 			Name:         "rejects a workload manifest",
-			File:         "container.yaml",
+			File:         "workload/container.yaml",
 			ExpectsError: true,
 		},
 	}
