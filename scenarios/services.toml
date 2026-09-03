@@ -1,0 +1,27 @@
+name = "services"
+description = "Services resolving backends across a fleet while restarts move them."
+
+# A service's backends are computed on every read: the fleet is observed, the
+# target's labels are matched, and every running instance publishing the port
+# becomes an address. Reading services while restarts replace instances measures
+# that resolution under the churn a balancer's feed would see.
+
+[fleet]
+containers = 40
+exec = 10
+dynamic-ports = 0.6
+health-checks = 0.3
+instances = 0.3
+
+[resources]
+services = 4
+
+[churn]
+duration = "1m"
+workers = 8
+
+[churn.weights]
+get-service = 4
+restart = 2
+list = 1
+get = 1

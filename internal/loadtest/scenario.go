@@ -108,6 +108,10 @@ type (
 		Variables int `toml:"variables"`
 		// How many volumes to create.
 		Volumes int `toml:"volumes"`
+		// How many services to create. Each selects the whole fleet by the label
+		// every workload carries, so reading one resolves a backend for every
+		// running instance that publishes the port.
+		Services int `toml:"services"`
 	}
 
 	// The Churn type describes what is done to the fleet once it is running.
@@ -139,6 +143,9 @@ type (
 		Logs int `toml:"logs"`
 		// Replacing a workload's instances.
 		Restart int `toml:"restart"`
+		// Reading one service, which observes the fleet and resolves a backend
+		// for every running instance the target selects.
+		GetService int `toml:"get-service"`
 	}
 )
 
@@ -198,6 +205,8 @@ func (s Scenario) validate() error {
 		return fmt.Errorf("%w: variables cannot be negative", ErrInvalidScenario)
 	case s.Resources.Volumes < 0:
 		return fmt.Errorf("%w: volumes cannot be negative", ErrInvalidScenario)
+	case s.Resources.Services < 0:
+		return fmt.Errorf("%w: services cannot be negative", ErrInvalidScenario)
 	}
 
 	return nil
@@ -225,6 +234,12 @@ func (s Scenario) readable() error {
 
 	if s.Fleet.MountsVolume > 0 && s.Resources.Volumes == 0 {
 		return fmt.Errorf("%w: mounts-volume needs at least one volume", ErrInvalidScenario)
+	}
+
+	// A service reports the fleet's addresses, so a churn reading services with
+	// none created would measure choosing from an empty list.
+	if s.Churn.Weights.GetService > 0 && s.Resources.Services == 0 {
+		return fmt.Errorf("%w: get-service needs at least one service", ErrInvalidScenario)
 	}
 
 	// An address is the host port orca published for a container, so a fleet with
@@ -327,6 +342,7 @@ func (w Weights) each() map[string]int {
 		"get":             w.Get,
 		"logs":            w.Logs,
 		"restart":         w.Restart,
+		"get-service":     w.GetService,
 	}
 }
 

@@ -42,7 +42,7 @@ func TestParseScenario(t *testing.T) {
 					MountsVariable: 0.25,
 					MountsVolume:   0.25,
 				},
-				Resources: loadtest.Resources{Secrets: 3, Variables: 3, Volumes: 2},
+				Resources: loadtest.Resources{Secrets: 3, Variables: 3, Volumes: 2, Services: 2},
 				Churn: loadtest.Churn{
 					Duration: 30 * time.Second,
 					Workers:  4,
@@ -54,6 +54,7 @@ func TestParseScenario(t *testing.T) {
 						Get:            1,
 						Logs:           1,
 						Restart:        1,
+						GetService:     1,
 					},
 				},
 			},

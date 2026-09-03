@@ -151,6 +151,23 @@ func setup(ctx context.Context, config Config, collected *collector, names Names
 		})
 	}
 
+	for _, name := range names.Services {
+		group.Go(func() error {
+			return collected.measure("service.apply", func() error {
+				_, err := config.Client.ApplyService(ctx, manifest.Service{
+					Version: "v1",
+					Name:    name,
+					Target: manifest.ServiceTarget{
+						Labels: map[string]string{"loadtest": config.Scenario.Name},
+						Port:   port,
+					},
+				})
+
+				return err
+			})
+		})
+	}
+
 	if err := group.Wait(); err != nil {
 		return fmt.Errorf("failed to set up the scenario's resources: %w", err)
 	}
@@ -359,6 +376,10 @@ func perform(ctx context.Context, config Config, collected *collector, names Nam
 			_, err := c.Restart(ctx, choose(names.Workloads, rng))
 
 			return err
+		case "service.get":
+			_, err := c.GetService(ctx, choose(names.Services, rng))
+
+			return err
 		default:
 			return fmt.Errorf("unknown operation %q", op)
 		}
@@ -376,6 +397,7 @@ func weighted(weights Weights) []string {
 		"workload.get":     weights.Get,
 		"workload.logs":    weights.Logs,
 		"workload.restart": weights.Restart,
+		"service.get":      weights.GetService,
 	}
 
 	var choices []string
@@ -429,6 +451,12 @@ func teardown(ctx context.Context, config Config, collected *collector, names Na
 	for _, name := range names.Volumes {
 		_ = collected.measure("volume.delete", func() error {
 			return config.Client.DeleteVolume(ctx, name)
+		})
+	}
+
+	for _, name := range names.Services {
+		_ = collected.measure("service.delete", func() error {
+			return config.Client.DeleteService(ctx, name)
 		})
 	}
 }

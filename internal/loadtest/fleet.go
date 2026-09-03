@@ -69,6 +69,8 @@ type (
 		Variables []string
 		// The volumes the fleet mounts.
 		Volumes []string
+		// The services selecting the fleet.
+		Services []string
 	}
 )
 
@@ -85,6 +87,7 @@ func Build(scenario Scenario, prefix string) ([]Workload, Names) {
 		Secrets:   nameSet(prefix, "secret", scenario.Resources.Secrets),
 		Variables: nameSet(prefix, "variable", scenario.Resources.Variables),
 		Volumes:   nameSet(prefix, "volume", scenario.Resources.Volumes),
+		Services:  nameSet(prefix, "service", scenario.Resources.Services),
 	}
 
 	total := scenario.Workloads()

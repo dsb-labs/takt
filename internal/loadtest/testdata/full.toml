@@ -19,6 +19,7 @@ mounts-volume = 0.25
 secrets = 3
 variables = 3
 volumes = 2
+services = 2
 
 [churn]
 duration = "30s"
@@ -32,3 +33,4 @@ list = 2
 get = 1
 logs = 1
 restart = 1
+get-service = 1
