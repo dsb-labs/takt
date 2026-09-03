@@ -34,7 +34,7 @@ func Command() *cobra.Command {
 			}
 			defer f.Close()
 
-			spec, err := manifest.Parse(f)
+			spec, err := manifest.ParseWorkload(f)
 			if err != nil {
 				return err
 			}

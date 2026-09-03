@@ -948,7 +948,7 @@ func (r *Reconciler) convergeSlot(ctx context.Context, row database.Workload, in
 // was stored, so failing here means the two have diverged, and converging one
 // instance is a better failure than converging none.
 func countOf(row database.Workload) int {
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil || spec.Count < 1 {
 		return 1
 	}
@@ -1073,7 +1073,7 @@ func (r *Reconciler) slotHash(ctx context.Context, row database.Workload, index 
 		return row.SpecHash, nil
 	}
 
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return "", err
 	}
@@ -1123,7 +1123,7 @@ func (r *Reconciler) refresh(ctx context.Context, row database.Workload) error {
 		return nil
 	}
 
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		// Validated before it was stored, so this means the specification and the rules
 		// have diverged. Nothing about the mounts can be read, and the workload is left
@@ -1226,7 +1226,7 @@ func (r *Reconciler) register(rows []database.Workload, observed map[string][]dr
 // either means the specification and the rules have diverged — and running a workload
 // continuously is a better failure than never running it again.
 func (r *Reconciler) schedule(row database.Workload) cron.Schedule {
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return nil
 	}
@@ -1249,7 +1249,7 @@ func (r *Reconciler) schedule(row database.Workload) cron.Schedule {
 // overlap reads what a stored workload asks for when an occurrence comes due while the
 // previous run is still going.
 func overlap(row database.Workload) manifest.OverlapPolicy {
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return manifest.OverlapReplace
 	}
@@ -1269,7 +1269,7 @@ func overlap(row database.Workload) manifest.OverlapPolicy {
 // restart a workload is a better failure than retiring it on the strength of a spec
 // nothing could read.
 func restartPolicy(row database.Workload) *manifest.Restart {
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay}
 	}
@@ -1303,7 +1303,7 @@ func retired(restart *manifest.Restart, instances []driver.Instance) bool {
 // healthCheck resolves a stored workload's health check into something probeable,
 // reporting false when the workload declares none.
 func healthCheck(bind string, row database.Workload, ports []database.Port) (health.Check, bool, error) {
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return health.Check{}, false, err
 	}

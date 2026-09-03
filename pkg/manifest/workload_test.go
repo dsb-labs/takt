@@ -646,7 +646,7 @@ func TestParse(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, f.Close()) })
 
-			spec, err := manifest.Parse(f)
+			spec, err := manifest.ParseWorkload(f)
 			switch {
 			case tc.ExpectErr != nil:
 				assert.ErrorIs(t, err, tc.ExpectErr)
@@ -841,7 +841,7 @@ func TestRestart_Defaults(t *testing.T) {
 	t.Parallel()
 
 	t.Run("parsing a manifest that says nothing", func(t *testing.T) {
-		spec, err := manifest.Parse(strings.NewReader(`
+		spec, err := manifest.ParseWorkload(strings.NewReader(`
 version: v1
 name: example
 container:
@@ -855,7 +855,7 @@ container:
 	})
 
 	t.Run("what the manifest states is kept", func(t *testing.T) {
-		spec, err := manifest.Parse(strings.NewReader(`
+		spec, err := manifest.ParseWorkload(strings.NewReader(`
 version: v1
 name: example
 restart:
@@ -877,7 +877,7 @@ func TestSchedule_Defaults(t *testing.T) {
 	t.Parallel()
 
 	t.Run("overlap defaults to replace", func(t *testing.T) {
-		spec, err := manifest.Parse(strings.NewReader(`
+		spec, err := manifest.ParseWorkload(strings.NewReader(`
 version: v1
 name: example
 schedule:
@@ -891,7 +891,7 @@ container:
 	})
 
 	t.Run("no schedule means the workload runs continuously", func(t *testing.T) {
-		spec, err := manifest.Parse(strings.NewReader(`
+		spec, err := manifest.ParseWorkload(strings.NewReader(`
 version: v1
 name: example
 container:
@@ -926,7 +926,7 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, f.Close()) })
 
-	spec, err := manifest.Parse(f)
+	spec, err := manifest.ParseWorkload(f)
 	require.NoError(t, err)
 
 	// Every field the manifest schema declares must have survived the round trip.

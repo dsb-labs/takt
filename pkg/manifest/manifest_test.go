@@ -37,7 +37,7 @@ func TestValidate_Labels(t *testing.T) {
 			"has space",
 			"orca.workload",
 		} {
-			err := manifest.Validate(spec(map[string]string{key: "value"}))
+			err := manifest.ValidateWorkload(spec(map[string]string{key: "value"}))
 			assert.Error(t, err, "accepted the key %q", key)
 		}
 	})
@@ -53,7 +53,7 @@ func TestValidate_Labels(t *testing.T) {
 			"a\tb",
 			string([]byte{0xff}),
 		} {
-			err := manifest.Validate(spec(map[string]string{"some-key": value}))
+			err := manifest.ValidateWorkload(spec(map[string]string{"some-key": value}))
 			assert.Error(t, err, "accepted the value %q", value)
 		}
 	})
@@ -68,7 +68,7 @@ func TestValidate_Labels(t *testing.T) {
 			"printable non-ascii in values": {"some-key": "café ☕"},
 			"an empty value":                {"some-key": ""},
 		} {
-			err := manifest.Validate(spec(labels))
+			err := manifest.ValidateWorkload(spec(labels))
 			assert.NoError(t, err, "rejected %s", name)
 		}
 	})
@@ -81,6 +81,6 @@ func TestValidate_Labels(t *testing.T) {
 			labels[fmt.Sprintf("key-%d", i)] = "value"
 		}
 
-		assert.NoError(t, manifest.Validate(spec(labels)))
+		assert.NoError(t, manifest.ValidateWorkload(spec(labels)))
 	})
 }

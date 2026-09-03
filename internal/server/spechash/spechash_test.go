@@ -110,11 +110,11 @@ func TestCompute(t *testing.T) {
 func TestCompute_CountOfOneIsTheDefault(t *testing.T) {
 	t.Parallel()
 
-	counted, err := manifest.Parse(strings.NewReader(
+	counted, err := manifest.ParseWorkload(strings.NewReader(
 		"version: v1\nname: example\ncount: 1\ncontainer:\n  image: example/example:latest\n"))
 	require.NoError(t, err)
 
-	uncounted, err := manifest.Parse(strings.NewReader(
+	uncounted, err := manifest.ParseWorkload(strings.NewReader(
 		"version: v1\nname: example\ncontainer:\n  image: example/example:latest\n"))
 	require.NoError(t, err)
 

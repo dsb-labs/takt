@@ -42,7 +42,7 @@ func TestBuild_Valid(t *testing.T) {
 	require.Len(t, names.Workloads, 40)
 
 	for _, workload := range workloads {
-		assert.NoError(t, manifest.Validate(workload.Spec), "workload %s", workload.Spec.Name)
+		assert.NoError(t, manifest.ValidateWorkload(workload.Spec), "workload %s", workload.Spec.Name)
 	}
 }
 
@@ -57,7 +57,7 @@ func TestBuild_EveryScenarioIsValid(t *testing.T) {
 			require.NotEmpty(t, workloads)
 
 			for _, workload := range workloads {
-				assert.NoError(t, manifest.Validate(workload.Spec), "workload %s", workload.Spec.Name)
+				assert.NoError(t, manifest.ValidateWorkload(workload.Spec), "workload %s", workload.Spec.Name)
 			}
 		})
 	}

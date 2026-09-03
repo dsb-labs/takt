@@ -93,7 +93,7 @@ type (
 	// The Spec type describes the desired state of a workload.
 	//
 	// It is the canonical shape of a workload throughout orca's public API: what
-	// Parse produces from a manifest file, and what the client submits. Optional
+	// ParseWorkload produces from a manifest file, and what the client submits. Optional
 	// values are plain zero values rather than pointers, so callers can build one
 	// by hand without ceremony.
 	//
@@ -127,7 +127,7 @@ type (
 		// volume that must already exist.
 		Volumes []VolumeMount `json:"volumes,omitempty"`
 		// What to do when the workload's instance ends. Never nil once a Spec has
-		// been through Defaults, which Parse and the wire mapping both call.
+		// been through Defaults, which ParseWorkload and the wire mapping both call.
 		Restart *Restart `json:"restart,omitempty"`
 		// How to tell whether the workload is working, rather than merely started.
 		Health *Health `json:"health,omitempty"`
@@ -528,7 +528,7 @@ func (s *Schedule) Parsed() (cron.Schedule, error) {
 // Defaults fills in what the specification left unset, so that validation checks
 // what will actually be used rather than zeroes.
 //
-// Exported because it runs however a Spec was built, decoded from YAML by Parse or
+// Exported because it runs however a Spec was built, decoded from YAML by ParseWorkload or
 // converted from the wire format by the caller that received one. A default applied
 // on only one of those paths would make the same manifest behave differently
 // depending on how it reached the server.
@@ -626,11 +626,11 @@ func (h *Health) defaults() {
 	}
 }
 
-// Parse reads a workload manifest from r and returns the specification it
+// ParseWorkload reads a workload manifest from r and returns the specification it
 // describes.
 //
 // The manifest is validated as it is parsed, so a specification returned from
-// Parse is well-formed: it names a version this package understands, a usable
+// ParseWorkload is well-formed: it names a version this package understands, a usable
 // name, exactly one runtime, and a schedule that parses as cron when present.
 // Unknown fields are rejected rather than ignored, so a typo in a key is reported
 // instead of silently doing nothing.
@@ -638,7 +638,7 @@ func (h *Health) defaults() {
 // YAML keys are matched against the lowercased Go field names of Spec. That holds
 // while every manifest key is a single word, as they all are today. A multi-word
 // field would need an explicit yaml tag, and the tests pin the current mapping.
-func Parse(r io.Reader) (Spec, error) {
+func ParseWorkload(r io.Reader) (Spec, error) {
 	decoder := yaml.NewDecoder(r)
 	decoder.KnownFields(true)
 
@@ -651,20 +651,20 @@ func Parse(r io.Reader) (Spec, error) {
 	// what will actually be used rather than zeroes.
 	spec.Defaults()
 
-	if err := Validate(spec); err != nil {
+	if err := ValidateWorkload(spec); err != nil {
 		return Spec{}, err
 	}
 
 	return spec, nil
 }
 
-// Decode reads a stored specification, resolving the defaults as Parse does.
+// DecodeWorkload reads a stored specification, resolving the defaults as ParseWorkload does.
 //
 // A specification is stored with its defaults already resolved, so this normally
 // changes nothing. It runs anyway because a decoded specification is not otherwise a
 // resolved one: a caller reading a field the manifest left unset would find a zero
 // value where every other path finds the default.
-func Decode(data []byte) (Spec, error) {
+func DecodeWorkload(data []byte) (Spec, error) {
 	var spec Spec
 	if err := json.Unmarshal(data, &spec); err != nil {
 		return Spec{}, fmt.Errorf("failed to decode workload spec: %w", err)
@@ -675,8 +675,8 @@ func Decode(data []byte) (Spec, error) {
 	return spec, nil
 }
 
-// Validate reports whether spec is a usable workload specification.
-func Validate(spec Spec) error {
+// ValidateWorkload reports whether spec is a usable workload specification.
+func ValidateWorkload(spec Spec) error {
 	if err := validateHeader(spec.Version, spec.Name); err != nil {
 		return err
 	}

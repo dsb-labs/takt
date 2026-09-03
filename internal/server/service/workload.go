@@ -503,7 +503,7 @@ func (s *WorkloadService) resolve(ctx context.Context, spec manifest.Spec) (reso
 	// that skips the CLI has to be held to them too. Without this the server accepted
 	// an unknown schema version, a name breaking its own documented rules, and an
 	// empty image that could only ever fail to start.
-	if err = manifest.Validate(spec); err != nil {
+	if err = manifest.ValidateWorkload(spec); err != nil {
 		return resolution{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
 
@@ -961,7 +961,7 @@ func (s *WorkloadService) Logs(ctx context.Context, out io.Writer, name string, 
 		return fmt.Errorf("failed to load workload: %w", err)
 	}
 
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return err
 	}
@@ -1040,7 +1040,7 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 		return false, fmt.Errorf("failed to read workload ports: %w", err)
 	}
 
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return false, err
 	}
@@ -1139,7 +1139,7 @@ func (s *WorkloadService) ReallocateInstance(ctx context.Context, name string, i
 		return false, fmt.Errorf("failed to read workload ports: %w", err)
 	}
 
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return false, err
 	}
@@ -1250,7 +1250,7 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 		return false, fmt.Errorf("failed to load workload: %w", err)
 	}
 
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return false, err
 	}
@@ -1710,7 +1710,7 @@ func (r references) hashInputs(digest string) spechash.Inputs {
 }
 
 func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, healths map[int]Health, lastError string, lastErrorAt time.Time) (Workload, error) {
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return Workload{}, err
 	}

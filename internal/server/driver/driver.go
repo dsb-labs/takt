@@ -231,7 +231,7 @@ type (
 // is the driver's business, and a server that understood each of them would have to
 // change every time a runtime was added.
 func NewWorkload(row database.Workload) (Workload, error) {
-	spec, err := manifest.Decode(row.Spec)
+	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return Workload{}, err
 	}
