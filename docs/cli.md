@@ -14,7 +14,7 @@ orca workload start <name>              Start a stopped workload
 orca workload restart <name>            Replace a workload's running instances
 
 orca volume create <manifest>           Create a volume from a manifest file
-orca volume update <manifest>           Update a volume's labels from a manifest
+orca volume update <manifest>           Update a volume from a manifest file
 orca volume list                        List volumes                         (alias: ls)
 orca volume get <name>                  Show a single volume
 orca volume delete <name>               Delete a volume and the data it holds (alias: rm)
@@ -335,8 +335,9 @@ yet is lost with the server, and can simply be sent again.
 orca volume create volume.yaml
 ```
 
-Creates a volume and the directory backing it. The manifest is a name, and labels if
-you want them:
+Creates a volume and the directory backing it. The manifest is a name, labels if you
+want them, and optionally who owns the directory and what permission bits it carries
+— see [Volumes](manifest.md#volumes) for what `owner` and `mode` mean:
 
 ```yaml
 version: v1
@@ -344,6 +345,8 @@ name: example-data
 labels:
   app: web
   team: platform
+owner: "470:470"
+mode: "0755"
 ```
 
 A volume has to exist before a workload can mount it, so that a mistyped name is
@@ -357,17 +360,20 @@ have not used yet.
 orca volume update volume.yaml
 ```
 
-Replaces the labels on the volume the manifest names.
+Replaces the labels, the owner and the mode on the volume the manifest names.
 
-Labels are the whole of what this changes, and the whole of what a volume has to
+Those are the whole of what this changes, and the whole of what a volume has to
 change. Its name identifies it, the directory holding its data is named for the
 identifier it was assigned, and its contents are the workloads' to write.
 
-The labels in the manifest replace the ones stored, the way applying a workload
-manifest replaces a workload's. A manifest carrying none removes them all.
+The fields in the manifest replace the ones stored, the way applying a workload
+manifest replaces a workload's. A manifest carrying no labels removes them all. The
+owner and mode are applied to the directory again, which is how a live volume is
+handed to another user. A manifest clearing either leaves the directory as it
+stands.
 
-Nothing mounting the volume is redeployed. A label says nothing about the storage, so
-no specification hash moves.
+Nothing mounting the volume is redeployed. None of these fields say anything about
+the volume's place in a workload's specification, so no specification hash moves.
 
 ## volume list
 

@@ -55,7 +55,7 @@ container:
 | `labels` | no | Key-value pairs attached to the workload. See [Labels](#labels). |
 | `ports` | no | The ports the workload publishes. |
 | `env` | no | Environment variables set for the workload. A value may reference a secret or a variable. |
-| `volumes` | no | What the workload mounts — a volume, a secret or a variable — and where it finds each one. |
+| `volumes` | no | What the workload mounts — a volume, a secret, a variable or a host path — and where it finds each one. |
 | `restart` | no | What happens when the workload ends. |
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
 | `health` | no | How orca decides the workload is working. |
@@ -197,7 +197,8 @@ configuration. It is not the default because it breaks too many stock images.
 `readOnly` applies to the image's own filesystem. Mounted volumes and mounted values
 are separate mounts with rules of their own, so a volume stays writable and a mounted
 value stays readable whatever this says. An image that writes temporary files needs
-them pointed at a volume before it can run read-only.
+them pointed at a volume before it can run read-only. A single mount can be made
+read-only with the mount's own `readOnly` field — see [Volumes](#volumes).
 
 ### exec
 
@@ -492,6 +493,9 @@ volumes:
     to: /var/secret.json
   - var: variable-name
     to: /var/example.json
+  - path: /mnt/media
+    to: /media
+    readOnly: true
 ```
 
 An entry names exactly one source, and which one it names decides what appears at the
@@ -502,13 +506,20 @@ path:
 | `name` | A volume, which is a directory that outlives the workload. |
 | `secret` | A file holding the secret's value. |
 | `var` | A file holding the variable's value. |
+| `path` | A host file or directory that orca does not manage. |
 
 Naming none, or naming two, is an error. It is one list rather than two, because what
 a workload finds in its filesystem is one question however the contents are produced.
 
-`to` is where the workload finds it, and works the same way for all three. The rest of
-this section is about mounting a volume. [Mounting a value](#mounting-a-value) covers
-the other two.
+`to` is where the workload finds it, and works the same way for all four. The rest of
+this section is about mounting a volume. [Mounting a host path](#mounting-a-host-path)
+and [Mounting a value](#mounting-a-value) cover the others.
+
+Any entry may also say `readOnly: true`, whatever its source. The workload can then
+read what is mounted and cannot change it, which is what a workload sharing a volume
+with its writer wants. Only a container can honour it: the exec runtime mounts
+through a symbolic link, which cannot make anything read-only, so an exec manifest
+naming it is rejected.
 
 `name` is the volume to mount. `to` is where the workload finds it.
 
@@ -521,8 +532,8 @@ orca volume create volume.yaml
 orca workload apply example.yaml
 ```
 
-The volume manifest is a name, and labels if you want them. A volume holds data and
-has nothing else to configure:
+The volume manifest is a name, labels if you want them, and optionally who owns the
+directory backing the volume and what permission bits it carries:
 
 ```yaml
 version: v1
@@ -530,11 +541,25 @@ name: example-data
 labels:
   app: web
   team: platform
+owner: "470:470"
+mode: "0755"
 ```
 
 Labels follow the rules in [Labels](#labels), unchanged. `orca volume update` replaces
 them. Nothing mounting the volume is redeployed, because a label says nothing about
 the storage.
+
+`owner` and `mode` exist for an image that runs as a fixed non-root user. Without
+them the directory is owned by the user running the server and readable only by it,
+so such an image cannot write to the volume it mounts. `owner` is a numeric `uid` or
+`uid:gid` — a name would resolve against the host's user database, so the same
+manifest would mean different users on different hosts. `mode` is an octal string
+such as `"0755"`, up to four digits so a shared volume can carry the setgid bit.
+
+Both are applied to the directory when the volume is created, and again on
+`orca volume update`, which is how a live volume is handed to another user. Removing
+either from the manifest leaves the directory as it stands. Assigning another user
+needs the server to carry `CAP_CHOWN` — see [Operating](operating.md).
 
 A volume outlives the workloads that mount it. Deleting a workload leaves its volumes
 alone, and `orca volume delete` is the only thing in orca that removes stored data. See
@@ -571,6 +596,34 @@ difference, so `/data` and `/data/` are the same mount.
 
 Volumes sit beside the runtime blocks rather than inside one, for the same reason ports
 do: where a workload keeps its data is a question about the workload.
+
+## Mounting a host path
+
+A mount can name a host file or directory instead of a volume. This is how a workload
+reaches data orca does not manage: a media library on its own mount point, or the
+docker socket for a workload that watches containers:
+
+```yaml
+volumes:
+  - path: /mnt/media
+    to: /media
+    readOnly: true
+  - path: /var/run/docker.sock
+    to: /var/run/docker.sock
+```
+
+`path` must be an absolute path on the host running the server. Nothing creates it:
+what is there is what the workload gets, and starting fails if it is not there.
+
+A host path reaches outside orca-managed state, so the server refuses every path
+mount until its configuration says otherwise. `allow-host-paths` in the `[workload]`
+section lists the prefixes a path mount may sit beneath — see
+[Configuration](configuration.md). The gate runs when a manifest is applied, so a
+workload already stored keeps its mounts if the list later narrows.
+
+The `to` rules are the volume's: written the same for either runtime, and reached by
+the relative path in an exec workload. A path mount cannot name a `signal`, for the
+reason a volume cannot: orca does not know when its contents change.
 
 ## Mounting a value
 

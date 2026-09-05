@@ -167,8 +167,10 @@ under `/var/lib/orca`. One consequence is worth knowing — under
 `NoNewPrivileges=yes` a workload cannot run a setuid binary.
 
 The unit grants the server `CAP_DAC_OVERRIDE`, so `orca volume delete` can remove
-files a container wrote as another user. The grant does not reach the workloads.
-See [Deleting a volume a container wrote](#deleting-a-volume-a-container-wrote).
+files a container wrote as another user, and `CAP_CHOWN`, so a volume manifest can
+name another user as its owner. The grants do not reach the workloads. See
+[Deleting a volume a container wrote](#deleting-a-volume-a-container-wrote) and
+[Assigning a volume to another user](#assigning-a-volume-to-another-user).
 
 ### Not in a container
 
@@ -495,6 +497,27 @@ A server without the grant runs everything, and only deleting a volume holding
 another user's files needs it. The same ownership stops anything else
 running as the server's user — a backup, for one — from reading those files, and the
 capability changes nothing for them.
+
+### Assigning a volume to another user
+
+A volume manifest can name who owns the directory backing it — see
+[Volumes](manifest.md#volumes). This is what lets an image running as a fixed
+non-root user write to the volume it mounts, without a task that exists only to run
+`chown` first.
+
+Assigning another user needs `CAP_CHOWN`. The packaged unit grants it beside
+`CAP_DAC_OVERRIDE`. Grant it yourself when you run the server another way — under
+systemd:
+
+```ini
+[Service]
+User=orca
+AmbientCapabilities=CAP_DAC_OVERRIDE CAP_CHOWN
+```
+
+As with `CAP_DAC_OVERRIDE`, the grant does not reach the workloads, and a server
+without it refuses only a volume manifest that names another user. The error names
+the capability.
 
 ## Restarting the server
 

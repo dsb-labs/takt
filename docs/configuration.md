@@ -134,6 +134,7 @@ how quickly orca notices something it was never told about.
 | `bind` | `0.0.0.0` | The address a workload's host ports are published on. |
 | `min-port` | `20000` | The lowest host port orca will allocate. |
 | `max-port` | `32000` | The highest host port orca will allocate. |
+| `allow-host-paths` | empty | The prefixes a path mount may sit beneath. |
 
 `min-port` and `max-port` are the range orca allocates from for a container port that
 names no host port. A port a manifest pins is used as given, whether or not it falls in
@@ -169,6 +170,26 @@ instead, which is how anything on this host reaches the host.
 This applies to a port orca publishes for a workload, which means a container. An
 `exec` workload binds its own port, so what it listens on is the process's business and
 this setting does not reach it.
+
+`allow-host-paths` is what lets a manifest mount a host path — see
+[Mounting a host path](manifest.md#mounting-a-host-path). A path mount is accepted
+when its path is one of these prefixes or sits beneath one, and refused otherwise.
+The default is empty, which refuses every path mount:
+
+```toml
+[workload]
+allow-host-paths = ["/mnt/media", "/var/run/docker.sock"]
+```
+
+Each prefix must be absolute. Comparison respects path boundaries, so `/mnt/media`
+does not cover `/mnt/media-cache`.
+
+There is no manifest equivalent, for the reason the exec `allow-paths` list has none.
+A host path reaches outside orca-managed state — the docker socket in particular is
+control of the daemon — so which paths are opened is the operator's decision. The
+list is checked when a manifest is applied. A workload already stored keeps its
+mounts if the list later narrows, the way an exec workload keeps the paths it was
+started with.
 
 ## exec
 
