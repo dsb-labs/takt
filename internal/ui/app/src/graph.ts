@@ -78,6 +78,11 @@ export function buildGraph(
   for (const workload of workloads) {
     const source = `workload:${workload.name}`;
     for (const ref of references(workload.spec)) {
+      // A host path is not a resource, so the graph has nothing to draw for
+      // one. references() never yields the kind today, but the type allows it
+      // and the guard keeps the exclusion deliberate rather than accidental.
+      if (ref.kind === "path") continue;
+
       const target = resource(ref.kind, ref.name);
       const id = `${source}->${target}`;
 

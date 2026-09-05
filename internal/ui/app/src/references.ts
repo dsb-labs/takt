@@ -2,9 +2,10 @@ import type { VolumeMount, WorkloadSpec } from "./api/types";
 
 // A Reference is something a workload's specification names: a secret,
 // variable or another workload expanded into its environment, or a volume,
-// secret or variable mounted as a file.
+// secret or variable mounted as a file. A host path is the one kind that is
+// not an orca resource, so it renders without a link and joins no graph.
 export type Reference = {
-  kind: "secret" | "variable" | "volume" | "workload" | "service";
+  kind: "secret" | "variable" | "volume" | "workload" | "service" | "path";
   name: string;
   via: string;
 };
@@ -52,14 +53,16 @@ export function mountedAt(mount: VolumeMount): string {
     : `mounted at ${mount.to}`;
 }
 
-// hostPaths lists the host paths the given specification mounts. They are not
-// references: a path mount reaches outside orca-managed state, so there is no
-// resource to link to.
-export function hostPaths(spec: WorkloadSpec): { path: string; via: string }[] {
-  const paths: { path: string; via: string }[] = [];
+// hostPaths lists the host paths the given specification mounts, shaped as
+// references so they share the reference card's table. They stay out of
+// references() on purpose: the graph consumes that, and a host path is not a
+// resource for it to draw.
+export function hostPaths(spec: WorkloadSpec): Reference[] {
+  const paths: Reference[] = [];
 
   for (const mount of spec.volumes ?? []) {
-    if (mount.path) paths.push({ path: mount.path, via: mountedAt(mount) });
+    if (mount.path)
+      paths.push({ kind: "path", name: mount.path, via: mountedAt(mount) });
   }
 
   return paths;
@@ -78,5 +81,8 @@ export function referenceTarget(ref: Reference): string {
       return `/volumes/${ref.name}`;
     case "service":
       return `/services/${ref.name}`;
+    case "path":
+      // A host path is not an orca resource, so there is nowhere to go.
+      return "";
   }
 }

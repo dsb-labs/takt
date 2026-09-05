@@ -234,22 +234,7 @@ await workload.suspense().catch(() => {});
         <ReferenceCard title="Variables" :refs="variableRefs" />
         <ReferenceCard title="Workloads" :refs="workloadRefs" />
 
-        <DetailCard v-if="pathMounts.length > 0" title="Host paths">
-          <dl
-            class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
-          >
-            <div
-              v-for="mount in pathMounts"
-              :key="mount.path"
-              class="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-2.5"
-            >
-              <dt class="font-mono text-xs leading-5">{{ mount.path }}</dt>
-              <dd class="text-slate-500 dark:text-slate-400">
-                {{ mount.via }}
-              </dd>
-            </div>
-          </dl>
-        </DetailCard>
+        <ReferenceCard title="Host paths" :refs="pathMounts" />
 
         <DetailCard v-if="check" title="Health check">
           <dl

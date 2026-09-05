@@ -46,11 +46,15 @@ const sort = useSort(() => props.refs, "name", {
           >
             <td class="px-4 py-2.5 font-medium">
               <RouterLink
+                v-if="referenceTarget(reference)"
                 :to="referenceTarget(reference)"
                 class="text-ocean-700 dark:text-ocean-300 hover:underline"
               >
                 {{ reference.name }}
               </RouterLink>
+              <span v-else class="font-mono text-xs leading-5">{{
+                reference.name
+              }}</span>
             </td>
             <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
               {{ reference.via }}
