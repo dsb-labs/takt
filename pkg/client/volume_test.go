@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
@@ -79,6 +80,38 @@ func TestClient_CreateVolume(t *testing.T) {
 			tc.Assert(t, volume)
 		})
 	}
+}
+
+func TestClient_CreateVolume_CarriesOwnerAndMode(t *testing.T) {
+	t.Parallel()
+
+	// The handler decodes what was sent and echoes it back, so this proves the
+	// fields cross the wire in both directions.
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var spec api.VolumeSpec
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&spec))
+
+		require.NotNil(t, spec.Owner)
+		assert.Equal(t, "470:470", *spec.Owner)
+		require.NotNil(t, spec.Mode)
+		assert.Equal(t, "0755", *spec.Mode)
+
+		volume := apiVolume("example-data")
+		volume.Owner, volume.Mode = spec.Owner, spec.Mode
+
+		writeJSON(t, w, http.StatusCreated, api.CreateVolumeResult{Volume: volume})
+	})
+
+	volume, err := c.CreateVolume(t.Context(), manifest.Volume{
+		Version: "v1",
+		Name:    "example-data",
+		Owner:   "470:470",
+		Mode:    "0755",
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, "470:470", volume.Owner)
+	assert.Equal(t, "0755", volume.Mode)
 }
 
 func TestClient_GetVolume(t *testing.T) {

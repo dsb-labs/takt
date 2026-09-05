@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -24,6 +25,12 @@ type Volume struct {
 	UsedBy []string
 	// Arbitrary key-value pairs attached to the volume.
 	Labels map[string]string
+	// Who owns the volume's directory, as a numeric "uid" or "uid:gid". Empty
+	// when the directory is owned by the user running the server.
+	Owner string
+	// The permission bits on the volume's directory, as an octal string. Empty
+	// when the directory keeps the server's default.
+	Mode string
 	// The time the volume was created.
 	CreatedAt time.Time
 }
@@ -48,11 +55,7 @@ func checkName(name string) error {
 // A volume has to exist before a workload can mount it, so that a mistyped name is
 // reported rather than quietly becoming a second empty volume.
 func (c *Client) CreateVolume(ctx context.Context, volume manifest.Volume) (Volume, error) {
-	resp, err := c.api.CreateVolumeWithResponse(ctx, api.VolumeSpec{
-		Version: volume.Version,
-		Name:    volume.Name,
-		Labels:  wireLabels(volume.Labels),
-	})
+	resp, err := c.api.CreateVolumeWithResponse(ctx, wire.FromVolume(volume))
 	if err != nil {
 		return Volume{}, fmt.Errorf("failed to send the request: %w", err)
 	}
@@ -71,25 +74,25 @@ func (c *Client) CreateVolume(ctx context.Context, volume manifest.Volume) (Volu
 	}
 }
 
-// UpdateVolume replaces the labels on the volume the manifest names, returning it as
-// it now stands. Returns ErrVolumeNotFound when no such volume exists.
+// UpdateVolume replaces the mutable fields of the volume the manifest names,
+// returning it as it now stands. Returns ErrVolumeNotFound when no such volume
+// exists.
 //
-// The labels in the manifest replace the ones stored, as applying a workload
-// manifest replaces a workload's. A manifest carrying none removes them all.
+// The manifest's labels, owner and mode replace the ones stored, as applying a
+// workload manifest replaces a workload's. A manifest carrying no labels removes
+// them all. The owner and mode are reapplied to the volume's directory, so this is
+// also how a live volume is handed to another user; a manifest clearing either
+// leaves the directory as it stands.
 //
-// Labels are the whole of what this changes. A volume's name identifies it, the
-// directory holding its data is named for the identifier it was assigned, and its
-// contents are the workloads' to write.
+// Those fields are the whole of what this changes. A volume's name identifies it,
+// the directory holding its data is named for the identifier it was assigned, and
+// its contents are the workloads' to write.
 func (c *Client) UpdateVolume(ctx context.Context, volume manifest.Volume) (Volume, error) {
 	if err := checkName(volume.Name); err != nil {
 		return Volume{}, err
 	}
 
-	resp, err := c.api.UpdateVolumeWithResponse(ctx, volume.Name, api.VolumeSpec{
-		Version: volume.Version,
-		Name:    volume.Name,
-		Labels:  wireLabels(volume.Labels),
-	})
+	resp, err := c.api.UpdateVolumeWithResponse(ctx, volume.Name, wire.FromVolume(volume))
 	if err != nil {
 		return Volume{}, fmt.Errorf("failed to send the request: %w", err)
 	}
@@ -242,6 +245,14 @@ func newVolume(volume api.Volume) Volume {
 
 	if volume.Labels != nil {
 		out.Labels = *volume.Labels
+	}
+
+	if volume.Owner != nil {
+		out.Owner = *volume.Owner
+	}
+
+	if volume.Mode != nil {
+		out.Mode = *volume.Mode
 	}
 
 	return out
