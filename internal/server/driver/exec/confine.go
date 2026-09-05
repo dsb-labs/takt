@@ -325,7 +325,7 @@ func hosts(volumes []driver.Volume) []string {
 }
 
 // files returns the volumes that are a single file rather than a directory, which is
-// what a mounted secret or variable is.
+// what a mounted secret or variable is — and a path mount of a single host file.
 //
 // Separated from the directories because the two are granted differently: a mounted
 // value sits beside every other workload's, so granting its directory would hand over

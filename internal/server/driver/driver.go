@@ -201,7 +201,9 @@ type (
 	// A driver is given the path rather than the name, so that nothing about how a
 	// volume is stored has to be understood by the runtimes that mount one.
 	Volume struct {
-		// The name that identifies the volume.
+		// The name that identifies the volume. A path mount has no name of its
+		// own, so it carries the host path here and anything reporting the mount
+		// names it by that.
 		Name string
 		// Where the volume's data is on the host.
 		Host string
@@ -271,28 +273,43 @@ func NewWorkload(row database.Workload) (Workload, error) {
 	if len(spec.Volumes) > 0 {
 		w.Volumes = make([]Volume, 0, len(spec.Volumes))
 		for _, mount := range spec.Volumes {
-			// Only a volume is resolved here, and which source a mount names is asked
-			// of the manifest package rather than inferred from which field is set. A
-			// mounted secret or variable is written as the workload starts and added to
-			// this by whoever wrote it, so that nothing about a value ever reaches a
-			// stored specification.
-			if kind, err := manifest.KindOf(mount); err != nil || kind != manifest.MountVolume {
+			// Which source a mount names is asked of the manifest package rather
+			// than inferred from which field is set. A mounted secret or variable
+			// is written as the workload starts and added to this by whoever wrote
+			// it, so that nothing about a value ever reaches a stored
+			// specification.
+			kind, err := manifest.KindOf(mount)
+			if err != nil {
 				continue
 			}
 
-			// Unresolved for the same reason a port can be: the server had not
-			// finished settling the workload. Mounting nothing would be worse than
-			// waiting, since the workload would start and write somewhere else.
-			if mount.From == "" {
-				continue
-			}
+			switch kind {
+			case manifest.MountVolume:
+				// Unresolved for the same reason a port can be: the server had not
+				// finished settling the workload. Mounting nothing would be worse
+				// than waiting, since the workload would start and write somewhere
+				// else.
+				if mount.From == "" {
+					continue
+				}
 
-			w.Volumes = append(w.Volumes, Volume{
-				Name:     mount.Name,
-				Host:     mount.From,
-				Target:   mount.To,
-				ReadOnly: mount.ReadOnly,
-			})
+				w.Volumes = append(w.Volumes, Volume{
+					Name:     mount.Name,
+					Host:     mount.From,
+					Target:   mount.To,
+					ReadOnly: mount.ReadOnly,
+				})
+			case manifest.MountPath:
+				// The path already says where the data is, so there is nothing for
+				// the server to resolve. Whether the host allows the path was
+				// settled when the specification was accepted.
+				w.Volumes = append(w.Volumes, Volume{
+					Name:     mount.Path,
+					Host:     mount.Path,
+					Target:   mount.To,
+					ReadOnly: mount.ReadOnly,
+				})
+			}
 		}
 	}
 

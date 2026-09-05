@@ -36,6 +36,26 @@ func TestNewWorkload(t *testing.T) {
 			{Name: "example-data", Host: "/var/lib/orca/volumes/abc", Target: "/var/lib/example", ReadOnly: true},
 		}, w.Volumes)
 	})
+
+	t.Run("maps path mounts without resolution", func(t *testing.T) {
+		w, err := driver.NewWorkload(row(t, manifest.Spec{
+			Version:   "v1",
+			Name:      "example",
+			Container: &manifest.Container{Image: "example/example:latest"},
+			Volumes: []manifest.VolumeMount{
+				{Path: "/mnt/media", To: "/media", ReadOnly: true},
+				{Path: "/var/run/docker.sock", To: "/var/run/docker.sock"},
+			},
+		}))
+		require.NoError(t, err)
+
+		// The path is both where the data is and what the mount is called, since a
+		// path mount has no name of its own.
+		assert.Equal(t, []driver.Volume{
+			{Name: "/mnt/media", Host: "/mnt/media", Target: "/media", ReadOnly: true},
+			{Name: "/var/run/docker.sock", Host: "/var/run/docker.sock", Target: "/var/run/docker.sock"},
+		}, w.Volumes)
+	})
 }
 
 // row encodes a specification the way the server stores one, so the mapping under
