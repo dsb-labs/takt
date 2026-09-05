@@ -52,6 +52,12 @@ await volume.suspense().catch(() => {});
             <OverviewRow label="Path" mono>{{
               volume.data.value.path
             }}</OverviewRow>
+            <OverviewRow v-if="volume.data.value.owner" label="Owner" mono>{{
+              volume.data.value.owner
+            }}</OverviewRow>
+            <OverviewRow v-if="volume.data.value.mode" label="Mode" mono>{{
+              volume.data.value.mode
+            }}</OverviewRow>
             <OverviewRow
               label="Created"
               :title="absoluteTime(volume.data.value.createdAt)"

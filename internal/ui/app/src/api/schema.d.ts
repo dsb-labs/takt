@@ -1133,11 +1133,13 @@ export interface components {
     /**
      * @description Something to mount, and the path at which the workload finds it.
      *
-     *     Exactly one of `name`, `secret` or `var` must be present, and which one it is
-     *     decides what appears at the path. `name` mounts a volume, which is a directory
-     *     that outlives the workload. `secret` and `var` mount a file holding what the
-     *     server holds under that name, so a value an operator keeps in orca can be read
-     *     by a workload that wants a file rather than an environment variable.
+     *     Exactly one of `name`, `secret`, `var` or `path` must be present, and which
+     *     one it is decides what appears at the path. `name` mounts a volume, which is
+     *     a directory that outlives the workload. `secret` and `var` mount a file
+     *     holding what the server holds under that name, so a value an operator keeps
+     *     in orca can be read by a workload that wants a file rather than an
+     *     environment variable. `path` mounts a host file or directory the server does
+     *     not manage, and only a path the server's configuration allows is accepted.
      *
      *     The source is derived from the field that is present rather than from a
      *     discriminator, as a specification's runtime is.
@@ -1183,6 +1185,27 @@ export interface components {
        * @example app-config
        */
       var?: string;
+      /**
+       * @description The host file or directory to mount, written as an absolute path. This
+       *     is how a workload reaches data the server does not manage: a media
+       *     library on its own mount point, or the docker socket.
+       *
+       *     A host path reaches outside server-managed state, so the server accepts
+       *     one only when it is under a prefix its `workload.allow-host-paths`
+       *     configuration names. An unconfigured server refuses every path mount.
+       * @example /mnt/media
+       */
+      path?: string;
+      /**
+       * @description Whether the workload may only read what is mounted. Applies to any
+       *     source, so a shared volume can be handed to a workload that should not
+       *     change it and a mounted secret cannot be altered through the mount.
+       *
+       *     Container workloads only. The exec runtime mounts through a symbolic
+       *     link, which cannot make anything read-only, so it rejects the field
+       *     rather than ignoring it.
+       */
+      readOnly?: boolean;
       signal?: components["schemas"]["MountSignal"];
       /**
        * @description Where the workload finds what is mounted. Must be an absolute path, and
@@ -1193,7 +1216,7 @@ export interface components {
       /**
        * @description Where the volume's data is on the host, resolved by the server from the
        *     named volume. Ignored when a specification is submitted, and absent for a
-       *     mounted secret or variable.
+       *     mounted secret, variable or host path.
        *
        *     It is stored with the workload, as an allocated host port is, so that the
        *     runtime is given a path rather than a name to look up. Because it is part
@@ -1227,8 +1250,8 @@ export interface components {
      */
     MountSignal: "SIGHUP" | "SIGUSR1" | "SIGUSR2";
     /**
-     * @description The desired state of a volume, which is no more than its name. A volume holds
-     *     data and has nothing to configure.
+     * @description The desired state of a volume: a name, and what the directory backing it
+     *     looks like to the workloads writing into it.
      */
     VolumeSpec: {
       /**
@@ -1242,6 +1265,26 @@ export interface components {
        */
       name: string;
       labels?: components["schemas"]["Labels"];
+      /**
+       * @description Who owns the volume's directory, written as a numeric "uid" or
+       *     "uid:gid". This is what lets an image running as a fixed non-root user
+       *     write to the volume it mounts. Absent leaves the directory owned by the
+       *     user running the server.
+       *
+       *     Numeric on purpose: a name would resolve against the host's user
+       *     database, so the same manifest would mean different users on different
+       *     hosts. Assigning another user needs the server to carry CAP_CHOWN.
+       * @example 470:470
+       */
+      owner?: string;
+      /**
+       * @description The permission bits on the volume's directory, written as an octal
+       *     string such as "0755". Up to four digits, so a shared volume can carry
+       *     the setgid bit. Absent leaves the directory readable only by the user
+       *     running the server.
+       * @example 0755
+       */
+      mode?: string;
     };
     /** @description A volume, together with the workloads currently mounting it. */
     Volume: {
@@ -1269,6 +1312,17 @@ export interface components {
        */
       usedBy?: string[];
       labels?: components["schemas"]["Labels"];
+      /**
+       * @description Who owns the volume's directory, as a numeric "uid" or "uid:gid".
+       *     Absent when the directory is owned by the user running the server.
+       */
+      owner?: string;
+      /**
+       * @description The permission bits on the volume's directory, as an octal string.
+       *     Absent when the directory keeps the default, readable only by the user
+       *     running the server.
+       */
+      mode?: string;
     };
     /**
      * @description The desired state of a service: a name, and the selection of workload
