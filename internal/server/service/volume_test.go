@@ -22,7 +22,7 @@ func TestVolumeService_Create(t *testing.T) {
 		t.Parallel()
 
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data", map[string]string{"app": "web"}).
+		repo.EXPECT().Insert(mock.Anything, database.Volume{Name: "example-data", Labels: map[string]string{"app": "web"}}).
 			Return(database.Volume{
 				ID:        testVolumeID,
 				Name:      "example-data",
@@ -69,7 +69,7 @@ func TestVolumeService_Create(t *testing.T) {
 		// A volume holds data, so handing a caller who meant a new name somebody
 		// else's storage is worse than failing.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data", mock.Anything).
+		repo.EXPECT().Insert(mock.Anything, mock.Anything).
 			Return(database.Volume{}, database.ErrVolumeExists).Once()
 
 		svc, _ := newVolumeService(t, repo)
@@ -85,7 +85,7 @@ func TestVolumeService_Create(t *testing.T) {
 		// volume nothing can reach, and nothing later creates the directory. Better to
 		// leave nothing behind.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data", mock.Anything).
+		repo.EXPECT().Insert(mock.Anything, mock.Anything).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
 		repo.EXPECT().Delete(mock.Anything, "example-data").Return(nil).Once()
 
@@ -114,7 +114,7 @@ func TestVolumeService_Delete(t *testing.T) {
 		// The only thing in orca that destroys stored data, so the directory going is
 		// worth asserting rather than assuming.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data", mock.Anything).
+		repo.EXPECT().Insert(mock.Anything, mock.Anything).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
 		repo.EXPECT().Get(mock.Anything, "example-data").
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
@@ -141,7 +141,7 @@ func TestVolumeService_Delete(t *testing.T) {
 		// what grants that, because nothing else about a permission error says why a
 		// directory orca created cannot be removed.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, "example-data", mock.Anything).
+		repo.EXPECT().Insert(mock.Anything, mock.Anything).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
 		repo.EXPECT().Get(mock.Anything, "example-data").
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
@@ -517,7 +517,7 @@ func TestVolumeService_Update(t *testing.T) {
 		// The only thing a volume has to change. Its name identifies it, its
 		// directory is named for its identifier, and its contents are the workloads'.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Update(mock.Anything, "example-data", map[string]string{"app": "api"}).
+		repo.EXPECT().Update(mock.Anything, database.Volume{Name: "example-data", Labels: map[string]string{"app": "api"}}).
 			Return(database.Volume{
 				ID:     testVolumeID,
 				Name:   "example-data",
@@ -536,7 +536,7 @@ func TestVolumeService_Update(t *testing.T) {
 		t.Parallel()
 
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Update(mock.Anything, "example-data", mock.Anything).
+		repo.EXPECT().Update(mock.Anything, mock.Anything).
 			Return(database.Volume{}, database.ErrVolumeNotFound).Once()
 
 		svc, _ := newVolumeService(t, repo)

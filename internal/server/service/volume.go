@@ -37,10 +37,12 @@ type (
 	// The VolumeRepository interface describes the persistence operations the volume
 	// service uses.
 	VolumeRepository interface {
-		// Insert should record a new volume with the given name.
-		Insert(ctx context.Context, name string, labels map[string]string) (database.Volume, error)
-		// Update should replace the volume's mutable fields, which are its labels.
-		Update(ctx context.Context, name string, labels map[string]string) (database.Volume, error)
+		// Insert should record a new volume, assigning its identifier and
+		// creation time.
+		Insert(ctx context.Context, volume database.Volume) (database.Volume, error)
+		// Update should replace the mutable fields of the volume with the given
+		// volume's name: its labels, owner and mode.
+		Update(ctx context.Context, volume database.Volume) (database.Volume, error)
 		// Get should return the volume with the given name.
 		Get(ctx context.Context, name string) (database.Volume, error)
 		// List should return the volumes matching every one of the given queries,
@@ -114,7 +116,7 @@ func (s *VolumeService) Create(ctx context.Context, name string, labels map[stri
 		return Volume{}, fmt.Errorf("%w: %v", ErrInvalidVolume, err)
 	}
 
-	stored, err := s.volumes.Insert(ctx, name, labels)
+	stored, err := s.volumes.Insert(ctx, database.Volume{Name: name, Labels: labels})
 	switch {
 	case errors.Is(err, database.ErrVolumeExists):
 		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeExists, name)
@@ -281,7 +283,7 @@ func (s *VolumeService) Update(ctx context.Context, name string, labels map[stri
 		return Volume{}, fmt.Errorf("%w: %v", ErrInvalidVolume, err)
 	}
 
-	stored, err := s.volumes.Update(ctx, name, labels)
+	stored, err := s.volumes.Update(ctx, database.Volume{Name: name, Labels: labels})
 	switch {
 	case errors.Is(err, database.ErrVolumeNotFound):
 		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeNotFound, name)

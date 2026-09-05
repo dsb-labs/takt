@@ -34,6 +34,13 @@ type (
 		Name string
 		// Arbitrary key-value pairs attached to the volume.
 		Labels map[string]string
+		// Who owns the volume's directory, as a numeric "uid" or "uid:gid".
+		// Empty leaves the directory owned by the user running the server.
+		Owner string
+		// The permission bits on the volume's directory, as an octal string.
+		// Empty leaves the directory readable only by the user running the
+		// server.
+		Mode string
 		// The time the volume was created.
 		CreatedAt time.Time
 	}
@@ -50,31 +57,29 @@ func NewVolumeRepository(db *sql.DB) *VolumeRepository {
 	return &VolumeRepository{db: db}
 }
 
-// Insert records a new volume with the given name, returning it with the identifier
-// and creation time the server assigned.
+// Insert records a new volume, returning it with the identifier and creation time
+// the server assigned. The given volume's identifier and creation time are ignored:
+// both are this repository's to hand out.
 //
 // Returns ErrVolumeExists when a volume already holds the name. Creating one that
 // exists is an error rather than a no-op, because a volume holds data: a caller who
 // meant a name they had not used yet would otherwise be handed someone else's.
-func (r *VolumeRepository) Insert(ctx context.Context, name string, labels map[string]string) (Volume, error) {
-	const q = `INSERT INTO volume (id, name, labels, created_at) VALUES (?, ?, jsonb(?), ?)`
+func (r *VolumeRepository) Insert(ctx context.Context, volume Volume) (Volume, error) {
+	const q = `INSERT INTO volume (id, name, labels, owner, mode, created_at) VALUES (?, ?, jsonb(?), ?, ?, ?)`
 
-	encoded, err := marshalLabels(labels)
+	encoded, err := marshalLabels(volume.Labels)
 	if err != nil {
 		return Volume{}, err
 	}
 
-	volume := Volume{
-		ID:        xid.New().String(),
-		Name:      name,
-		Labels:    labels,
-		CreatedAt: time.Now().UTC(),
-	}
+	volume.ID = xid.New().String()
+	volume.CreatedAt = time.Now().UTC()
 
-	_, err = r.db.ExecContext(ctx, q, volume.ID, volume.Name, encoded, formatTime(volume.CreatedAt))
+	_, err = r.db.ExecContext(ctx, q,
+		volume.ID, volume.Name, encoded, volume.Owner, volume.Mode, formatTime(volume.CreatedAt))
 	switch {
 	case IsUniqueError(err):
-		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeExists, name)
+		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeExists, volume.Name)
 	case err != nil:
 		return Volume{}, fmt.Errorf("failed to insert volume: %w", err)
 	}
@@ -85,14 +90,15 @@ func (r *VolumeRepository) Insert(ctx context.Context, name string, labels map[s
 // Get returns the volume with the given name, reporting ErrVolumeNotFound when no
 // such volume exists.
 func (r *VolumeRepository) Get(ctx context.Context, name string) (Volume, error) {
-	const q = `SELECT id, name, json(labels), created_at FROM volume WHERE name = ?`
+	const q = `SELECT id, name, json(labels), owner, mode, created_at FROM volume WHERE name = ?`
 
 	var (
 		volume            Volume
 		labels, createdAt string
 	)
 
-	err := r.db.QueryRowContext(ctx, q, name).Scan(&volume.ID, &volume.Name, &labels, &createdAt)
+	err := r.db.QueryRowContext(ctx, q, name).
+		Scan(&volume.ID, &volume.Name, &labels, &volume.Owner, &volume.Mode, &createdAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeNotFound, name)
@@ -115,18 +121,19 @@ func (r *VolumeRepository) Get(ctx context.Context, name string) (Volume, error)
 // Update replaces the mutable fields of the volume with the given name, reporting
 // ErrVolumeNotFound when no such volume exists.
 //
-// Only the labels. A volume's name identifies it, its identifier is what its
-// directory is named for, and its contents are the workloads' to write — so the
-// labels are the whole of what an update of a volume can mean.
-func (r *VolumeRepository) Update(ctx context.Context, name string, labels map[string]string) (Volume, error) {
-	const q = `UPDATE volume SET labels = jsonb(?) WHERE name = ?`
+// The labels, the owner and the mode. A volume's name identifies it, its
+// identifier is what its directory is named for, and its contents are the
+// workloads' to write — so these are the whole of what an update of a volume can
+// mean.
+func (r *VolumeRepository) Update(ctx context.Context, volume Volume) (Volume, error) {
+	const q = `UPDATE volume SET labels = jsonb(?), owner = ?, mode = ? WHERE name = ?`
 
-	encoded, err := marshalLabels(labels)
+	encoded, err := marshalLabels(volume.Labels)
 	if err != nil {
 		return Volume{}, err
 	}
 
-	tag, err := r.db.ExecContext(ctx, q, encoded, name)
+	tag, err := r.db.ExecContext(ctx, q, encoded, volume.Owner, volume.Mode, volume.Name)
 	if err != nil {
 		return Volume{}, fmt.Errorf("failed to update volume: %w", err)
 	}
@@ -137,10 +144,10 @@ func (r *VolumeRepository) Update(ctx context.Context, name string, labels map[s
 	}
 
 	if affected == 0 {
-		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeNotFound, name)
+		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeNotFound, volume.Name)
 	}
 
-	return r.Get(ctx, name)
+	return r.Get(ctx, volume.Name)
 }
 
 // List returns the volumes matching every one of the given queries, ordered by
@@ -153,7 +160,7 @@ func (r *VolumeRepository) Update(ctx context.Context, name string, labels map[s
 // parse.
 func (r *VolumeRepository) List(ctx context.Context, queries ...Query) ([]Volume, error) {
 	const q = `
-		SELECT id, name, json(labels), created_at
+		SELECT id, name, json(labels), owner, mode, created_at
 		FROM volume
 	`
 
@@ -177,7 +184,7 @@ func (r *VolumeRepository) List(ctx context.Context, queries ...Query) ([]Volume
 			labels, createdAt string
 		)
 
-		if err = rows.Scan(&volume.ID, &volume.Name, &labels, &createdAt); err != nil {
+		if err = rows.Scan(&volume.ID, &volume.Name, &labels, &volume.Owner, &volume.Mode, &createdAt); err != nil {
 			return nil, fmt.Errorf("failed to scan volume: %w", err)
 		}
 

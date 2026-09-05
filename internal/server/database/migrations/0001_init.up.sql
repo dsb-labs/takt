@@ -30,5 +30,7 @@ CREATE TABLE IF NOT EXISTS volume (
     id         TEXT NOT NULL PRIMARY KEY,
     name       TEXT NOT NULL UNIQUE,
     labels     BLOB NOT NULL DEFAULT '{}',
+    owner      TEXT NOT NULL DEFAULT '',
+    mode       TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );

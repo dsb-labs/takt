@@ -18,7 +18,7 @@ func TestVolumeRepository_Insert(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		stored, err := volumes.Insert(t.Context(), "example-data", nil)
+		stored, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data"})
 		require.NoError(t, err)
 
 		assert.Equal(t, "example-data", stored.Name)
@@ -33,10 +33,10 @@ func TestVolumeRepository_Insert(t *testing.T) {
 		// caller who meant a new name somebody else's storage.
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		_, err := volumes.Insert(t.Context(), "example-data", nil)
+		_, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data"})
 		require.NoError(t, err)
 
-		_, err = volumes.Insert(t.Context(), "example-data", nil)
+		_, err = volumes.Insert(t.Context(), database.Volume{Name: "example-data"})
 		assert.ErrorIs(t, err, database.ErrVolumeExists)
 	})
 }
@@ -49,7 +49,7 @@ func TestVolumeRepository_Get(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		stored, err := volumes.Insert(t.Context(), "example-data", nil)
+		stored, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data"})
 		require.NoError(t, err)
 
 		got, err := volumes.Get(t.Context(), "example-data")
@@ -60,12 +60,62 @@ func TestVolumeRepository_Get(t *testing.T) {
 		assert.WithinDuration(t, stored.CreatedAt, got.CreatedAt, 0)
 	})
 
+	t.Run("keeps the owner and mode", func(t *testing.T) {
+		t.Parallel()
+
+		volumes := database.NewVolumeRepository(newTestDatabase(t))
+
+		_, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data", Owner: "470:470", Mode: "0755"})
+		require.NoError(t, err)
+
+		got, err := volumes.Get(t.Context(), "example-data")
+		require.NoError(t, err)
+
+		assert.Equal(t, "470:470", got.Owner)
+		assert.Equal(t, "0755", got.Mode)
+	})
+
 	t.Run("reports a volume that does not exist", func(t *testing.T) {
 		t.Parallel()
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
 		_, err := volumes.Get(t.Context(), "nope")
+		assert.ErrorIs(t, err, database.ErrVolumeNotFound)
+	})
+}
+
+func TestVolumeRepository_Update(t *testing.T) {
+	t.Parallel()
+
+	t.Run("replaces the mutable fields", func(t *testing.T) {
+		t.Parallel()
+
+		volumes := database.NewVolumeRepository(newTestDatabase(t))
+
+		stored, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data", Owner: "470", Mode: "0700"})
+		require.NoError(t, err)
+
+		got, err := volumes.Update(t.Context(), database.Volume{
+			Name:   "example-data",
+			Labels: map[string]string{"app": "web"},
+			Owner:  "470:470",
+			Mode:   "0755",
+		})
+		require.NoError(t, err)
+
+		assert.Equal(t, stored.ID, got.ID)
+		assert.Equal(t, map[string]string{"app": "web"}, got.Labels)
+		assert.Equal(t, "470:470", got.Owner)
+		assert.Equal(t, "0755", got.Mode)
+	})
+
+	t.Run("reports a volume that does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		volumes := database.NewVolumeRepository(newTestDatabase(t))
+
+		_, err := volumes.Update(t.Context(), database.Volume{Name: "nope"})
 		assert.ErrorIs(t, err, database.ErrVolumeNotFound)
 	})
 }
@@ -79,7 +129,7 @@ func TestVolumeRepository_List(t *testing.T) {
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
 		for _, name := range []string{"charlie", "alpha", "bravo"} {
-			_, err := volumes.Insert(t.Context(), name, nil)
+			_, err := volumes.Insert(t.Context(), database.Volume{Name: name})
 			require.NoError(t, err)
 		}
 
@@ -119,7 +169,7 @@ func TestVolumeRepository_List_Query(t *testing.T) {
 		}
 
 		for name, volumeLabels := range labels {
-			_, err := volumes.Insert(t.Context(), name, volumeLabels)
+			_, err := volumes.Insert(t.Context(), database.Volume{Name: name, Labels: volumeLabels})
 			require.NoError(t, err)
 		}
 	}
@@ -202,7 +252,7 @@ func TestVolumeRepository_Delete(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		_, err := volumes.Insert(t.Context(), "example-data", nil)
+		_, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data"})
 		require.NoError(t, err)
 
 		require.NoError(t, volumes.Delete(t.Context(), "example-data"))
