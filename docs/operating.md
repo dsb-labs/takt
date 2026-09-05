@@ -169,8 +169,8 @@ under `/var/lib/orca`. One consequence is worth knowing — under
 The unit grants the server `CAP_DAC_OVERRIDE`, so `orca volume delete` can remove
 files a container wrote as another user, and `CAP_CHOWN`, so a volume manifest can
 name another user as its owner. The grants do not reach the workloads. See
-[Deleting a volume a container wrote](#deleting-a-volume-a-container-wrote) and
-[Assigning a volume to another user](#assigning-a-volume-to-another-user).
+[Deleting a volume a container wrote](volumes.md#deleting-a-volume-a-container-wrote)
+and [Ownership](volumes.md#ownership).
 
 ### Not in a container
 
@@ -401,7 +401,7 @@ Two consequences are worth knowing:
 
 A workload also starts with no ambient capabilities. orca drops the ambient set
 before the command runs, so a capability granted to the server — see
-[Deleting a volume a container wrote](#deleting-a-volume-a-container-wrote) — never
+[Deleting a volume a container wrote](volumes.md#deleting-a-volume-a-container-wrote) — never
 reaches a workload.
 
 What it does not cover is anything not reached through a filesystem path. Signal
@@ -448,76 +448,9 @@ server alone. An unlimited workload is unaffected by the limits work either way.
 
 ## Volumes
 
-Each volume gets a directory named for the identifier orca assigned it:
-
-```
-volumes/<id>/
-```
-
-Everything a workload writes to a mounted volume is in there. The directory is created
-when the volume is created and removed only when the volume is deleted, so it survives
-the workloads that mount it — including a workload being replaced, restarted or
-deleted.
-
-`orca volume list` reports where each volume's data is, which is what something taking
-a backup needs:
-
-```sh
-orca volume list | jq -r '.[] | "\(.Name)\t\(.Path)"'
-```
-
-Nothing tells a workload where its volume is on the host. An exec workload told that
-would know it sits inside orca's data directory, and could walk out of it.
-
-A volume is bind-mounted into a container, so the Docker daemon has to share this
-filesystem. Volumes do not work against a daemon reached over the network.
-
-### Deleting a volume a container wrote
-
-A container runs as whatever user its image names, and the files it writes to a
-volume belong to that user. The postgres image is the familiar case: it re-owns its
-data directory and makes it readable only by its own user. The server's user then
-cannot remove those files, and `orca volume delete` fails with a permission error.
-
-The `CAP_DAC_OVERRIDE` capability lets the server remove files whatever their
-owner. The packaged unit grants it. Grant it yourself when you run the server
-another way — under systemd:
-
-```ini
-[Service]
-User=orca
-AmbientCapabilities=CAP_DAC_OVERRIDE
-```
-
-The grant does not reach the workloads. orca drops its ambient capabilities before an
-exec workload's command runs, so the command holds none of them. A container's
-capabilities come from the Docker daemon rather than from orca.
-
-A server without the grant runs everything, and only deleting a volume holding
-another user's files needs it. The same ownership stops anything else
-running as the server's user — a backup, for one — from reading those files, and the
-capability changes nothing for them.
-
-### Assigning a volume to another user
-
-A volume manifest can name who owns the directory backing it — see
-[Volumes](manifest.md#volumes). This is what lets an image running as a fixed
-non-root user write to the volume it mounts, without a task that exists only to run
-`chown` first.
-
-Assigning another user needs `CAP_CHOWN`. The packaged unit grants it beside
-`CAP_DAC_OVERRIDE`. Grant it yourself when you run the server another way — under
-systemd:
-
-```ini
-[Service]
-User=orca
-AmbientCapabilities=CAP_DAC_OVERRIDE CAP_CHOWN
-```
-
-As with `CAP_DAC_OVERRIDE`, the grant does not reach the workloads, and a server
-without it refuses only a volume manifest that names another user. The error names
-the capability.
+A volume's data lives in a directory under the data directory, named for the
+identifier orca assigned it. Where it is, how ownership works, backing one up
+and what deleting one needs are covered in [Volumes](volumes.md).
 
 ## Restarting the server
 

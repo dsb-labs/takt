@@ -532,38 +532,8 @@ orca volume create volume.yaml
 orca workload apply example.yaml
 ```
 
-The volume manifest is a name, labels if you want them, and optionally who owns the
-directory backing the volume and what permission bits it carries:
-
-```yaml
-version: v1
-name: example-data
-labels:
-  app: web
-  team: platform
-owner: "470:470"
-mode: "0755"
-```
-
-Labels follow the rules in [Labels](#labels), unchanged. `orca volume update` replaces
-them. Nothing mounting the volume is redeployed, because a label says nothing about
-the storage.
-
-`owner` and `mode` exist for an image that runs as a fixed non-root user. Without
-them the directory is owned by the user running the server and readable only by it,
-so such an image cannot write to the volume it mounts. `owner` is a numeric `uid` or
-`uid:gid` — a name would resolve against the host's user database, so the same
-manifest would mean different users on different hosts. `mode` is an octal string
-such as `"0755"`, up to four digits so a shared volume can carry the setgid bit.
-
-Both are applied to the directory when the volume is created, and again on
-`orca volume update`, which is how a live volume is handed to another user. Removing
-either from the manifest leaves the directory as it stands. Assigning another user
-needs the server to carry `CAP_CHOWN` — see [Operating](operating.md).
-
-A volume outlives the workloads that mount it. Deleting a workload leaves its volumes
-alone, and `orca volume delete` is the only thing in orca that removes stored data. See
-[Command line](cli.md) for those commands.
+The volume is a resource of its own. Its manifest, who owns its directory, where
+its data lives and how it is deleted are covered in [Volumes](volumes.md).
 
 `to` is written the same way whichever runtime runs the workload, so a workload moved
 between them keeps its manifest. It must be an absolute path, and not `/`.

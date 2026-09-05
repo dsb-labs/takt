@@ -337,7 +337,7 @@ orca volume create volume.yaml
 
 Creates a volume and the directory backing it. The manifest is a name, labels if you
 want them, and optionally who owns the directory and what permission bits it carries
-— see [Volumes](manifest.md#volumes) for what `owner` and `mode` mean:
+— see [Volumes](volumes.md#ownership) for what `owner` and `mode` mean:
 
 ```yaml
 version: v1
