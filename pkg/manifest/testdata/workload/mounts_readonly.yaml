@@ -1,0 +1,16 @@
+version: v1
+name: example
+
+volumes:
+  - name: example-data
+    to: /var/lib/example
+    readOnly: true
+  - path: /mnt/media
+    to: /media
+    readOnly: true
+  - secret: tls-cert
+    to: /etc/tls/cert.pem
+    readOnly: true
+
+container:
+  image: example/example:latest

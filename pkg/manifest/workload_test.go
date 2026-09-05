@@ -543,6 +543,26 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// Any source may be read-only in a container. A bind mount is what
+			// enforces it, so the kind of source behind the bind does not matter.
+			Name: "mounts read-only sources",
+			File: "mounts_readonly.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, []manifest.VolumeMount{
+					{Name: "example-data", To: "/var/lib/example", ReadOnly: true},
+					{Path: "/mnt/media", To: "/media", ReadOnly: true},
+					{Secret: "tls-cert", To: "/etc/tls/cert.pem", ReadOnly: true},
+				}, spec.Volumes)
+			},
+		},
+		{
+			// The exec runtime mounts through a symbolic link, which cannot make
+			// anything read-only, so the promise is refused rather than ignored.
+			Name:         "rejects a read-only mount in an exec workload",
+			File:         "mounts_readonly_exec.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:      "rejects a mount naming nothing to mount",
 			File:      "mounts_no_source.yaml",
 			ExpectErr: manifest.ErrNoMountSource,

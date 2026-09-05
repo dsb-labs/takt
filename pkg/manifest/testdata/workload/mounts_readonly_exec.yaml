@@ -1,0 +1,10 @@
+version: v1
+name: example
+
+volumes:
+  - name: example-data
+    to: /var/lib/example
+    readOnly: true
+
+exec:
+  command: ["/usr/local/bin/backup", "--target", "/var/lib/example"]

@@ -306,6 +306,18 @@ type (
 		// Only a mounted secret or variable may name one. A volume holds whatever the
 		// workload puts there, so there is no change orca could report.
 		Signal Signal `json:"signal,omitempty"`
+		// Whether the workload may only read what is mounted. Applies to any
+		// source, so a shared volume can be handed to a workload that should not
+		// change it.
+		//
+		// Container workloads only. The exec runtime mounts through a symbolic
+		// link, which cannot make anything read-only, so it rejects this rather
+		// than ignoring it.
+		//
+		// The yaml tag is explicit for the reason Container.ReadOnly's is:
+		// yaml.v3 matches against the lowercased Go field name, and the key is
+		// spelled camelCase on the wire.
+		ReadOnly bool `yaml:"readOnly" json:"readOnly,omitempty"`
 	}
 )
 
@@ -726,7 +738,7 @@ func ValidateWorkload(spec Spec) error {
 		return err
 	}
 
-	if err = validateVolumes(spec.Volumes); err != nil {
+	if err = validateVolumes(spec.Volumes, runtime); err != nil {
 		return err
 	}
 
@@ -916,10 +928,16 @@ func validateResources(spec Spec, runtime Runtime) error {
 // a filesystem of its own, an exec workload has its working directory — but what a
 // manifest may say does not.
 //
+// The one exception is a read-only mount, which is why the runtime is passed. The
+// exec runtime mounts through a symbolic link, which cannot make anything
+// read-only, so it rejects the field rather than ignoring it — for the reason a
+// port it cannot publish is rejected: a promise that never applies looks like orca
+// failing rather than the manifest being wrong.
+//
 // A mount names exactly one source, and the rules that follow from the source are
 // checked against the kind rather than against whichever field happened to be set: a
 // volume takes no signal, and a value mount is a file rather than a directory.
-func validateVolumes(mounts []VolumeMount) error {
+func validateVolumes(mounts []VolumeMount, runtime Runtime) error {
 	if len(mounts) == 0 {
 		return nil
 	}
@@ -953,6 +971,11 @@ func validateVolumes(mounts []VolumeMount) error {
 
 		if err = validateMountSignal(mount, kind); err != nil {
 			return err
+		}
+
+		if mount.ReadOnly && runtime == RuntimeExec {
+			return fmt.Errorf("invalid volumes: %s %q cannot be read-only, because the %s "+
+				"runtime mounts through a symbolic link and cannot enforce it", kind, source, runtime)
 		}
 
 		key := Reference{Kind: ReferenceKind(kind), Name: source}
