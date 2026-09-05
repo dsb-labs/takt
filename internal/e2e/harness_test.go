@@ -492,6 +492,25 @@ func (s *Suite) awaitListening(address string) {
 	}, convergeTimeout, 500*time.Millisecond, "nothing ever listened on %s", address)
 }
 
+// awaitBackends waits for the named service to report the given number of
+// backends and returns them.
+func (s *Suite) awaitBackends(name string, count int) []client.ServiceBackend {
+	var backends []client.ServiceBackend
+
+	s.Require().Eventuallyf(func() bool {
+		service, err := s.client.GetService(s.ctx(), name)
+		if err != nil {
+			return false
+		}
+
+		backends = service.Backends
+
+		return len(backends) == count
+	}, convergeTimeout, 500*time.Millisecond, "service %q never reported %d backends", name, count)
+
+	return backends
+}
+
 // names returns the names of the given workloads, for asserting on what a list
 // contains without depending on its order.
 func (s *Suite) names(workloads []client.Workload) []string {

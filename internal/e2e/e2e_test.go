@@ -3558,22 +3558,3 @@ func (s *Suite) TestServiceReportsBackends() {
 	_, err = s.client.Get(s.ctx(), name)
 	s.Require().NoError(err, "deleting the service must leave the workload")
 }
-
-// awaitBackends waits for the named service to report the given number of
-// backends and returns them.
-func (s *Suite) awaitBackends(name string, count int) []client.ServiceBackend {
-	var backends []client.ServiceBackend
-
-	s.Require().Eventuallyf(func() bool {
-		service, err := s.client.GetService(s.ctx(), name)
-		if err != nil {
-			return false
-		}
-
-		backends = service.Backends
-
-		return len(backends) == count
-	}, convergeTimeout, 500*time.Millisecond, "service %q never reported %d backends", name, count)
-
-	return backends
-}
