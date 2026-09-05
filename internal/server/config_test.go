@@ -44,6 +44,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "/etc/orca/keys", config.Secrets.Keys)
 				assert.Equal(t, "/etc/orca/keys", config.KeysPath())
 				assert.Equal(t, []string{"/opt/runtime", "/nix/store"}, config.Exec.AllowPaths)
+				assert.Equal(t, []string{"/mnt/media", "/var/run/docker.sock"}, config.Workload.AllowHostPaths)
 				assert.Equal(t, "http://collector.example.com:4318", config.Telemetry.OTLPEndpoint)
 				assert.Equal(t, "debug", config.Logging.Level)
 			},
@@ -297,6 +298,17 @@ func TestConfig_Validate(t *testing.T) {
 			// names somewhere different for each of them and nowhere the operator meant.
 			Name:         "a relative path an exec workload may read",
 			Mutate:       func(c *server.Config) { c.Exec.AllowPaths = []string{"runtime"} },
+			ExpectsError: true,
+		},
+		{
+			Name:   "absolute prefixes a path mount may sit beneath",
+			Mutate: func(c *server.Config) { c.Workload.AllowHostPaths = []string{"/mnt/media"} },
+		},
+		{
+			// A path mount's own path must be absolute, so a relative prefix could
+			// never match one.
+			Name:         "a relative prefix for path mounts",
+			Mutate:       func(c *server.Config) { c.Workload.AllowHostPaths = []string{"media"} },
 			ExpectsError: true,
 		},
 	}

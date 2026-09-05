@@ -153,6 +153,17 @@ type (
 		// container. An exec workload binds its port itself, so what it listens on is
 		// the process's business and orca has nothing to say about it.
 		Bind string `toml:"bind"`
+		// Host paths a workload may name in a path mount, as absolute prefixes.
+		// A path is accepted when it is one of these or sits beneath one.
+		//
+		// Empty refuses every path mount, which is the default: a path mount
+		// reaches outside orca-managed state, so it is a sandbox escape by
+		// design. It is host configuration rather than a manifest field for the
+		// reason the exec allow-paths list is: the API has no authentication,
+		// so a workload able to widen its own reach would undo the gate. Which
+		// paths are opened is a decision the operator who administers the host
+		// makes.
+		AllowHostPaths []string `toml:"allow-host-paths"`
 		// The lowest host port that may be allocated.
 		MinPort int `toml:"min-port"`
 		// The highest host port that may be allocated.
@@ -421,6 +432,14 @@ func (c WorkloadConfig) validate() error {
 		return errors.New("workload port range maximum must be between 1 and 65535")
 	case c.MinPort > c.MaxPort:
 		return errors.New("workload port range minimum must not exceed its maximum")
+	}
+
+	for _, path := range c.AllowHostPaths {
+		// Absolute, because a path mount's own path must be and a relative prefix
+		// could never match one.
+		if !filepath.IsAbs(path) {
+			return fmt.Errorf("workload allowed host path must be absolute, got %q", path)
+		}
 	}
 
 	return nil

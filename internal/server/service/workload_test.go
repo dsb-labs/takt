@@ -618,6 +618,110 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("stores a host path the configuration allows", func(t *testing.T) {
+		t.Parallel()
+
+		// A path mount needs no resolution: the path already says where the data
+		// is, so nothing asks the volume locator and the mount is stored as
+		// written.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		pathSpec := containerSpec("example", "example/example:latest")
+		pathSpec.Volumes = []manifest.VolumeMount{{Path: "/mnt/media", To: "/media", ReadOnly: true}}
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		repo.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(w database.Workload) bool {
+			var stored manifest.Spec
+			if err := json.Unmarshal(w.Spec, &stored); err != nil {
+				return false
+			}
+
+			return len(stored.Volumes) == 1 &&
+				stored.Volumes[0].Path == "/mnt/media" &&
+				stored.Volumes[0].From == ""
+		})).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+			w.Version = 1
+
+			return w, true, nil
+		}).Once()
+
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:         newTestLogger(t),
+			Drivers:        map[string]service.Driver{docker.Name: d},
+			Workloads:      repo,
+			Ports:          ports,
+			Claimer:        newTestClaimer(ports, allocatorStub{}),
+			AllowHostPaths: []string{"/mnt"},
+		})
+
+		_, _, err := svc.Apply(t.Context(), pathSpec)
+		require.NoError(t, err)
+	})
+
+	t.Run("refuses a host path outside the allowed prefixes", func(t *testing.T) {
+		t.Parallel()
+
+		// A sibling that shares the prefix as a string but not as a directory, so
+		// the comparison has to respect path boundaries. Nothing is stored.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		pathSpec := containerSpec("example", "example/example:latest")
+		pathSpec.Volumes = []manifest.VolumeMount{{Path: "/mnt/media-cache", To: "/media"}}
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:         newTestLogger(t),
+			Drivers:        map[string]service.Driver{docker.Name: d},
+			Workloads:      repo,
+			Ports:          ports,
+			Claimer:        newTestClaimer(ports, allocatorStub{}),
+			AllowHostPaths: []string{"/mnt/media"},
+		})
+
+		_, _, err := svc.Apply(t.Context(), pathSpec)
+		assert.ErrorIs(t, err, service.ErrInvalidSpec)
+	})
+
+	t.Run("refuses every host path by default", func(t *testing.T) {
+		t.Parallel()
+
+		// An unconfigured server opens nothing. A host path reaches outside
+		// orca-managed state, so reaching one is an operator's decision to make.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		pathSpec := containerSpec("example", "example/example:latest")
+		pathSpec.Volumes = []manifest.VolumeMount{{Path: "/mnt/media", To: "/media"}}
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]service.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Claimer:   newTestClaimer(ports, allocatorStub{}),
+		})
+
+		_, _, err := svc.Apply(t.Context(), pathSpec)
+		assert.ErrorIs(t, err, service.ErrInvalidSpec)
+	})
+
 	t.Run("refuses a workload naming a volume that does not exist", func(t *testing.T) {
 		t.Parallel()
 

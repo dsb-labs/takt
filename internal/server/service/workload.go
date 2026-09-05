@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -382,6 +383,7 @@ type (
 		claims     Claimer
 		checker    Checker
 		reconciler Reconciler
+		hostPaths  []string
 	}
 )
 
@@ -421,6 +423,10 @@ type WorkloadServiceConfig struct {
 	// each workload. May be nil when no reconciler is running, as in tests, in
 	// which case nothing is woken and no workload reports an error.
 	Reconciler Reconciler
+	// The absolute prefixes a path mount may sit beneath. Empty rejects every
+	// path mount, which is the safe default: a host path reaches outside
+	// orca-managed state, so which ones are reachable is the operator's call.
+	AllowHostPaths []string
 }
 
 // NewWorkloadService returns a WorkloadService built from the given configuration.
@@ -438,6 +444,7 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		claims:     config.Claimer,
 		checker:    config.Checker,
 		reconciler: config.Reconciler,
+		hostPaths:  config.AllowHostPaths,
 	}
 }
 
@@ -1304,7 +1311,8 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 }
 
 // resolveVolumes fills in where each mounted volume lives on the host, rejecting a
-// specification naming one that does not exist.
+// specification naming one that does not exist and a host path this server's
+// configuration does not allow.
 //
 // A volume has to exist before it can be mounted. Creating one here would make a
 // mistyped name a second empty volume, which reads as success while the data the
@@ -1313,6 +1321,12 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 // by the reconciler as the workload starts, at a path that changes with every version,
 // so storing one would move the hash for a reason the operator did not ask for and put
 // orca's own layout in the API.
+//
+// A path mount is gated here rather than by validation, because whether a host
+// allows a path is this host's configuration rather than a property of the
+// manifest. The gate runs when a specification is accepted: one already stored
+// keeps running if the list later narrows, the way an exec workload keeps the
+// paths it was started with.
 func (s *WorkloadService) resolveVolumes(ctx context.Context, spec manifest.Spec) (manifest.Spec, error) {
 	if len(spec.Volumes) == 0 {
 		return spec, nil
@@ -1327,7 +1341,18 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec manifest.Spec
 			return spec, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 		}
 
-		if kind != manifest.MountVolume {
+		switch kind {
+		case manifest.MountPath:
+			if !s.hostPathAllowed(mount.Path) {
+				return spec, fmt.Errorf("%w: host path %q is not under a prefix this server's "+
+					"workload allow-host-paths configuration names", ErrInvalidSpec, mount.Path)
+			}
+
+			mounts = append(mounts, mount)
+
+			continue
+		case manifest.MountVolume:
+		default:
 			// The source fields are carried across untouched, so what the workload
 			// reads is stored as written rather than as a value.
 			mounts = append(mounts, mount)
@@ -1356,6 +1381,27 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec manifest.Spec
 	spec.Volumes = mounts
 
 	return spec, nil
+}
+
+// hostPathAllowed reports whether the configuration opens the given host path to
+// path mounts: the path is one of the allowed prefixes, or sits beneath one.
+//
+// Both sides are cleaned before comparing, so a trailing slash in either place
+// cannot turn "/mnt/media-cache" into something "/mnt/media" appears to cover.
+func (s *WorkloadService) hostPathAllowed(mount string) bool {
+	cleaned := filepath.Clean(mount)
+
+	return slices.ContainsFunc(s.hostPaths, func(prefix string) bool {
+		prefix = filepath.Clean(prefix)
+
+		// The root as a prefix opens everything, and the general form below
+		// would double the separator and open nothing.
+		if prefix == string(filepath.Separator) {
+			return true
+		}
+
+		return cleaned == prefix || strings.HasPrefix(cleaned, prefix+string(filepath.Separator))
+	})
 }
 
 // resolveReferences returns what the specification's environment references, along

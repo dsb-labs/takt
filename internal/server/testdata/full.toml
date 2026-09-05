@@ -18,6 +18,7 @@ interval = "30s"
 bind = "0.0.0.0"
 min-port = 25000
 max-port = 26000
+allow-host-paths = ["/mnt/media", "/var/run/docker.sock"]
 
 [exec]
 allow-paths = ["/opt/runtime", "/nix/store"]

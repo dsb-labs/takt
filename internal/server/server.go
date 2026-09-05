@@ -290,13 +290,14 @@ func Run(ctx context.Context, config Config) error {
 		Volumes:   volumeSvc,
 		// The repositories rather than the services: hashing a workload needs what
 		// each thing currently holds and nothing else.
-		Secrets:    secrets,
-		Variables:  variables,
-		Addresses:  addresses,
-		Images:     dockerDriver,
-		Claimer:    claimer,
-		Checker:    checker,
-		Reconciler: reconcile,
+		Secrets:        secrets,
+		Variables:      variables,
+		Addresses:      addresses,
+		Images:         dockerDriver,
+		Claimer:        claimer,
+		Checker:        checker,
+		Reconciler:     reconcile,
+		AllowHostPaths: config.Workload.AllowHostPaths,
 	})
 
 	serviceSvc := service.NewServiceService(service.ServiceServiceConfig{
