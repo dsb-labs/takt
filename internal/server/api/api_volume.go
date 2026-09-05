@@ -8,6 +8,7 @@ import (
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/internal/wire"
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
@@ -70,10 +71,7 @@ func (a *VolumeAPI) CreateVolume(ctx context.Context, request api.CreateVolumeRe
 		}, nil
 	}
 
-	volume, err := a.volumes.Create(ctx, manifest.Volume{
-		Name:   request.Body.Name,
-		Labels: labelsOf(request.Body.Labels),
-	})
+	volume, err := a.volumes.Create(ctx, wire.ToVolume(*request.Body))
 	switch {
 	case errors.Is(err, service.ErrInvalidVolume):
 		return api.CreateVolume400JSONResponse{
@@ -103,10 +101,12 @@ func (a *VolumeAPI) UpdateVolume(ctx context.Context, request api.UpdateVolumeRe
 		}, nil
 	}
 
-	volume, err := a.volumes.Update(ctx, manifest.Volume{
-		Name:   request.Name,
-		Labels: labelsOf(request.Body.Labels),
-	})
+	// The path names the volume being updated, so the name in the body is
+	// replaced rather than trusted to match.
+	spec := wire.ToVolume(*request.Body)
+	spec.Name = request.Name
+
+	volume, err := a.volumes.Update(ctx, spec)
 	switch {
 	case errors.Is(err, service.ErrInvalidVolume):
 		return api.UpdateVolume400JSONResponse{
@@ -199,7 +199,7 @@ func (a *VolumeAPI) DeleteVolume(ctx context.Context, request api.DeleteVolumeRe
 
 // newVolume converts a volume as the service reports it into its wire representation.
 func newVolume(volume service.Volume) api.Volume {
-	wire := api.Volume{
+	out := api.Volume{
 		Name:      volume.Name,
 		CreatedAt: volume.CreatedAt,
 		Path:      &volume.Path,
@@ -208,10 +208,18 @@ func newVolume(volume service.Volume) api.Volume {
 	// Absent rather than an empty array when nothing mounts it, so that "used by
 	// nothing" and "not reported" are not the same value on the wire.
 	if len(volume.UsedBy) > 0 {
-		wire.UsedBy = &volume.UsedBy
+		out.UsedBy = &volume.UsedBy
 	}
 
-	wire.Labels = wireLabels(volume.Labels)
+	if volume.Owner != "" {
+		out.Owner = &volume.Owner
+	}
 
-	return wire
+	if volume.Mode != "" {
+		out.Mode = &volume.Mode
+	}
+
+	out.Labels = wireLabels(volume.Labels)
+
+	return out
 }

@@ -110,6 +110,11 @@ func TestFromSpec(t *testing.T) {
 			Ports:     []manifest.Port{{Name: "http", To: 8080, From: 4141, Protocol: manifest.ProtocolTCP}},
 			Env:       map[string]string{"EXAMPLE": "EXAMPLE"},
 			Resources: &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 100},
+			Volumes: []manifest.VolumeMount{
+				{Name: "example-data", To: "/var/lib/example", ReadOnly: true},
+				{Path: "/mnt/media", To: "/media", ReadOnly: true},
+				{Secret: "tls-cert", To: "/etc/tls/cert.pem", Signal: manifest.SignalHUP},
+			},
 			Container: &manifest.Container{
 				Image:    "example/example:latest",
 				Pull:     manifest.PullAlways,

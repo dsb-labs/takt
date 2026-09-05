@@ -49,6 +49,28 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 			},
 		},
 		{
+			Name: "carries the owner and mode through",
+			Body: generated.VolumeSpec{Version: "v1", Name: "example-data", Owner: new("470:470"), Mode: new("0755")},
+			SetupMocks: func(svc *MockVolumeService) {
+				svc.EXPECT().Create(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool {
+					return v.Name == "example-data" && v.Owner == "470:470" && v.Mode == "0755"
+				})).Return(func() service.Volume {
+					volume := testVolume("example-data")
+					volume.Owner = "470:470"
+					volume.Mode = "0755"
+
+					return volume
+				}(), nil).Once()
+			},
+			ExpectStatus: http.StatusCreated,
+			Assert: func(t *testing.T, v generated.Volume) {
+				require.NotNil(t, v.Owner)
+				assert.Equal(t, "470:470", *v.Owner)
+				require.NotNil(t, v.Mode)
+				assert.Equal(t, "0755", *v.Mode)
+			},
+		},
+		{
 			Name: "reports a name another volume holds",
 			Body: generated.VolumeSpec{Version: "v1", Name: "example-data"},
 			SetupMocks: func(svc *MockVolumeService) {
