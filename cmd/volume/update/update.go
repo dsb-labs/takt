@@ -12,22 +12,25 @@ import (
 	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
-// Command returns the "volume update" command used to change a volume's labels from a
-// manifest file.
+// Command returns the "volume update" command used to change a volume's mutable
+// fields from a manifest file.
 func Command() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "update <manifest>",
-		Short: "Update a volume's labels from a manifest file",
-		Long: "Update a volume's labels from a manifest file.\n\n" +
-			"Labels are the whole of what this changes. A volume's name identifies it,\n" +
-			"the directory holding its data is named for the identifier it was assigned,\n" +
-			"and its contents are the workloads' to write.\n\n" +
-			"The labels in the manifest replace the ones stored, the way applying a\n" +
-			"workload manifest replaces a workload's. A manifest carrying none removes\n" +
-			"them all.\n\n" +
-			"Nothing mounting the volume is redeployed. A label says nothing about the\n" +
-			"storage, so no specification hash moves.",
+		Short: "Update a volume from a manifest file",
+		Long: "Update a volume from a manifest file.\n\n" +
+			"The labels, the owner and the mode are the whole of what this changes. A\n" +
+			"volume's name identifies it, the directory holding its data is named for\n" +
+			"the identifier it was assigned, and its contents are the workloads' to\n" +
+			"write.\n\n" +
+			"The fields in the manifest replace the ones stored, the way applying a\n" +
+			"workload manifest replaces a workload's. A manifest carrying no labels\n" +
+			"removes them all. The owner and mode are applied to the directory again,\n" +
+			"which is how a live volume is handed to another user. A manifest clearing\n" +
+			"either leaves the directory as it stands.\n\n" +
+			"Nothing mounting the volume is redeployed, because none of these fields\n" +
+			"reach a workload's specification hash.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := os.Open(args[0])
