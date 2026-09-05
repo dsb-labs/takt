@@ -17,7 +17,7 @@ import StateBadge from "../../components/StateBadge.vue";
 import Tooltip from "../../components/Tooltip.vue";
 import OverviewRow from "../../components/OverviewRow.vue";
 import { absoluteTime, healthStyles, relativeTime } from "../../format";
-import { references } from "../../references";
+import { hostPaths, references } from "../../references";
 import { useSort } from "../../sort";
 
 const route = useRoute();
@@ -52,6 +52,10 @@ const volumeRefs = refsOf("volume");
 const secretRefs = refsOf("secret");
 const variableRefs = refsOf("variable");
 const workloadRefs = refsOf("workload");
+
+// Host paths get a card of their own rather than a reference card: a path
+// mount reaches outside orca-managed state, so there is no resource to link.
+const pathMounts = computed(() => (spec.value ? hostPaths(spec.value) : []));
 const command = computed(() => {
   const runtime = spec.value?.container ?? spec.value?.exec;
   return runtime?.command?.join(" ");
@@ -229,6 +233,23 @@ await workload.suspense().catch(() => {});
         <ReferenceCard title="Secrets" :refs="secretRefs" />
         <ReferenceCard title="Variables" :refs="variableRefs" />
         <ReferenceCard title="Workloads" :refs="workloadRefs" />
+
+        <DetailCard v-if="pathMounts.length > 0" title="Host paths">
+          <dl
+            class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
+          >
+            <div
+              v-for="mount in pathMounts"
+              :key="mount.path"
+              class="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-2.5"
+            >
+              <dt class="font-mono text-xs leading-5">{{ mount.path }}</dt>
+              <dd class="text-slate-500 dark:text-slate-400">
+                {{ mount.via }}
+              </dd>
+            </div>
+          </dl>
+        </DetailCard>
 
         <DetailCard v-if="check" title="Health check">
           <dl

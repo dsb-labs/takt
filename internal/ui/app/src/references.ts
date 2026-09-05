@@ -1,4 +1,4 @@
-import type { WorkloadSpec } from "./api/types";
+import type { VolumeMount, WorkloadSpec } from "./api/types";
 
 // A Reference is something a workload's specification names: a secret,
 // variable or another workload expanded into its environment, or a volume,
@@ -35,13 +35,34 @@ export function references(spec: WorkloadSpec): Reference[] {
   }
 
   for (const mount of spec.volumes ?? []) {
-    const via = `mounted at ${mount.to}`;
+    const via = mountedAt(mount);
     if (mount.name) refs.push({ kind: "volume", name: mount.name, via });
     if (mount.secret) refs.push({ kind: "secret", name: mount.secret, via });
     if (mount.var) refs.push({ kind: "variable", name: mount.var, via });
   }
 
   return refs;
+}
+
+// mountedAt describes where a workload finds a mount, carrying the read-only
+// flag so a restricted mount reads differently from a writable one.
+export function mountedAt(mount: VolumeMount): string {
+  return mount.readOnly
+    ? `mounted read-only at ${mount.to}`
+    : `mounted at ${mount.to}`;
+}
+
+// hostPaths lists the host paths the given specification mounts. They are not
+// references: a path mount reaches outside orca-managed state, so there is no
+// resource to link to.
+export function hostPaths(spec: WorkloadSpec): { path: string; via: string }[] {
+  const paths: { path: string; via: string }[] = [];
+
+  for (const mount of spec.volumes ?? []) {
+    if (mount.path) paths.push({ path: mount.path, via: mountedAt(mount) });
+  }
+
+  return paths;
 }
 
 // referenceTarget returns the detail route a reference links to.
