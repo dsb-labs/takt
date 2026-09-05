@@ -1,0 +1,9 @@
+version: v1
+name: example
+
+volumes:
+  - path: media/library
+    to: /media
+
+container:
+  image: example/example:latest

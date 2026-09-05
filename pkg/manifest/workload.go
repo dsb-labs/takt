@@ -253,8 +253,9 @@ type (
 	// workload finds it.
 	//
 	// Exactly one source must be named, and which one it is decides what appears at
-	// the path: a volume is a directory that outlives the workload, where a secret or
-	// a variable is a file holding what orca holds under that name. The source is
+	// the path: a volume is a directory that outlives the workload, a secret or
+	// a variable is a file holding what orca holds under that name, and a path is a
+	// file or directory on the host that orca does not manage. The source is
 	// derived from the field that is present rather than from a discriminator, as a
 	// specification's runtime is.
 	VolumeMount struct {
@@ -270,7 +271,8 @@ type (
 		//
 		// A mounted value carries none. Where the server writes the file is its own
 		// layout and changes with every version of the workload, so storing it would
-		// move the hash for a reason the operator did not ask for.
+		// move the hash for a reason the operator did not ask for. A path mount
+		// carries none either: the path field already says where the data is.
 		From string `json:"from,omitempty" yaml:"-"`
 		// The volume to mount, which must already exist.
 		Name string `json:"name,omitempty"`
@@ -278,6 +280,15 @@ type (
 		Secret string `json:"secret,omitempty"`
 		// The variable to mount as a file, which must already exist.
 		Var string `json:"var,omitempty"`
+		// The host file or directory to mount, written as an absolute path.
+		//
+		// This is how a workload reaches data orca does not manage: a media
+		// library on its own mount point, or the docker socket. A host path
+		// reaches outside orca-managed state, so the server accepts one only
+		// when its configuration allows the path. This package cannot check
+		// that, because it validates manifests on machines that are not the
+		// host.
+		Path string `json:"path,omitempty"`
 		// Where the workload finds what is mounted, written the same way whichever
 		// runtime runs it. Where it resolves to differs, because a container has a
 		// filesystem of its own and a process on the host does not.
@@ -364,6 +375,8 @@ const (
 	MountSecret MountKind = "secret"
 	// MountVariable mounts a variable's value as a file.
 	MountVariable MountKind = "var"
+	// MountPath mounts a file or directory on the host that orca does not manage.
+	MountPath MountKind = "path"
 )
 
 const (
@@ -422,7 +435,7 @@ func (p *PortRef) UnmarshalYAML(node *yaml.Node) error {
 // Returns ErrNoMountSource when no source is named, or ErrAmbiguousMountSource when
 // more than one is.
 func KindOf(mount VolumeMount) (MountKind, error) {
-	named := make([]MountKind, 0, 3)
+	named := make([]MountKind, 0, 4)
 
 	if mount.Name != "" {
 		named = append(named, MountVolume)
@@ -434,6 +447,10 @@ func KindOf(mount VolumeMount) (MountKind, error) {
 
 	if mount.Var != "" {
 		named = append(named, MountVariable)
+	}
+
+	if mount.Path != "" {
+		named = append(named, MountPath)
 	}
 
 	switch len(named) {
@@ -457,12 +474,15 @@ func (m VolumeMount) Source() string {
 		return m.Secret
 	case m.Var != "":
 		return m.Var
+	case m.Path != "":
+		return m.Path
 	default:
 		return m.Name
 	}
 }
 
-// Reference returns what the mount reads, reporting false for a mount of a volume.
+// Reference returns what the mount reads, reporting false for a mount of a volume
+// or a host path.
 //
 // A mounted secret or variable is the same thing an env value references, so it
 // resolves through the same identity rather than through a second notion of what a
@@ -917,7 +937,16 @@ func validateVolumes(mounts []VolumeMount) error {
 		}
 
 		source := mount.Source()
-		if !namePattern.MatchString(source) || len(source) > 63 {
+
+		if kind == MountPath {
+			if !path.IsAbs(source) {
+				return fmt.Errorf("invalid volumes: path %q must be absolute", source)
+			}
+
+			// Cleaned before it is used as a key, so that "/data" and "/data/" are
+			// recognised as the same source rather than as two.
+			source = path.Clean(source)
+		} else if !namePattern.MatchString(source) || len(source) > 63 {
 			return fmt.Errorf("invalid volumes: %q is not a %s name: must be lowercase "+
 				"alphanumeric, optionally separated by dashes", source, kind)
 		}
@@ -959,18 +988,18 @@ func validateVolumes(mounts []VolumeMount) error {
 // validateMountSignal reports whether the signal a mount names is one orca will send
 // for a mount of that kind.
 //
-// A volume takes none at all. orca does not know what a workload writes into a volume,
-// so there is no change it could report — and a manifest naming a signal there is
-// asking for something that would never happen, which is worth saying rather than
-// ignoring.
+// A volume or a host path takes none at all. orca does not know what changes inside
+// either, so there is no change it could report — and a manifest naming a signal
+// there is asking for something that would never happen, which is worth saying
+// rather than ignoring.
 func validateMountSignal(mount VolumeMount, kind MountKind) error {
 	if mount.Signal == "" {
 		return nil
 	}
 
-	if kind == MountVolume {
-		return fmt.Errorf("invalid volumes: volume %q cannot name a signal, because orca does not "+
-			"know when its contents change", mount.Name)
+	if kind == MountVolume || kind == MountPath {
+		return fmt.Errorf("invalid volumes: %s %q cannot name a signal, because orca does not "+
+			"know when its contents change", kind, mount.Source())
 	}
 
 	if !slices.Contains(signals, mount.Signal) {

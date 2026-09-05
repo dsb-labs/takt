@@ -1,0 +1,13 @@
+version: v1
+name: example
+
+volumes:
+  - name: example-data
+    to: /var/lib/example
+  - path: /mnt/media
+    to: /media
+  - path: /var/run/docker.sock
+    to: /var/run/docker.sock
+
+container:
+  image: example/example:latest

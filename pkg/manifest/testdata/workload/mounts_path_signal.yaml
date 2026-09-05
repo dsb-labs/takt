@@ -1,0 +1,10 @@
+version: v1
+name: example
+
+volumes:
+  - path: /mnt/media
+    to: /media
+    signal: SIGHUP
+
+container:
+  image: example/example:latest

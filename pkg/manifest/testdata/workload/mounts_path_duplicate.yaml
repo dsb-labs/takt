@@ -1,0 +1,11 @@
+version: v1
+name: example
+
+volumes:
+  - path: /mnt/media
+    to: /media
+  - path: /mnt/media/
+    to: /srv/media
+
+container:
+  image: example/example:latest

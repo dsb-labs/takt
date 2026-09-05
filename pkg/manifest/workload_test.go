@@ -509,6 +509,40 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
+			// A host path beside a volume, which is the shape the media stack
+			// wants: shared data on its own mount point next to storage orca
+			// manages.
+			Name: "mounts host paths",
+			File: "mounts_path.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, []manifest.VolumeMount{
+					{Name: "example-data", To: "/var/lib/example"},
+					{Path: "/mnt/media", To: "/media"},
+					{Path: "/var/run/docker.sock", To: "/var/run/docker.sock"},
+				}, spec.Volumes)
+			},
+		},
+		{
+			// A relative path would resolve against whatever directory the server
+			// happened to be in, which is not something a manifest can mean.
+			Name:         "rejects a relative host path",
+			File:         "mounts_path_relative.yaml",
+			ExpectsError: true,
+		},
+		{
+			// orca does not watch a host path any more than it watches a volume, so
+			// a signal there would never be sent.
+			Name:         "rejects a signal on a mounted host path",
+			File:         "mounts_path_signal.yaml",
+			ExpectsError: true,
+		},
+		{
+			// Cleaned before comparing, so a trailing slash does not hide a clash.
+			Name:         "rejects the same host path mounted twice",
+			File:         "mounts_path_duplicate.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:      "rejects a mount naming nothing to mount",
 			File:      "mounts_no_source.yaml",
 			ExpectErr: manifest.ErrNoMountSource,
