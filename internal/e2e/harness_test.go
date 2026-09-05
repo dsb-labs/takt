@@ -71,6 +71,12 @@ func withDataDirectory(directory string) option {
 	return func(c *server.Config) { c.Data.Directory = directory }
 }
 
+// withAllowHostPaths modifies the server to accept path mounts under the given
+// prefixes, which the default configuration refuses entirely.
+func withAllowHostPaths(prefixes ...string) option {
+	return func(c *server.Config) { c.Workload.AllowHostPaths = prefixes }
+}
+
 // withTLS modifies the server to terminate TLS with a self-signed pair generated
 // for the test. The suite's client trusts the pair through the same option an
 // operator would use.

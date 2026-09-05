@@ -1804,6 +1804,123 @@ func (s *Suite) TestWorkloadMountingAnUnknownVolumeIsRejected() {
 	s.ErrorIs(err, client.ErrVolumeNotFound)
 }
 
+// TestPathMountReachesTheHost covers a workload reading data orca does not manage,
+// which is what a path mount exists for. The server is restarted with the host
+// directory allowed, since the default configuration refuses every path mount.
+func (s *Suite) TestPathMountReachesTheHost() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// A host directory outside orca's data directory, holding a file the workload
+	// reads back through the mount.
+	host := s.T().TempDir()
+	s.Require().NoError(os.WriteFile(filepath.Join(host, "greeting"), []byte("hello from the host\n"), 0o644))
+
+	s.restart(withAllowHostPaths(host))
+
+	// The exec runtime reaches the mount by the relative path, like a volume.
+	spec := s.execSpec(name, "sh", "-c", "cat host-data/greeting; exit 0")
+	spec.Restart = &manifest.Restart{Policy: manifest.RestartNever}
+	spec.Volumes = []manifest.VolumeMount{{Path: host, To: "/host-data"}}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+
+	var logs strings.Builder
+	s.Require().NoError(s.client.Logs(s.ctx(), &logs, name, client.WithTail(10)))
+	s.Contains(logs.String(), "hello from the host")
+}
+
+// TestReadOnlyPathMountInAContainer covers the read-only flag being enforced by the
+// bind rather than politely recorded: the workload proves it can read the mount and
+// cannot write it.
+func (s *Suite) TestReadOnlyPathMountInAContainer() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	host := s.T().TempDir()
+	s.Require().NoError(os.WriteFile(filepath.Join(host, "greeting"), []byte("hello from the host\n"), 0o644))
+
+	s.restart(withAllowHostPaths(host))
+
+	// The command exits cleanly only when the read succeeds and the write is
+	// refused, so completion is the assertion.
+	spec := s.jobSpec(name, manifest.RestartNever, 0)
+	spec.Container.Command = []string{"sh", "-c",
+		"cat /host-data/greeting || exit 1; touch /host-data/nope 2>/dev/null && exit 1; exit 0"}
+	spec.Volumes = []manifest.VolumeMount{{Path: host, To: "/host-data", ReadOnly: true}}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+
+	// And the host directory holds only what it started with.
+	_, err = os.Stat(filepath.Join(host, "nope"))
+	s.True(os.IsNotExist(err), "the workload wrote through a read-only mount")
+}
+
+// TestPathMountRefusedByDefault covers the gate: an unconfigured
+// server accepts no path mount at all, and nothing is stored when one is refused.
+func (s *Suite) TestPathMountRefusedByDefault() {
+	name := s.workloadName()
+
+	spec := s.containerSpec(name)
+	spec.Volumes = []manifest.VolumeMount{{Path: "/etc", To: "/host-etc", ReadOnly: true}}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().Error(err)
+
+	// The error names the configuration that opens the path, since an operator who
+	// meant it can act on that and not on "something went wrong".
+	s.Contains(err.Error(), "allow-host-paths")
+
+	_, err = s.client.Get(s.ctx(), name)
+	s.ErrorIs(err, client.ErrWorkloadNotFound)
+}
+
+// TestVolumeOwnershipReachesTheDirectory covers a volume's owner and mode being
+// applied to the directory backing it, on create and again on update.
+func (s *Suite) TestVolumeOwnershipReachesTheDirectory() {
+	volume := s.volumeName()
+	s.T().Cleanup(func() { s.cleanupVolume(volume) })
+
+	// The server runs inside the test process, so its own identifiers are the ones
+	// a chown needs no capability for.
+	owner := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+
+	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{
+		Version: "v1",
+		Name:    volume,
+		Owner:   owner,
+		Mode:    "0750",
+	})
+	s.Require().NoError(err)
+	s.Equal(owner, created.Owner)
+	s.Equal("0750", created.Mode)
+
+	info, err := os.Stat(created.Path)
+	s.Require().NoError(err)
+	s.Equal(os.FileMode(0o750), info.Mode().Perm())
+
+	// An update is how a live volume changes hands, so the new mode has to reach
+	// the directory rather than only the row.
+	updated, err := s.client.UpdateVolume(s.ctx(), manifest.Volume{
+		Version: "v1",
+		Name:    volume,
+		Owner:   owner,
+		Mode:    "0755",
+	})
+	s.Require().NoError(err)
+	s.Equal("0755", updated.Mode)
+
+	info, err = os.Stat(created.Path)
+	s.Require().NoError(err)
+	s.Equal(os.FileMode(0o755), info.Mode().Perm())
+}
+
 // TestMissingVolume covers the not-found path on every volume endpoint that takes a
 // name.
 func (s *Suite) TestMissingVolume() {
