@@ -34,9 +34,11 @@ PrivateTmp=yes
 # ProtectSystem=strict otherwise removes.
 ReadWritePaths=/run/docker.sock
 
-# Lets the server delete volume files a container wrote as another user.
-# Dropped before an exec workload's command runs, so no workload holds it.
-AmbientCapabilities=CAP_DAC_OVERRIDE
+# CAP_DAC_OVERRIDE lets the server delete volume files a container wrote as
+# another user. CAP_CHOWN lets it assign a volume's directory to the user a
+# volume manifest names. Both are dropped before an exec workload's command
+# runs, so no workload holds them.
+AmbientCapabilities=CAP_DAC_OVERRIDE CAP_CHOWN
 
 [Install]
 WantedBy=multi-user.target
