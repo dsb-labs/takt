@@ -1282,8 +1282,8 @@ func (_m *MockVolumeService) EXPECT() *MockVolumeService_Expecter {
 }
 
 // Create provides a mock function for the type MockVolumeService
-func (_mock *MockVolumeService) Create(ctx context.Context, name string, labels map[string]string) (service.Volume, error) {
-	ret := _mock.Called(ctx, name, labels)
+func (_mock *MockVolumeService) Create(ctx context.Context, volume manifest.Volume) (service.Volume, error) {
+	ret := _mock.Called(ctx, volume)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
@@ -1291,16 +1291,16 @@ func (_mock *MockVolumeService) Create(ctx context.Context, name string, labels 
 
 	var r0 service.Volume
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) (service.Volume, error)); ok {
-		return returnFunc(ctx, name, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) (service.Volume, error)); ok {
+		return returnFunc(ctx, volume)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) service.Volume); ok {
-		r0 = returnFunc(ctx, name, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) service.Volume); ok {
+		r0 = returnFunc(ctx, volume)
 	} else {
 		r0 = ret.Get(0).(service.Volume)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, map[string]string) error); ok {
-		r1 = returnFunc(ctx, name, labels)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Volume) error); ok {
+		r1 = returnFunc(ctx, volume)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1314,41 +1314,35 @@ type MockVolumeService_Create_Call struct {
 
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
-//   - name string
-//   - labels map[string]string
-func (_e *MockVolumeService_Expecter) Create(ctx any, name any, labels any) *MockVolumeService_Create_Call {
-	return &MockVolumeService_Create_Call{Call: _e.mock.On("Create", ctx, name, labels)}
+//   - volume manifest.Volume
+func (_e *MockVolumeService_Expecter) Create(ctx any, volume any) *MockVolumeService_Create_Call {
+	return &MockVolumeService_Create_Call{Call: _e.mock.On("Create", ctx, volume)}
 }
 
-func (_c *MockVolumeService_Create_Call) Run(run func(ctx context.Context, name string, labels map[string]string)) *MockVolumeService_Create_Call {
+func (_c *MockVolumeService_Create_Call) Run(run func(ctx context.Context, volume manifest.Volume)) *MockVolumeService_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 manifest.Volume
 		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		var arg2 map[string]string
-		if args[2] != nil {
-			arg2 = args[2].(map[string]string)
+			arg1 = args[1].(manifest.Volume)
 		}
 		run(
 			arg0,
 			arg1,
-			arg2,
 		)
 	})
 	return _c
 }
 
-func (_c *MockVolumeService_Create_Call) Return(volume service.Volume, err error) *MockVolumeService_Create_Call {
-	_c.Call.Return(volume, err)
+func (_c *MockVolumeService_Create_Call) Return(volume1 service.Volume, err error) *MockVolumeService_Create_Call {
+	_c.Call.Return(volume1, err)
 	return _c
 }
 
-func (_c *MockVolumeService_Create_Call) RunAndReturn(run func(ctx context.Context, name string, labels map[string]string) (service.Volume, error)) *MockVolumeService_Create_Call {
+func (_c *MockVolumeService_Create_Call) RunAndReturn(run func(ctx context.Context, volume manifest.Volume) (service.Volume, error)) *MockVolumeService_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1560,8 +1554,8 @@ func (_c *MockVolumeService_List_Call) RunAndReturn(run func(ctx context.Context
 }
 
 // Update provides a mock function for the type MockVolumeService
-func (_mock *MockVolumeService) Update(ctx context.Context, name string, labels map[string]string) (service.Volume, error) {
-	ret := _mock.Called(ctx, name, labels)
+func (_mock *MockVolumeService) Update(ctx context.Context, volume manifest.Volume) (service.Volume, error) {
+	ret := _mock.Called(ctx, volume)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Update")
@@ -1569,16 +1563,16 @@ func (_mock *MockVolumeService) Update(ctx context.Context, name string, labels 
 
 	var r0 service.Volume
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) (service.Volume, error)); ok {
-		return returnFunc(ctx, name, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) (service.Volume, error)); ok {
+		return returnFunc(ctx, volume)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, map[string]string) service.Volume); ok {
-		r0 = returnFunc(ctx, name, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) service.Volume); ok {
+		r0 = returnFunc(ctx, volume)
 	} else {
 		r0 = ret.Get(0).(service.Volume)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, map[string]string) error); ok {
-		r1 = returnFunc(ctx, name, labels)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Volume) error); ok {
+		r1 = returnFunc(ctx, volume)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1592,41 +1586,35 @@ type MockVolumeService_Update_Call struct {
 
 // Update is a helper method to define mock.On call
 //   - ctx context.Context
-//   - name string
-//   - labels map[string]string
-func (_e *MockVolumeService_Expecter) Update(ctx any, name any, labels any) *MockVolumeService_Update_Call {
-	return &MockVolumeService_Update_Call{Call: _e.mock.On("Update", ctx, name, labels)}
+//   - volume manifest.Volume
+func (_e *MockVolumeService_Expecter) Update(ctx any, volume any) *MockVolumeService_Update_Call {
+	return &MockVolumeService_Update_Call{Call: _e.mock.On("Update", ctx, volume)}
 }
 
-func (_c *MockVolumeService_Update_Call) Run(run func(ctx context.Context, name string, labels map[string]string)) *MockVolumeService_Update_Call {
+func (_c *MockVolumeService_Update_Call) Run(run func(ctx context.Context, volume manifest.Volume)) *MockVolumeService_Update_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 manifest.Volume
 		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		var arg2 map[string]string
-		if args[2] != nil {
-			arg2 = args[2].(map[string]string)
+			arg1 = args[1].(manifest.Volume)
 		}
 		run(
 			arg0,
 			arg1,
-			arg2,
 		)
 	})
 	return _c
 }
 
-func (_c *MockVolumeService_Update_Call) Return(volume service.Volume, err error) *MockVolumeService_Update_Call {
-	_c.Call.Return(volume, err)
+func (_c *MockVolumeService_Update_Call) Return(volume1 service.Volume, err error) *MockVolumeService_Update_Call {
+	_c.Call.Return(volume1, err)
 	return _c
 }
 
-func (_c *MockVolumeService_Update_Call) RunAndReturn(run func(ctx context.Context, name string, labels map[string]string) (service.Volume, error)) *MockVolumeService_Update_Call {
+func (_c *MockVolumeService_Update_Call) RunAndReturn(run func(ctx context.Context, volume manifest.Volume) (service.Volume, error)) *MockVolumeService_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }

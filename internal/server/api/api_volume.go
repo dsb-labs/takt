@@ -8,16 +8,18 @@ import (
 
 	"github.com/dsb-labs/orca/internal/generated/api"
 	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/orca/pkg/manifest"
 )
 
 type (
 	// The VolumeService interface describes the volume operations the API exposes.
 	VolumeService interface {
-		// Create should create a volume with the given name, along with the
-		// directory backing it.
-		Create(ctx context.Context, name string, labels map[string]string) (service.Volume, error)
-		// Update should replace the volume's mutable fields, which are its labels.
-		Update(ctx context.Context, name string, labels map[string]string) (service.Volume, error)
+		// Create should create the given volume, along with the directory
+		// backing it, owned and moded as the volume asks.
+		Create(ctx context.Context, volume manifest.Volume) (service.Volume, error)
+		// Update should replace the volume's mutable fields — its labels, owner
+		// and mode — and reapply the owner and mode to its directory.
+		Update(ctx context.Context, volume manifest.Volume) (service.Volume, error)
 		// Get should return the volume with the given name.
 		Get(ctx context.Context, name string) (service.Volume, error)
 		// List should return the volumes matching every one of the given
@@ -68,7 +70,10 @@ func (a *VolumeAPI) CreateVolume(ctx context.Context, request api.CreateVolumeRe
 		}, nil
 	}
 
-	volume, err := a.volumes.Create(ctx, request.Body.Name, labelsOf(request.Body.Labels))
+	volume, err := a.volumes.Create(ctx, manifest.Volume{
+		Name:   request.Body.Name,
+		Labels: labelsOf(request.Body.Labels),
+	})
 	switch {
 	case errors.Is(err, service.ErrInvalidVolume):
 		return api.CreateVolume400JSONResponse{
@@ -98,7 +103,10 @@ func (a *VolumeAPI) UpdateVolume(ctx context.Context, request api.UpdateVolumeRe
 		}, nil
 	}
 
-	volume, err := a.volumes.Update(ctx, request.Name, labelsOf(request.Body.Labels))
+	volume, err := a.volumes.Update(ctx, manifest.Volume{
+		Name:   request.Name,
+		Labels: labelsOf(request.Body.Labels),
+	})
 	switch {
 	case errors.Is(err, service.ErrInvalidVolume):
 		return api.UpdateVolume400JSONResponse{

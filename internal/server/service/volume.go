@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,13 @@ type (
 		UsedBy []string
 		// Arbitrary key-value pairs attached to the volume.
 		Labels map[string]string
+		// Who owns the volume's directory, as a numeric "uid" or "uid:gid".
+		// Empty when the directory is owned by the user running the server.
+		Owner string
+		// The permission bits on the volume's directory, as an octal string.
+		// Empty when the directory keeps the default, readable only by the user
+		// running the server.
+		Mode string
 		// The time the volume was created.
 		CreatedAt time.Time
 	}
@@ -101,25 +109,38 @@ func NewVolumeService(config VolumeServiceConfig) *VolumeService {
 	}
 }
 
-// Create records a volume with the given name and creates the directory backing it.
+// Create records a volume and creates the directory backing it, owned and moded as
+// the volume asks.
 //
 // The row is written first. A directory with no row is invisible to everything and
 // would be created again under a new identifier, where a row with no directory is
 // reported as a volume whose data cannot be reached — so the failure that leaves
 // nothing behind is the one to prefer.
-func (s *VolumeService) Create(ctx context.Context, name string, labels map[string]string) (Volume, error) {
-	if !volumeNamePattern.MatchString(name) || len(name) > 63 {
+func (s *VolumeService) Create(ctx context.Context, volume manifest.Volume) (Volume, error) {
+	if !volumeNamePattern.MatchString(volume.Name) || len(volume.Name) > 63 {
 		return Volume{}, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidVolume)
 	}
 
-	if err := manifest.ValidateLabels(labels); err != nil {
+	if err := manifest.ValidateLabels(volume.Labels); err != nil {
 		return Volume{}, fmt.Errorf("%w: %v", ErrInvalidVolume, err)
 	}
 
-	stored, err := s.volumes.Insert(ctx, database.Volume{Name: name, Labels: labels})
+	// Proved to parse before the row exists, so a bad owner or mode is refused
+	// rather than rolled back. A manifest reaches here already validated, but this
+	// is a public API and a caller can send anything.
+	if err := validateOwnership(volume.Owner, volume.Mode); err != nil {
+		return Volume{}, err
+	}
+
+	stored, err := s.volumes.Insert(ctx, database.Volume{
+		Name:   volume.Name,
+		Labels: volume.Labels,
+		Owner:  volume.Owner,
+		Mode:   volume.Mode,
+	})
 	switch {
 	case errors.Is(err, database.ErrVolumeExists):
-		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeExists, name)
+		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeExists, volume.Name)
 	case err != nil:
 		return Volume{}, err
 	}
@@ -130,22 +151,118 @@ func (s *VolumeService) Create(ctx context.Context, name string, labels map[stri
 	}
 
 	// Readable only by the user running the server, like everything else orca keeps.
-	// A workload runs as that user, so this is about what else on the host can read a
-	// workload's data rather than about the workload itself.
-	if err = os.MkdirAll(path, 0o700); err != nil {
-		// The row would otherwise name a volume whose directory does not exist, and
-		// nothing later creates it.
-		if removeErr := s.volumes.Delete(ctx, name); removeErr != nil {
-			s.logger.With("volume", name, "error", removeErr).
+	// A workload runs as that user, so this is about what else on the host can read
+	// a workload's data rather than about the workload itself. A volume naming an
+	// owner or a mode replaces that default, which is what lets a container running
+	// as a fixed non-root user write to it.
+	if err = s.materialise(path, stored.Owner, stored.Mode); err != nil {
+		// The row would otherwise name a volume whose directory is not what was
+		// asked for, and nothing later fixes it.
+		if removeErr := os.RemoveAll(path); removeErr != nil {
+			s.logger.With("volume", volume.Name, "error", removeErr).
+				Error("failed to remove the directory of a volume that could not be created")
+		}
+
+		if removeErr := s.volumes.Delete(ctx, volume.Name); removeErr != nil {
+			s.logger.With("volume", volume.Name, "error", removeErr).
 				Error("failed to remove a volume whose directory could not be created")
 		}
 
-		return Volume{}, fmt.Errorf("failed to create volume directory: %w", err)
+		return Volume{}, err
 	}
 
-	s.logger.With("volume", name).Debug("volume created")
+	s.logger.With("volume", volume.Name).Debug("volume created")
 
-	return Volume{Name: stored.Name, Path: path, Labels: stored.Labels, CreatedAt: stored.CreatedAt}, nil
+	return Volume{
+		Name:      stored.Name,
+		Path:      path,
+		Labels:    stored.Labels,
+		Owner:     stored.Owner,
+		Mode:      stored.Mode,
+		CreatedAt: stored.CreatedAt,
+	}, nil
+}
+
+// materialise creates the volume's directory and applies the owner and mode it
+// asks for, leaving the default for whichever it leaves empty.
+//
+// Assigning another user needs CAP_CHOWN, which the server does not otherwise
+// carry, so a refusal names the fix the way removing another user's files does.
+func (s *VolumeService) materialise(path, owner, mode string) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return fmt.Errorf("failed to create volume directory: %w", err)
+	}
+
+	if owner != "" {
+		uid, gid, err := ownerIDs(owner)
+		if err != nil {
+			return err
+		}
+
+		if err = os.Chown(path, uid, gid); err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				return fmt.Errorf("failed to set volume owner: %w: grant the server CAP_CHOWN to assign volumes to another user", err)
+			}
+
+			return fmt.Errorf("failed to set volume owner: %w", err)
+		}
+	}
+
+	if mode != "" {
+		parsed, err := strconv.ParseUint(mode, 8, 32)
+		if err != nil {
+			return fmt.Errorf("%w: mode %q is not octal", ErrInvalidVolume, mode)
+		}
+
+		if err = os.Chmod(path, os.FileMode(parsed)); err != nil {
+			return fmt.Errorf("failed to set volume mode: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// validateOwnership reports whether the owner and mode are ones the service can
+// apply to a directory, skipping whichever is empty.
+func validateOwnership(owner, mode string) error {
+	if owner != "" {
+		if _, _, err := ownerIDs(owner); err != nil {
+			return err
+		}
+	}
+
+	if mode != "" {
+		if _, err := strconv.ParseUint(mode, 8, 32); err != nil {
+			return fmt.Errorf("%w: mode %q is not octal", ErrInvalidVolume, mode)
+		}
+	}
+
+	return nil
+}
+
+// ownerIDs reads the numeric identifiers out of a volume's owner. A missing group
+// resolves to -1, which chown reads as leaving the group alone.
+//
+// Validation proves the form parses, so an error here means the stored volume and
+// the rules have diverged rather than that the operator made a mistake.
+func ownerIDs(owner string) (int, int, error) {
+	uidPart, gidPart, hasGroup := strings.Cut(owner, ":")
+
+	uid, err := strconv.Atoi(uidPart)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%w: owner %q is not a numeric uid or uid:gid", ErrInvalidVolume, owner)
+	}
+
+	if !hasGroup {
+		return uid, -1, nil
+	}
+
+	gid, err := strconv.Atoi(gidPart)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%w: owner %q is not a numeric uid or uid:gid", ErrInvalidVolume, owner)
+	}
+
+	return uid, gid, nil
 }
 
 // Get returns the volume with the given name, along with the workloads mounting it.
@@ -275,23 +392,46 @@ func (s *VolumeService) Path(ctx context.Context, name string) (string, error) {
 // Update replaces the mutable fields of the volume with the given name, returning it
 // as it now stands. Returns ErrVolumeNotFound when no such volume exists.
 //
-// The labels are the whole of what a volume has to change. Its name identifies it,
-// its identifier is what its directory is named for, and its contents are the
-// workloads' to write — so there is nothing else an update of a volume could mean.
-func (s *VolumeService) Update(ctx context.Context, name string, labels map[string]string) (Volume, error) {
-	if err := manifest.ValidateLabels(labels); err != nil {
+// The labels, the owner and the mode. A volume's name identifies it, its identifier
+// is what its directory is named for, and its contents are the workloads' to write —
+// so these are the whole of what an update of a volume can mean.
+//
+// The owner and mode are reapplied to the directory whenever they are set, so an
+// update is also how a live volume is handed to another user. Clearing either
+// leaves the directory as it stands: the previous value was applied when it was
+// set, and there is nothing recorded to restore.
+func (s *VolumeService) Update(ctx context.Context, volume manifest.Volume) (Volume, error) {
+	if err := manifest.ValidateLabels(volume.Labels); err != nil {
 		return Volume{}, fmt.Errorf("%w: %v", ErrInvalidVolume, err)
 	}
 
-	stored, err := s.volumes.Update(ctx, database.Volume{Name: name, Labels: labels})
+	if err := validateOwnership(volume.Owner, volume.Mode); err != nil {
+		return Volume{}, err
+	}
+
+	stored, err := s.volumes.Update(ctx, database.Volume{
+		Name:   volume.Name,
+		Labels: volume.Labels,
+		Owner:  volume.Owner,
+		Mode:   volume.Mode,
+	})
 	switch {
 	case errors.Is(err, database.ErrVolumeNotFound):
-		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeNotFound, name)
+		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeNotFound, volume.Name)
 	case err != nil:
 		return Volume{}, err
 	}
 
-	usedBy, err := s.volumes.UsedBy(ctx, name)
+	path, err := s.path(stored.ID)
+	if err != nil {
+		return Volume{}, err
+	}
+
+	if err = s.materialise(path, stored.Owner, stored.Mode); err != nil {
+		return Volume{}, err
+	}
+
+	usedBy, err := s.volumes.UsedBy(ctx, volume.Name)
 	if err != nil {
 		return Volume{}, err
 	}
@@ -310,6 +450,8 @@ func (s *VolumeService) hydrate(row database.Volume, usedBy []string) (Volume, e
 		Path:      path,
 		UsedBy:    usedBy,
 		Labels:    row.Labels,
+		Owner:     row.Owner,
+		Mode:      row.Mode,
 		CreatedAt: row.CreatedAt,
 	}, nil
 }
