@@ -845,9 +845,10 @@ func mounts(volumes []driver.Volume) []mount.Mount {
 	out := make([]mount.Mount, 0, len(volumes))
 	for _, volume := range volumes {
 		out = append(out, mount.Mount{
-			Type:   mount.TypeBind,
-			Source: volume.Host,
-			Target: volume.Target,
+			Type:     mount.TypeBind,
+			Source:   volume.Host,
+			Target:   volume.Target,
+			ReadOnly: volume.ReadOnly,
 		})
 	}
 

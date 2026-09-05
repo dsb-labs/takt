@@ -177,9 +177,10 @@ func (m *Mounter) Deliver(ctx context.Context, id string, version int, spec mani
 		record.Digests[name] = digest(value)
 
 		volumes = append(volumes, driver.Volume{
-			Name:   reference.Name,
-			Host:   filepath.Join(dir, name),
-			Target: mount.To,
+			Name:     reference.Name,
+			Host:     filepath.Join(dir, name),
+			Target:   mount.To,
+			ReadOnly: mount.ReadOnly,
 		})
 	}
 

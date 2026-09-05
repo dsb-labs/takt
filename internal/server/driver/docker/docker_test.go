@@ -142,6 +142,35 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
+			// The bind is what enforces a read-only mount, so the flag has to
+			// survive the trip into the host configuration.
+			Name: "mounts a read-only bind when the mount asks",
+			Workload: withVolumes(
+				workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
+				driver.Volume{Name: "example-data", Host: "/var/lib/orca/volumes/abc", Target: "/var/lib/example", ReadOnly: true},
+			),
+			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						return len(host.Mounts) == 1 && host.Mounts[0].ReadOnly
+					}),
+					mock.Anything, mock.Anything, "orca-example-1-0-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
 			Name:     "runs the command the workload names",
 			Workload: workload("example", 1, "hash-one", containerSpec("example/example:latest", []string{"sh", "-c", "exit 0"}), nil, nil),
 			SetupMocks: func(c *MockClient) {

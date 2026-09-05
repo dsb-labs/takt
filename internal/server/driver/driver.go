@@ -209,6 +209,9 @@ type (
 		// path inside a container, or one resolved against an exec workload's own
 		// working directory.
 		Target string
+		// Whether the workload may only read what is mounted. Validation proves
+		// this reaches only runtimes that can enforce it.
+		ReadOnly bool
 	}
 
 	// The Event type reports that a driver's view of an instance has changed, so
@@ -284,7 +287,12 @@ func NewWorkload(row database.Workload) (Workload, error) {
 				continue
 			}
 
-			w.Volumes = append(w.Volumes, Volume{Name: mount.Name, Host: mount.From, Target: mount.To})
+			w.Volumes = append(w.Volumes, Volume{
+				Name:     mount.Name,
+				Host:     mount.From,
+				Target:   mount.To,
+				ReadOnly: mount.ReadOnly,
+			})
 		}
 	}
 

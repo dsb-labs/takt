@@ -26,19 +26,23 @@ func TestMounter_Deliver(t *testing.T) {
 		svc, root := newMounter(t, secrets, variables)
 
 		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
-			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem"},
+			manifest.VolumeMount{Secret: "tls-cert", To: "/etc/tls/cert.pem", ReadOnly: true},
 			manifest.VolumeMount{Var: "app-config", To: "/etc/app/config.json"},
 		))
 		require.NoError(t, err)
 		require.Len(t, mounts, 2)
 
 		// The driver is handed a path and a target, which is exactly what it is handed
-		// for a volume: a mounted value needs nothing new of either runtime.
+		// for a volume: a mounted value needs nothing new of either runtime. What the
+		// mount says about being read-only travels with it, so the bind enforces what
+		// the file's own mode only suggests.
 		dir := filepath.Join(root, "mounts", "files", testVolumeID, "1")
 		assert.Equal(t, filepath.Join(dir, "secret-tls-cert"), mounts[0].Host)
 		assert.Equal(t, "/etc/tls/cert.pem", mounts[0].Target)
+		assert.True(t, mounts[0].ReadOnly)
 		assert.Equal(t, filepath.Join(dir, "var-app-config"), mounts[1].Host)
 		assert.Equal(t, "/etc/app/config.json", mounts[1].Target)
+		assert.False(t, mounts[1].ReadOnly)
 
 		contents, err := os.ReadFile(mounts[0].Host)
 		require.NoError(t, err)
