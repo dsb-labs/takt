@@ -156,6 +156,7 @@ container:
 | `readOnly` | no | Make the root filesystem read-only. |
 | `capAdd` | no | Kernel capabilities to grant beyond the default set. |
 | `capDrop` | no | Kernel capabilities to remove from the default set. |
+| `pidMode` | no | The pid namespace the container runs in. Only `host` is accepted. |
 
 `pull: missing` pulls the image only when it is not present on the host, which pins a
 tag that is already there until something removes it. This rewards pinning a tag or a
@@ -197,7 +198,13 @@ configuration. It is not the default because it breaks too many stock images.
 `readOnly` applies to the image's own filesystem. Mounted volumes and mounted values
 are separate mounts with rules of their own, so a volume stays writable and a mounted
 value stays readable whatever this says. An image that writes temporary files needs
-them pointed at a volume before it can run read-only. A single mount can be made
+them pointed at a volume before it can run read-only.
+
+`pidMode: host` runs the container in the host's pid namespace, the way an `exec`
+workload always runs. It is for a workload whose job is observing the host's
+processes — a metrics exporter, for one — and it is spelled the way docker spells
+it. Docker's other mode, joining a named container's namespace, is not accepted:
+it would name a container takt did not start and cannot promise anything about. A single mount can be made
 read-only with the mount's own `readOnly` field — see [Volumes](#volumes).
 
 ### exec
