@@ -11,13 +11,26 @@ A workload runs either as a Docker container or as a command on the host.
 
 ## Quick start
 
-Download an archive for your platform from the
-[releases](https://github.com/dsb-labs/takt/releases) page and put `takt` on your
-`PATH`. Then start the server:
+On Debian or Ubuntu, install from the apt repository and start the service:
+
+```sh
+curl -fsSL https://apt.dsb.dev/key.asc | sudo tee /usr/share/keyrings/takt.asc >/dev/null
+echo "deb [signed-by=/usr/share/keyrings/takt.asc] https://apt.dsb.dev stable main" \
+  | sudo tee /etc/apt/sources.list.d/takt.list
+sudo apt-get update && sudo apt-get install takt
+sudo usermod -aG docker takt && sudo systemctl enable --now takt
+```
+
+Anywhere else, download an archive for your platform from the
+[releases](https://github.com/dsb-labs/takt/releases) page, put `takt` on your
+`PATH`, and start the server yourself:
 
 ```sh
 takt serve          # listens on 127.0.0.1:7373
 ```
+
+[Installing](docs/installing.md) covers both paths in full, including what the
+`docker` group grant hands over and where a deployment keeps its data.
 
 Write a manifest and apply it:
 
@@ -37,9 +50,6 @@ takt workload get example
 
 `get` reports the host port takt allocated, which is how the workload is reached.
 
-Each release also publishes `.deb` and `.rpm` packages that install the server as
-a systemd service. See
-[Running under systemd](docs/operating.md#running-under-systemd).
 
 ## A workload
 
@@ -159,6 +169,7 @@ dependency keeps working without being re-applied.
 
 ## Documentation
 
+- [Installing](docs/installing.md) — from nothing to a running server, packaged or by hand.
 - [Manifest reference](docs/manifest.md) — every field a workload can name.
 - [Command line](docs/cli.md) — every command and flag.
 - [Services](docs/services.md) — reporting the addresses of a labelled set of instances for a load balancer.
