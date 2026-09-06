@@ -407,6 +407,33 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
+			// The pid namespace is passed through as docker spells it, so a
+			// workload that asks for the host's sees every process on it.
+			Name: "shares the host pid namespace when the specification asks",
+			Workload: workload("example", 1, "hash",
+				manifest.Container{Image: "example/example:latest", PidMode: "host"}, nil, nil),
+			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						return host.PidMode.IsHost()
+					}),
+					mock.Anything, mock.Anything, mock.Anything,
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
 			// A read-only root filesystem applies to the image's own layers. A volume
 			// and a mounted value are bind mounts with rules of their own, so they
 			// must not inherit the flag or a workload could not write its data.

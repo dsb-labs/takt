@@ -240,6 +240,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 			CapAdd:         capabilities(spec.CapAdd),
 			CapDrop:        capabilities(spec.CapDrop),
 			ReadonlyRootfs: spec.ReadOnly,
+			PidMode:        container.PidMode(spec.PidMode),
 		},
 		nil, nil,
 		containerName(w.Name, w.Version, w.Instance, attempt),
