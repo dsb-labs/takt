@@ -1521,6 +1521,14 @@ components:
             stock images to be a reasonable default.
           items:
             type: string
+        pidMode:
+          type: string
+          enum: [host]
+          description: |
+            The pid namespace the container runs in, spelled the way docker
+            spells it. Only "host" is accepted, which shares the host's
+            namespace the way an exec workload always does. Absent runs the
+            container in a namespace of its own.
             minLength: 1
           examples: [["ALL"]]
 

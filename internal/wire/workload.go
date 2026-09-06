@@ -110,6 +110,9 @@ func ToSpec(spec api.WorkloadSpec) (manifest.Spec, error) {
 		if spec.Container.CapDrop != nil {
 			out.Container.CapDrop = *spec.Container.CapDrop
 		}
+		if spec.Container.PidMode != nil {
+			out.Container.PidMode = string(*spec.Container.PidMode)
+		}
 	}
 
 	if spec.Exec != nil {
@@ -377,6 +380,9 @@ func FromSpec(s manifest.Spec) api.WorkloadSpec {
 		}
 		if len(s.Container.CapDrop) > 0 {
 			spec.Container.CapDrop = new(s.Container.CapDrop)
+		}
+		if s.Container.PidMode != "" {
+			spec.Container.PidMode = new(api.ContainerSpecPidMode(s.Container.PidMode))
 		}
 	}
 

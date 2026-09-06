@@ -854,11 +854,20 @@ export interface components {
        *     docker names them. Dropping ALL and adding back what the workload needs
        *     is the hardened configuration, and is opt-in because it breaks too many
        *     stock images to be a reasonable default.
+       */
+      capDrop?: string[];
+      /**
+       * @description The pid namespace the container runs in, spelled the way docker
+       *     spells it. Only "host" is accepted, which shares the host's
+       *     namespace the way an exec workload always does. Absent runs the
+       *     container in a namespace of its own.
+       *     minLength: 1
        * @example [
        *       "ALL"
        *     ]
+       * @enum {string}
        */
-      capDrop?: string[];
+      pidMode?: "host";
     };
     /**
      * @description When the docker driver pulls the workload's image.

@@ -20,6 +20,21 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ContainerSpecPidMode.
+const (
+	Host ContainerSpecPidMode = "host"
+)
+
+// Valid indicates whether the value is a known member of the ContainerSpecPidMode enum.
+func (e ContainerSpecPidMode) Valid() bool {
+	switch e {
+	case Host:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetHealthResultStatus.
 const (
 	Ok GetHealthResultStatus = "ok"
@@ -292,9 +307,6 @@ type ContainerSpec struct {
 	// docker names them. Dropping ALL and adding back what the workload needs
 	// is the hardened configuration, and is opt-in because it breaks too many
 	// stock images to be a reasonable default.
-	//
-	//
-	// Examples: ["ALL"]
 	CapDrop *[]string `json:"capDrop,omitempty"`
 
 	// Command The command to run, replacing the one the image declares. Given as the
@@ -312,6 +324,16 @@ type ContainerSpec struct {
 	//
 	// Examples: example/example:latest
 	Image string `json:"image"`
+
+	// PidMode The pid namespace the container runs in, spelled the way docker
+	// spells it. Only "host" is accepted, which shares the host's
+	// namespace the way an exec workload always does. Absent runs the
+	// container in a namespace of its own.
+	// minLength: 1
+	//
+	//
+	// Examples: ["ALL"]
+	PidMode *ContainerSpecPidMode `json:"pidMode,omitempty"`
 
 	// Pull When the docker driver pulls the workload's image.
 	//
@@ -349,6 +371,15 @@ type ContainerSpec struct {
 	// Examples: 65532:65532
 	User *string `json:"user,omitempty"`
 }
+
+// ContainerSpecPidMode The pid namespace the container runs in, spelled the way docker
+// spells it. Only "host" is accepted, which shares the host's
+// namespace the way an exec workload always does. Absent runs the
+// container in a namespace of its own.
+// minLength: 1
+//
+// Examples: ["ALL"]
+type ContainerSpecPidMode string
 
 // CreateVolumeResult The body returned when a volume is created.
 type CreateVolumeResult struct {
