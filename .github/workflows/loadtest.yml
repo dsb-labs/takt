@@ -52,27 +52,11 @@ jobs:
       - name: Build takt
         run: go build -o takt .
 
-      # Started in the background rather than as a service container, because the
-      # load test drives the build under test. A released image would measure
-      # whatever was last published.
-      #
-      # Through make dev and its dev.toml, so the run exercises exactly the server
-      # a developer load-tests locally: delegated, able to enforce resource limits
-      # the way a production server under systemd can, and keeping its data in the
-      # workspace's data directory. The server resolves that path and creates it.
       - name: Start the server
         run: |
           make dev > server.log 2>&1 &
           ./takt admin health --wait 30s
 
-      # The smoke scenario, which is a few of every feature and takes seconds. The
-      # larger scenarios are for running by hand: they measure how fast a machine is
-      # as much as anything else, and a shared runner is not a machine worth
-      # measuring.
-      #
-      # The data directory is passed so that the run also reports what was left on
-      # disk after teardown. That check is the only one that sees a leaked mount
-      # directory, and it needs the server's own host.
       - name: Run the smoke load test
         run: ./takt dev loadtest scenarios/smoke.toml --data-dir "${{ github.workspace }}/data" > report.json
 
