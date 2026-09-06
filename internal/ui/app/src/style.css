@@ -1,8 +1,9 @@
 @import "tailwindcss";
 
 /*
- * The takt palette. Surfaces are near-black and white like the animal, and the
- * accent is the deep ocean blue between them.
+ * The takt palette. Light surfaces are manuscript paper and dark ones are the
+ * near-black of a lacquered metronome case. The accent is the brass of its
+ * pendulum.
  */
 /*
  * Highlighting for the YAML specification view, over the same dark surface
@@ -26,15 +27,36 @@
 }
 
 @theme {
-  --color-pulse-50: oklch(0.97 0.01 240);
-  --color-pulse-100: oklch(0.93 0.02 240);
-  --color-pulse-200: oklch(0.86 0.04 240);
-  --color-pulse-300: oklch(0.76 0.07 240);
-  --color-pulse-400: oklch(0.65 0.11 240);
-  --color-pulse-500: oklch(0.55 0.14 240);
-  --color-pulse-600: oklch(0.47 0.14 242);
-  --color-pulse-700: oklch(0.4 0.12 244);
-  --color-pulse-800: oklch(0.33 0.09 246);
-  --color-pulse-900: oklch(0.27 0.07 248);
-  --color-pulse-950: oklch(0.19 0.05 250);
+  --color-pulse-50: oklch(0.97 0.02 85);
+  --color-pulse-100: oklch(0.93 0.04 85);
+  --color-pulse-200: oklch(0.86 0.07 84);
+  --color-pulse-300: oklch(0.76 0.1 83);
+  --color-pulse-400: oklch(0.65 0.12 81);
+  --color-pulse-500: oklch(0.55 0.12 79);
+  --color-pulse-600: oklch(0.47 0.11 77);
+  --color-pulse-700: oklch(0.4 0.09 75);
+  --color-pulse-800: oklch(0.33 0.07 73);
+  --color-pulse-900: oklch(0.27 0.06 71);
+  --color-pulse-950: oklch(0.19 0.04 70);
+
+  /*
+   * The slate scale is redefined so the warmth belongs to the paper and not
+   * the night. The light stops carry the manuscript cream, and the scale
+   * fades to neutral by the stops dark mode is built from, so a dark surface
+   * is plain charcoal and only the brass and the status colours are warm.
+   * Lightness mirrors the stock scale, so every contrast pairing holds.
+   * White is the paper too, since most light surfaces are bg-white.
+   */
+  --color-white: oklch(0.985 0.008 85);
+  --color-slate-50: oklch(0.97 0.01 85);
+  --color-slate-100: oklch(0.955 0.012 84);
+  --color-slate-200: oklch(0.929 0.012 82);
+  --color-slate-300: oklch(0.869 0.006 80);
+  --color-slate-400: oklch(0.704 0.004 78);
+  --color-slate-500: oklch(0.554 0.003 75);
+  --color-slate-600: oklch(0.446 0.002 72);
+  --color-slate-700: oklch(0.372 0.002 70);
+  --color-slate-800: oklch(0.279 0.002 68);
+  --color-slate-900: oklch(0.208 0.002 66);
+  --color-slate-950: oklch(0.129 0.002 64);
 }
