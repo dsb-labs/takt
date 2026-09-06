@@ -153,7 +153,7 @@ await workload.suspense().catch(() => {});
       <template v-if="workload.data.value">
         <button
           v-if="workload.data.value.suspended"
-          class="bg-ocean-600 hover:bg-ocean-700 rounded-md px-3 py-1.5 font-medium text-white"
+          class="bg-pulse-600 hover:bg-pulse-700 rounded-md px-3 py-1.5 font-medium text-white"
           @click="act(start)"
         >
           Start
@@ -327,7 +327,7 @@ await workload.suspense().catch(() => {});
                         instance.id.slice(0, 12)
                       }}</span>
                       <button
-                        class="hover:text-ocean-700 dark:hover:text-ocean-300 text-slate-400 dark:text-slate-500"
+                        class="hover:text-pulse-700 dark:hover:text-pulse-300 text-slate-400 dark:text-slate-500"
                         title="Copy the full ID"
                         @click="copyID(instance.id)"
                       >
@@ -432,7 +432,7 @@ await workload.suspense().catch(() => {});
                       :href="`http://${host}:${port.from}`"
                       target="_blank"
                       rel="noopener"
-                      class="text-ocean-700 dark:text-ocean-300 hover:underline"
+                      class="text-pulse-700 dark:text-pulse-300 hover:underline"
                     >
                       {{ port.from }}
                     </a>

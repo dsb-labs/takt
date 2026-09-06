@@ -14,7 +14,7 @@ const styles: Record<WorkloadState, string> = {
     "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
   stopped: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
   completed:
-    "bg-ocean-100 text-ocean-800 dark:bg-ocean-900 dark:text-ocean-200",
+    "bg-pulse-100 text-pulse-800 dark:bg-pulse-900 dark:text-pulse-200",
   failed: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300",
   suspended:
     "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300",

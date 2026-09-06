@@ -50,7 +50,7 @@ await services.suspense().catch(() => {});
         <td class="px-4 py-3 font-medium">
           <RouterLink
             :to="`/services/${service.name}`"
-            class="text-ocean-700 dark:text-ocean-300 hover:underline"
+            class="text-pulse-700 dark:text-pulse-300 hover:underline"
           >
             {{ service.name }}
           </RouterLink>

@@ -44,7 +44,7 @@ const sort = useSort(() => props.usedBy, "workload", {
             <td class="px-4 py-2.5 font-medium">
               <RouterLink
                 :to="`/workloads/${workload}`"
-                class="text-ocean-700 dark:text-ocean-300 hover:underline"
+                class="text-pulse-700 dark:text-pulse-300 hover:underline"
               >
                 {{ workload }}
               </RouterLink>

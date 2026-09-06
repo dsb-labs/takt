@@ -9,7 +9,7 @@
  * the log view uses in both colour schemes.
  */
 .hljs-attr {
-  color: var(--color-ocean-300);
+  color: var(--color-pulse-300);
 }
 
 .hljs-string {
@@ -26,15 +26,15 @@
 }
 
 @theme {
-  --color-ocean-50: oklch(0.97 0.01 240);
-  --color-ocean-100: oklch(0.93 0.02 240);
-  --color-ocean-200: oklch(0.86 0.04 240);
-  --color-ocean-300: oklch(0.76 0.07 240);
-  --color-ocean-400: oklch(0.65 0.11 240);
-  --color-ocean-500: oklch(0.55 0.14 240);
-  --color-ocean-600: oklch(0.47 0.14 242);
-  --color-ocean-700: oklch(0.4 0.12 244);
-  --color-ocean-800: oklch(0.33 0.09 246);
-  --color-ocean-900: oklch(0.27 0.07 248);
-  --color-ocean-950: oklch(0.19 0.05 250);
+  --color-pulse-50: oklch(0.97 0.01 240);
+  --color-pulse-100: oklch(0.93 0.02 240);
+  --color-pulse-200: oklch(0.86 0.04 240);
+  --color-pulse-300: oklch(0.76 0.07 240);
+  --color-pulse-400: oklch(0.65 0.11 240);
+  --color-pulse-500: oklch(0.55 0.14 240);
+  --color-pulse-600: oklch(0.47 0.14 242);
+  --color-pulse-700: oklch(0.4 0.12 244);
+  --color-pulse-800: oklch(0.33 0.09 246);
+  --color-pulse-900: oklch(0.27 0.07 248);
+  --color-pulse-950: oklch(0.19 0.05 250);
 }

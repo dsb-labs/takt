@@ -55,7 +55,7 @@ const navigation = [
           class="px-4 py-2.5 text-sm font-medium"
           :class="
             active(item.to)
-              ? 'bg-ocean-50 text-ocean-800 dark:bg-ocean-950 dark:text-ocean-200'
+              ? 'bg-pulse-50 text-pulse-800 dark:bg-pulse-950 dark:text-pulse-200'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100'
           "
         >

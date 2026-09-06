@@ -20,7 +20,7 @@ defineProps<{ labels?: Record<string, string>; target: string }>();
         v-for="(value, key) in labels"
         :key="key"
         :to="{ path: target, query: { query: labelQuery(key, value) } }"
-        class="hover:border-ocean-300 hover:text-ocean-700 dark:hover:border-ocean-700 dark:hover:text-ocean-300 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+        class="hover:border-pulse-300 hover:text-pulse-700 dark:hover:border-pulse-700 dark:hover:text-pulse-300 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
         :title="`Show everything labelled ${key}=${value}`"
       >
         {{ key }}={{ value }}

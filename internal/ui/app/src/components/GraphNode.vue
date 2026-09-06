@@ -9,7 +9,7 @@ const props = defineProps<{ data: GraphNode }>();
 const router = useRouter();
 
 const accents: Record<GraphNode["kind"], string> = {
-  workload: "border-l-ocean-500",
+  workload: "border-l-pulse-500",
   secret: "border-l-amber-500",
   variable: "border-l-emerald-500",
   volume: "border-l-violet-500",
@@ -22,7 +22,7 @@ const stateDots: Record<string, string> = {
   pending: "bg-sky-500",
   failed: "bg-rose-500",
   stopped: "bg-slate-400",
-  completed: "bg-ocean-500",
+  completed: "bg-pulse-500",
   suspended: "bg-violet-500",
   terminating: "bg-slate-400",
 };

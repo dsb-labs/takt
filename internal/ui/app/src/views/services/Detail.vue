@@ -81,7 +81,7 @@ await service.suspense().catch(() => {});
               v-for="(value, key) in service.data.value.target.labels"
               :key="key"
               :to="{ path: '/', query: { query: labelQuery(key, value) } }"
-              class="hover:border-ocean-300 hover:text-ocean-700 dark:hover:border-ocean-700 dark:hover:text-ocean-300 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              class="hover:border-pulse-300 hover:text-pulse-700 dark:hover:border-pulse-700 dark:hover:text-pulse-300 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
               :title="`Show the workloads labelled ${key}=${value}`"
             >
               {{ key }}={{ value }}
@@ -126,7 +126,7 @@ await service.suspense().catch(() => {});
                   <td class="px-4 py-2.5 font-medium">
                     <RouterLink
                       :to="`/workloads/${backend.workload}`"
-                      class="text-ocean-700 dark:text-ocean-300 hover:underline"
+                      class="text-pulse-700 dark:text-pulse-300 hover:underline"
                     >
                       {{ backend.workload }}
                     </RouterLink>

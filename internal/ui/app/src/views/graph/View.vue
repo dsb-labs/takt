@@ -153,7 +153,7 @@ await Promise.all([
           <input
             v-model="hideUnconnected"
             type="checkbox"
-            class="accent-ocean-600"
+            class="accent-pulse-600"
           />
           Hide unconnected
         </label>

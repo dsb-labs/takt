@@ -203,7 +203,7 @@ onUnmounted(() => controller?.abort());
       <label
         class="flex items-center gap-1.5 text-slate-600 dark:text-slate-400"
       >
-        <input v-model="previous" type="checkbox" class="accent-ocean-600" />
+        <input v-model="previous" type="checkbox" class="accent-pulse-600" />
         Previous
       </label>
 
@@ -222,7 +222,7 @@ onUnmounted(() => controller?.abort());
             v-model="follow"
             type="checkbox"
             :disabled="followDisabled"
-            class="accent-ocean-600"
+            class="accent-pulse-600"
           />
           Follow
         </label>

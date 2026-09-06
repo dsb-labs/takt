@@ -37,7 +37,7 @@ await secrets.suspense().catch(() => {});
         <QueryInput v-model="filter" />
         <RouterLink
           to="/secrets/new"
-          class="bg-ocean-600 hover:bg-ocean-700 rounded-md px-3 py-1.5 text-sm font-medium text-white"
+          class="bg-pulse-600 hover:bg-pulse-700 rounded-md px-3 py-1.5 text-sm font-medium text-white"
         >
           Set a secret
         </RouterLink>
@@ -60,7 +60,7 @@ await secrets.suspense().catch(() => {});
         <td class="px-4 py-3 font-medium">
           <RouterLink
             :to="`/secrets/${secret.name}`"
-            class="text-ocean-700 dark:text-ocean-300 hover:underline"
+            class="text-pulse-700 dark:text-pulse-300 hover:underline"
           >
             {{ secret.name }}
           </RouterLink>

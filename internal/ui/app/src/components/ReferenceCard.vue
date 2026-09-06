@@ -48,7 +48,7 @@ const sort = useSort(() => props.refs, "name", {
               <RouterLink
                 v-if="referenceTarget(reference)"
                 :to="referenceTarget(reference)"
-                class="text-ocean-700 dark:text-ocean-300 hover:underline"
+                class="text-pulse-700 dark:text-pulse-300 hover:underline"
               >
                 {{ reference.name }}
               </RouterLink>
