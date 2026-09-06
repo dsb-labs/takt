@@ -183,14 +183,29 @@ func (s *VolumeService) Create(ctx context.Context, volume manifest.Volume) (Vol
 	}, nil
 }
 
-// materialise creates the volume's directory and applies the owner and mode it
+// materialise creates the volume's directory and applies the mode and owner it
 // asks for, leaving the default for whichever it leaves empty.
+//
+// The mode is applied first. Changing the mode of a directory another user owns
+// needs CAP_FOWNER, so a chmod after the chown fails for any owner that is not
+// the server, and the server holds the directory until both are applied.
 //
 // Assigning another user needs CAP_CHOWN, which the server does not otherwise
 // carry, so a refusal names the fix the way removing another user's files does.
 func (s *VolumeService) materialise(path, owner, mode string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return fmt.Errorf("failed to create volume directory: %w", err)
+	}
+
+	if mode != "" {
+		parsed, err := strconv.ParseUint(mode, 8, 32)
+		if err != nil {
+			return fmt.Errorf("%w: mode %q is not octal", ErrInvalidVolume, mode)
+		}
+
+		if err = os.Chmod(path, os.FileMode(parsed)); err != nil {
+			return fmt.Errorf("failed to set volume mode: %w", err)
+		}
 	}
 
 	if owner != "" {
@@ -205,17 +220,6 @@ func (s *VolumeService) materialise(path, owner, mode string) error {
 			}
 
 			return fmt.Errorf("failed to set volume owner: %w", err)
-		}
-	}
-
-	if mode != "" {
-		parsed, err := strconv.ParseUint(mode, 8, 32)
-		if err != nil {
-			return fmt.Errorf("%w: mode %q is not octal", ErrInvalidVolume, mode)
-		}
-
-		if err = os.Chmod(path, os.FileMode(parsed)); err != nil {
-			return fmt.Errorf("failed to set volume mode: %w", err)
 		}
 	}
 
