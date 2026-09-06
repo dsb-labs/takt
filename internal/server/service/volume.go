@@ -204,6 +204,14 @@ func (s *VolumeService) materialise(path, owner, mode string) error {
 		}
 
 		if err = os.Chmod(path, os.FileMode(parsed)); err != nil {
+			// Reached on an update: the directory already belongs to the user
+			// a previous apply assigned it to, and changing the mode of
+			// another user's directory needs the capability whatever the
+			// order.
+			if errors.Is(err, fs.ErrPermission) {
+				return fmt.Errorf("failed to set volume mode: %w: grant the server CAP_FOWNER to change the mode of a directory another user owns", err)
+			}
+
 			return fmt.Errorf("failed to set volume mode: %w", err)
 		}
 	}

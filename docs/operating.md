@@ -167,8 +167,10 @@ under `/var/lib/takt`. One consequence is worth knowing — under
 `NoNewPrivileges=yes` a workload cannot run a setuid binary.
 
 The unit grants the server `CAP_DAC_OVERRIDE`, so `takt volume delete` can remove
-files a container wrote as another user, and `CAP_CHOWN`, so a volume manifest can
-name another user as its owner. The grants do not reach the workloads. See
+files a container wrote as another user, `CAP_CHOWN`, so a volume manifest can
+name another user as its owner, and `CAP_FOWNER`, so `takt volume update` can
+change the mode of a directory it assigned away. The grants do not reach the
+workloads. See
 [Deleting a volume a container wrote](volumes.md#deleting-a-volume-a-container-wrote)
 and [Ownership](volumes.md#ownership).
 

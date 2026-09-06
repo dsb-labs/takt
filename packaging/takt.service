@@ -36,9 +36,11 @@ ReadWritePaths=/run/docker.sock
 
 # CAP_DAC_OVERRIDE lets the server delete volume files a container wrote as
 # another user. CAP_CHOWN lets it assign a volume's directory to the user a
-# volume manifest names. Both are dropped before an exec workload's command
-# runs, so no workload holds them.
-AmbientCapabilities=CAP_DAC_OVERRIDE CAP_CHOWN
+# volume manifest names. CAP_FOWNER lets it change the mode of a directory it
+# assigned away, which is what updating an owned volume's mode is. All three
+# are dropped before an exec workload's command runs, so no workload holds
+# them.
+AmbientCapabilities=CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
 
 [Install]
 WantedBy=multi-user.target
