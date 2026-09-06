@@ -21,16 +21,16 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/driver/docker"
-	"github.com/dsb-labs/orca/internal/server/driver/exec"
-	"github.com/dsb-labs/orca/internal/server/health"
-	"github.com/dsb-labs/orca/internal/server/port"
-	"github.com/dsb-labs/orca/internal/server/resolve"
-	"github.com/dsb-labs/orca/internal/server/service"
-	"github.com/dsb-labs/orca/internal/server/state"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/driver/docker"
+	"github.com/dsb-labs/takt/internal/server/driver/exec"
+	"github.com/dsb-labs/takt/internal/server/health"
+	"github.com/dsb-labs/takt/internal/server/port"
+	"github.com/dsb-labs/takt/internal/server/resolve"
+	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/internal/server/state"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestWorkloadService_Apply(t *testing.T) {
@@ -110,7 +110,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 			Name: "rejects a name the runtime could not represent",
 			Spec: containerSpec("BAD_NAME", "example/example:latest"),
 			// The CLI checks this, but a caller that skips the CLI must not be able
-			// to store a workload whose name breaks orca's own documented rules.
+			// to store a workload whose name breaks takt's own documented rules.
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
 			ExpectErr:  service.ErrInvalidSpec,
 		},
@@ -143,11 +143,11 @@ func TestWorkloadService_Apply(t *testing.T) {
 		},
 		{
 			// The CLI checks this, but a caller that skips the CLI must not be able
-			// to store a label key orca's own documented rules refuse.
-			Name: "rejects a label using the reserved orca. prefix",
+			// to store a label key takt's own documented rules refuse.
+			Name: "rejects a label using the reserved takt. prefix",
 			Spec: func() manifest.Spec {
 				spec := containerSpec("example", "example/example:latest")
-				spec.Labels = map[string]string{"orca.workload": "spoof"}
+				spec.Labels = map[string]string{"takt.workload": "spoof"}
 				return spec
 			}(),
 			SetupMocks: func(*MockDriver, *MockWorkloadRepository, *MockPortRepository) {},
@@ -432,7 +432,7 @@ func TestWorkloadService_DryRun(t *testing.T) {
 
 		// The stored specification holds the host port the workload was applied
 		// with, and the reported one holds no host port at all. That difference is
-		// orca's to settle rather than a change the operator made.
+		// takt's to settle rather than a change the operator made.
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		held := containerSpec("example", "example/example:latest")
@@ -582,7 +582,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 
 		volumes.EXPECT().Path(mock.Anything, "example-data").
-			Return("/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0", nil).Once()
+			Return("/var/lib/takt/volumes/cvhs0dq0kqj4c9r8m1a0", nil).Once()
 
 		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -594,7 +594,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			}
 
 			return len(stored.Volumes) == 1 &&
-				stored.Volumes[0].From == "/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0"
+				stored.Volumes[0].From == "/var/lib/takt/volumes/cvhs0dq0kqj4c9r8m1a0"
 		})).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
 			w.Version = 1
 
@@ -699,7 +699,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 		t.Parallel()
 
 		// An unconfigured server opens nothing. A host path reaches outside
-		// orca-managed state, so reaching one is an operator's decision to make.
+		// takt-managed state, so reaching one is an operator's decision to make.
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
 		pathSpec := containerSpec("example", "example/example:latest")
@@ -1032,7 +1032,7 @@ func TestWorkloadService_Get_State(t *testing.T) {
 				{ID: "container-one", Workload: "example", State: driver.StateTerminating},
 				{ID: "container-two", Workload: "example", State: driver.StateFailed, ExitCode: 137},
 			},
-			// The non-zero exit is a consequence of the teardown — orca stopped
+			// The non-zero exit is a consequence of the teardown — takt stopped
 			// it — rather than news in its own right.
 			Expected: state.Terminating,
 		},
@@ -1297,7 +1297,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		// Two applies racing each other can pick the same free port, and the unique
-		// constraint means one loses. Since orca chose the port, losing is its
+		// constraint means one loses. Since takt chose the port, losing is its
 		// problem to resolve rather than something to report to the caller.
 		var attempts int
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
@@ -1918,7 +1918,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		// The consumer is rehashed on the way out, the way a deleted secret rehashes
-		// what read it: what it was started against no longer describes what orca
+		// what read it: what it was started against no longer describes what takt
 		// holds.
 		repo.EXPECT().Get(mock.Anything, "api").
 			Return(database.Workload{ID: "api-id", Name: "api", Spec: consumerSpec, SpecHash: "hash-one"}, nil).Once()
@@ -2650,7 +2650,7 @@ func TestWorkloadService_Rehash(t *testing.T) {
 			}).Once()
 
 		// A force-deleted secret still moves the hash, so the workload stops claiming
-		// it is running against something orca holds.
+		// it is running against something takt holds.
 		changed, err := newTestSecretAwareService(t, d, repo, ports, secrets).Rehash(t.Context(), "example")
 		require.NoError(t, err)
 		assert.True(t, changed)
@@ -3577,7 +3577,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		_, _, err := svc.Apply(t.Context(), first)
 		require.NoError(t, err)
 
-		// A dynamic port that collides is orca's to resolve, so it is allocated again.
+		// A dynamic port that collides is takt's to resolve, so it is allocated again.
 		// A pinned one is the caller's decision, and quietly moving it would hand back
 		// a workload reachable somewhere other than where they asked for.
 		second := containerSpec("second", "example/example:latest")

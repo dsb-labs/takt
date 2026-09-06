@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/api"
-	"github.com/dsb-labs/orca/internal/server/reconciler"
+	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/reconciler"
 )
 
 func TestSystemAPI_GetHealth(t *testing.T) {
@@ -110,7 +110,7 @@ func TestSystemAPI_GetMetrics(t *testing.T) {
 		registry := prometheus.NewPedanticRegistry()
 
 		counter := prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "orca_test_total",
+			Name: "takt_test_total",
 			Help: "A counter the test registers.",
 		})
 		require.NoError(t, registry.Register(counter))
@@ -120,7 +120,7 @@ func TestSystemAPI_GetMetrics(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, resp.Code)
 		assert.True(t, strings.HasPrefix(resp.Header().Get("Content-Type"), "text/plain"))
-		assert.Contains(t, resp.Body.String(), "orca_test_total 1")
+		assert.Contains(t, resp.Body.String(), "takt_test_total 1")
 	})
 
 	t.Run("reports a gather failure rather than truncating", func(t *testing.T) {

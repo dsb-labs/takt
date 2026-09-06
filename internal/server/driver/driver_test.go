@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestNewWorkload(t *testing.T) {
@@ -21,7 +21,7 @@ func TestNewWorkload(t *testing.T) {
 			Name:      "example",
 			Container: &manifest.Container{Image: "example/example:latest"},
 			Volumes: []manifest.VolumeMount{
-				{Name: "example-data", From: "/var/lib/orca/volumes/abc", To: "/var/lib/example", ReadOnly: true},
+				{Name: "example-data", From: "/var/lib/takt/volumes/abc", To: "/var/lib/example", ReadOnly: true},
 				// Unresolved, so the server has not finished settling the
 				// workload. Mounting nothing would be worse than waiting.
 				{Name: "pending-data", To: "/var/lib/pending"},
@@ -33,7 +33,7 @@ func TestNewWorkload(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, []driver.Volume{
-			{Name: "example-data", Host: "/var/lib/orca/volumes/abc", Target: "/var/lib/example", ReadOnly: true},
+			{Name: "example-data", Host: "/var/lib/takt/volumes/abc", Target: "/var/lib/example", ReadOnly: true},
 		}, w.Volumes)
 	})
 

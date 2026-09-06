@@ -2,7 +2,7 @@
 
 ## Desired state and observed state
 
-orca stores what you asked for. What is actually running is observed from the runtime
+takt stores what you asked for. What is actually running is observed from the runtime
 when something asks, and the two are merged on read.
 
 Nothing about the running state is persisted, so nothing persisted can go stale
@@ -13,18 +13,18 @@ This is why ownership lives in the runtime rather than in the database. A contai
 carries labels naming its workload, the specification hash it was created from, and
 its version. An exec workload has a record in its own directory.
 
-Either way the runtime is the source of truth about what is running. orca stores no
+Either way the runtime is the source of truth about what is running. takt stores no
 identifier that could point at something gone.
 
-That cuts both ways. What a runtime reports is not something orca validated, so a name
+That cuts both ways. What a runtime reports is not something takt validated, so a name
 read back from a label or a record is treated as a value rather than as a path. The
-directories the exec runtime keeps are named for the identifier orca assigned, and a
+directories the exec runtime keeps are named for the identifier takt assigned, and a
 name is read from inside a record rather than from the directory holding it.
 
 One thing a driver reports is not running work: the attempt it keeps for its output.
 Replacing a workload means stopping it and starting it again, which would destroy the
 output of the attempt being replaced — so a driver keeps that attempt rather than
-removing it, and `orca workload logs --previous` reads it.
+removing it, and `takt workload logs --previous` reads it.
 
 Such an instance has ended and nothing will restart it, so it is reported as retained
 and left out of every decision about what to run. Counted as an instance it would read
@@ -103,16 +103,16 @@ expression and the time the last instance started, which the runtime already rep
 A container that has ended is left in place until the next occurrence replaces it, and
 a workload that has not run yet counts from when its specification was applied.
 
-Occurrences missed while the server was down are missed. The occurrence orca runs is
+Occurrences missed while the server was down are missed. The occurrence takt runs is
 the first after the last run, so a workload down for several does not run once for
 each. For a nightly job down a week, that is the difference between one run and seven.
 
-## orca owns restarts
+## takt owns restarts
 
 Neither runtime is asked to restart anything. Docker's restart policy is left unset and
-an exec process is not respawned by anything but orca.
+an exec process is not respawned by anything but takt.
 
-Restarting is therefore visible in the workload's reported state. It is paced by orca's
+Restarting is therefore visible in the workload's reported state. It is paced by takt's
 own backoff, which widens after each consecutive failure, so a workload that cannot
 start does not spin the daemon.
 
@@ -143,13 +143,13 @@ A suspended cron workload misses its occurrences. Starting it again counts the
 schedule from the start, so the first run after a resume is the next natural
 occurrence rather than the last one missed.
 
-## Health is orca's question
+## Health is takt's question
 
 Whether a workload is working is different from whether its runtime says it started. A
 process listening and answering errors looks healthy to Docker, and Docker's own health
 support reports a verdict without acting on it.
 
-orca performs the check itself, from the host, against the port the workload
+takt performs the check itself, from the host, against the port the workload
 publishes. An image carrying no shell can still be checked. A driver inherits the
 behaviour by publishing an address rather than implementing checks of its own.
 
@@ -197,7 +197,7 @@ workload that mounts it, and deleting that workload leaves it alone.
 The alternative is storage scoped to a workload, which reads as simpler until deleting
 a workload destroys data. Then every delete is a decision about data, and correcting a
 typo in a manifest is one too. Removing stored data is instead something asked for
-directly, and `orca volume delete` is the only thing that does it.
+directly, and `takt volume delete` is the only thing that does it.
 
 That is also why mounting a volume which does not exist is rejected rather than
 creating one. A mistyped name would otherwise become a second empty volume, which reads
@@ -207,21 +207,21 @@ Deleting a volume a workload mounts is refused unless forced, and a workload bei
 down still counts as mounting it. Its work runs until the reconciler has stopped it, so
 the data is still in use.
 
-## A volume is a directory orca owns
+## A volume is a directory takt owns
 
 A volume is a directory under the data directory, bind-mounted into a container and
 symlinked into an exec workload's working directory.
 
 Docker has named volumes, and using them for containers would work. But an exec process
-runs on the host and needs a real path, so orca has to own a directory whatever it does
+runs on the host and needs a real path, so takt has to own a directory whatever it does
 for containers. One mechanism means a volume means the same thing wherever it is
-mounted, and orca can say where a volume's data actually is.
+mounted, and takt can say where a volume's data actually is.
 
 The cost is that the Docker daemon has to share the filesystem, so a volume cannot be
 mounted into a container on a daemon reached over the network.
 
 An exec workload gets a symlink rather than a mount because mounting needs privileges
-orca does not have. It runs as an ordinary user, and a workload reads and writes through
+takt does not have. It runs as an ordinary user, and a workload reads and writes through
 a link perfectly well. The links are made fresh on every start, since stopping a
 workload removes the directory holding the last set — the link is disposable, and the
 volume it points at is not.
@@ -230,7 +230,7 @@ The mount path is written the same way for either runtime, so a workload moved b
 them keeps its manifest. Where it resolves to cannot be: an exec workload reaches its
 volume by the path taken as relative to the directory it runs in, because making the
 absolute path resolve there would mean giving the process a filesystem root of its own,
-which needs privileges orca has not got. Landlock restricts which paths a process may
+which needs privileges takt has not got. Landlock restricts which paths a process may
 reach, not what they resolve to, so it cannot stand in for that.
 
 The path a volume resolves to is part of the stored specification, so it is covered by
@@ -239,22 +239,22 @@ bound to where it was, the same way a reallocated port does.
 
 Nothing tells a workload where its volume is on the host. It does not need telling —
 the path in its manifest is the path that works — and an exec workload that knew would
-know it sits inside orca's data directory.
+know it sits inside takt's data directory.
 
-## Host ports are orca's to allocate
+## Host ports are takt's to allocate
 
-A container port that names no host port gets one from orca rather than from the
+A container port that names no host port gets one from takt rather than from the
 runtime. A workload's address is therefore known when it is applied rather than
 discovered afterwards, and a driver whose runtime has no allocator of its own inherits
 the behaviour.
 
 An exec workload names its own host port, because the process binds one directly and
-there is no mapping to make. orca records it so that no other workload is given it.
+there is no mapping to make. takt records it so that no other workload is given it.
 
 ## A workload's address is referenced, not written down
 
 Two workloads used to talk only through a host port an operator read back and pasted
-into a manifest — a number orca chose, and one it revises if the workload fails to
+into a manifest — a number takt chose, and one it revises if the workload fails to
 start on it. There was no way to write the dependency down.
 
 A reference writes it down. `${workload:name:port}` resolves to the address the named
@@ -309,11 +309,11 @@ back.
 
 A workload that reads no secret is hashed exactly as it would be if none of this
 existed. That is deliberate rather than incidental: any other choice would replace
-every running instance the first time an operator upgraded orca.
+every running instance the first time an operator upgraded takt.
 
 The revision is random rather than a counter. A counter would restart at one for a
 secret deleted and created again, so a workload would produce the hash it had for the
-value that is gone, and would keep running against a secret orca no longer holds.
+value that is gone, and would keep running against a secret takt no longer holds.
 
 ## A variable's value is hashed, and a secret's is not
 
@@ -367,21 +367,21 @@ Every other pull policy contributes nothing, so a workload that never asked for 
 of this is hashed exactly as it was before the policy existed — the same property the
 secret and variable contributions hold to, and for the same reason.
 
-## Registry credentials are docker's, not orca's
+## Registry credentials are docker's, not takt's
 
 A pull or a digest lookup against a private registry carries credentials resolved
 from the docker credential file — the `config.json` that `docker login` writes.
-There is no registry username or password in orca's own configuration, and no
-registry credential stored as an orca secret.
+There is no registry username or password in takt's own configuration, and no
+registry credential stored as an takt secret.
 
 Reusing docker's file means reusing what the operator already has. A host that can
 `docker pull` an image can run it as a workload, with no second place to keep the
 same login. It also carries the credential helpers the file can name: on many hosts
 the file holds no password at all, just a `credsStore` entry pointing at the OS
-keychain, and running the helper is something orca gets by reading the file the way
+keychain, and running the helper is something takt gets by reading the file the way
 docker does.
 
-Storing registry credentials as orca secrets was considered and rejected as
+Storing registry credentials as takt secrets was considered and rejected as
 circular — the secret subsystem would have to be up before the driver could pull,
 and it would put a secret-reading path inside a driver that has none. The file is
 read at pull time rather than cached, so a `docker login` on the host takes effect
@@ -399,7 +399,7 @@ the environment. Starting a workload is also the only path to a driver, so one c
 covers every way a workload comes to run.
 
 It happens ahead of the start rather than in its error path. A workload that fails to
-start gives up the host ports orca chose for it, because something outside orca may
+start gives up the host ports takt chose for it, because something outside takt may
 have taken one. A secret that cannot be resolved has nothing to do with ports, and
 moving a workload's address for that reason would be a change an operator could not
 account for.
@@ -411,14 +411,14 @@ boundary around it. Without one it reads the keyring, reads the database, reads 
 other workload's mounted plaintext, and writes to every volume. A container gets that
 boundary from the runtime. An exec process had none.
 
-Running workloads as separate users would be the conventional answer, and orca cannot
-take it: allocating users and changing to them needs privileges orca deliberately does
+Running workloads as separate users would be the conventional answer, and takt cannot
+take it: allocating users and changing to them needs privileges takt deliberately does
 not ask for. Landlock needs none. An unprivileged process applies a ruleset to itself,
 and the kernel enforces it from then on.
 
-It is applied by orca executing itself. A ruleset has to land after the fork, so it
+It is applied by takt executing itself. A ruleset has to land after the fork, so it
 restricts the workload rather than the server, and before the command runs, so nothing
-runs unconfined. Go exposes no hook between the two, so the driver starts orca, that
+runs unconfined. Go exposes no hook between the two, so the driver starts takt, that
 process confines itself, and it then becomes the command. Executing a command keeps the
 process identifier, so the record the driver wrote still describes the running workload
 and adoption is unaffected.
@@ -451,7 +451,7 @@ it, rather than being a second instrumentation pass later.
 document. A separate metrics port would let a scraper reach the server while the
 control API stayed on loopback, which is a real pattern — it is rejected because
 it splits the surface in two and puts half of it outside the one document that
-describes everything orca serves. Anyone wanting the split can take it from the
+describes everything takt serves. Anyone wanting the split can take it from the
 reverse proxy they already need. The endpoints carry no authentication for the
 same reason the rest of the API carries none: gating metrics behind something the
 control endpoints lack would be theatre.
@@ -464,5 +464,5 @@ that has not completed a pass reports not ready rather than guessing.
 
 The configuration is one key: where to send traces and logs over OTLP. Everything
 finer-grained belongs to the standard `OTEL_*` environment variables the SDK
-already reads. Nothing in orca's configuration describes the consumers of the
+already reads. Nothing in takt's configuration describes the consumers of the
 telemetry, because which dashboard reads a scrape is not the server's decision.

@@ -7,7 +7,7 @@
 // through a shell, so nothing has to decide how to split it and no shell is involved
 // unless the command names one.
 //
-// A process outlives the server that started it. Orca releases it on shutdown and
+// A process outlives the server that started it. Takt releases it on shutdown and
 // re-adopts it on the next start, which is what makes restarting the server a
 // different thing from restarting the workloads it runs.
 package exec
@@ -29,8 +29,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // Name is how this driver identifies itself, and is what the server maps a workload's
@@ -98,7 +98,7 @@ var signals = map[string]syscall.Signal{
 	string(manifest.SignalUSR2): syscall.SIGUSR2,
 }
 
-// The identifiers orca assigns are xid values: twenty lowercase alphanumeric
+// The identifiers takt assigns are xid values: twenty lowercase alphanumeric
 // characters. Checked rather than trusted, because this driver removes directories and
 // should not build a path from a value it has not looked at.
 var idPattern = regexp.MustCompile(`^[0-9a-v]{20}$`)
@@ -281,7 +281,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", fmt.Errorf("failed to open workload output: %w", pathless(err))
 	}
 
-	// Orca itself rather than the workload's command. The process confines itself and
+	// Takt itself rather than the workload's command. The process confines itself and
 	// then becomes the command, which is the only point a ruleset can be applied: after
 	// the fork, so it restricts the workload rather than the server, and before the
 	// exec, so the command never runs unconfined.
@@ -289,7 +289,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	if err != nil {
 		_ = output.Close()
 
-		return "", fmt.Errorf("failed to locate the orca binary: %w", err)
+		return "", fmt.Errorf("failed to locate the takt binary: %w", err)
 	}
 
 	limits, err := d.limit(w)
@@ -417,7 +417,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 //
 // Waiting is what makes the exit code available: only the parent can collect it. A
 // process adopted from an earlier server has no supervisor, so an exit that happens
-// while orca is down leaves no code to record — Observe reports that as a failure,
+// while takt is down leaves no code to record — Observe reports that as a failure,
 // since a job that may not have finished is better run again than assumed complete.
 func (d *Driver) supervise(ctx context.Context, workload string, instance int, process *supervised) {
 	key := supKey{workload: workload, instance: instance}
@@ -855,9 +855,9 @@ func (d *Driver) Signal(_ context.Context, id, workload, signal string) error {
 // The volume ends up at the mount path taken as relative to that directory, so a
 // workload reaches it by the relative path rather than by the absolute one its manifest
 // names. Resolving the absolute path there would mean confining the process to its own
-// directory, which needs privileges orca does not have.
+// directory, which needs privileges takt does not have.
 //
-// A symlink rather than a bind mount, because mounting requires privileges orca does
+// A symlink rather than a bind mount, because mounting requires privileges takt does
 // not have: it runs as an ordinary user, and a workload reads and writes through a link
 // perfectly well. The links are made fresh on every start, since stopping the workload
 // removed the directory holding the last set. The link is the disposable part — the
@@ -1287,7 +1287,7 @@ func (d *Driver) Supervises(workload string) bool {
 // dir returns the directory holding a workload beneath the given tree.
 //
 // Directories are named for the workload's identifier rather than its name. An
-// identifier is orca's own, where a name is the operator's handle and reaches a driver
+// identifier is takt's own, where a name is the operator's handle and reaches a driver
 // from places a manifest never validated — an orphan is named by a label on the work
 // found running. Keying on the identifier means no name is ever a path component, so
 // none has to be safe as one.

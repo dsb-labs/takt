@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dsb-labs/orca/internal/ui"
+	"github.com/dsb-labs/takt/internal/ui"
 )
 
 func TestNewHandler(t *testing.T) {
@@ -18,7 +18,7 @@ func TestNewHandler(t *testing.T) {
 		"index.html":         {Data: []byte("<html>index</html>")},
 		"assets/app.abc.js":  {Data: []byte("js")},
 		"assets/app.abc.css": {Data: []byte("css")},
-		"orca.svg":           {Data: []byte("svg")},
+		"takt.svg":           {Data: []byte("svg")},
 	}
 
 	tt := []struct {
@@ -64,7 +64,7 @@ func TestNewHandler(t *testing.T) {
 		{
 			Name:           "unhashed files are served without caching headers",
 			Files:          bundle,
-			Path:           "/orca.svg",
+			Path:           "/takt.svg",
 			ExpectedStatus: http.StatusOK,
 			ExpectedBody:   "svg",
 		},

@@ -18,7 +18,7 @@ func Command() *cobra.Command {
 		Short:  "Put a node back from a backup archive",
 		Hidden: true,
 		RunE: func(*cobra.Command, []string) error {
-			return errors.New("the orca server only runs on linux")
+			return errors.New("the takt server only runs on linux")
 		},
 	}
 }

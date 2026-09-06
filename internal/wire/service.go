@@ -1,14 +1,14 @@
 package wire
 
 import (
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // ToService maps a wire service specification onto the canonical shape.
 //
 // The defaults are resolved by the canonical package before the service is
-// returned, so a service reaching orca over HTTP means what the same service
+// returned, so a service reaching takt over HTTP means what the same service
 // written as a manifest file means.
 func ToService(spec api.ServiceSpec) manifest.Service {
 	out := manifest.Service{

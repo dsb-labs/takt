@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/wire"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/wire"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 type (

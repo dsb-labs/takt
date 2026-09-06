@@ -1,8 +1,8 @@
-// Package secret provides the encryption orca stores a secret's value under.
+// Package secret provides the encryption takt stores a secret's value under.
 //
 // A value is sealed on its way into the database and opened only to hand it to a
 // workload that is starting. Nothing else opens one: a secret is not readable back
-// through the API, so the ciphertext in the database is the only copy orca keeps.
+// through the API, so the ciphertext in the database is the only copy takt keeps.
 package secret
 
 import (
@@ -35,7 +35,7 @@ const (
 	// What the file key is expanded with before it becomes the encryption key. It
 	// names this use of the key, so the same file can serve another purpose later
 	// without one use weakening the other.
-	keyInfo = "orca secret encryption v1"
+	keyInfo = "takt secret encryption v1"
 )
 
 // The Cipher type seals and opens a secret's value.

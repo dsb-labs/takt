@@ -5,7 +5,7 @@ referenced from a manifest by name, and substituted into a workload's environmen
 it starts.
 
 ```sh
-orca variable set db-host db.internal
+takt variable set db-host db.internal
 ```
 
 ```yaml
@@ -49,10 +49,10 @@ you would want to read back when working out how something is configured. Use a
 protected, so a value that would be damaging to report does not belong in one. See
 [Exposure](operating.md#exposure).
 
-## What orca guarantees
+## What takt guarantees
 
 - **The value reaches the workload.** Resolution happens as the workload starts, so a
-  workload always starts against what orca holds now.
+  workload always starts against what takt holds now.
 - **The reference is what is stored.** A workload's stored specification holds the
   reference text, not the resolved value, so changing a variable reaches the workloads
   reading it rather than only the ones applied afterwards.
@@ -64,7 +64,7 @@ protected, so a value that would be damaging to report does not belong in one. S
 The value is an argument:
 
 ```sh
-orca variable set log-level debug
+takt variable set log-level debug
 ```
 
 This is where a variable differs from a secret, which cannot take one. Arguments
@@ -74,8 +74,8 @@ history — exactly what a secret has to avoid, and what a variable has no reaso
 A file or standard input works for a value too long or too awkward to type:
 
 ```sh
-orca variable set motd --from-file ./motd.txt
-printf %s debug | orca variable set log-level
+takt variable set motd --from-file ./motd.txt
+printf %s debug | takt variable set log-level
 ```
 
 A value read either way is taken exactly as given, including a trailing newline.
@@ -88,7 +88,7 @@ rather than none.
 Labels are attached with `--label`, repeatable:
 
 ```sh
-orca variable set log-level debug -l app=web -l team=platform
+takt variable set log-level debug -l app=web -l team=platform
 ```
 
 They replace rather than merge, so setting a value without `--label` removes the ones
@@ -102,8 +102,8 @@ reading it. The reconciler then replaces their instances, and the new value reac
 each one as it starts.
 
 ```sh
-orca variable set log-level info
-orca workload get example | jq '.Version'
+takt variable set log-level info
+takt workload get example | jq '.Version'
 ```
 
 Setting a variable to the value it already holds does nothing, so nothing is
@@ -121,7 +121,7 @@ with the same value correctly leaves the workloads reading it alone.
 A variable a workload reads is refused, and the message names the workloads:
 
 ```sh
-orca variable delete log-level
+takt variable delete log-level
 # Error: failed to delete variable: variable is in use: read by example
 ```
 

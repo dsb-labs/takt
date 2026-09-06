@@ -1,11 +1,11 @@
-// Package loadtest drives a running orca server hard enough to find out what breaks.
+// Package loadtest drives a running takt server hard enough to find out what breaks.
 //
 // A scenario describes the shape of a fleet rather than the content of any workload
 // in it. What matters to a measurement is that eighty workloads exist, that a third
 // publish an allocated port and that a quarter mount a secret — not what the eighty
 // are running. The workload body is therefore the package's own, and it is trivial
 // and uniform: a scenario that could name an image would eventually name a large one,
-// and the run would measure the daemon's network rather than orca.
+// and the run would measure the daemon's network rather than takt.
 //
 // Every proportion in a scenario names a subsystem it stresses, so a scenario can be
 // read to see what it covers. That is the property a file full of manifests could not
@@ -56,7 +56,7 @@ type (
 		Containers int `toml:"containers"`
 		// How many exec workloads to apply.
 		Exec int `toml:"exec"`
-		// The proportion publishing a port orca allocates, which is what puts the
+		// The proportion publishing a port takt allocates, which is what puts the
 		// allocator under contention.
 		DynamicPorts float64 `toml:"dynamic-ports"`
 		// The proportion publishing a port the specification pins. A pinned port
@@ -88,7 +88,7 @@ type (
 		// another and redeploying a reader when the address it read moves.
 		//
 		// Only a container publishing a port can be referenced, because the
-		// address is the host port orca published on the workload's behalf. A
+		// address is the host port takt published on the workload's behalf. A
 		// scenario asking for this without ports has nothing to point at.
 		References float64 `toml:"references"`
 		// The proportion running three instances rather than one, which is what
@@ -242,7 +242,7 @@ func (s Scenario) readable() error {
 		return fmt.Errorf("%w: get-service needs at least one service", ErrInvalidScenario)
 	}
 
-	// An address is the host port orca published for a container, so a fleet with
+	// An address is the host port takt published for a container, so a fleet with
 	// nothing publishing one has nothing to reference. The apply would be refused
 	// rather than producing a workload that cannot start.
 	if s.Fleet.References > 0 {

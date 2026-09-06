@@ -1,10 +1,10 @@
 // Package wire maps between the specification the HTTP API speaks and the canonical
-// one the rest of orca reasons about.
+// one the rest of takt reasons about.
 //
 // It exists so that the generated wire types stay inside the two packages that have
 // business with them: the server's HTTP API and the client. Everything else — the
 // service, the drivers, the reconciler, the database — holds a manifest.Spec, which
-// is the shape orca stores, hashes and validates.
+// is the shape takt stores, hashes and validates.
 //
 // The package sits beside the generated types rather than inside either caller
 // because both directions are needed by both of them. The server returns a
@@ -15,8 +15,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // ToSpec maps a wire specification onto the canonical shape.
@@ -26,11 +26,11 @@ import (
 // held to, rather than each side growing its own.
 //
 // The defaults are resolved by the canonical package before the specification is
-// returned, so a workload reaching orca over HTTP means what the same workload
+// returned, so a workload reaching takt over HTTP means what the same workload
 // written as a manifest file means.
 //
 // A duration that does not parse is an error. The wire format spells one as a string,
-// so this is the only place that reads it, and a specification carrying one orca
+// so this is the only place that reads it, and a specification carrying one takt
 // cannot understand is not a specification it can run.
 func ToSpec(spec api.WorkloadSpec) (manifest.Spec, error) {
 	out := manifest.Spec{

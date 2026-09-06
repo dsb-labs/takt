@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 // Command returns the "secret get" command used to read a single secret.
@@ -18,7 +18,7 @@ func Command() *cobra.Command {
 		Short: "Get a single secret",
 		Long: "Get a single secret, with the workloads reading it.\n\n" +
 			"The value is not part of the output. Nothing reads a secret back out of\n" +
-			"orca: once set, the only thing that sees the value is a workload being\n" +
+			"takt: once set, the only thing that sees the value is a workload being\n" +
 			"started. What is reported is the revision, which changes whenever the value\n" +
 			"changes, so a rotation can be confirmed without the value being shown.",
 		Args: cobra.ExactArgs(1),

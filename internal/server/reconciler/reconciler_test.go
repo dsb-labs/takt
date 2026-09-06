@@ -17,13 +17,13 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/driver/docker"
-	"github.com/dsb-labs/orca/internal/server/health"
-	"github.com/dsb-labs/orca/internal/server/mount"
-	"github.com/dsb-labs/orca/internal/server/reconciler"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/driver/docker"
+	"github.com/dsb-labs/takt/internal/server/health"
+	"github.com/dsb-labs/takt/internal/server/mount"
+	"github.com/dsb-labs/takt/internal/server/reconciler"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestReconciler_Run(t *testing.T) {
@@ -619,7 +619,7 @@ func TestReconciler_Run_RegistersChecks(t *testing.T) {
 		"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
 	}, nil)
 
-	// The address is resolved from the host port orca allocated, and probed over
+	// The address is resolved from the host port takt allocated, and probed over
 	// loopback so the check never leaves the host.
 	registered := make(chan health.Check, 1)
 	checker.EXPECT().Set("example", 0, mock.Anything).
@@ -3203,7 +3203,7 @@ func TestReconciler_Metrics(t *testing.T) {
 		cancel()
 		require.NoError(t, <-done)
 
-		recorded := metricByName(t, reader, "orca.reconcile.passes")
+		recorded := metricByName(t, reader, "takt.reconcile.passes")
 
 		sum, ok := recorded.Data.(metricdata.Sum[int64])
 		require.True(t, ok)
@@ -3259,7 +3259,7 @@ func TestReconciler_Metrics(t *testing.T) {
 		cancel()
 		require.NoError(t, <-done)
 
-		recorded := metricByName(t, reader, "orca.workloads")
+		recorded := metricByName(t, reader, "takt.workloads")
 
 		gauge, ok := recorded.Data.(metricdata.Gauge[int64])
 		require.True(t, ok)

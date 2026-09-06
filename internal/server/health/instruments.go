@@ -3,7 +3,7 @@ package health
 import (
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/dsb-labs/orca/internal/server/telemetry"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
 )
 
 type (
@@ -18,7 +18,7 @@ type (
 // records nothing.
 func newInstruments(meter metric.Meter) instruments {
 	return instruments{
-		duration: telemetry.Histogram(meter, "orca.health.check.duration",
+		duration: telemetry.Histogram(meter, "takt.health.check.duration",
 			"How long each health probe took.", "s"),
 	}
 }

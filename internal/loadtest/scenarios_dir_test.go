@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/loadtest"
+	"github.com/dsb-labs/takt/internal/loadtest"
 )
 
 // TestShippedScenariosParse pins that every scenario in the repository's

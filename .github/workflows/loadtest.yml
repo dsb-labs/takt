@@ -49,8 +49,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build orca
-        run: go build -o orca .
+      - name: Build takt
+        run: go build -o takt .
 
       # Started in the background rather than as a service container, because the
       # load test drives the build under test. A released image would measure
@@ -63,7 +63,7 @@ jobs:
       - name: Start the server
         run: |
           make dev > server.log 2>&1 &
-          ./orca admin health --wait 30s
+          ./takt admin health --wait 30s
 
       # The smoke scenario, which is a few of every feature and takes seconds. The
       # larger scenarios are for running by hand: they measure how fast a machine is
@@ -74,7 +74,7 @@ jobs:
       # disk after teardown. That check is the only one that sees a leaked mount
       # directory, and it needs the server's own host.
       - name: Run the smoke load test
-        run: ./orca dev loadtest scenarios/smoke.toml --data-dir "${{ github.workspace }}/data" > report.json
+        run: ./takt dev loadtest scenarios/smoke.toml --data-dir "${{ github.workspace }}/data" > report.json
 
       - name: Report
         if: always()

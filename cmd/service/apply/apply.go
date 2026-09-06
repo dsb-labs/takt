@@ -8,12 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/pkg/client"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // Command returns the "service apply" command used to submit a service manifest to
-// the orca server.
+// the takt server.
 func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply <manifest>",

@@ -7,7 +7,7 @@ package port_test
 import (
 	"context"
 
-	"github.com/dsb-labs/orca/internal/server/port"
+	"github.com/dsb-labs/takt/internal/server/port"
 	mock "github.com/stretchr/testify/mock"
 )
 

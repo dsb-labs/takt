@@ -1,4 +1,4 @@
-// Package manifest provides parsing and validation of orca resource manifests.
+// Package manifest provides parsing and validation of takt resource manifests.
 //
 // A manifest is the YAML file an operator writes to describe a resource. Parsing
 // it is a client-side concern: it produces the value the client submits, so the
@@ -34,14 +34,14 @@ const (
 	// than any sane manifest needs and small enough that the stored labels the
 	// list query filter scans stay bounded.
 	maxLabels = 32
-	// maxLabelKeyLength is the cap every other name in orca is held to.
+	// maxLabelKeyLength is the cap every other name in takt is held to.
 	maxLabelKeyLength = 63
 	// maxLabelValueLength is counted in bytes, because the limit protects what
 	// stores and displays the value rather than how many characters it reads
 	// as. Generous enough for a URL or a one-line description.
 	maxLabelValueLength = 256
 	// reservedLabelPrefix marks the keys the docker driver writes for itself.
-	reservedLabelPrefix = "orca."
+	reservedLabelPrefix = "takt."
 )
 
 // validateHeader reports whether a manifest's version and name are usable, which
@@ -70,7 +70,7 @@ func validateHeader(v, name string) error {
 	return nil
 }
 
-// ValidateLabels reports whether the labels are ones orca will attach.
+// ValidateLabels reports whether the labels are ones takt will attach.
 //
 // Keys are held to the shape operators arrive with rather than to the workload
 // name pattern, so app.kubernetes.io/name passes. Values are freer still — any
@@ -78,7 +78,7 @@ func validateHeader(v, name string) error {
 // list query filter — but control characters are refused because the value
 // reaches container metadata and terminal output.
 //
-// The orca. prefix is refused for feedback rather than safety. The docker driver
+// The takt. prefix is refused for feedback rather than safety. The docker driver
 // writes its own labels after copying these, so a spoofed key could never stick —
 // but silently overwriting an operator's value is worse than telling them no.
 //
@@ -95,7 +95,7 @@ func ValidateLabels(labels map[string]string) error {
 	// can be anything up to the request body limit, so it is never echoed.
 	for _, key := range slices.Sorted(maps.Keys(labels)) {
 		if strings.HasPrefix(key, reservedLabelPrefix) {
-			return fmt.Errorf("invalid labels: key %q uses the %q prefix, which is reserved for the labels orca writes itself",
+			return fmt.Errorf("invalid labels: key %q uses the %q prefix, which is reserved for the labels takt writes itself",
 				key, reservedLabelPrefix)
 		}
 
@@ -122,7 +122,7 @@ func ValidateLabels(labels map[string]string) error {
 	return nil
 }
 
-// validProtocol reports whether a port names a protocol orca can publish it on.
+// validProtocol reports whether a port names a protocol takt can publish it on.
 func validProtocol(protocol Protocol) error {
 	switch protocol {
 	case ProtocolTCP, ProtocolUDP:

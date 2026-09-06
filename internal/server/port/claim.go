@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 var (
@@ -101,7 +101,7 @@ func NewClaimer(config ClaimerConfig) *Claimer {
 }
 
 // Pinned reports whether any mapping names a host port explicitly, which decides
-// whether a claim collision is the caller's problem or orca's to retry.
+// whether a claim collision is the caller's problem or takt's to retry.
 func Pinned(mappings []manifest.Port) bool {
 	for _, mapping := range mappings {
 		if mapping.From != 0 {
@@ -303,7 +303,7 @@ func (c *Claimer) allocate(held map[key]Claim, taken map[Protocol][]int, mapping
 		host, err := c.allocator.Allocate(protocols, taken)
 		if err != nil {
 			if errors.Is(err, ErrRangeExhausted) {
-				// Every port orca may allocate is in use. The request was valid and
+				// Every port takt may allocate is in use. The request was valid and
 				// will become servable when a workload is deleted or the range
 				// widened, so it is reported as a capacity problem rather than a
 				// fault or a bad request.
@@ -332,7 +332,7 @@ func (c *Claimer) resolve(
 ) (Claim, error) {
 	protocol := protocolOf(mapping)
 
-	// A pinned host port is a decision orca must not quietly override, so it is
+	// A pinned host port is a decision takt must not quietly override, so it is
 	// used as given once nothing else holds it.
 	if mapping.From != 0 {
 		holder, isHeld, err := c.ports.HolderOf(ctx, mapping.From, string(protocol))

@@ -4,13 +4,13 @@
 // The derivation lives in its own package because two tiers perform it: the
 // workload service reports a state to the API, and the reconciler counts states
 // for its metrics. Owned here rather than taken from the wire format, because a
-// state is something orca establishes rather than something a caller submits. The
+// state is something takt establishes rather than something a caller submits. The
 // HTTP API maps it onto the state it publishes, as it does every other field.
 package state
 
 import (
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // The Workload type names what a workload is doing overall, derived from the

@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/middleware"
+	"github.com/dsb-labs/takt/internal/server/middleware"
 )
 
 // TestStream_LetsAHandlerClearTheWriteDeadline covers what the outermost middleware

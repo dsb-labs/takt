@@ -1,4 +1,4 @@
-# Upgrading orca
+# Upgrading takt
 
 An upgrade replaces the server with a newer one. This page says what that does to
 the database and to the workloads, and what going back takes. The short version: the
@@ -9,7 +9,7 @@ backup rather than a downgrade.
 
 1. Stop the server.
 2. Replace the binary with the new one. For a package install, install the new
-   package — your `/etc/orca/config.toml` is kept.
+   package — your `/etc/takt/config.toml` is kept.
 3. Start the server.
 
 Workloads keep running through all three steps. A container keeps running when the
@@ -18,7 +18,7 @@ rather than duplicating them. See
 [Restarting the server](operating.md#restarting-the-server).
 
 One caveat from that page applies here. An exec workload that ends while the server
-is down leaves no exit code, and orca reports it as a failure. Under
+is down leaves no exit code, and takt reports it as a failure. Under
 `restart: on-failure` such a job runs again after the upgrade.
 
 ## The database
@@ -32,7 +32,7 @@ nothing.
 
 **An upgrade does not restart your workloads unless the release notes say it does.**
 
-The reason is in how orca decides to replace anything. A running instance is
+The reason is in how takt decides to replace anything. A running instance is
 replaced when the hash of its workload's resolved specification changes, and only
 then. See [Replacing rather than mutating](design.md#replacing-rather-than-mutating).
 An upgrade therefore redeploys the node only if the new binary computes different
@@ -64,7 +64,7 @@ does. They exist for development.
 The rollback mechanism is a backup. Take one before the upgrade:
 
 ```sh
-orca admin backup /backups/pre-upgrade.zip
+takt admin backup /backups/pre-upgrade.zip
 ```
 
 To go back: stop the server, restore the backup, and start the older binary. The

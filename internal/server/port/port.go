@@ -2,7 +2,7 @@
 // workload's ports on the ones it is reached at.
 //
 // Allocation lives above the driver boundary rather than inside a driver. A host
-// port that orca chose is a decision it can record, report and keep stable, which is
+// port that takt chose is a decision it can record, report and keep stable, which is
 // what makes it usable as an address. Leaving the choice to the runtime would mean
 // only discovering the address afterwards, and would have to be reimplemented by
 // every driver whose runtime has no allocator of its own.
@@ -23,12 +23,12 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/dsb-labs/orca/internal/server/telemetry"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
 )
 
 // The name this package's instruments are recorded under, which describes the code
 // declaring them rather than whatever assembles the server.
-const scope = "github.com/dsb-labs/orca/internal/server/port"
+const scope = "github.com/dsb-labs/takt/internal/server/port"
 
 var (
 	// ErrRangeExhausted is returned when no port in the configured range is free.
@@ -78,7 +78,7 @@ const (
 	// DefaultMax is the highest port allocated when none is configured.
 	//
 	// The default range sits below the ephemeral ports the kernel and docker hand
-	// out for themselves, so orca's allocations don't collide with a port the
+	// out for themselves, so takt's allocations don't collide with a port the
 	// system was about to use for something else.
 	DefaultMax = 32000
 )
@@ -119,7 +119,7 @@ func New(config Config) *Allocator {
 // Returns ErrRangeExhausted when nothing in the range is available.
 //
 // A port that is free here can still be taken by the time a runtime binds it, since
-// nothing outside orca is holding it in the meantime. The check makes that race
+// nothing outside takt is holding it in the meantime. The check makes that race
 // unlikely rather than impossible, and the caller is expected to cope with a bind
 // that fails anyway.
 func (a *Allocator) Allocate(protocols []Protocol, taken map[Protocol][]int) (int, error) {
@@ -146,7 +146,7 @@ func (a *Allocator) Allocate(protocols []Protocol, taken map[Protocol][]int) (in
 }
 
 // usable reports whether a candidate port is free on every protocol asked for, both
-// as far as orca's own allocations go and on the host itself.
+// as far as takt's own allocations go and on the host itself.
 func usable(protocols []Protocol, claimed map[Protocol]map[int]struct{}, candidate int) bool {
 	for _, protocol := range protocols {
 		if _, ok := claimed[protocol][candidate]; ok {
@@ -165,7 +165,7 @@ func usable(protocols []Protocol, claimed map[Protocol]map[int]struct{}, candida
 // port over the given protocol.
 //
 // The check is a real bind rather than a lookup, because that is the only thing that
-// accounts for every listener: processes orca knows nothing about, containers other
+// accounts for every listener: processes takt knows nothing about, containers other
 // tooling started, and sockets held by the system. The port is released immediately,
 // so this establishes that the port was free a moment ago rather than reserving it.
 //

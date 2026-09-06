@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/loadtest"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/loadtest"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // TestBuild_Valid is the test that matters most here. A fleet the server refuses is a

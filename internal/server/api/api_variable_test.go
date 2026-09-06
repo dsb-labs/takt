@@ -16,9 +16,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	generated "github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/server/api"
-	"github.com/dsb-labs/orca/internal/server/service"
+	generated "github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/service"
 )
 
 func TestVariableAPI_SetVariable(t *testing.T) {
@@ -69,7 +69,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			ExpectStatus: http.StatusCreated,
 		},
 		{
-			Name:         "rejects a name orca would not accept",
+			Name:         "rejects a name takt would not accept",
 			Target:       "/api/v1/variables/LOG_LEVEL",
 			Body:         generated.VariableSpec{Value: "debug"},
 			ExpectStatus: http.StatusBadRequest,
@@ -312,7 +312,7 @@ func TestVariableAPI_HidesInternalFailures(t *testing.T) {
 	svc := NewMockVariableService(t)
 
 	svc.EXPECT().Get(mock.Anything, "log-level").
-		Return(service.Variable{}, errors.New("open /var/lib/orca/state.db: permission denied")).Once()
+		Return(service.Variable{}, errors.New("open /var/lib/takt/state.db: permission denied")).Once()
 
 	resp := doVariable(t, svc, http.MethodGet, "/api/v1/variables/log-level", nil)
 	require.Equal(t, http.StatusInternalServerError, resp.Code)

@@ -1,4 +1,4 @@
-// Package client provides a Go client for the orca server's HTTP API.
+// Package client provides a Go client for the takt server's HTTP API.
 //
 // The transport is generated from the OpenAPI document, so the wire format has a
 // single description. This package wraps it to present canonical domain types and
@@ -15,7 +15,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/generated/api"
 )
 
 var (
@@ -65,7 +65,7 @@ type (
 		caCertificate string
 	}
 
-	// The Client type talks to an orca server over HTTP.
+	// The Client type talks to an takt server over HTTP.
 	Client struct {
 		api *api.ClientWithResponses
 		// The same server, reached without a request timeout, for the one call that
@@ -95,7 +95,7 @@ func WithCACertificate(path string) Option {
 	return func(c *config) { c.caCertificate = path }
 }
 
-// New returns a Client that targets the orca server at the given address.
+// New returns a Client that targets the takt server at the given address.
 //
 // An invalid address or an unusable certificate authority file is rejected here
 // so that callers see the problem at construction time rather than on their

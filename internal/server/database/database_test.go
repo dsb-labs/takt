@@ -23,7 +23,7 @@ import (
 )
 
 // TestOpen_ConcurrentWrites covers the pragmas Open sets. SQLite permits one writer
-// at a time, and orca has several — the API accepting applies while the reconciler
+// at a time, and takt has several — the API accepting applies while the reconciler
 // finishes deletions — so without a busy timeout a concurrent write fails outright
 // rather than waiting its turn. A load test found this the hard way.
 func TestOpen_ConcurrentWrites(t *testing.T) {

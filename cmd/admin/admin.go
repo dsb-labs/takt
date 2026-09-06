@@ -5,10 +5,10 @@ package admin
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/cmd/admin/backup"
-	"github.com/dsb-labs/orca/cmd/admin/health"
-	"github.com/dsb-labs/orca/cmd/admin/rekey"
-	"github.com/dsb-labs/orca/cmd/admin/restore"
+	"github.com/dsb-labs/takt/cmd/admin/backup"
+	"github.com/dsb-labs/takt/cmd/admin/health"
+	"github.com/dsb-labs/takt/cmd/admin/rekey"
+	"github.com/dsb-labs/takt/cmd/admin/restore"
 )
 
 // Command returns the "admin" command, which does nothing on its own and holds the
@@ -18,7 +18,7 @@ func Command() *cobra.Command {
 		Use:   "admin",
 		Short: "Operate on the node itself",
 		Long: "Operate on the node itself.\n\n" +
-			"These commands act on the state orca keeps rather than on the workloads\n" +
+			"These commands act on the state takt keeps rather than on the workloads\n" +
 			"it runs. What they touch is shared by every workload on the node, so a\n" +
 			"maintenance window is usually the right time for them.",
 	}

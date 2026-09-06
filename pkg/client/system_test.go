@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 func TestClient_Health(t *testing.T) {
@@ -121,7 +121,7 @@ func TestClient_Metrics(t *testing.T) {
 			assert.Equal(t, "/api/v1/metrics", r.URL.Path)
 
 			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-			_, _ = w.Write([]byte("orca_reconcile_passes_total{outcome=\"ok\"} 3\n"))
+			_, _ = w.Write([]byte("takt_reconcile_passes_total{outcome=\"ok\"} 3\n"))
 		}))
 		t.Cleanup(server.Close)
 
@@ -130,7 +130,7 @@ func TestClient_Metrics(t *testing.T) {
 
 		var out bytes.Buffer
 		require.NoError(t, c.Metrics(t.Context(), &out))
-		assert.Contains(t, out.String(), "orca_reconcile_passes_total")
+		assert.Contains(t, out.String(), "takt_reconcile_passes_total")
 	})
 
 	t.Run("reports a failure with the server's message", func(t *testing.T) {

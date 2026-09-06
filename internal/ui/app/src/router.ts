@@ -89,5 +89,5 @@ router.afterEach((to) => {
     typeof to.params.name === "string"
       ? to.params.name
       : sections[String(to.name)];
-  document.title = name ? `${name} · orca` : "orca";
+  document.title = name ? `${name} · takt` : "takt";
 });

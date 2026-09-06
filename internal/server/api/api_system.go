@@ -11,8 +11,8 @@ import (
 	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/server/reconciler"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/reconciler"
 )
 
 type (

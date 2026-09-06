@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 func TestNew(t *testing.T) {

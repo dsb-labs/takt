@@ -25,7 +25,7 @@ type (
 	//
 	// The value never leaves the database in the clear except to be handed to a
 	// workload that is starting. Nothing reports it back to a caller, which is what
-	// makes the encrypted column the only copy orca keeps.
+	// makes the encrypted column the only copy takt keeps.
 	Secret struct {
 		// The identifier the server assigns to the secret.
 		ID string

@@ -209,10 +209,10 @@ func (r *PortRepository) HolderOf(ctx context.Context, host int, protocol string
 
 // Allocated returns every host port currently allocated to any workload, keyed by
 // the protocol it is allocated on, which the allocator uses to avoid handing out a
-// port orca already promised.
+// port takt already promised.
 //
 // Keyed rather than flat, because the two protocols are separate address spaces: a
-// single list would have 20000/tcp rule out 20000/udp, and orca would refuse a port
+// single list would have 20000/tcp rule out 20000/udp, and takt would refuse a port
 // that is genuinely free.
 func (r *PortRepository) Allocated(ctx context.Context) (map[string][]int, error) {
 	const q = `SELECT protocol, host_port FROM workload_port ORDER BY protocol ASC, host_port ASC`

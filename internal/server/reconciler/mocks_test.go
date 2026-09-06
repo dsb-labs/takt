@@ -7,11 +7,11 @@ package reconciler_test
 import (
 	"context"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/health"
-	"github.com/dsb-labs/orca/internal/server/mount"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/health"
+	"github.com/dsb-labs/takt/internal/server/mount"
+	"github.com/dsb-labs/takt/pkg/manifest"
 	mock "github.com/stretchr/testify/mock"
 )
 

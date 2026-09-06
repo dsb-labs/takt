@@ -29,14 +29,14 @@ import (
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/dsb-labs/orca/internal/restore"
-	"github.com/dsb-labs/orca/internal/server"
-	"github.com/dsb-labs/orca/pkg/client"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/restore"
+	"github.com/dsb-labs/takt/internal/server"
+	"github.com/dsb-labs/takt/pkg/client"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 type (
-	// The Suite type runs an orca server for each test and exercises it through the
+	// The Suite type runs an takt server for each test and exercises it through the
 	// public client.
 	//
 	// The server runs inside the test process rather than as a built binary, so a
@@ -97,7 +97,7 @@ func (s *Suite) generateCertificate() (string, string) {
 
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "orca e2e"},
+		Subject:      pkix.Name{CommonName: "takt e2e"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 		// The suite dials the address literal, so the address literal is what
@@ -444,7 +444,7 @@ func (s *Suite) awaitInstances(name string, count int) map[int]client.Instance {
 // workload, leaving out whatever a stop retained.
 func (s *Suite) runningContainers(workload string) []string {
 	out, err := exec.Command("docker", "ps", "--quiet",
-		"--filter", "label=orca.workload="+workload).Output()
+		"--filter", "label=takt.workload="+workload).Output()
 	s.Require().NoError(err)
 
 	return strings.Fields(string(out))
@@ -454,7 +454,7 @@ func (s *Suite) runningContainers(workload string) []string {
 // in their PEER environment variable, reporting nil until the expected number of
 // containers is running.
 //
-// Asked of docker rather than of orca, because the resolved environment is
+// Asked of docker rather than of takt, because the resolved environment is
 // deliberately not reported by the API: what each instance was actually started with
 // is the only place the answer exists.
 func (s *Suite) peers(workload string, expected int) map[string]struct{} {
@@ -526,7 +526,7 @@ func (s *Suite) names(workloads []client.Workload) []string {
 // workload, whatever state they are in.
 func (s *Suite) containers(workload string) []string {
 	out, err := exec.Command("docker", "ps", "--all", "--quiet",
-		"--filter", "label=orca.workload="+workload).Output()
+		"--filter", "label=takt.workload="+workload).Output()
 	s.Require().NoError(err)
 
 	return strings.Fields(string(out))
@@ -535,7 +535,7 @@ func (s *Suite) containers(workload string) []string {
 // publishedPorts returns the port mappings docker reports for the named workload's
 // container, as "<port>/<protocol>" strings.
 //
-// Asked of docker rather than of orca, since what the server recorded and what the
+// Asked of docker rather than of takt, since what the server recorded and what the
 // runtime published are the two things a test about protocols has to see agree.
 func (s *Suite) publishedPorts(workload string) []string {
 	ids := s.containers(workload)
@@ -772,7 +772,7 @@ func (b *syncBuffer) String() string {
 // restore puts a backup archive into a data directory and returns what the restore
 // reported it could not do.
 //
-// Through the same code "orca admin restore" runs, rather than by unpacking the
+// Through the same code "takt admin restore" runs, rather than by unpacking the
 // archive here. A helper of its own would be a second implementation of the
 // procedure, and the one that had never been run is the one under test.
 func (s *Suite) restore(archive []byte, directory string) restore.Report {

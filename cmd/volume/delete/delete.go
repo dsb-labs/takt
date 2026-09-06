@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 // Command returns the "volume delete" command used to remove a volume and everything
@@ -19,7 +19,7 @@ func Command() *cobra.Command {
 		Aliases: []string{"rm"},
 		Short:   "Delete a volume and the data it holds",
 		Long: "Delete a volume and the data it holds.\n\n" +
-			"This is the only thing in orca that destroys stored data. A volume a\n" +
+			"This is the only thing in takt that destroys stored data. A volume a\n" +
 			"workload mounts is refused, and the workloads holding it are named; pass\n" +
 			"--force to remove it anyway, which leaves those workloads running with a\n" +
 			"mount that no longer resolves.",

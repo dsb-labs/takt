@@ -3,7 +3,7 @@ package docker
 import (
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/dsb-labs/orca/internal/server/telemetry"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
 )
 
 type (
@@ -18,7 +18,7 @@ type (
 // records nothing.
 func newInstruments(meter metric.Meter) instruments {
 	return instruments{
-		pulls: telemetry.Histogram(meter, "orca.image.pull.duration",
+		pulls: telemetry.Histogram(meter, "takt.image.pull.duration",
 			"How long each image pull took.", "s"),
 	}
 }

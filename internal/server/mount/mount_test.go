@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/mount"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/mount"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestMounter_Deliver(t *testing.T) {
@@ -150,7 +150,7 @@ func TestMounter_Deliver(t *testing.T) {
 
 		svc, _ := newMounter(t, secrets, nil)
 
-		// Writing an empty file would hand the workload a value orca does not hold,
+		// Writing an empty file would hand the workload a value takt does not hold,
 		// which it would then use.
 		_, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
 			manifest.VolumeMount{Secret: "nope", To: "/etc/tls/cert.pem"},
@@ -510,7 +510,7 @@ func newMounter(t *testing.T, secrets, variables mount.ValueStore) (*mount.Mount
 	return mount.New(config), root
 }
 
-// The identifiers orca assigns are xid values: twenty lowercase alphanumeric
+// The identifiers takt assigns are xid values: twenty lowercase alphanumeric
 // characters.
 const (
 	testVolumeID  = "cvhs0dq0kqj4c9r8m1a0"

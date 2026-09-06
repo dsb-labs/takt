@@ -1,6 +1,6 @@
 //go:build linux
 
-// Package server provides the orca server and its configuration.
+// Package server provides the takt server and its configuration.
 package server
 
 import (
@@ -17,11 +17,11 @@ import (
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
-	"github.com/dsb-labs/orca/internal/server/port"
+	"github.com/dsb-labs/takt/internal/server/port"
 )
 
 type (
-	// The Config type contains the top-level configuration for the orca server.
+	// The Config type contains the top-level configuration for the takt server.
 	Config struct {
 		// HTTP server settings.
 		HTTP HTTPConfig `toml:"http"`
@@ -33,7 +33,7 @@ type (
 		Exec ExecConfig `toml:"exec"`
 		// Reconciliation settings.
 		Reconcile ReconcileConfig `toml:"reconcile"`
-		// Settings for the workloads orca runs.
+		// Settings for the workloads takt runs.
 		Workload WorkloadConfig `toml:"workload"`
 		// Secret storage settings.
 		Secrets SecretsConfig `toml:"secrets"`
@@ -53,8 +53,8 @@ type (
 		// A request naming anything else is refused. Reaching this API is enough to
 		// run code on the host, and a browser will send a request to a loopback
 		// address on behalf of any page the operator visited — so the name a request
-		// asks for is checked rather than assumed to be orca's own. Set this to the
-		// name a reverse proxy in front of orca serves.
+		// asks for is checked rather than assumed to be takt's own. Set this to the
+		// name a reverse proxy in front of takt serves.
 		Hosts []string `toml:"hosts"`
 		// The PEM certificate file the server presents when it serves TLS. Set
 		// together with tls-key, or not at all. The pair is reread when this
@@ -71,12 +71,12 @@ type (
 		Directory string `toml:"directory"`
 	}
 
-	// The SecretsConfig type contains configuration for the secrets orca holds.
+	// The SecretsConfig type contains configuration for the secrets takt holds.
 	SecretsConfig struct {
 		// The directory holding the keys a secret's value is encrypted under.
 		//
 		// A key is generated on first start if the directory is empty. Anything that
-		// can read this directory can read every secret orca holds, so it is created
+		// can read this directory can read every secret takt holds, so it is created
 		// readable only by the user running the server — and it belongs on a backup,
 		// because a secret sealed under a key that is gone cannot be recovered.
 		//
@@ -99,7 +99,7 @@ type (
 		//
 		// Empty reads docker's own default location, so a docker login by the user
 		// running the server just works. Set it when that default holds nothing —
-		// notably when orca itself runs in a container. The file is read when a
+		// notably when takt itself runs in a container. The file is read when a
 		// pull happens rather than at startup, and an absent file means anonymous
 		// pulls.
 		ConfigFile string `toml:"config-file"`
@@ -133,7 +133,7 @@ type (
 		Interval time.Duration `toml:"interval"`
 	}
 
-	// The WorkloadConfig type contains configuration for the workloads orca runs:
+	// The WorkloadConfig type contains configuration for the workloads takt runs:
 	// the address their host ports are published on, and the range it allocates
 	// those ports from.
 	WorkloadConfig struct {
@@ -149,15 +149,15 @@ type (
 		// is enough to run code on the host, where reaching a workload's port only
 		// reaches what that workload serves.
 		//
-		// This applies to a port orca publishes on a workload's behalf, which means a
+		// This applies to a port takt publishes on a workload's behalf, which means a
 		// container. An exec workload binds its port itself, so what it listens on is
-		// the process's business and orca has nothing to say about it.
+		// the process's business and takt has nothing to say about it.
 		Bind string `toml:"bind"`
 		// Host paths a workload may name in a path mount, as absolute prefixes.
 		// A path is accepted when it is one of these or sits beneath one.
 		//
 		// Empty refuses every path mount, which is the default: a path mount
-		// reaches outside orca-managed state, so it is a sandbox escape by
+		// reaches outside takt-managed state, so it is a sandbox escape by
 		// design. It is host configuration rather than a manifest field for the
 		// reason the exec allow-paths list is: the API has no authentication,
 		// so a workload able to widen its own reach would undo the gate. Which
@@ -270,7 +270,7 @@ func (c Config) VolumesPath() string {
 //
 // Resolved here rather than defaulted in DefaultConfig, because the default sits
 // inside the data directory and a configuration file may have moved that. A default
-// computed before the file was read would point at the directory orca is not using.
+// computed before the file was read would point at the directory takt is not using.
 func (c Config) KeysPath() string {
 	if c.Secrets.Keys != "" {
 		return c.Secrets.Keys
@@ -285,7 +285,7 @@ func defaultDataDir() string {
 		return "data"
 	}
 
-	return filepath.Join(home, ".local", "share", "orca")
+	return filepath.Join(home, ".local", "share", "takt")
 }
 
 // LoadConfig the configuration file at the specified path. The configuration file
@@ -422,7 +422,7 @@ func (c WorkloadConfig) validate() error {
 	case c.Bind == "":
 		return errors.New("workload bind address is required")
 	// An address rather than a name, because this is what a port is published on
-	// rather than somewhere orca connects to. A name would have to be resolved, and
+	// rather than somewhere takt connects to. A name would have to be resolved, and
 	// what it resolved to could change under a running workload.
 	case net.ParseIP(c.Bind) == nil:
 		return fmt.Errorf("workload bind address must be an IP address, got %q", c.Bind)

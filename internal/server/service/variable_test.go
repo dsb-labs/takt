@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/service"
 )
 
 func TestVariableService_Set(t *testing.T) {
@@ -162,7 +162,7 @@ func TestVariableService_Set(t *testing.T) {
 		assert.Empty(t, rehashed)
 	})
 
-	t.Run("refuses a name orca would not accept", func(t *testing.T) {
+	t.Run("refuses a name takt would not accept", func(t *testing.T) {
 		_, _, err := newTestVariableService(t, NewMockVariableRepository(t)).
 			Set(t.Context(), "LOG_LEVEL", "debug", nil)
 		assert.ErrorIs(t, err, service.ErrInvalidVariable)
@@ -313,7 +313,7 @@ func TestVariableService_Delete(t *testing.T) {
 		require.NoError(t, svc.Delete(t.Context(), "log-level", true))
 
 		// The workload is rehashed so that what it was started against stops
-		// describing what orca holds.
+		// describing what takt holds.
 		assert.Equal(t, []string{"example"}, rehashed)
 	})
 

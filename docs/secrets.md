@@ -5,7 +5,7 @@ referenced from a manifest by name, and decrypted only to be handed to a workloa
 it starts.
 
 ```sh
-printf %s hunter2 | orca secret set db-password
+printf %s hunter2 | takt secret set db-password
 ```
 
 ```yaml
@@ -23,10 +23,10 @@ A workload that wants a file rather than an environment variable can mount the s
 instead. That writes the value to disk, which is covered in
 [Mounting a secret as a file](#mounting-a-secret-as-a-file).
 
-## What orca guarantees
+## What takt guarantees
 
 - **The value is not readable back.** No endpoint returns one, so no command prints
-  one. `orca secret get` reports the name, the revision and the workloads reading it.
+  one. `takt secret get` reports the name, the revision and the workloads reading it.
 - **The value is not in the database.** A workload's stored specification holds the
   reference text. The secret's own row holds the encrypted bytes.
 - **Changing a value redeploys the workloads reading it.** A rotation is not
@@ -45,11 +45,11 @@ the process:
   [Confinement](operating.md#confinement).
 
 Both are inherent to giving a process an environment. Any orchestrator that sets
-environment variables has the same property. What orca guarantees is narrower and
+environment variables has the same property. What takt guarantees is narrower and
 still worth having: the value is not in the database, not in a backup of it, not in
 the API, and not in a log.
 
-Reaching orca's API is already enough to run code on the host, so an attacker who can
+Reaching takt's API is already enough to run code on the host, so an attacker who can
 reach it can start a workload that reads any secret. Encryption at rest protects the
 database file, not the API. See [Exposure](operating.md#exposure).
 
@@ -63,8 +63,8 @@ the other.
 The value is read from a file or from standard input:
 
 ```sh
-orca secret set db-password --from-file ./password
-printf %s hunter2 | orca secret set db-password
+takt secret set db-password --from-file ./password
+printf %s hunter2 | takt secret set db-password
 ```
 
 There is deliberately no `--value` flag. Arguments are visible to anything that can
@@ -72,8 +72,8 @@ list processes on the host, and they land in shell history, so a flag would undo
 feature for whoever used it.
 
 The value is taken exactly as given. `printf %s` rather than `echo` is what keeps a
-trailing newline out of it, and orca does not trim one: a credential that ends in
-whitespace is not orca's to correct.
+trailing newline out of it, and takt does not trim one: a credential that ends in
+whitespace is not takt's to correct.
 
 An empty value is a value. A workload reading it gets an empty variable rather than
 none.
@@ -81,7 +81,7 @@ none.
 Labels are attached with `--label`, repeatable:
 
 ```sh
-printf %s hunter2 | orca secret set db-password -l app=web -l team=platform
+printf %s hunter2 | takt secret set db-password -l app=web -l team=platform
 ```
 
 They replace rather than merge, so setting a value without `--label` removes the ones
@@ -120,7 +120,7 @@ exactly what that costs:
   cannot read what another mounts even though both run as the same user. See
   [Confinement](operating.md#confinement).
 - The file is written as the workload starts and removed once nothing is running for it.
-  `orca workload delete` removes it from the disk.
+  `takt workload delete` removes it from the disk.
 - A backup of the data directory includes it, in the clear. This is the one place a
   secret's value is not encrypted at rest.
 
@@ -134,8 +134,8 @@ of every workload reading it. The reconciler then replaces their instances, and 
 value reaches each one as it starts.
 
 ```sh
-printf %s hunter3 | orca secret set db-password
-orca workload get example | jq '.Version'
+printf %s hunter3 | takt secret set db-password
+takt workload get example | jq '.Version'
 ```
 
 Setting a secret to the value it already holds does nothing. The revision stays put,
@@ -154,7 +154,7 @@ volumes:
     signal: SIGHUP
 ```
 
-orca then rewrites the file and signals the workload, which keeps running. This is what
+takt then rewrites the file and signals the workload, which keeps running. This is what
 a server holding open connections wants from a certificate rotation. See
 [When a mounted value changes](manifest.md#when-a-mounted-value-changes).
 
@@ -163,7 +163,7 @@ a server holding open connections wants from a certificate rotation. See
 A secret a workload reads is refused, and the message names the workloads:
 
 ```sh
-orca secret delete db-password
+takt secret delete db-password
 # Error: failed to delete secret: secret is in use: read by example
 ```
 
@@ -183,7 +183,7 @@ Values are encrypted with AES-256-GCM. The keys live in a directory beside the
 database:
 
 ```
-~/.local/share/orca/keys/da879s0hpe2ten8re4u0.key
+~/.local/share/takt/keys/da879s0hpe2ten8re4u0.key
 ```
 
 A key is generated on first start, 32 random bytes, readable only by the user running
@@ -191,14 +191,14 @@ the server. Point `secrets.keys` somewhere else to keep the keyring off the same
 as the database. See [Configuration](configuration.md).
 
 Each key is named by an identifier, and the database records which key sealed each
-secret. That is what lets `orca admin rekey` write a new key before anything points
+secret. That is what lets `takt admin rekey` write a new key before anything points
 at it, so a rotation is never a moment where the database and the keyring disagree.
 
 **Back the keyring up, and keep the backup separate from the database.** A value
 sealed under a key that is gone cannot be recovered. A backup of the data directory
 holds both, which makes it a complete copy and also a single thing worth protecting.
 
-`orca admin backup` leaves the keyring out for this reason, so the archive it writes
+`takt admin backup` leaves the keyring out for this reason, so the archive it writes
 is safe to keep where a key would not be. Point `secrets.keys` at somewhere your
 existing backups already cover and there is nothing else to remember. See
 [Backups](operating.md#backups).
@@ -209,7 +209,7 @@ moves its revision and redeploys the workloads reading it.
 ### Rotating the key
 
 ```sh
-orca admin rekey
+takt admin rekey
 ```
 
 The server generates a key, re-seals every secret under it, and starts using it. This
@@ -225,7 +225,7 @@ points at it. A rekey that is interrupted therefore leaves every secret under th
 key or every secret under the new one, with nothing to repair by hand.
 
 The key that was replaced is kept. It still opens the backups taken before the rekey,
-which is why `orca admin backup --include-keys` carries the whole keyring rather than
+which is why `takt admin backup --include-keys` carries the whole keyring rather than
 the current key alone.
 
 **Back the keyring up afterwards.** The copy you had opens nothing the node now

@@ -16,9 +16,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/resolve"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/resolve"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 var (
@@ -84,7 +84,7 @@ type (
 		// Where the variables a workload mounts are read from. May be nil, in which
 		// case a workload mounting a variable fails to start.
 		Variables ValueStore
-		// The directory orca keeps its state in. Mounted values live in a
+		// The directory takt keeps its state in. Mounted values live in a
 		// subdirectory of it.
 		Directory string
 	}
@@ -120,7 +120,7 @@ func New(config Config) *Mounter {
 		secrets:   config.Secrets,
 		variables: config.Variables,
 		// Two trees rather than one, for the reason the exec driver has two: a
-		// workload reaches the files mounted into it, so what orca records about
+		// workload reaches the files mounted into it, so what takt records about
 		// having written them is kept where the workload has no path to it.
 		files: filepath.Join(root, mountFileDir),
 		state: filepath.Join(root, mountStateDir),
@@ -131,12 +131,12 @@ func New(config Config) *Mounter {
 // returns them as mounts the driver can honour.
 //
 // Called as a workload starts, so a value's plaintext is written as late as it can be
-// and the workload always starts against what orca holds now. A workload mounting
+// and the workload always starts against what takt holds now. A workload mounting
 // nothing writes nothing and creates no directories.
 //
 // Returns database.ErrSecretNotFound or database.ErrVariableNotFound naming what it
 // could not read.
-// Writing an empty file instead would hand the workload a value orca does not hold,
+// Writing an empty file instead would hand the workload a value takt does not hold,
 // which it would then use.
 func (m *Mounter) Deliver(ctx context.Context, id string, version int, spec manifest.Spec) ([]driver.Volume, error) {
 	mounts := valueMounts(spec)
@@ -526,7 +526,7 @@ func (m *Mounter) version(tree, id string, version int) (string, error) {
 // leave the workload reading the old contents indefinitely.
 //
 // The file ends up read-only and readable by anyone who can reach it, which is wider
-// than orca's other files. A container runs as a user of its own, rarely the one
+// than takt's other files. A container runs as a user of its own, rarely the one
 // running the server, so a file only that user could read would be unreadable by the
 // workload that mounted it. What keeps it private is the directory above, which only
 // the server's user may enter.

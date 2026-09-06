@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/middleware"
+	"github.com/dsb-labs/takt/internal/server/middleware"
 )
 
 func TestLimit(t *testing.T) {

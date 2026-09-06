@@ -17,7 +17,7 @@ import (
 	ll "github.com/landlock-lsm/go-landlock/landlock/syscall"
 	"golang.org/x/sys/unix"
 
-	"github.com/dsb-labs/orca/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/driver"
 )
 
 var (
@@ -34,13 +34,13 @@ var (
 )
 
 const (
-	// The argument that makes orca confine itself and exec a command rather than run
+	// The argument that makes takt confine itself and exec a command rather than run
 	// the command line it was given.
 	//
 	// Landlock restricts the calling thread, so a ruleset has to be applied after fork
-	// and before exec. Go's os/exec offers no hook there, so orca execs itself with
+	// and before exec. Go's os/exec offers no hook there, so takt execs itself with
 	// this argument, the child confines itself, and it then becomes the workload's
-	// command. Two leading underscores because this is orca talking to itself: it is
+	// command. Two leading underscores because this is takt talking to itself: it is
 	// not a subcommand, takes no part in the CLI, and nothing outside this package
 	// should ever pass it.
 	confineArg = "__confine"
@@ -71,7 +71,7 @@ const (
 //
 // A dynamically linked program needs its interpreter and its libraries, and almost
 // every program reads something under /etc. These are the host's own files rather than
-// orca's: nothing orca stores lives here, so opening them discloses nothing about
+// takt's: nothing takt stores lives here, so opening them discloses nothing about
 // other workloads.
 //
 // Missing entries are ignored rather than refused. Which of these a host has depends on
@@ -130,7 +130,7 @@ type ruleset struct {
 // Confine turns this process into a workload's confined command, when it was started
 // to be one, and otherwise returns so the caller carries on.
 //
-// Called before anything else a binary does, because this process is not running orca:
+// Called before anything else a binary does, because this process is not running takt:
 // it is about to become the workload. Anything the caller would otherwise set up would
 // be discarded by the exec a moment later.
 //
@@ -150,7 +150,7 @@ func Confine() {
 
 	if err := confine(os.NewFile(rulesetFD, "ruleset")); err != nil {
 		// The only report there is. This process holds the workload's output, so
-		// writing there would put orca's own failure inside the workload's log.
+		// writing there would put takt's own failure inside the workload's log.
 		fmt.Fprint(status, err.Error())
 
 		os.Exit(1)
@@ -186,7 +186,7 @@ func confine(in *os.File) error {
 
 	// Ambient capabilities survive an exec, so without this the command would keep
 	// whatever a service manager granted the server. An operator grants
-	// CAP_DAC_OVERRIDE so orca can delete a volume a container wrote as another
+	// CAP_DAC_OVERRIDE so takt can delete a volume a container wrote as another
 	// user, and a workload holding it could read past file permissions on every
 	// path its ruleset grants.
 	if err := unix.Prctl(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_CLEAR_ALL, 0, 0, 0); err != nil {
@@ -210,7 +210,7 @@ func confine(in *os.File) error {
 //
 // The reparenting right is not asked for. Moving a file within a granted directory
 // works without it, moving one between two of them is not something a workload needs
-// orca's help to avoid, and asking for it falls back to no confinement at all on
+// takt's help to avoid, and asking for it falls back to no confinement at all on
 // kernels below 5.19 — which is the one outcome this must not produce.
 func restrict(rs ruleset) error {
 	rules := []landlock.Rule{

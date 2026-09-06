@@ -3,10 +3,10 @@
 ## Building
 
 ```sh
-go build -o orca .
+go build -o takt .
 ```
 
-Go 1.26 or later. The `exec` runtime reads `/proc`, so orca runs on Linux.
+Go 1.26 or later. The `exec` runtime reads `/proc`, so takt runs on Linux.
 
 ## The API is generated
 
@@ -86,10 +86,10 @@ nightly workflow uploads it when a run fails.
 go run . dev loadtest scenarios/smoke.toml
 ```
 
-`orca dev loadtest` drives a running server through a scenario: it creates the
+`takt dev loadtest` drives a running server through a scenario: it creates the
 secrets, variables and volumes the scenario names, applies the fleet at once, waits
 for it to converge, churns against it, tears it down and reports. The command is
-hidden, because it is for working on orca rather than for operating it.
+hidden, because it is for working on takt rather than for operating it.
 
 Run `smoke.toml` before a commit. It is a few of everything and takes seconds.
 
@@ -99,7 +99,7 @@ A scenario describes the **shape of a fleet** rather than the workloads in it. W
 measurement depends on is that eighty workloads exist and that a third of them publish
 a port, not what the eighty are running — so the workload body belongs to the tool and
 does as little as possible. A scenario that could name an image would eventually name
-a large one, and the run would measure the daemon's network rather than orca.
+a large one, and the run would measure the daemon's network rather than takt.
 
 ```toml
 [fleet]
@@ -162,7 +162,7 @@ to the run, so two load tests against one server neither collide nor tear down e
 other's work. `--keep` leaves the fleet in place to inspect.
 
 **Do not run a load test while the end-to-end suite is running.** Both drive the same
-Docker daemon, and a teardown removes containers by orca's label.
+Docker daemon, and a teardown removes containers by takt's label.
 
 ## Running a server
 
@@ -230,7 +230,7 @@ internal/server/          the server and everything it wires together
   driver/                 the runtime boundary
     docker/               containers
     exec/                 processes on the host
-  health/                 the checks orca performs
+  health/                 the checks takt performs
   port/                   host port allocation and claiming
   secret/                 the encryption a secret is stored under
   spechash/               the hash a workload is replaced on
@@ -243,12 +243,12 @@ pkg/client/               the Go client
 docs/                     documentation
 ```
 
-`pkg/` holds the packages something outside orca would import: the manifest parser and
+`pkg/` holds the packages something outside takt would import: the manifest parser and
 the client. Everything else is `internal/`.
 
 ## The wire format stops at the API
 
-`manifest.Spec` is the specification orca reasons about. It is what a manifest file
+`manifest.Spec` is the specification takt reasons about. It is what a manifest file
 parses into, what the server stores, and what the hash covers. The generated wire
 types stay in the three packages with business in them: `internal/server/api`,
 `pkg/client`, and `internal/wire`, which maps between the two.

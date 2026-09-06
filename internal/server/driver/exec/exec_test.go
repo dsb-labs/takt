@@ -20,11 +20,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/driver/exec"
-	"github.com/dsb-labs/orca/internal/server/reconciler"
-	"github.com/dsb-labs/orca/internal/server/service"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/driver/exec"
+	"github.com/dsb-labs/takt/internal/server/reconciler"
+	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // The driver is consumed through two interfaces, which are deliberately narrower than
@@ -37,7 +37,7 @@ var (
 
 // TestMain lets this test binary act as a confinement trampoline.
 //
-// A confined workload is started by orca executing itself, so the tests need the same
+// A confined workload is started by takt executing itself, so the tests need the same
 // of the binary they run in: started as a trampoline it has to confine itself and
 // become the command, rather than run the suite a second time inside the workload.
 //
@@ -212,7 +212,7 @@ func TestDriver_Observe(t *testing.T) {
 		d, root := newDriver(t)
 
 		// A process with no supervisor, standing in for one that outlived the server
-		// that started it. Adoption is what makes restarting orca different from
+		// that started it. Adoption is what makes restarting takt different from
 		// restarting the workloads it runs.
 		pid := orphan(t)
 
@@ -535,7 +535,7 @@ func TestDriver_Signal(t *testing.T) {
 		awaitState(t, d, "example", driver.StateExited)
 
 		// There is no process left to reload, and the pid may since have been reused by
-		// something that has nothing to do with orca.
+		// something that has nothing to do with takt.
 		assert.NoError(t, d.Signal(t.Context(), testID, "example", "SIGHUP"))
 	})
 }
@@ -1294,7 +1294,7 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 
 		// The target comes from a specification submitted over the API. A path
 		// climbing out of the working directory is resolved against it rather than
-		// escaping, so a manifest cannot direct orca to write elsewhere on the host.
+		// escaping, so a manifest cannot direct takt to write elsewhere on the host.
 		d, root := newDriver(t)
 		volume := newVolume(t, "example-data")
 

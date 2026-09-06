@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestParseVolume(t *testing.T) {
@@ -68,14 +68,14 @@ func TestParseVolume(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
-			Name:         "rejects a name orca would not accept",
+			Name:         "rejects a name takt would not accept",
 			File:         "volume/volume_bad_name.yaml",
 			ExpectsError: true,
 		},
 		{
 			// A volume's labels answer to the same rules a workload's do, reserved
 			// prefix included, so an operator learns them once.
-			Name:         "rejects a label orca reserves for itself",
+			Name:         "rejects a label takt reserves for itself",
 			File:         "volume/volume_bad_label.yaml",
 			ExpectsError: true,
 		},

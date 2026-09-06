@@ -15,10 +15,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	generated "github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/server/api"
-	"github.com/dsb-labs/orca/internal/server/service"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	generated "github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // testServiceSpec returns a wire specification for the example service,

@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 // Command returns the "variable delete" command used to remove a variable.

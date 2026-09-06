@@ -1,4 +1,4 @@
-module github.com/dsb-labs/orca
+module github.com/dsb-labs/takt
 
 go 1.27
 

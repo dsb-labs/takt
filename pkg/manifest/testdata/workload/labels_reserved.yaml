@@ -1,6 +1,6 @@
 version: v1
 name: example
 labels:
-  orca.workload: spoof
+  takt.workload: spoof
 container:
   image: example/example:latest

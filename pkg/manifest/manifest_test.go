@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // TestValidate_Labels pins the label boundaries that are unwieldy as fixtures:
@@ -35,7 +35,7 @@ func TestValidate_Labels(t *testing.T) {
 			"-leading",
 			"trailing.",
 			"has space",
-			"orca.workload",
+			"takt.workload",
 		} {
 			err := manifest.ValidateWorkload(spec(map[string]string{key: "value"}))
 			assert.Error(t, err, "accepted the key %q", key)
@@ -64,7 +64,7 @@ func TestValidate_Labels(t *testing.T) {
 		for name, labels := range map[string]map[string]string{
 			"a key at the length cap":       {strings.Repeat("a", 63): "value"},
 			"a value at the length cap":     {"some-key": strings.Repeat("v", 256)},
-			"the bare key orca":             {"orca": "value"},
+			"the bare key takt":             {"takt": "value"},
 			"printable non-ascii in values": {"some-key": "café ☕"},
 			"an empty value":                {"some-key": ""},
 		} {

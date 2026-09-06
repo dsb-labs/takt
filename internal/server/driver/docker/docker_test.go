@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/driver/docker"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/driver/docker"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestDriver_Start(t *testing.T) {
@@ -56,13 +56,13 @@ func TestDriver_Start(t *testing.T) {
 					}),
 					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
 						// Publishing 53/tcp instead would leave the workload
-						// unreachable at the address orca reports for it.
+						// unreachable at the address takt reports for it.
 						bindings := host.PortBindings["53/udp"]
 
 						return len(bindings) == 1 && bindings[0].HostPort == "20000" &&
 							len(host.PortBindings) == 1
 					}),
-					mock.Anything, mock.Anything, "orca-example-1-0-1",
+					mock.Anything, mock.Anything, "takt-example-1-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -72,7 +72,7 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
-			Name:     "starts a container with orca's ownership labels",
+			Name:     "starts a container with takt's ownership labels",
 			Workload: withEnv(workload("example", 2, "hash-two", containerSpec("example/example:latest", nil), ports(8080, 4141), map[string]string{"some-key": "some-value"}), map[string]string{"EXAMPLE": "EXAMPLE"}),
 			SetupMocks: func(c *MockClient) {
 				// Read to number the attempt, so a replacement cannot collide with a
@@ -99,7 +99,7 @@ func TestDriver_Start(t *testing.T) {
 						return len(bindings) == 1 && bindings[0].HostPort == "4141" &&
 							bindings[0].HostIP == "127.0.0.1"
 					}),
-					mock.Anything, mock.Anything, "orca-example-2-0-1",
+					mock.Anything, mock.Anything, "takt-example-2-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -112,7 +112,7 @@ func TestDriver_Start(t *testing.T) {
 			Name: "mounts the workload's volumes",
 			Workload: withVolumes(
 				workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
-				driver.Volume{Name: "example-data", Host: "/var/lib/orca/volumes/abc", Target: "/var/lib/example"},
+				driver.Volume{Name: "example-data", Host: "/var/lib/takt/volumes/abc", Target: "/var/lib/example"},
 			),
 			SetupMocks: func(c *MockClient) {
 				// Read to number the attempt, so a replacement cannot collide with a
@@ -124,15 +124,15 @@ func TestDriver_Start(t *testing.T) {
 
 				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
 					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
-						// A bind of the directory orca owns, rather than a docker
+						// A bind of the directory takt owns, rather than a docker
 						// named volume: the exec runtime needs a real path anyway, so
 						// one mechanism serves both.
 						return len(host.Mounts) == 1 &&
 							host.Mounts[0].Type == mount.TypeBind &&
-							host.Mounts[0].Source == "/var/lib/orca/volumes/abc" &&
+							host.Mounts[0].Source == "/var/lib/takt/volumes/abc" &&
 							host.Mounts[0].Target == "/var/lib/example"
 					}),
-					mock.Anything, mock.Anything, "orca-example-1-0-1",
+					mock.Anything, mock.Anything, "takt-example-1-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -147,7 +147,7 @@ func TestDriver_Start(t *testing.T) {
 			Name: "mounts a read-only bind when the mount asks",
 			Workload: withVolumes(
 				workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
-				driver.Volume{Name: "example-data", Host: "/var/lib/orca/volumes/abc", Target: "/var/lib/example", ReadOnly: true},
+				driver.Volume{Name: "example-data", Host: "/var/lib/takt/volumes/abc", Target: "/var/lib/example", ReadOnly: true},
 			),
 			SetupMocks: func(c *MockClient) {
 				// Read to number the attempt, so a replacement cannot collide with a
@@ -161,7 +161,7 @@ func TestDriver_Start(t *testing.T) {
 					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
 						return len(host.Mounts) == 1 && host.Mounts[0].ReadOnly
 					}),
-					mock.Anything, mock.Anything, "orca-example-1-0-1",
+					mock.Anything, mock.Anything, "takt-example-1-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -185,7 +185,7 @@ func TestDriver_Start(t *testing.T) {
 					mock.MatchedBy(func(config *dockercontainer.Config) bool {
 						return len(config.Cmd) == 3 && config.Cmd[0] == "sh" && config.Cmd[2] == "exit 0"
 					}),
-					mock.Anything, mock.Anything, mock.Anything, "orca-example-1-0-1",
+					mock.Anything, mock.Anything, mock.Anything, "takt-example-1-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -212,7 +212,7 @@ func TestDriver_Start(t *testing.T) {
 					mock.MatchedBy(func(config *dockercontainer.Config) bool {
 						return config.Cmd == nil
 					}),
-					mock.Anything, mock.Anything, mock.Anything, "orca-example-1-0-1",
+					mock.Anything, mock.Anything, mock.Anything, "takt-example-1-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -223,9 +223,9 @@ func TestDriver_Start(t *testing.T) {
 		},
 		{
 			// Ownership is expressed entirely through these labels: Observe reads
-			// them to decide which containers are orca's and which workload each
+			// them to decide which containers are takt's and which workload each
 			// belongs to. A manifest that could set them would be able to disown a
-			// container or claim another workload's, so orca's own must win.
+			// container or claim another workload's, so takt's own must win.
 			Name: "refuses to let a manifest overwrite the ownership labels",
 			Workload: workload("example", 2, "hash-two", containerSpec("example/example:latest", nil), nil, map[string]string{
 				docker.LabelWorkload: "someone-elses-workload",
@@ -246,7 +246,7 @@ func TestDriver_Start(t *testing.T) {
 							config.Labels[docker.LabelSpecHash] == "hash-two" &&
 							config.Labels[docker.LabelVersion] == "2"
 					}),
-					mock.Anything, mock.Anything, mock.Anything, "orca-example-2-0-1",
+					mock.Anything, mock.Anything, mock.Anything, "takt-example-2-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -365,7 +365,7 @@ func TestDriver_Start(t *testing.T) {
 							host.NanoCPUs == 500_000_000 &&
 							host.PidsLimit != nil && *host.PidsLimit == 100
 					}),
-					mock.Anything, mock.Anything, "orca-example-1-0-1",
+					mock.Anything, mock.Anything, "takt-example-1-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -395,7 +395,7 @@ func TestDriver_Start(t *testing.T) {
 							host.NanoCPUs == 0 && host.PidsLimit == nil &&
 							!host.ReadonlyRootfs && host.CapAdd == nil && host.CapDrop == nil
 					}),
-					mock.Anything, mock.Anything, "orca-example-1-0-1",
+					mock.Anything, mock.Anything, "takt-example-1-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -424,7 +424,7 @@ func TestDriver_Start(t *testing.T) {
 							slices.Equal(host.CapAdd, []string{"NET_ADMIN"}) &&
 							slices.Equal(host.CapDrop, []string{"ALL"})
 					}),
-					mock.Anything, mock.Anything, "orca-example-1-0-1",
+					mock.Anything, mock.Anything, "takt-example-1-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -440,7 +440,7 @@ func TestDriver_Start(t *testing.T) {
 			Name: "leaves bind mounts writable under a read-only root filesystem",
 			Workload: withVolumes(
 				workload("example", 1, "hash-one", hardenedSpec("example/example:latest"), nil, nil),
-				driver.Volume{Name: "example-data", Host: "/var/lib/orca/volumes/abc", Target: "/var/lib/example"},
+				driver.Volume{Name: "example-data", Host: "/var/lib/takt/volumes/abc", Target: "/var/lib/example"},
 			),
 			SetupMocks: func(c *MockClient) {
 				// Read to number the attempt, so a replacement cannot collide with a
@@ -455,7 +455,7 @@ func TestDriver_Start(t *testing.T) {
 						return host.ReadonlyRootfs &&
 							len(host.Mounts) == 1 && !host.Mounts[0].ReadOnly
 					}),
-					mock.Anything, mock.Anything, "orca-example-1-0-1",
+					mock.Anything, mock.Anything, "takt-example-1-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
 
 				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
@@ -1027,7 +1027,7 @@ func TestDriver_Observe(t *testing.T) {
 	t.Run("reports a container being removed as terminating", func(t *testing.T) {
 		client := NewMockClient(t)
 
-		// Removal is orca's own doing — a replacement or a delete in progress — so
+		// Removal is takt's own doing — a replacement or a delete in progress — so
 		// it must not be reported as a failure, and must not be inspected for an
 		// exit code it hasn't produced yet.
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
@@ -1071,7 +1071,7 @@ func TestDriver_Observe(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, instances, 1)
 
-		// Nothing orca does will move a dead container on. Docker retries it when
+		// Nothing takt does will move a dead container on. Docker retries it when
 		// the daemon restarts, so it stays a failure rather than terminating.
 		assert.Equal(t, driver.StateFailed, instances[0].State)
 	})
@@ -1389,7 +1389,7 @@ func TestDriver_Start_NumbersEachAttempt(t *testing.T) {
 		mock.MatchedBy(func(config *dockercontainer.Config) bool {
 			return config.Labels[docker.LabelAttempt] == "3"
 		}),
-		mock.Anything, mock.Anything, mock.Anything, "orca-example-1-0-3",
+		mock.Anything, mock.Anything, mock.Anything, "takt-example-1-0-3",
 	).Return(dockercontainer.CreateResponse{ID: "container-three"}, nil).Once()
 
 	client.EXPECT().ContainerStart(mock.Anything, "container-three", mock.Anything).Return(nil).Once()
@@ -1495,7 +1495,7 @@ func TestDriver_Digest(t *testing.T) {
 		client := NewMockClient(t)
 
 		path := filepath.Join(t.TempDir(), "config.json")
-		require.NoError(t, os.WriteFile(path, []byte(`{"credHelpers":{"registry.example.com":"orca-test-absent"}}`), 0o600))
+		require.NoError(t, os.WriteFile(path, []byte(`{"credHelpers":{"registry.example.com":"takt-test-absent"}}`), 0o600))
 
 		d := credentialedDriver(t, client, path)
 

@@ -17,7 +17,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/dsb-labs/orca/internal/server/health"
+	"github.com/dsb-labs/takt/internal/server/health"
 )
 
 func TestChecker_Run(t *testing.T) {
@@ -395,7 +395,7 @@ func TestChecker_Metrics(t *testing.T) {
 	var found bool
 	for _, scope := range collected.ScopeMetrics {
 		for _, recorded := range scope.Metrics {
-			if recorded.Name != "orca.health.check.duration" {
+			if recorded.Name != "takt.health.check.duration" {
 				continue
 			}
 

@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 // Command returns the "variable list" command used to list the variables the server
@@ -27,8 +27,8 @@ func Command() *cobra.Command {
 			"Repeat --query to narrow the result. A variable has to match all of them.\n" +
 			"A query is a JSON path into the variable's labels and the value it must\n" +
 			"hold:\n\n" +
-			"  orca variable list --query '$.labels.app=web'\n" +
-			"  orca variable list -q '$.labels.app=web' -q '$.labels.env=prod'",
+			"  takt variable list --query '$.labels.app=web'\n" +
+			"  takt variable list -q '$.labels.app=web' -q '$.labels.env=prod'",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())

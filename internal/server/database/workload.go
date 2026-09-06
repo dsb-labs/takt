@@ -103,7 +103,7 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Po
 	// The row, its port allocations and everything it references are written
 	// together. A workload whose ports could not be claimed must not exist at
 	// all: the reconciler would otherwise start it against a specification naming host
-	// ports nothing holds, so the caller would be told the apply failed while orca
+	// ports nothing holds, so the caller would be told the apply failed while takt
 	// ran it anyway.
 	err = transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
 		existing, err := get(ctx, tx, w.Name)

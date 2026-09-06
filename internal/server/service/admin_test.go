@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/secret"
-	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/secret"
+	"github.com/dsb-labs/takt/internal/server/service"
 )
 
 func TestAdminService_PrepareBackup(t *testing.T) {

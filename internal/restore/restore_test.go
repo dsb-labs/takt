@@ -12,11 +12,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/restore"
-	"github.com/dsb-labs/orca/internal/server/database"
+	"github.com/dsb-labs/takt/internal/restore"
+	"github.com/dsb-labs/takt/internal/server/database"
 )
 
-// The identifiers used throughout, which are xid values because that is what orca
+// The identifiers used throughout, which are xid values because that is what takt
 // assigns and what the volume directories are named after.
 const (
 	testKeyID    = "cvhs0dq0kqj4c9r8m1a0"

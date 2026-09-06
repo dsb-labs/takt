@@ -5,10 +5,10 @@ package variable
 import (
 	"github.com/spf13/cobra"
 
-	delcmd "github.com/dsb-labs/orca/cmd/variable/delete"
-	"github.com/dsb-labs/orca/cmd/variable/get"
-	"github.com/dsb-labs/orca/cmd/variable/list"
-	"github.com/dsb-labs/orca/cmd/variable/set"
+	delcmd "github.com/dsb-labs/takt/cmd/variable/delete"
+	"github.com/dsb-labs/takt/cmd/variable/get"
+	"github.com/dsb-labs/takt/cmd/variable/list"
+	"github.com/dsb-labs/takt/cmd/variable/set"
 )
 
 // Command returns the "variable" command, which does nothing on its own and holds the

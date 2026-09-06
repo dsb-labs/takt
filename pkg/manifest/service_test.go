@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestParseService(t *testing.T) {
@@ -87,7 +87,7 @@ func TestParseService(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
-			Name:         "rejects a protocol orca cannot publish",
+			Name:         "rejects a protocol takt cannot publish",
 			File:         "service/service_bad_protocol.yaml",
 			ExpectsError: true,
 		},
@@ -101,12 +101,12 @@ func TestParseService(t *testing.T) {
 		{
 			// A service's labels answer to the same rules a workload's do,
 			// reserved prefix included, so an operator learns them once.
-			Name:         "rejects a label orca reserves for itself",
+			Name:         "rejects a label takt reserves for itself",
 			File:         "service/service_bad_label.yaml",
 			ExpectsError: true,
 		},
 		{
-			Name:         "rejects a target label orca reserves for itself",
+			Name:         "rejects a target label takt reserves for itself",
 			File:         "service/service_bad_target_label.yaml",
 			ExpectsError: true,
 		},

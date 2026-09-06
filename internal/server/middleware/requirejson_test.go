@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dsb-labs/orca/internal/server/middleware"
+	"github.com/dsb-labs/takt/internal/server/middleware"
 )
 
 func TestRequireJSON(t *testing.T) {

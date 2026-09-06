@@ -1,4 +1,4 @@
-// Package driver defines the vocabulary shared between the orca server and the
+// Package driver defines the vocabulary shared between the takt server and the
 // runtimes it can run workloads on.
 //
 // A driver is responsible for turning a workload's specification into running
@@ -12,8 +12,8 @@ package driver
 import (
 	"time"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // The State type describes the state of a single instance as reported by its driver.
@@ -27,7 +27,7 @@ const (
 	// StateTerminating indicates the instance is being torn down and will shortly
 	// be gone.
 	//
-	// This is a state orca's own actions produce: replacing an outdated instance
+	// This is a state takt's own actions produce: replacing an outdated instance
 	// and deleting a workload both stop a container before removing it, and a
 	// runtime need not complete either step before reporting. It is deliberately
 	// distinct from a failure, because nothing has gone wrong, and from an exit,
@@ -70,7 +70,7 @@ type (
 		//
 		// A driver needing somewhere on disk keys it on this rather than on the name:
 		// a name is the operator's handle and reaches a driver from places a manifest
-		// never validated, where an identifier is orca's own.
+		// never validated, where an identifier is takt's own.
 		ID string
 		// The name of the workload, which identifies it to the operator.
 		Name string
@@ -126,7 +126,7 @@ type (
 		// What the runtime reports about the instance's own health, when the image
 		// declares a check of its own. Empty when it declares none.
 		//
-		// This is separate from the check orca performs: an image may carry a
+		// This is separate from the check takt performs: an image may carry a
 		// HEALTHCHECK that docker is already running, and ignoring it would discard
 		// something the operator asked for.
 		RuntimeHealth string
@@ -191,7 +191,7 @@ type (
 		Host int
 		// The transport protocol the port is published on, which is either tcp or
 		// udp. The two are separate address spaces, so a driver publishing the wrong
-		// one leaves the workload unreachable at an address orca reports.
+		// one leaves the workload unreachable at an address takt reports.
 		Protocol string
 	}
 

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/wire"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/wire"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // The Volume type is the client-side view of a volume: storage a workload mounts,
@@ -171,7 +171,7 @@ func (c *Client) ListVolumes(ctx context.Context, queries ...string) ([]Volume, 
 // DeleteVolume removes the volume with the given name and everything stored in it.
 //
 // A volume a workload mounts is refused with ErrVolumeInUse, and the error names the
-// workloads holding it. Pass WithForce to remove it anyway. Nothing else in orca
+// workloads holding it. Pass WithForce to remove it anyway. Nothing else in takt
 // removes a volume, so this is the only call that destroys stored data.
 func (c *Client) DeleteVolume(ctx context.Context, name string, options ...DeleteVolumeOption) error {
 	if err := checkName(name); err != nil {

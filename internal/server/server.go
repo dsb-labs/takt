@@ -19,24 +19,24 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/dsb-labs/orca/internal/server/api"
-	"github.com/dsb-labs/orca/internal/server/certificate"
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/driver/docker"
-	"github.com/dsb-labs/orca/internal/server/driver/exec"
-	"github.com/dsb-labs/orca/internal/server/health"
-	"github.com/dsb-labs/orca/internal/server/middleware"
-	"github.com/dsb-labs/orca/internal/server/mount"
-	"github.com/dsb-labs/orca/internal/server/port"
-	"github.com/dsb-labs/orca/internal/server/reconciler"
-	"github.com/dsb-labs/orca/internal/server/resolve"
-	"github.com/dsb-labs/orca/internal/server/secret"
-	"github.com/dsb-labs/orca/internal/server/service"
-	"github.com/dsb-labs/orca/internal/server/telemetry"
-	"github.com/dsb-labs/orca/internal/ui"
+	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/certificate"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/driver/docker"
+	"github.com/dsb-labs/takt/internal/server/driver/exec"
+	"github.com/dsb-labs/takt/internal/server/health"
+	"github.com/dsb-labs/takt/internal/server/middleware"
+	"github.com/dsb-labs/takt/internal/server/mount"
+	"github.com/dsb-labs/takt/internal/server/port"
+	"github.com/dsb-labs/takt/internal/server/reconciler"
+	"github.com/dsb-labs/takt/internal/server/resolve"
+	"github.com/dsb-labs/takt/internal/server/secret"
+	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
+	"github.com/dsb-labs/takt/internal/ui"
 )
 
-// Run starts the orca server using the given configuration and blocks until the
+// Run starts the takt server using the given configuration and blocks until the
 // context is cancelled or the server stops with an error.
 func Run(ctx context.Context, config Config) error {
 	if err := config.Validate(); err != nil {
@@ -56,7 +56,7 @@ func Run(ctx context.Context, config Config) error {
 	}
 
 	logger := newLogger(config.Logging, tel.LogHandler())
-	logger.With("address", config.HTTP.Address).Debug("starting orca server")
+	logger.With("address", config.HTTP.Address).Debug("starting takt server")
 
 	defer func() {
 		// Exported signals are batched, so this flush is what makes the last
@@ -143,7 +143,7 @@ func Run(ctx context.Context, config Config) error {
 	}
 
 	// The exec driver keeps its own trees under the data directory, beside the
-	// database, so that everything orca owns on disk is in one place.
+	// database, so that everything takt owns on disk is in one place.
 	execDriver := exec.New(exec.Config{
 		Logger: logger,
 		Root:   filepath.Join(config.Data.Directory, "exec"),
@@ -347,7 +347,7 @@ func Run(ctx context.Context, config Config) error {
 		// Outside the telemetry handler, which is the only place a handler can still
 		// reach the connection's own writer: everything below wraps it, and none of
 		// those wrappers carries a write deadline.
-		Handler: middleware.Stream(otelhttp.NewHandler(middleware.Wrap(mux, logger, config.HTTP.Hosts), "orca",
+		Handler: middleware.Stream(otelhttp.NewHandler(middleware.Wrap(mux, logger, config.HTTP.Hosts), "takt",
 			otelhttp.WithMeterProvider(tel.MeterProvider()),
 			otelhttp.WithTracerProvider(tel.TracerProvider()),
 			otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(
@@ -432,7 +432,7 @@ func Run(ctx context.Context, config Config) error {
 		return server.Shutdown(shutdownCtx)
 	})
 
-	logger.With("address", config.HTTP.Address, "tls", config.HTTP.TLSEnabled()).Info("orca server listening")
+	logger.With("address", config.HTTP.Address, "tls", config.HTTP.TLSEnabled()).Info("takt server listening")
 
 	if err = notify("READY=1"); err != nil {
 		logger.With("error", err).Warn("failed to signal readiness to the service manager")

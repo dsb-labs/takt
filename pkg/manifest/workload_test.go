@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/golden"
 
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestParse(t *testing.T) {
@@ -271,7 +271,7 @@ func TestParse(t *testing.T) {
 		{
 			// The driver writes its own labels after copying these, so refusal is
 			// feedback — a silently overwritten value would vanish with no explanation.
-			Name:         "rejects a label key using the reserved orca. prefix",
+			Name:         "rejects a label key using the reserved takt. prefix",
 			File:         "labels_reserved.yaml",
 			ExpectsError: true,
 		},
@@ -320,7 +320,7 @@ func TestParse(t *testing.T) {
 		},
 		{
 			// A schedule with no expression names no times, so there is nothing for
-			// orca to act on.
+			// takt to act on.
 			Name:         "rejects a schedule naming no expression",
 			File:         "no_cron.yaml",
 			ExpectsError: true,
@@ -405,7 +405,7 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
-			Name:         "rejects a protocol orca cannot publish",
+			Name:         "rejects a protocol takt cannot publish",
 			File:         "ports_bad_protocol.yaml",
 			ExpectsError: true,
 		},
@@ -468,7 +468,7 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
-			Name:         "rejects a volume name orca would not accept",
+			Name:         "rejects a volume name takt would not accept",
 			File:         "volumes_bad_name.yaml",
 			ExpectsError: true,
 		},
@@ -510,7 +510,7 @@ func TestParse(t *testing.T) {
 		},
 		{
 			// A host path beside a volume, which is the shape the media stack
-			// wants: shared data on its own mount point next to storage orca
+			// wants: shared data on its own mount point next to storage takt
 			// manages.
 			Name: "mounts host paths",
 			File: "mounts_path.yaml",
@@ -530,7 +530,7 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
-			// orca does not watch a host path any more than it watches a volume, so
+			// takt does not watch a host path any more than it watches a volume, so
 			// a signal there would never be sent.
 			Name:         "rejects a signal on a mounted host path",
 			File:         "mounts_path_signal.yaml",
@@ -573,7 +573,7 @@ func TestParse(t *testing.T) {
 			ExpectErr: manifest.ErrAmbiguousMountSource,
 		},
 		{
-			// orca does not know what a workload writes into a volume, so a signal there
+			// takt does not know what a workload writes into a volume, so a signal there
 			// asks for something that would never happen.
 			Name:         "rejects a signal on a mounted volume",
 			File:         "mounts_volume_signal.yaml",
@@ -905,7 +905,7 @@ container:
 		require.NotNil(t, spec.Restart)
 		assert.Equal(t, manifest.RestartAlways, spec.Restart.Policy)
 		assert.Equal(t, manifest.DefaultRestartDelay, spec.Restart.Delay)
-		assert.Zero(t, spec.Restart.Attempts, "unset attempts means orca keeps trying")
+		assert.Zero(t, spec.Restart.Attempts, "unset attempts means takt keeps trying")
 	})
 
 	t.Run("what the manifest states is kept", func(t *testing.T) {
@@ -1013,7 +1013,7 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	assert.NotEmpty(t, spec.Volumes)
 }
 
-// TestSpec_JSON pins the JSON encoding of a specification, which is what orca stores
+// TestSpec_JSON pins the JSON encoding of a specification, which is what takt stores
 // a workload as and what its hash covers.
 //
 // A failure means the encoding moved, which replaces every running instance on every

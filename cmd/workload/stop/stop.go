@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 // Command returns the "workload stop" command used to suspend a workload and hold

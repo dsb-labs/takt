@@ -1,15 +1,15 @@
 [http]
 address = "localhost:9999"
-hosts = ["orca.example.com"]
-tls-cert = "/etc/orca/tls/cert.pem"
-tls-key = "/etc/orca/tls/key.pem"
+hosts = ["takt.example.com"]
+tls-cert = "/etc/takt/tls/cert.pem"
+tls-key = "/etc/takt/tls/key.pem"
 
 [data]
-directory = "/var/lib/orca"
+directory = "/var/lib/takt"
 
 [docker]
 host = "tcp://localhost:2375"
-config-file = "/etc/orca/docker-config.json"
+config-file = "/etc/takt/docker-config.json"
 
 [reconcile]
 interval = "30s"
@@ -24,7 +24,7 @@ allow-host-paths = ["/mnt/media", "/var/run/docker.sock"]
 allow-paths = ["/opt/runtime", "/nix/store"]
 
 [secrets]
-keys = "/etc/orca/keys"
+keys = "/etc/takt/keys"
 
 [telemetry]
 otlp-endpoint = "http://collector.example.com:4318"

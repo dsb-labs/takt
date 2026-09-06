@@ -3,7 +3,7 @@ package reconciler
 import (
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/dsb-labs/orca/internal/server/telemetry"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
 )
 
 // Outcomes for a pass that ended before it could converge anything.
@@ -38,13 +38,13 @@ type (
 // records nothing.
 func newInstruments(meter metric.Meter) instruments {
 	return instruments{
-		passes: telemetry.Counter(meter, "orca.reconcile.passes",
+		passes: telemetry.Counter(meter, "takt.reconcile.passes",
 			"The number of reconciliation passes completed.", "{pass}"),
-		passDuration: telemetry.Histogram(meter, "orca.reconcile.pass.duration",
+		passDuration: telemetry.Histogram(meter, "takt.reconcile.pass.duration",
 			"How long each reconciliation pass took.", "s"),
-		converges: telemetry.Histogram(meter, "orca.workload.converge.duration",
+		converges: telemetry.Histogram(meter, "takt.workload.converge.duration",
 			"How long converging a workload took.", "s"),
-		workloads: telemetry.Gauge(meter, "orca.workloads",
+		workloads: telemetry.Gauge(meter, "takt.workloads",
 			"The number of workloads in each state.", "{workload}"),
 		// These two name the workload where the converge histogram does not, and the
 		// difference is deliberate. A counter is one series per workload rather than
@@ -52,11 +52,11 @@ func newInstruments(meter metric.Meter) instruments {
 		// rather than for every workload on every pass — so the set is bounded by how
 		// many have ever misbehaved. Which workload is flapping is also the whole
 		// question they answer, where a duration is useful in aggregate.
-		restarts: telemetry.Counter(meter, "orca.workload.restarts",
+		restarts: telemetry.Counter(meter, "takt.workload.restarts",
 			"The number of paced attempts to start a workload that keeps failing.", "{restart}"),
-		giveups: telemetry.Counter(meter, "orca.workload.giveups",
+		giveups: telemetry.Counter(meter, "takt.workload.giveups",
 			"The number of workloads given up on because they would not stay up.", "{giveup}"),
-		observes: telemetry.Histogram(meter, "orca.driver.observe.duration",
+		observes: telemetry.Histogram(meter, "takt.driver.observe.duration",
 			"How long each driver took to report what it is running.", "s"),
 	}
 }

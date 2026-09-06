@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/golden"
 
-	"github.com/dsb-labs/orca/internal/server/spechash"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/spechash"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // TestCompute pins a known specification to a known hash.

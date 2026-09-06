@@ -15,13 +15,13 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/dsb-labs/orca/pkg/client"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/pkg/client"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // How long the fleet is given to converge before the run reports what did not.
 // Generous, because a scenario applying hundreds of containers is bounded by the
-// daemon rather than by orca.
+// daemon rather than by takt.
 const convergeTimeout = 5 * time.Minute
 
 // teardownBudget reports how long a run waits for its fleet to be torn down.

@@ -11,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 
-	"github.com/dsb-labs/orca/internal/server/telemetry"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
 )
 
 func TestNew(t *testing.T) {
@@ -38,7 +38,7 @@ func TestNew(t *testing.T) {
 		tel, err := telemetry.New(ctx, telemetry.Config{})
 		require.NoError(t, err)
 
-		counter, err := tel.MeterProvider().Meter("test").Int64Counter("orca.test")
+		counter, err := tel.MeterProvider().Meter("test").Int64Counter("takt.test")
 		require.NoError(t, err)
 		counter.Add(ctx, 1)
 
@@ -47,7 +47,7 @@ func TestNew(t *testing.T) {
 
 		found := false
 		for _, family := range families {
-			if strings.HasPrefix(family.GetName(), "orca_test") {
+			if strings.HasPrefix(family.GetName(), "takt_test") {
 				found = true
 			}
 		}

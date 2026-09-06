@@ -29,7 +29,7 @@ import (
 // The paths are written in the syntax a list query uses, which is the syntax the
 // unknown paths use as well. An operator meets one path syntax rather than two.
 //
-// The paths named in skip are dropped from the result. They are the values orca
+// The paths named in skip are dropped from the result. They are the values takt
 // settles only as it applies: such a value is missing from the specification being
 // reported and present in the one stored, which is not a change to anything the
 // operator wrote.
@@ -130,7 +130,7 @@ func objects(path string, was, is map[string]any, paths []string) []string {
 
 // arrays compares two decoded arrays by position.
 //
-// Position rather than content, because an element's index is how the rest of orca
+// Position rather than content, because an element's index is how the rest of takt
 // addresses it: the path of a port is the path a list query would match it by. An
 // element inserted at the front therefore reports every position after it as
 // changed, which is what an operator reading the paths against the reported

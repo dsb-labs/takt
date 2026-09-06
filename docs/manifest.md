@@ -58,7 +58,7 @@ container:
 | `volumes` | no | What the workload mounts — a volume, a secret, a variable or a host path — and where it finds each one. |
 | `restart` | no | What happens when the workload ends. |
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
-| `health` | no | How orca decides the workload is working. |
+| `health` | no | How takt decides the workload is working. |
 | `resources` | no | The resource limits the workload runs under. |
 | `container` | one of | Run the workload as a Docker container. |
 | `exec` | one of | Run the workload as a command on the host. |
@@ -67,19 +67,19 @@ The name is the workload's identity. Applying the same name again updates that
 workload rather than creating a second one.
 
 To find out what applying a manifest would do without doing it, use
-`orca workload apply --dry-run`. It reports whether the workload would be created,
+`takt workload apply --dry-run`. It reports whether the workload would be created,
 whether its running instances would be replaced, and everything it names that does
 not exist. See [Command line](cli.md#workload-apply---dry-run).
 
 ## Labels
 
-Labels are how a workload is found: `orca workload list -q '$.labels.app=web'`
+Labels are how a workload is found: `takt workload list -q '$.labels.app=web'`
 matches against them.
 
 A key is lowercase alphanumeric, optionally separated by dots, dashes, underscores
 or slashes, up to 63 characters — so a key like `app.example.com/name` works as
 written.
-Keys starting with `orca.` are refused. The server writes its own labels under that
+Keys starting with `takt.` are refused. The server writes its own labels under that
 prefix, and refusing yours is better than silently overwriting it.
 
 A value is free text without control characters, up to 256 bytes. An empty value
@@ -118,7 +118,7 @@ power. Several copies of a single-threaded service across several cores is the c
 this serves. A [service](services.md) reports every instance's address, so an
 external load balancer can spread requests across them.
 
-orca does not cap the count. The machine does: each instance costs a container or a
+takt does not cap the count. The machine does: each instance costs a container or a
 process, memory, and — for a workload publishing ports — a host port per port from
 the configured range. A count the machine cannot serve fails at those limits rather
 than at validation.
@@ -126,7 +126,7 @@ than at validation.
 Instances share what the workload mounts. A volume is one directory on the host,
 and every instance reads and writes the same one. That is correct for data that is
 safe for concurrent writers and corrupting for anything that is not — a database
-file, for one — and orca cannot tell which is which. Mount a volume into a workload
+file, for one — and takt cannot tell which is which. Mount a volume into a workload
 with a count only when its contents tolerate concurrent writers.
 
 ## Runtimes
@@ -211,9 +211,9 @@ exec:
 |---|---|---|
 | `command` | yes | The command to run, and its arguments. |
 
-The command runs on the host rather than in a container. orca creates a directory for
+The command runs on the host rather than in a container. takt creates a directory for
 each version of the workload and runs the command inside it, capturing its output
-there. See [Operating orca](operating.md) for where those files live.
+there. See [Operating takt](operating.md) for where those files live.
 
 An exec workload starts with only the environment `env` names, plus a `PATH`. It does
 not inherit the server's environment.
@@ -234,27 +234,27 @@ ports:
 `protocol` is `tcp` or `udp`, and defaults to `tcp`. `name` is optional and is what
 the rest of the manifest refers to the port by.
 
-For a container, leaving `from` out is the usual case. orca allocates a host port and
+For a container, leaving `from` out is the usual case. takt allocates a host port and
 reports it back, so you never have to invent unique numbers by hand.
 
 ```sh
-orca workload get example | jq '.Ports'
+takt workload get example | jq '.Ports'
 [ { "Name": "http", "To": 80, "From": 20000, "Protocol": "tcp", "Dynamic": true } ]
 ```
 
 An allocated port is sticky. It stays the same across restarts and image changes, so
-anything pointing at it keeps working. Pin `from` when something outside orca has to
+anything pointing at it keeps working. Pin `from` when something outside takt has to
 know the address up front. Pinning a port another workload holds is rejected when you
 apply the manifest.
 
 A workload running more than one instance publishes each port once per instance, at
-a host port of its own. `orca workload get` reports every mapping, with `Instance`
+a host port of its own. `takt workload get` reports every mapping, with `Instance`
 saying which instance a mapping reaches, and each instance's allocation is sticky on
 its own.
 
 A container's port is published on every interface unless the server is configured
 otherwise, so anything the host is reachable at reaches the workload. See
-[Operating orca](operating.md#workload-ports-are-published-separately).
+[Operating takt](operating.md#workload-ports-are-published-separately).
 
 ### Naming a port
 
@@ -295,7 +295,7 @@ is a change to what the manifest calls the port rather than a reason to redeploy
 workload at a new address.
 
 An exec workload must name `from`. The process binds a port on the host directly, so
-there is no mapping to make. orca records the port to stop another workload taking it,
+there is no mapping to make. takt records the port to stop another workload taking it,
 and allocates nothing.
 
 Ports sit beside the runtime blocks rather than inside one, because reaching a
@@ -315,11 +315,11 @@ ports:
     protocol: udp
 ```
 
-When both host ports are allocated, orca gives them the same number, so the workload is
+When both host ports are allocated, takt gives them the same number, so the workload is
 reached at one address whichever protocol a caller uses.
 
 ```sh
-orca workload get dns | jq '.Ports'
+takt workload get dns | jq '.Ports'
 [
   { "To": 53, "From": 20000, "Protocol": "tcp", "Dynamic": true },
   { "To": 53, "From": 20000, "Protocol": "udp", "Dynamic": true }
@@ -381,8 +381,8 @@ The secret has to exist before a workload can read it. Applying a manifest namin
 that does not is rejected, and the message names the secret:
 
 ```sh
-printf %s hunter2 | orca secret set db-password
-orca workload apply example.yaml
+printf %s hunter2 | takt secret set db-password
+takt workload apply example.yaml
 ```
 
 What is stored is the reference, never the value. A workload's specification is
@@ -439,14 +439,14 @@ and a reference still resolves to one of them. Which one is derived from the rea
 workload's own name and instance, so a reader running several instances spreads them
 evenly across the target's. Changing the target's count moves the arithmetic and the
 readers are redeployed onto the new spread, rolling one instance per pass. A single
-reader keeps sending everything to one instance — orca does not balance requests.
+reader keeps sending everything to one instance — takt does not balance requests.
 Something that balances per request needs every instance's address, which is what a
 [service](services.md) reports.
 
-The address is not a URL. orca does not know what the workload speaks, so a bare
+The address is not a URL. takt does not know what the workload speaks, so a bare
 address composes into whatever you are writing.
 
-This exists because a host port orca allocated is not something to write down. It is
+This exists because a host port takt allocated is not something to write down. It is
 reported rather than chosen, and it is revised if the workload fails to start on it.
 A reference records the dependency instead, and every consumer follows the port
 wherever it goes:
@@ -506,7 +506,7 @@ path:
 | `name` | A volume, which is a directory that outlives the workload. |
 | `secret` | A file holding the secret's value. |
 | `var` | A file holding the variable's value. |
-| `path` | A host file or directory that orca does not manage. |
+| `path` | A host file or directory that takt does not manage. |
 
 Naming none, or naming two, is an error. It is one list rather than two, because what
 a workload finds in its filesystem is one question however the contents are produced.
@@ -528,8 +528,8 @@ that does not is rejected, so a mistyped name is reported rather than quietly be
 a second empty volume:
 
 ```sh
-orca volume create volume.yaml
-orca workload apply example.yaml
+takt volume create volume.yaml
+takt workload apply example.yaml
 ```
 
 The volume is a resource of its own. Its manifest, who owns its directory, where
@@ -558,7 +558,7 @@ exec:
 ```
 
 Resolving the absolute path there would mean confining the process to its own
-directory, which needs privileges orca does not have. An absolute path in a command
+directory, which needs privileges takt does not have. An absolute path in a command
 therefore reaches the host's own root, wherever the volume was mounted.
 
 Two mounts cannot name the same volume, or the same path. A trailing slash makes no
@@ -570,7 +570,7 @@ do: where a workload keeps its data is a question about the workload.
 ## Mounting a host path
 
 A mount can name a host file or directory instead of a volume. This is how a workload
-reaches data orca does not manage: a media library on its own mount point, or the
+reaches data takt does not manage: a media library on its own mount point, or the
 docker socket for a workload that watches containers:
 
 ```yaml
@@ -585,7 +585,7 @@ volumes:
 `path` must be an absolute path on the host running the server. Nothing creates it:
 what is there is what the workload gets, and starting fails if it is not there.
 
-A host path reaches outside orca-managed state, so the server refuses every path
+A host path reaches outside takt-managed state, so the server refuses every path
 mount until its configuration says otherwise. `allow-host-paths` in the `[workload]`
 section lists the prefixes a path mount may sit beneath — see
 [Configuration](configuration.md). The gate runs when a manifest is applied, so a
@@ -593,7 +593,7 @@ workload already stored keeps its mounts if the list later narrows.
 
 The `to` rules are the volume's: written the same for either runtime, and reached by
 the relative path in an exec workload. A path mount cannot name a `signal`, for the
-reason a volume cannot: orca does not know when its contents change.
+reason a volume cannot: takt does not know when its contents change.
 
 ## Mounting a value
 
@@ -613,7 +613,7 @@ document, a configuration fragment. An `env` reference covers a value that fits 
 environment variable. Use whichever the program wants.
 
 The file holds the value and nothing else. No trailing newline is added, so what a
-workload reads is what `orca secret set` was given.
+workload reads is what `takt secret set` was given.
 
 The value has to exist before a workload can mount it, exactly as a volume does.
 Applying a manifest naming one that does not is rejected, and the message names it.
@@ -642,7 +642,7 @@ volumes:
     signal: SIGHUP
 ```
 
-orca then rewrites the file in place and sends the signal. The workload keeps running,
+takt then rewrites the file in place and sends the signal. The workload keeps running,
 so a program that rereads its configuration keeps its connections and its uptime
 through a rotation.
 
@@ -653,11 +653,11 @@ through a rotation.
 | `SIGUSR2` | The other user-defined signal. |
 
 Anything else is rejected, including `SIGTERM` and `SIGKILL`. Whether a workload runs
-is orca's decision to make through the [restart policy](#restart), so a manifest that
+is takt's decision to make through the [restart policy](#restart), so a manifest that
 could stop one would be taking it.
 
 Only a mounted secret or variable may name a signal. A volume holds whatever the
-workload puts there, so there is no change orca could report.
+workload puts there, so there is no change takt could report.
 
 The file is rewritten rather than replaced. A mount follows the file it was given, so a
 replacement would leave the workload reading the old contents.
@@ -678,7 +678,7 @@ restart:
 | Field | Required | Default | Description |
 |---|---|---|---|
 | `policy` | no | `always` | Whether to run the workload again. |
-| `attempts` | no | unlimited | Consecutive restarts before orca gives up. |
+| `attempts` | no | unlimited | Consecutive restarts before takt gives up. |
 | `delay` | no | `1s` | How long to wait before the first restart. |
 
 | Policy | Behaviour |
@@ -690,7 +690,7 @@ restart:
 `always` is what a long-running service wants. `on-failure` is what a one-off job
 wants: a job that exits cleanly has finished its work.
 
-A workload that orca will not restart reads as `completed` when it exited cleanly and
+A workload that takt will not restart reads as `completed` when it exited cleanly and
 as `failed` when it did not. The policy decides whether to run it again. The exit code
 decides whether it worked, so a workload retired under `never` still reports that it
 failed.
@@ -700,7 +700,7 @@ is then out of date. Applying an unchanged manifest does nothing, so a repeated 
 does not run a job twice. To run an unchanged job again, delete it and apply it.
 
 `delay` is the first wait, and each consecutive failure doubles it up to a ceiling
-orca sets. A workload that reaches `attempts` is left exactly as it ended, so its
+takt sets. A workload that reaches `attempts` is left exactly as it ended, so its
 outcome stays readable. Changing its specification starts it again.
 
 ## Health
@@ -728,7 +728,7 @@ health:
 Whether a workload is working is a different question from whether its runtime says
 it started. A process that is listening and answering errors looks healthy to Docker.
 
-orca performs the check itself, against the port it published, so an image carrying no
+takt performs the check itself, against the port it published, so an image carrying no
 shell can still be checked. A workload that exhausts its retries is restarted on the
 same paced schedule a crashed one takes.
 
@@ -766,7 +766,7 @@ resources:
 | `cpu` | no | The most CPU the workload may use, in cores. Fractions are allowed. |
 | `pids` | no | The most processes and threads the workload may create. |
 
-A limit that is not named is not applied. There is no default ceiling: a limit orca
+A limit that is not named is not applied. There is no default ceiling: a limit takt
 invented would be wrong for most workloads, and a workload killed by a limit nobody
 set is worse than one that was never limited. Unset means unlimited.
 
@@ -777,7 +777,7 @@ policy then treats the kill as any other failure.
 Resources sit beside the runtime blocks because how much a workload may consume is a
 question about the workload, and the limits mean the same thing on either runtime. A
 container's are enforced by its own runtime. An exec workload's are enforced with a
-cgroup of its own, which needs the host to delegate a cgroup subtree to orca —
+cgroup of its own, which needs the host to delegate a cgroup subtree to takt —
 running the server under systemd with `Delegate=yes` grants one, and
 [operating](operating.md#delegation) describes it. A host without one refuses the
 apply rather than accepting limits that would silently never apply.
@@ -818,7 +818,7 @@ retries a run that failed.
 A run that ended cleanly is not restarted. Starting it again would run the workload at
 a time its schedule does not name.
 
-Occurrences missed while the server was down are missed. The occurrence orca runs is
+Occurrences missed while the server was down are missed. The occurrence takt runs is
 the first after the last run, so a workload down for several does not run once for each.
 
 A scheduled workload cannot declare a health check. A check restarts a workload that
@@ -827,4 +827,4 @@ stops answering, and a scheduled workload is expected to end.
 A scheduled workload cannot run more than one instance, because N copies of a cron
 job firing at once is almost never what a schedule means.
 
-`orca workload get` reports when a scheduled workload next runs, once it has run at least once.
+`takt workload get` reports when a scheduled workload next runs, once it has run at least once.

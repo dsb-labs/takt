@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 // The largest value that will be read from a file or from standard input.
@@ -39,9 +39,9 @@ func Command() *cobra.Command {
 			"they start.\n\n" +
 			"A value read from a file or from standard input is taken exactly as given,\n" +
 			"including any trailing newline:\n\n" +
-			"  orca variable set log-level debug\n" +
-			"  orca variable set motd --from-file ./motd.txt\n" +
-			"  printf %s debug | orca variable set log-level\n\n" +
+			"  takt variable set log-level debug\n" +
+			"  takt variable set motd --from-file ./motd.txt\n" +
+			"  printf %s debug | takt variable set log-level\n\n" +
 			"Labels are replaced, not merged, the way a workload manifest replaces a\n" +
 			"workload's. Setting a value without --label removes the labels the variable\n" +
 			"had. Labelling one replaces no workload: what redeploys a reader is the\n" +

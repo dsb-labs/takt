@@ -1,43 +1,43 @@
 # Command line
 
 ```
-orca serve [config-file]                Run the orca server
+takt serve [config-file]                Run the takt server
 
-orca workload apply <manifest>          Create or update a workload from a manifest file
-orca workload apply --dry-run <file>    Report what applying a manifest would do
-orca workload list                      List workloads                       (alias: ls)
-orca workload get <name>                Show a single workload
-orca workload logs <name>               Read a workload's recent output
-orca workload delete <name>             Delete a workload and stop its work  (alias: rm)
-orca workload stop <name>               Stop a workload and hold it down
-orca workload start <name>              Start a stopped workload
-orca workload restart <name>            Replace a workload's running instances
+takt workload apply <manifest>          Create or update a workload from a manifest file
+takt workload apply --dry-run <file>    Report what applying a manifest would do
+takt workload list                      List workloads                       (alias: ls)
+takt workload get <name>                Show a single workload
+takt workload logs <name>               Read a workload's recent output
+takt workload delete <name>             Delete a workload and stop its work  (alias: rm)
+takt workload stop <name>               Stop a workload and hold it down
+takt workload start <name>              Start a stopped workload
+takt workload restart <name>            Replace a workload's running instances
 
-orca volume create <manifest>           Create a volume from a manifest file
-orca volume update <manifest>           Update a volume from a manifest file
-orca volume list                        List volumes                         (alias: ls)
-orca volume get <name>                  Show a single volume
-orca volume delete <name>               Delete a volume and the data it holds (alias: rm)
+takt volume create <manifest>           Create a volume from a manifest file
+takt volume update <manifest>           Update a volume from a manifest file
+takt volume list                        List volumes                         (alias: ls)
+takt volume get <name>                  Show a single volume
+takt volume delete <name>               Delete a volume and the data it holds (alias: rm)
 
-orca service apply <manifest>           Create or update a service from a manifest file
-orca service list                       List services                        (alias: ls)
-orca service get <name>                 Show a single service
-orca service delete <name>              Delete a service                     (alias: rm)
+takt service apply <manifest>           Create or update a service from a manifest file
+takt service list                       List services                        (alias: ls)
+takt service get <name>                 Show a single service
+takt service delete <name>              Delete a service                     (alias: rm)
 
-orca secret set <name>                  Set a secret's value
-orca secret list                        List secrets                         (alias: ls)
-orca secret get <name>                  Show a single secret
-orca secret delete <name>               Delete a secret                      (alias: rm)
+takt secret set <name>                  Set a secret's value
+takt secret list                        List secrets                         (alias: ls)
+takt secret get <name>                  Show a single secret
+takt secret delete <name>               Delete a secret                      (alias: rm)
 
-orca variable set <name> [value]        Set a variable's value
-orca variable list                      List variables                       (alias: ls)
-orca variable get <name>                Show a single variable
-orca variable delete <name>             Delete a variable                    (alias: rm)
+takt variable set <name> [value]        Set a variable's value
+takt variable list                      List variables                       (alias: ls)
+takt variable get <name>                Show a single variable
+takt variable delete <name>             Delete a variable                    (alias: rm)
 
-orca admin health                       Check that the server is alive
-orca admin backup <destination>         Write a backup of the node to a file
-orca admin restore <archive> [config]   Restore a node from a backup archive
-orca admin rekey                        Re-encrypt every secret under a new key
+takt admin health                       Check that the server is alive
+takt admin backup <destination>         Write a backup of the node to a file
+takt admin restore <archive> [config]   Restore a node from a backup archive
+takt admin rekey                        Re-encrypt every secret under a new key
 ```
 
 Commands are grouped by what they act on, so a verb reads the same whichever noun
@@ -49,15 +49,15 @@ Every command takes `--address` (`-a`), the URL of the server, which defaults to
 `--ca-cert` names a PEM file holding the certificate authority the client checks
 the server's certificate against, instead of the system roots. This is how you
 talk to a server that terminates TLS with a self-signed certificate. See
-[Operating orca](operating.md#serving-tls-directly).
+[Operating takt](operating.md#serving-tls-directly).
 
 Read commands print indented JSON, so they pipe into `jq`.
 
 ## serve
 
 ```sh
-orca serve                  # every default
-orca serve config.toml      # from a file
+takt serve                  # every default
+takt serve config.toml      # from a file
 ```
 
 Runs the server in the foreground. The configuration file is optional and only has to
@@ -66,7 +66,7 @@ describe what it changes. See [Configuration](configuration.md).
 ## workload apply
 
 ```sh
-orca workload apply example.yaml
+takt workload apply example.yaml
 ```
 
 | Flag | Description |
@@ -84,7 +84,7 @@ half torn down.
 ### workload apply --dry-run
 
 ```sh
-orca workload apply --dry-run example.yaml
+takt workload apply --dry-run example.yaml
 ```
 
 Resolves the manifest exactly as an apply resolves it, prints what applying it would
@@ -121,8 +121,8 @@ therefore replace a running instance because something outside the file moved, w
 nothing in the manifest to say so.
 
 `Changed` says what moved. The paths are into the specification the report carries,
-which is the resolved one rather than the file, so a field orca defaulted is compared
-as orca stored it. A field is named once, at the level the difference starts: a
+which is the resolved one rather than the file, so a field takt defaulted is compared
+as takt stored it. A field is named once, at the level the difference starts: a
 container block that was added reads as `$.container` rather than as every field
 inside it.
 
@@ -160,10 +160,10 @@ had changed. Such a port is printed without a `from`, and its path is listed in
 }
 ```
 
-The paths in both lists are written in the syntax `orca workload list --query` uses.
+The paths in both lists are written in the syntax `takt workload list --query` uses.
 A port the workload already holds is reported with the host port it holds, because
 that is settled and needs no allocation, and it is never listed as changed: the
-difference between a stored host port and one not yet allocated is orca's to settle
+difference between a stored host port and one not yet allocated is takt's to settle
 rather than something the operator wrote.
 
 `SpecHash` is empty whenever `Unknown` is not. The host ports reach the hash, so one
@@ -173,11 +173,11 @@ apply still replaces what is running, and says so.
 ## workload list
 
 ```sh
-orca workload list
-orca workload list -q '$.labels.app=web'
-orca workload list -q '$.labels.app=web' -q '$.labels.env=prod'
-orca workload list -q '$.container.image=nginx:1.27-alpine'
-orca workload list -q '$.ports[0].to=80'
+takt workload list
+takt workload list -q '$.labels.app=web'
+takt workload list -q '$.labels.app=web' -q '$.labels.env=prod'
+takt workload list -q '$.container.image=nginx:1.27-alpine'
+takt workload list -q '$.ports[0].to=80'
 ```
 
 | Flag | Description |
@@ -197,10 +197,10 @@ little does not cost a read of everything it discards.
 ## workload get
 
 ```sh
-orca workload get example
+takt workload get example
 ```
 
-Prints one workload: the specification that was submitted, the ports orca settled on,
+Prints one workload: the specification that was submitted, the ports takt settled on,
 and what the runtime reports about each instance.
 
 A workload that names a schedule also reports when it next runs.
@@ -213,11 +213,11 @@ without is merely slow.
 ## workload logs
 
 ```sh
-orca workload logs example
-orca workload logs example --tail 20
-orca workload logs example --previous
-orca workload logs example --follow
-orca workload logs example --since 10m
+takt workload logs example
+takt workload logs example --tail 20
+takt workload logs example --previous
+takt workload logs example --follow
+takt workload logs example --since 10m
 ```
 
 | Flag | Default | Description |
@@ -254,9 +254,9 @@ plain file with no timestamps in it.
 ## workload delete
 
 ```sh
-orca workload delete example
-orca workload delete example --wait
-orca workload delete postgres --force
+takt workload delete example
+takt workload delete example --wait
+takt workload delete postgres --force
 ```
 
 | Flag | Description |
@@ -276,8 +276,8 @@ the name again. See [Reaching another workload](manifest.md#reaching-another-wor
 ## workload stop
 
 ```sh
-orca workload stop example
-orca workload stop example --wait
+takt workload stop example
+takt workload stop example --wait
 ```
 
 | Flag | Description |
@@ -298,8 +298,8 @@ removes them.
 ## workload start
 
 ```sh
-orca workload start example
-orca workload start example --wait
+takt workload start example
+takt workload start example --wait
 ```
 
 | Flag | Description |
@@ -314,8 +314,8 @@ that is not stopped changes nothing.
 ## workload restart
 
 ```sh
-orca workload restart example
-orca workload restart example --wait
+takt workload restart example
+takt workload restart example --wait
 ```
 
 | Flag | Description |
@@ -332,7 +332,7 @@ yet is lost with the server, and can simply be sent again.
 ## volume create
 
 ```sh
-orca volume create volume.yaml
+takt volume create volume.yaml
 ```
 
 Creates a volume and the directory backing it. The manifest is a name, labels if you
@@ -357,7 +357,7 @@ have not used yet.
 ## volume update
 
 ```sh
-orca volume update volume.yaml
+takt volume update volume.yaml
 ```
 
 Replaces the labels, the owner and the mode on the volume the manifest names.
@@ -378,9 +378,9 @@ the volume's place in a workload's specification, so no specification hash moves
 ## volume list
 
 ```sh
-orca volume list
-orca volume list -q '$.labels.app=web'
-orca volume list -q '$.labels.app=web' -q '$.labels.env=prod'
+takt volume list
+takt volume list -q '$.labels.app=web'
+takt volume list -q '$.labels.app=web' -q '$.labels.env=prod'
 ```
 
 | Flag | Description |
@@ -397,7 +397,7 @@ can reach only the labels.
 ## volume get
 
 ```sh
-orca volume get example-data
+takt volume get example-data
 ```
 
 Prints one volume. `Path` is where its data is on the host running the server, which is
@@ -406,21 +406,21 @@ what something taking a backup needs.
 ## volume delete
 
 ```sh
-orca volume delete example-data
-orca volume delete example-data --force
+takt volume delete example-data
+takt volume delete example-data --force
 ```
 
 | Flag | Description |
 |---|---|
 | `--force`, `-f` | Remove the volume even though a workload mounts it. |
 
-This is the only thing in orca that removes stored data. Deleting a workload leaves its
+This is the only thing in takt that removes stored data. Deleting a workload leaves its
 volumes alone.
 
 A volume a workload mounts is refused, and the workloads holding it are named:
 
 ```
-$ orca volume delete example-data
+$ takt volume delete example-data
 Error: failed to delete volume: volume is in use: mounted by writer
 ```
 
@@ -433,7 +433,7 @@ until the reconciler has stopped it, so the data it mounts is still in use.
 ## service apply
 
 ```sh
-orca service apply service.yaml
+takt service apply service.yaml
 ```
 
 Creates or updates a service from a manifest file. The stored selection becomes what
@@ -446,8 +446,8 @@ workloads reports no backends until they arrive.
 ## service list
 
 ```sh
-orca service list
-orca service list --query '$.labels.env=prod'
+takt service list
+takt service list --query '$.labels.env=prod'
 ```
 
 | Flag | Description |
@@ -460,7 +460,7 @@ reaches only the service's own labels, not its target's.
 ## service get
 
 ```sh
-orca service get web
+takt service get web
 ```
 
 Prints one service: its target, and the address of every selected instance that is
@@ -469,7 +469,7 @@ running, passing its check when the workload declares one, and not being torn do
 ## service delete
 
 ```sh
-orca service delete web
+takt service delete web
 ```
 
 The workloads the service selected keep running. What stops is the service reporting
@@ -478,8 +478,8 @@ their addresses.
 ## secret set
 
 ```sh
-orca secret set db-password --from-file ./password
-printf %s hunter2 | orca secret set db-password
+takt secret set db-password --from-file ./password
+printf %s hunter2 | takt secret set db-password
 ```
 
 | Flag | Description |
@@ -499,7 +499,7 @@ labels the secret had, the way applying a workload manifest without them does. T
 is one desired state, and the request carries all of it.
 
 Labelling a secret is not rotating it. The revision stays put, so nothing reading the
-secret is replaced — the same reasoning that keeps `orca admin rekey` from redeploying
+secret is replaced — the same reasoning that keeps `takt admin rekey` from redeploying
 the fleet.
 
 **A label is as readable as the secret's name.** The value is not, and a label is no
@@ -512,8 +512,8 @@ did change replaces those workloads, and reaches them as they start.
 ## secret list
 
 ```sh
-orca secret list
-orca secret list -q '$.labels.app=web'
+takt secret list
+takt secret list -q '$.labels.app=web'
 ```
 
 | Flag | Description |
@@ -531,7 +531,7 @@ can reach only the labels, so it cannot probe what a secret holds.
 ## secret get
 
 ```sh
-orca secret get db-password
+takt secret get db-password
 ```
 
 Prints one secret. `Revision` changes whenever the value changes, which is how a
@@ -540,8 +540,8 @@ rotation is confirmed without the value being shown.
 ## secret delete
 
 ```sh
-orca secret delete db-password
-orca secret delete db-password --force
+takt secret delete db-password
+takt secret delete db-password --force
 ```
 
 | Flag | Description |
@@ -557,9 +557,9 @@ something replaces them. Creating the secret again recovers them. See
 ## variable set
 
 ```sh
-orca variable set log-level debug
-orca variable set motd --from-file ./motd.txt
-printf %s debug | orca variable set log-level
+takt variable set log-level debug
+takt variable set motd --from-file ./motd.txt
+printf %s debug | takt variable set log-level
 ```
 
 | Flag | Description |
@@ -585,8 +585,8 @@ did change replaces those workloads, and reaches them as they start.
 ## variable list
 
 ```sh
-orca variable list
-orca variable list -q '$.labels.app=web'
+takt variable list
+takt variable list -q '$.labels.app=web'
 ```
 
 | Flag | Description |
@@ -604,7 +604,7 @@ query can reach only the labels, not the values the list reports.
 ## variable get
 
 ```sh
-orca variable get log-level
+takt variable get log-level
 ```
 
 Prints one variable, including its value.
@@ -612,8 +612,8 @@ Prints one variable, including its value.
 ## variable delete
 
 ```sh
-orca variable delete log-level
-orca variable delete log-level --force
+takt variable delete log-level
+takt variable delete log-level --force
 ```
 
 | Flag | Description |
@@ -629,8 +629,8 @@ something replaces them. Creating the variable again recovers them. See
 ## admin health
 
 ```sh
-orca admin health
-orca admin health --wait 30s
+takt admin health
+takt admin health --wait 30s
 ```
 
 | Flag | Description |
@@ -647,8 +647,8 @@ for the moment after starting a server when the next step needs it listening.
 ## admin backup
 
 ```sh
-orca admin backup /backups/orca.zip
-orca admin backup /backups/orca.zip --include-keys
+takt admin backup /backups/takt.zip
+takt admin backup /backups/takt.zip --include-keys
 ```
 
 | Flag | Description |
@@ -671,8 +671,8 @@ environment included.
 The path and the size are printed as JSON. What the backup does not cover is printed
 to standard error, so the two do not mix when the output is piped.
 
-**Volume data is not in the archive.** Run `orca volume list` for each volume's path
-on the host and back those up separately. orca has no business copying arbitrary user
+**Volume data is not in the archive.** Run `takt volume list` for each volume's path
+on the host and back those up separately. takt has no business copying arbitrary user
 data.
 
 **The keyring is not in the archive** unless `--include-keys` is passed. A database
@@ -682,7 +682,7 @@ secret the node holds, and it keeps opening them long after it was taken. Settin
 `secrets.keys` to a path you already back up is the better answer. See
 [The encryption key](secrets.md#the-encryption-key).
 
-Every key goes in, not only the one sealing secrets now. A key that `orca admin rekey`
+Every key goes in, not only the one sealing secrets now. A key that `takt admin rekey`
 replaced still opens the archives taken before it was replaced.
 
 See [`admin restore`](#admin-restore) for putting one back, and
@@ -691,17 +691,17 @@ See [`admin restore`](#admin-restore) for putting one back, and
 ## admin restore
 
 ```sh
-orca admin restore /backups/orca.zip /etc/orca/config.toml
+takt admin restore /backups/takt.zip /etc/takt/config.toml
 ```
 
 Reads a backup archive back into the data directory a configuration file names.
 
 **Run this with the server stopped.** Unlike everything else under `admin`, this
-command talks to no server. It reads the same configuration file `orca serve` does,
+command talks to no server. It reads the same configuration file `takt serve` does,
 works over the data directory directly, and refuses to run while anything is
 listening on the configured address — a restore under a running server writes a
 database out from under the connections reading it. The configuration file may be
-left out, in which case the defaults apply, exactly as for `orca serve`.
+left out, in which case the defaults apply, exactly as for `takt serve`.
 
 It writes `state.db` into the data directory and the keyring into wherever
 `secrets.keys` puts it, both readable only by their owner, and removes any stale
@@ -738,7 +738,7 @@ volume data after the database is a reasonable order to work in. See
 ## admin rekey
 
 ```sh
-orca admin rekey
+takt admin rekey
 ```
 
 Generates a new encryption key, re-seals every secret under it, and starts using it.

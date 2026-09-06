@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/specdiff"
+	"github.com/dsb-labs/takt/internal/server/specdiff"
 )
 
 func TestChanged(t *testing.T) {

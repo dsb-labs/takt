@@ -5,14 +5,14 @@ package workload
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/cmd/workload/apply"
-	delcmd "github.com/dsb-labs/orca/cmd/workload/delete"
-	"github.com/dsb-labs/orca/cmd/workload/get"
-	"github.com/dsb-labs/orca/cmd/workload/list"
-	"github.com/dsb-labs/orca/cmd/workload/logs"
-	"github.com/dsb-labs/orca/cmd/workload/restart"
-	"github.com/dsb-labs/orca/cmd/workload/start"
-	"github.com/dsb-labs/orca/cmd/workload/stop"
+	"github.com/dsb-labs/takt/cmd/workload/apply"
+	delcmd "github.com/dsb-labs/takt/cmd/workload/delete"
+	"github.com/dsb-labs/takt/cmd/workload/get"
+	"github.com/dsb-labs/takt/cmd/workload/list"
+	"github.com/dsb-labs/takt/cmd/workload/logs"
+	"github.com/dsb-labs/takt/cmd/workload/restart"
+	"github.com/dsb-labs/takt/cmd/workload/start"
+	"github.com/dsb-labs/takt/cmd/workload/stop"
 )
 
 // Command returns the "workload" command, which does nothing on its own and holds the

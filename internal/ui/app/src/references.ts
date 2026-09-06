@@ -3,7 +3,7 @@ import type { VolumeMount, WorkloadSpec } from "./api/types";
 // A Reference is something a workload's specification names: a secret,
 // variable or another workload expanded into its environment, or a volume,
 // secret or variable mounted as a file. A host path is the one kind that is
-// not an orca resource, so it renders without a link and joins no graph.
+// not an takt resource, so it renders without a link and joins no graph.
 export type Reference = {
   kind: "secret" | "variable" | "volume" | "workload" | "service" | "path";
   name: string;
@@ -82,7 +82,7 @@ export function referenceTarget(ref: Reference): string {
     case "service":
       return `/services/${ref.name}`;
     case "path":
-      // A host path is not an orca resource, so there is nowhere to go.
+      // A host path is not an takt resource, so there is nowhere to go.
       return "";
   }
 }

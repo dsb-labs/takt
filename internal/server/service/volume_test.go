@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/service"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestVolumeService_Create(t *testing.T) {
@@ -125,7 +125,7 @@ func TestVolumeService_Create(t *testing.T) {
 		assert.True(t, os.IsNotExist(err), "the directory outlived the failed create")
 	})
 
-	t.Run("refuses a name orca would not accept", func(t *testing.T) {
+	t.Run("refuses a name takt would not accept", func(t *testing.T) {
 		t.Parallel()
 
 		// Refused before anything is written, so a name that could never be a volume
@@ -187,7 +187,7 @@ func TestVolumeService_Delete(t *testing.T) {
 	t.Run("removes the volume and its contents", func(t *testing.T) {
 		t.Parallel()
 
-		// The only thing in orca that destroys stored data, so the directory going is
+		// The only thing in takt that destroys stored data, so the directory going is
 		// worth asserting rather than assuming.
 		repo := NewMockVolumeRepository(t)
 		repo.EXPECT().Insert(mock.Anything, mock.Anything).
@@ -215,7 +215,7 @@ func TestVolumeService_Delete(t *testing.T) {
 		// A container writes to a volume as whatever user its image names, and the
 		// server's user cannot remove another user's files. The failure has to name
 		// what grants that, because nothing else about a permission error says why a
-		// directory orca created cannot be removed.
+		// directory takt created cannot be removed.
 		repo := NewMockVolumeRepository(t)
 		repo.EXPECT().Insert(mock.Anything, mock.Anything).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
@@ -559,8 +559,8 @@ func TestVolumeService_Path(t *testing.T) {
 	t.Run("refuses an identifier that is not usable as a directory", func(t *testing.T) {
 		t.Parallel()
 
-		// The identifier comes from orca's own database rather than from a caller, so
-		// this guards against orca's mistakes rather than someone else's. It is checked
+		// The identifier comes from takt's own database rather than from a caller, so
+		// this guards against takt's mistakes rather than someone else's. It is checked
 		// because the path it builds is one directories are removed from.
 		for _, id := range []string{"../escape", "..", "", "short", "UPPERCASE0000000000A"} {
 			repo := NewMockVolumeRepository(t)
@@ -575,7 +575,7 @@ func TestVolumeService_Path(t *testing.T) {
 	})
 }
 
-// The identifiers orca assigns are xid values: twenty lowercase alphanumeric
+// The identifiers takt assigns are xid values: twenty lowercase alphanumeric
 // characters.
 const (
 	testVolumeID  = "cvhs0dq0kqj4c9r8m1a0"
@@ -651,14 +651,14 @@ func TestVolumeService_Update(t *testing.T) {
 		assert.ErrorIs(t, err, service.ErrVolumeNotFound)
 	})
 
-	t.Run("refuses a label orca reserves for itself", func(t *testing.T) {
+	t.Run("refuses a label takt reserves for itself", func(t *testing.T) {
 		t.Parallel()
 
 		// Refused before the repository is reached, which the mock asserts by
 		// expecting nothing.
 		svc, _ := newVolumeService(t, NewMockVolumeRepository(t))
 
-		_, err := svc.Update(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"orca.workload": "sneaky"}})
+		_, err := svc.Update(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"takt.workload": "sneaky"}})
 		assert.ErrorIs(t, err, service.ErrInvalidVolume)
 	})
 }

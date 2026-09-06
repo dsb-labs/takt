@@ -20,12 +20,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/dsb-labs/orca/internal/server/telemetry"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
 )
 
 // The name this package's telemetry is recorded under, which describes the code
 // declaring it rather than whatever assembles the server.
-const scope = "github.com/dsb-labs/orca/internal/server/health"
+const scope = "github.com/dsb-labs/takt/internal/server/health"
 
 // The Status type describes whether a workload is working.
 type Status string

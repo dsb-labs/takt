@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/port"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/port"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestClaimer_Resolve(t *testing.T) {
@@ -405,7 +405,7 @@ func TestClaimer_Preview(t *testing.T) {
 func TestRequested(t *testing.T) {
 	t.Parallel()
 
-	t.Run("drops the host port of an allocation orca made", func(t *testing.T) {
+	t.Run("drops the host port of an allocation takt made", func(t *testing.T) {
 		// Resolution then allocates afresh rather than being handed back the
 		// allocation it is being asked to reconsider.
 		requested := port.Requested(

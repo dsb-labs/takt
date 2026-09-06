@@ -7,7 +7,7 @@ package resolve_test
 import (
 	"context"
 
-	"github.com/dsb-labs/orca/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/database"
 	mock "github.com/stretchr/testify/mock"
 )
 

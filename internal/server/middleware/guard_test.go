@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dsb-labs/orca/internal/server/middleware"
+	"github.com/dsb-labs/takt/internal/server/middleware"
 )
 
 func TestGuard(t *testing.T) {
@@ -34,7 +34,7 @@ func TestGuard(t *testing.T) {
 		},
 		{
 			Name: "accepts an address literal on any interface",
-			// Reaching orca by an address means the caller knew where it was, and an
+			// Reaching takt by an address means the caller knew where it was, and an
 			// address is not something an attacker can point at a victim's loopback.
 			Host:         "10.0.0.5:7373",
 			ExpectStatus: http.StatusOK,
@@ -49,19 +49,19 @@ func TestGuard(t *testing.T) {
 			// The DNS rebinding case: the attacker owns the name, points it at
 			// 127.0.0.1, and the browser sends this on behalf of a page the operator
 			// merely visited.
-			Host:         "orca.evil.example.com:7373",
+			Host:         "takt.evil.example.com:7373",
 			ExpectStatus: http.StatusMisdirectedRequest,
 		},
 		{
 			Name:         "accepts a name the operator permitted",
-			Host:         "orca.internal:7373",
-			Permitted:    []string{"orca.internal"},
+			Host:         "takt.internal:7373",
+			Permitted:    []string{"takt.internal"},
 			ExpectStatus: http.StatusOK,
 		},
 		{
 			Name:         "compares a permitted name without regard to case",
-			Host:         "ORCA.Internal:7373",
-			Permitted:    []string{"orca.internal"},
+			Host:         "TAKT.Internal:7373",
+			Permitted:    []string{"takt.internal"},
 			ExpectStatus: http.StatusOK,
 		},
 		{
@@ -72,11 +72,11 @@ func TestGuard(t *testing.T) {
 		{
 			Name: "refuses a scrape addressed by an unpermitted hostname",
 			// The guard covers /metrics like everything else: a scraper that
-			// targets orca by hostname needs the name in the configuration,
+			// targets takt by hostname needs the name in the configuration,
 			// while one targeting an address always passes. Pinned here because
 			// a scrape failing with a 421 is otherwise confusing to debug.
 			Path:         "/api/v1/metrics",
-			Host:         "orca.internal:7373",
+			Host:         "takt.internal:7373",
 			ExpectStatus: http.StatusMisdirectedRequest,
 		},
 		{

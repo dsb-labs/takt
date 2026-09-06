@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/internal/loadtest"
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/internal/loadtest"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 // Command returns the "dev loadtest" command used to drive a server through a
@@ -27,7 +27,7 @@ func Command() *cobra.Command {
 			"A scenario describes the shape of a fleet — how many workloads, and what\n" +
 			"proportion of them publish ports, mount secrets, fail, or are checked.\n" +
 			"The workloads themselves are this command's own and do as little as\n" +
-			"possible, so a run measures orca rather than what it was asked to run.\n\n" +
+			"possible, so a run measures takt rather than what it was asked to run.\n\n" +
 			"The report is JSON on standard output, and the command says nothing\n" +
 			"else. A run that found problems says so through its exit status, and\n" +
 			"what it found is in the report.\n\n" +

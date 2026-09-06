@@ -27,7 +27,7 @@ import (
 // its cost lands on the reader — for the repository behind it, one read of the
 // allocations it already records.
 func (a *Allocator) registerMetrics(meter metric.Meter, allocated func(ctx context.Context) (map[string][]int, error)) {
-	capacity, err := meter.Int64ObservableGauge("orca.ports.capacity",
+	capacity, err := meter.Int64ObservableGauge("takt.ports.capacity",
 		metric.WithDescription("The number of host ports in the configured range."),
 		metric.WithUnit("{port}"))
 	if err != nil {
@@ -36,7 +36,7 @@ func (a *Allocator) registerMetrics(meter metric.Meter, allocated func(ctx conte
 		return
 	}
 
-	used, err := meter.Int64ObservableGauge("orca.ports.used",
+	used, err := meter.Int64ObservableGauge("takt.ports.used",
 		metric.WithDescription("The number of host ports currently allocated to workloads."),
 		metric.WithUnit("{port}"))
 	if err != nil {

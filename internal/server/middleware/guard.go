@@ -22,7 +22,7 @@ import (
 // attacker has to control what the name resolves to, so a Host naming an address
 // rather than a name cannot be one: a page served from an address literal is a page
 // served from this server. A name has to be one the operator named, which is what a
-// reverse proxy in front of orca needs.
+// reverse proxy in front of takt needs.
 //
 // The Origin is checked by the same rule. The web UI is served from this server and so
 // shares its origin, so an Origin naming somewhere else is a page acting on its own
@@ -62,7 +62,7 @@ func Guard(logger *slog.Logger, permitted []string) func(http.Handler) http.Hand
 
 // permittedHost reports whether a request may name the given host.
 //
-// An address literal is always allowed. Reaching orca by one means the caller already
+// An address literal is always allowed. Reaching takt by one means the caller already
 // knew where it was, and a page served from an address is a page served from this
 // server — where a name is something an attacker can point wherever they like.
 func permittedHost(host string, allowed map[string]struct{}) bool {
@@ -85,7 +85,7 @@ func permittedHost(host string, allowed map[string]struct{}) bool {
 
 // permittedOrigin reports whether a request may come from the given origin.
 //
-// An origin orca cannot parse is refused, as is the opaque "null" a sandboxed page
+// An origin takt cannot parse is refused, as is the opaque "null" a sandboxed page
 // sends: neither names somewhere this API is served from.
 func permittedOrigin(origin string, allowed map[string]struct{}) bool {
 	parsed, err := url.Parse(origin)

@@ -1,9 +1,9 @@
-# Operating orca
+# Operating takt
 
 ## Exposure
 
 Applying a workload runs code, with whatever access the Docker socket grants. Treat
-orca's port as equivalent to that socket, because in practice it is.
+takt's port as equivalent to that socket, because in practice it is.
 
 The default address is loopback for that reason. Restrict who can reach it before
 binding it to a network:
@@ -12,7 +12,7 @@ binding it to a network:
 - A WireGuard or Tailscale interface, so the port is only reachable inside it.
 - An SSH tunnel, for occasional access from one machine.
 
-Set `hosts` to the name the proxy serves when you put one in front of orca. See
+Set `hosts` to the name the proxy serves when you put one in front of takt. See
 [Configuration](configuration.md#http).
 
 Encrypting secrets does not change this. An attacker who can reach the API can apply
@@ -36,8 +36,8 @@ The server terminates TLS itself when the configuration names a certificate pair
 ```toml
 [http]
 address = "127.0.0.1:7373"
-tls-cert = "/etc/orca/tls/cert.pem"
-tls-key = "/etc/orca/tls/key.pem"
+tls-cert = "/etc/takt/tls/cert.pem"
+tls-key = "/etc/takt/tls/key.pem"
 ```
 
 A reverse proxy is still the recommended front door, because it can also require
@@ -58,7 +58,7 @@ same reason.
 A client trusts a self-signed pair by naming its certificate:
 
 ```sh
-orca workload list --address https://orca.example.com:7373 --ca-cert /etc/orca/tls/cert.pem
+takt workload list --address https://takt.example.com:7373 --ca-cert /etc/takt/tls/cert.pem
 ```
 
 There is no flag to skip verification. The host name check described below still
@@ -66,14 +66,14 @@ applies to a TLS listener.
 
 ### Loopback is not a boundary against a browser
 
-A loopback bind stops another machine reaching orca. It does not stop a web page.
+A loopback bind stops another machine reaching takt. It does not stop a web page.
 
 A browser sends a request to `127.0.0.1` on behalf of whatever page it has open. An
 attacker serves a page from a name they control, points that name at `127.0.0.1`, and
 the browser treats what follows as same-origin. The request arrives from loopback, so
 nothing about where it came from says the operator asked for it.
 
-orca checks the name each request asks for, which is what closes this. A request
+takt checks the name each request asks for, which is what closes this. A request
 naming an address or `localhost` is accepted, since an attacker cannot point either at
 a victim's own machine. A request naming anything else has to name something in
 `hosts`, or it is refused. A request from a browser page on another origin is refused
@@ -93,11 +93,11 @@ curl -X PUT -H 'Content-Type: application/json' \
   http://127.0.0.1:7373/api/v1/workloads/example
 ```
 
-This matters most for whoever runs orca on a workstation they also browse from.
+This matters most for whoever runs takt on a workstation they also browse from.
 
 ### Workload ports are published separately
 
-Restricting reach to orca's own port does not restrict reach to its workloads. A
+Restricting reach to takt's own port does not restrict reach to its workloads. A
 container's host port is published on the address `workload.bind` names, which is
 every interface by default. Anything a workload serves is reachable wherever the host
 is, so it is worth knowing which workloads that covers.
@@ -118,19 +118,19 @@ containers reaching each other as well as stopping the network reaching them. Se
 [Configuration](configuration.md#workload).
 
 An `exec` workload is not covered either way. The process binds its own port, so what
-it listens on is decided by the command rather than by orca.
+it listens on is decided by the command rather than by takt.
 
 ## Running under systemd
 
 Each release publishes a `.deb` and an `.rpm` package. A package installs:
 
-- the `orca` binary, at `/usr/bin/orca`.
-- a systemd unit, `orca.service`.
-- a sysusers entry that creates the `orca` system user.
-- `/etc/orca/config.toml`, which an upgrade never overwrites.
+- the `takt` binary, at `/usr/bin/takt`.
+- a systemd unit, `takt.service`.
+- a sysusers entry that creates the `takt` system user.
+- `/etc/takt/config.toml`, which an upgrade never overwrites.
 
-The unit runs `orca serve /etc/orca/config.toml` as the `orca` user, with the data
-directory at `/var/lib/orca`. systemd creates that directory, owned by the `orca`
+The unit runs `takt serve /etc/takt/config.toml` as the `takt` user, with the data
+directory at `/var/lib/takt`. systemd creates that directory, owned by the `takt`
 user and readable only by it, which is the mode [State on disk](#state-on-disk)
 requires.
 
@@ -139,13 +139,13 @@ until it can reach the Docker socket, and granting that access is yours to decid
 rather than a default:
 
 ```sh
-usermod -aG docker orca
-systemctl enable --now orca
+usermod -aG docker takt
+systemctl enable --now takt
 ```
 
 Membership of the `docker` group is root-equivalent. Anything in it can run a
-privileged container, so the grant above hands the `orca` user the host. That is
-what running orca means — see [Exposure](#exposure) — but it should happen because
+privileged container, so the grant above hands the `takt` user the host. That is
+what running takt means — see [Exposure](#exposure) — but it should happen because
 you typed it, not because a package script did.
 
 Three of the unit's settings carry behaviour documented elsewhere:
@@ -159,14 +159,14 @@ Three of the unit's settings carry behaviour documented elsewhere:
   limits enforceable. See [Delegation](#delegation).
 
 The unit also confines the server. `ProtectSystem=strict` makes the filesystem
-read-only outside `/var/lib/orca`, `ProtectHome=yes` hides home directories, and
+read-only outside `/var/lib/takt`, `ProtectHome=yes` hides home directories, and
 `NoNewPrivileges=yes` stops privilege escalation. An `exec` workload inherits these
 restrictions, and they compose with [Confinement](#confinement): the system
 directories a workload may read stay readable, and everything it may write sits
-under `/var/lib/orca`. One consequence is worth knowing — under
+under `/var/lib/takt`. One consequence is worth knowing — under
 `NoNewPrivileges=yes` a workload cannot run a setuid binary.
 
-The unit grants the server `CAP_DAC_OVERRIDE`, so `orca volume delete` can remove
+The unit grants the server `CAP_DAC_OVERRIDE`, so `takt volume delete` can remove
 files a container wrote as another user, and `CAP_CHOWN`, so a volume manifest can
 name another user as its owner. The grants do not reach the workloads. See
 [Deleting a volume a container wrote](volumes.md#deleting-a-volume-a-container-wrote)
@@ -174,15 +174,15 @@ and [Ownership](volumes.md#ownership).
 
 ### Not in a container
 
-orca runs on the host, and the release deliberately publishes no container image.
-The `exec` runtime starts processes on the machine orca runs on, so inside a
+takt runs on the host, and the release deliberately publishes no container image.
+The `exec` runtime starts processes on the machine takt runs on, so inside a
 container those workloads would run inside it too. Volumes and mounted values break
 more quietly: the Docker daemon resolves a bind mount against the host filesystem,
-and orca would write them somewhere the daemon cannot see.
+and takt would write them somewhere the daemon cannot see.
 
 ## State on disk
 
-Everything orca keeps lives under the data directory, `~/.local/share/orca` by
+Everything takt keeps lives under the data directory, `~/.local/share/takt` by
 default:
 
 ```
@@ -190,14 +190,14 @@ state.db          the workloads that have been applied
 state.db-wal      SQLite's write-ahead log
 state.db-shm      SQLite's shared-memory index
 keys/             the keys secrets are encrypted with, one file each
-exec/state/       what orca started, one directory per exec workload
+exec/state/       what takt started, one directory per exec workload
 exec/workloads/   where exec workloads run, one directory each
 volumes/          one directory per volume
 mounts/files/     the secrets and variables workloads mount, one directory each
-mounts/state/     what orca wrote for each of them
+mounts/state/     what takt wrote for each of them
 ```
 
-The database holds each workload's stored specification, environment included, so orca
+The database holds each workload's stored specification, environment included, so takt
 creates the directory and its files readable only by the user running the server.
 
 A secret's value is encrypted in the database rather than held in a specification, so
@@ -215,12 +215,12 @@ the server. **A backup of the data directory includes them in the clear.** See
 
 The database holds desired state only. What is actually running is observed from the
 runtime when asked, so nothing persisted can go stale against reality. A restarted
-server needs no recovery of orca's own bookkeeping.
+server needs no recovery of takt's own bookkeeping.
 
 ## Backups
 
 ```sh
-orca admin backup /backups/orca.zip
+takt admin backup /backups/takt.zip
 ```
 
 The server takes a consistent snapshot of its database while it keeps running and
@@ -240,7 +240,7 @@ reason:
 | Not in the archive | Why | What to do |
 |---|---|---|
 | The keyring | The database and the keys are separable on purpose, so a copy of the database is safe to keep where a key would not be. | Back it up separately. It changes only when you rekey. |
-| Volume data | Copying arbitrary user data is not orca's job. | `orca volume list` reports each path. Back those up yourself. |
+| Volume data | Copying arbitrary user data is not takt's job. | `takt volume list` reports each path. Back those up yourself. |
 | `mounts/` | Transient. Rewritten as a workload starts. | Nothing. |
 
 `--include-keys` puts the keyring in the archive. It makes a restore one step instead
@@ -248,7 +248,7 @@ of two, and it makes the archive key material: anything that can read it can rea
 every secret the node holds. Setting `secrets.keys` to somewhere already covered by a
 backup is the better answer, and then the default needs nothing.
 
-Every key goes in, not only the one sealing secrets now. A key that `orca admin rekey`
+Every key goes in, not only the one sealing secrets now. A key that `takt admin rekey`
 replaced still opens the archives taken before it was replaced.
 
 ## Restoring a node
@@ -258,11 +258,11 @@ replacement has to come back holding what the old one held. A corrupted file on 
 the same procedure with more of it already in place.
 
 ```sh
-orca admin restore /backups/orca.zip /etc/orca/config.toml
+takt admin restore /backups/takt.zip /etc/takt/config.toml
 ```
 
 **Run it with the server stopped.** This is the one command that talks to no server: it
-reads the configuration file `orca serve` reads, works over the data directory
+reads the configuration file `takt serve` reads, works over the data directory
 directly, and refuses to run while anything is listening on the configured address.
 A restore under a running server writes a database out from under the connections
 reading it.
@@ -283,13 +283,13 @@ instead is tell you exactly what is missing:
 
 ```json
 {
-  "Restored": ["/var/lib/orca/state.db", "/var/lib/orca/keys/da8lt98hpe2jmgmjl9fg.key"],
+  "Restored": ["/var/lib/takt/state.db", "/var/lib/takt/keys/da8lt98hpe2jmgmjl9fg.key"],
   "MissingKeys": null,
   "MissingVolumes": [
     {
       "ID": "da8ltc8hpe2jmgmjl9g0",
       "Name": "example-data",
-      "Path": "/var/lib/orca/volumes/da8ltc8hpe2jmgmjl9g0"
+      "Path": "/var/lib/takt/volumes/da8ltc8hpe2jmgmjl9g0"
     }
   ]
 }
@@ -329,33 +329,33 @@ exec/workloads/<id>/<instance>/<version>/
   previous.log    the output of the attempt this one replaced
 
 exec/state/<id>/<instance>/<version>/
-  state.json      the process orca started, and how it ended
+  state.json      the process takt started, and how it ended
   retained        present when the record is kept only for its output
 ```
 
 `<instance>` is the instance's index, counted from zero. A workload running one
 instance keeps everything under `0`.
 
-The process runs in `cwd`. What orca records about it lives in the other tree, which
+The process runs in `cwd`. What takt records about it lives in the other tree, which
 holds no working directory at all, so a workload writing above its own has nothing of
-orca's to reach. A workload that could rewrite its own record could name any process on
+takt's to reach. A workload that could rewrite its own record could name any process on
 the host as its own.
 
-`<id>` is the identifier orca assigned the workload rather than its name. A name is
-what an operator types and reaches orca from places no manifest validated, so it is
-never a path component. It is read from inside a record when orca needs it.
+`<id>` is the identifier takt assigned the workload rather than its name. A name is
+what an operator types and reaches takt from places no manifest validated, so it is
+never a path component. It is read from inside a record when takt needs it.
 
-`output.log` grows for as long as the workload runs. orca does not rotate or truncate
+`output.log` grows for as long as the workload runs. takt does not rotate or truncate
 it, so a workload that writes continuously needs watching.
 
 `previous.log` is the output of the attempt a replacement took the place of, which is
-what `orca workload logs --previous` reads. Stopping a workload moves `output.log` to it,
+what `takt workload logs --previous` reads. Stopping a workload moves `output.log` to it,
 so the attempt starting next writes to a file of its own rather than appending to the one
 before it. Only the most recent replaced attempt is kept, so this is one file rather than
 one per restart.
 
 `state.json` records the process identifier and the kernel's start time for that
-process. Both have to match for orca to claim the workload is still running. A process
+process. Both have to match for takt to claim the workload is still running. A process
 identifier alone is reused, so a record naming one that is alive may be describing
 something else.
 
@@ -367,10 +367,10 @@ output survives for as long as the workload does.
 An `exec` workload runs as the same user as the server, so file permissions draw no
 boundary around it: everything that user can reach, it can reach, including the
 keyring, the database, and every other workload's mounted plaintext. Running
-workloads as a separate user would need privileges orca deliberately does not ask
+workloads as a separate user would need privileges takt deliberately does not ask
 for.
 
-The kernel is what draws the boundary instead. orca confines every `exec` workload with
+The kernel is what draws the boundary instead. takt confines every `exec` workload with
 [Landlock](https://landlock.io), which lets an unprivileged process restrict itself
 before it runs the command. A confined workload reaches:
 
@@ -399,13 +399,13 @@ Two consequences are worth knowing:
 - **A workload cannot attach a debugger to the server.** Landlock scopes `ptrace`
   between domains. Without that, restricting the filesystem alone would be defeatable.
 
-A workload also starts with no ambient capabilities. orca drops the ambient set
+A workload also starts with no ambient capabilities. takt drops the ambient set
 before the command runs, so a capability granted to the server — see
 [Deleting a volume a container wrote](volumes.md#deleting-a-volume-a-container-wrote) — never
 reaches a workload.
 
 What it does not cover is anything not reached through a filesystem path. Signal
-scoping arrives in a later Landlock version than orca requires, so a confined workload
+scoping arrives in a later Landlock version than takt requires, so a confined workload
 can still send a signal to the server. The network is not restricted either.
 
 There is deliberately no grant for `/tmp`. It is shared by every process running as
@@ -417,26 +417,26 @@ a command at it.
 
 An `exec` workload naming `resources:` runs in a cgroup of its own, which is what
 enforces the limits. Writing below `/sys/fs/cgroup` needs either root or a subtree
-delegated to orca's user, so enforcement needs the host's help where confinement does
-not. orca derives the subtree from the cgroup it was started in — there is nothing to
+delegated to takt's user, so enforcement needs the host's help where confinement does
+not. takt derives the subtree from the cgroup it was started in — there is nothing to
 configure.
 
 Running the server under systemd with `Delegate=yes` on its unit grants a subtree.
 Setting `DelegateSubgroup=main` as well is recommended: it places the server in a
-leaf of the subtree, which orca otherwise has to arrange for itself, and it keeps a
-restart working when processes survive the old server. A bare `orca serve` from a
+leaf of the subtree, which takt otherwise has to arrange for itself, and it keeps a
+restart working when processes survive the old server. A bare `takt serve` from a
 shell may or may not sit in a delegated cgroup, and the startup log says which.
 
 A host without a delegated subtree refuses an apply that names limits on an `exec`
 workload, and says so at startup. There is no reduced mode, for the reason
 confinement has none: a limit that did nothing on some hosts would be a guarantee
-nobody could rely on. In particular orca does not fall back to rlimits — they cap
+nobody could rely on. In particular takt does not fall back to rlimits — they cap
 address space rather than memory used and count the user's processes rather than the
 workload's, so the same manifest field would mean something different per runtime.
 Container workloads are unaffected, and so is every `exec` workload naming no limits.
 
-Inside the subtree, orca keeps a `main` cgroup holding the server and every unlimited
-workload, and one `orca-<id>-<version>` cgroup per limited workload. The limits are
+Inside the subtree, takt keeps a `main` cgroup holding the server and every unlimited
+workload, and one `takt-<id>-<version>` cgroup per limited workload. The limits are
 written before the command starts, so it never runs outside them, and the cgroup is
 removed when the workload stops.
 
@@ -449,40 +449,40 @@ server alone. An unlimited workload is unaffected by the limits work either way.
 ## Volumes
 
 A volume's data lives in a directory under the data directory, named for the
-identifier orca assigned it. Where it is, how ownership works, backing one up
+identifier takt assigned it. Where it is, how ownership works, backing one up
 and what deleting one needs are covered in [Volumes](volumes.md).
 
 ## Restarting the server
 
-A container keeps running when the server stops, and so does an exec process. orca
+A container keeps running when the server stops, and so does an exec process. takt
 rediscovers both on its next start rather than duplicating them, so restarting the
 server is a different thing from restarting the workloads it runs.
 
-Containers are found by the labels orca sets on them. Exec processes are found from the
+Containers are found by the labels takt sets on them. Exec processes are found from the
 records under `exec/state`, which is why those have to outlive the server that wrote
 them.
 
 One thing does not survive. Only a process's parent can collect its exit code, so an
 exec workload that ends while the server is down leaves none.
 
-orca reports that as a failure rather than a clean exit. A job which may not have
+takt reports that as a failure rather than a clean exit. A job which may not have
 finished is better run again than assumed complete. Under `restart: always` it changes
 nothing, and under `on-failure` it means such a job runs again.
 
 ## Reading logs
 
 ```sh
-orca workload logs example --tail 20
+takt workload logs example --tail 20
 ```
 
-For a container, orca reads the logs from the Docker daemon. For an exec workload it
+For a container, takt reads the logs from the Docker daemon. For an exec workload it
 reads `output.log`. Either way both output streams come back combined in the order
 they were written.
 
 ### Watching output as it arrives
 
 ```sh
-orca workload logs example --follow
+takt workload logs example --follow
 ```
 
 This keeps the connection open and prints each line as the workload writes it, which is
@@ -500,8 +500,8 @@ attribute. An ordinary read without `--instance` returns every instance's output
 ### Output since a moment
 
 ```sh
-orca workload logs example --since 10m
-orca workload logs example --since 2026-08-25T12:00:00Z
+takt workload logs example --since 10m
+takt workload logs example --since 2026-08-25T12:00:00Z
 ```
 
 A duration says how long ago, and an RFC 3339 time names the moment itself. Use the
@@ -509,16 +509,16 @@ second when correlating a workload's output with another record.
 
 This applies to container workloads. The Docker daemon holds a timestamp for every line
 it keeps, so it does the filtering itself. An exec workload's output is a plain file
-with no timestamps in it, so orca ignores `--since` for one rather than filtering on
+with no timestamps in it, so takt ignores `--since` for one rather than filtering on
 times it would have to invent.
 
 ### The attempt before this one
 
-orca replaces a workload by stopping it and starting it again, so the output an
+takt replaces a workload by stopping it and starting it again, so the output an
 operator wants is often the attempt that has just gone. It keeps that attempt:
 
 ```sh
-orca workload logs example --previous
+takt workload logs example --previous
 ```
 
 This matters most for a workload that keeps restarting. The attempt running now has not
@@ -533,20 +533,20 @@ What is kept is not counted as running. It has no bearing on the workload's stat
 and a container being kept for its output is a corpse rather than another instance:
 
 ```sh
-orca workload get example
+takt workload get example
 ```
 
 It goes when the workload does. Deleting a workload removes what was kept along with
 everything else, so nothing is left on the host afterwards.
 
 For a container this is the stopped container itself, which `docker ps --all` shows with
-orca's labels on it. For an exec workload it is a `previous.log` beside the
+takt's labels on it. For an exec workload it is a `previous.log` beside the
 `output.log` the current attempt is writing.
 
-## Watching what orca is doing
+## Watching what takt is doing
 
 Start with the workload itself. A workload the server has tried and failed to start
-reports why in `orca workload get`, as `lastError` with the time it was recorded. The
+reports why in `takt workload get`, as `lastError` with the time it was recorded. The
 error stands until an attempt succeeds, so a workload failing on every pass carries a
 recent timestamp where one that failed once an hour ago does not. It is held in
 memory: a server restart clears it, and the next pass either fails again and restores
@@ -617,20 +617,20 @@ hostname in `hosts`, or every scrape fails with a 421. See
 
 The metrics to alert on first:
 
-- `orca_reconcile_passes_total` stops increasing when the reconciler has stopped
+- `takt_reconcile_passes_total` stops increasing when the reconciler has stopped
   converging, which is exactly the failure a log does not surface.
-- `orca_workloads{state="failed"}` counts workloads in the failed state, derived
-  by the same rules `orca workload get` reports. `state="degraded"` counts the
+- `takt_workloads{state="failed"}` counts workloads in the failed state, derived
+  by the same rules `takt workload get` reports. `state="degraded"` counts the
   workloads still serving with a failed instance among them, which is the earlier
   warning for a workload running several.
-- `orca_ports_used` against `orca_ports_capacity` warns before an apply fails
+- `takt_ports_used` against `takt_ports_capacity` warns before an apply fails
   with no free port. Usage carries a `protocol` label, because the range holds as
   many UDP ports as TCP ones.
 
-Alongside orca's own instruments, the scrape carries the standard OpenTelemetry
+Alongside takt's own instruments, the scrape carries the standard OpenTelemetry
 HTTP server metrics, with request counts and durations per route and status, and
 the Go runtime's own metrics — goroutine count, memory use and garbage collection
-timings — which is where a leak in orca itself shows.
+timings — which is where a leak in takt itself shows.
 
 ### Traces and logs
 
@@ -650,7 +650,7 @@ SQLite's write lock.
 
 ## Host ports
 
-orca allocates a host port for a container port that names none, from the range in the
+takt allocates a host port for a container port that names none, from the range in the
 configuration. A workload running several instances holds one allocation per instance.
 An allocation is sticky to its instance: it survives restarts and specification
 changes, so anything pointing at it keeps working.
@@ -658,6 +658,6 @@ changes, so anything pointing at it keeps working.
 The range covers each protocol separately, since TCP and UDP are unrelated address
 spaces. A workload holding 20000/tcp leaves 20000/udp free for another.
 
-A port orca chose is revised if the workload fails to start on it, since something
-outside orca may hold it. A port a manifest pinned is never moved, because it was asked
+A port takt chose is revised if the workload fails to start on it, since something
+outside takt may hold it. A port a manifest pinned is never moved, because it was asked
 for.

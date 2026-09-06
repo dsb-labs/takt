@@ -54,17 +54,17 @@ type (
 )
 
 const (
-	// KindSecret is a reference to a value orca holds encrypted, which nothing reads
+	// KindSecret is a reference to a value takt holds encrypted, which nothing reads
 	// back out.
 	KindSecret ReferenceKind = "secret"
-	// KindVariable is a reference to a value orca holds in the clear, which the API
+	// KindVariable is a reference to a value takt holds in the clear, which the API
 	// reports.
 	KindVariable ReferenceKind = "var"
 	// KindWorkload is a reference to the address another workload is reached at.
 	//
-	// Unlike the other two it resolves against something orca settled on rather than
+	// Unlike the other two it resolves against something takt settled on rather than
 	// something an operator stored, which is what lets a workload be written down as
-	// the dependency of another without either naming a port orca chose.
+	// the dependency of another without either naming a port takt chose.
 	KindWorkload ReferenceKind = "workload"
 )
 
@@ -378,7 +378,7 @@ func newReference(kind ReferenceKind, body string) (Reference, error) {
 	return Reference{Kind: kind, Name: name, Port: PortRef(port)}, nil
 }
 
-// validReferenceName reports whether a reference names something orca could hold
+// validReferenceName reports whether a reference names something takt could hold
 // under that name.
 func validReferenceName(name string) bool {
 	return namePattern.MatchString(name) && len(name) <= maxLabelKeyLength

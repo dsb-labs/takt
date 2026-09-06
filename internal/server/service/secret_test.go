@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/secret"
-	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/secret"
+	"github.com/dsb-labs/takt/internal/server/service"
 )
 
 func TestSecretService_Set(t *testing.T) {
@@ -130,11 +130,11 @@ func TestSecretService_Set(t *testing.T) {
 		assert.Equal(t, map[string]string{"app": "api"}, stored.Labels)
 	})
 
-	t.Run("refuses a label orca reserves for itself", func(t *testing.T) {
+	t.Run("refuses a label takt reserves for itself", func(t *testing.T) {
 		// The rules are the workload's rules. The repository is never reached, which
 		// the mock asserts by expecting nothing.
 		_, _, err := newTestSecretService(t, NewMockSecretRepository(t), nil).
-			Set(t.Context(), "db-password", []byte("hunter2"), map[string]string{"orca.workload": "sneaky"})
+			Set(t.Context(), "db-password", []byte("hunter2"), map[string]string{"takt.workload": "sneaky"})
 		assert.ErrorIs(t, err, service.ErrInvalidSecret)
 	})
 
@@ -198,7 +198,7 @@ func TestSecretService_Set(t *testing.T) {
 		assert.Equal(t, []string{"two", "three"}, rehashed)
 	})
 
-	t.Run("refuses a name orca would not accept", func(t *testing.T) {
+	t.Run("refuses a name takt would not accept", func(t *testing.T) {
 		_, _, err := newTestSecretService(t, NewMockSecretRepository(t), nil).
 			Set(t.Context(), "DB_PASSWORD", []byte("hunter2"), nil)
 		assert.ErrorIs(t, err, service.ErrInvalidSecret)
@@ -305,7 +305,7 @@ func TestSecretService_Delete(t *testing.T) {
 		require.NoError(t, svc.Delete(t.Context(), "db-password", true))
 
 		// The workload is rehashed so that what it was started against stops
-		// describing what orca holds.
+		// describing what takt holds.
 		assert.Equal(t, []string{"example"}, rehashed)
 	})
 

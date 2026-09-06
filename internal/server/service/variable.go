@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 var (
@@ -19,7 +19,7 @@ var (
 	// ErrVariableInUse is returned when a variable a workload references is deleted
 	// without being forced.
 	ErrVariableInUse = errors.New("variable is in use")
-	// ErrInvalidVariable is returned when a variable's name is not one orca will
+	// ErrInvalidVariable is returned when a variable's name is not one takt will
 	// accept.
 	ErrInvalidVariable = errors.New("invalid variable")
 )
@@ -228,7 +228,7 @@ func (s *VariableService) Delete(ctx context.Context, name string, force bool) e
 	}
 
 	// The workloads that referenced it are rehashed for the same reason a change
-	// rehashes them: what they were started against no longer describes what orca
+	// rehashes them: what they were started against no longer describes what takt
 	// holds, and the hash is how that is reported.
 	if err = s.redeploy(ctx, name); err != nil {
 		return err

@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestParseReferences(t *testing.T) {
@@ -738,7 +738,7 @@ func TestVolumeMount_Reference(t *testing.T) {
 	})
 
 	t.Run("reports that a mounted volume reads nothing", func(t *testing.T) {
-		// A volume holds whatever the workload puts there, so there is nothing orca
+		// A volume holds whatever the workload puts there, so there is nothing takt
 		// resolves for it.
 		_, ok := manifest.VolumeMount{Name: "example-data"}.Reference()
 		assert.False(t, ok)

@@ -12,7 +12,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/dsb-labs/orca/internal/server/port"
+	"github.com/dsb-labs/takt/internal/server/port"
 )
 
 func TestNew_Metrics(t *testing.T) {
@@ -42,9 +42,9 @@ func TestNew_Metrics(t *testing.T) {
 	var collected metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(t.Context(), &collected))
 
-	assert.EqualValues(t, 10, gaugeValue(t, collected, "orca.ports.capacity"))
-	assert.EqualValues(t, 3, protocolGaugeValue(t, collected, "orca.ports.used", port.ProtocolTCP))
-	assert.EqualValues(t, 1, protocolGaugeValue(t, collected, "orca.ports.used", port.ProtocolUDP))
+	assert.EqualValues(t, 10, gaugeValue(t, collected, "takt.ports.capacity"))
+	assert.EqualValues(t, 3, protocolGaugeValue(t, collected, "takt.ports.used", port.ProtocolTCP))
+	assert.EqualValues(t, 1, protocolGaugeValue(t, collected, "takt.ports.used", port.ProtocolUDP))
 }
 
 // TestNew_Metrics_EmptyProtocols covers the case the old conversion got right by
@@ -68,11 +68,11 @@ func TestNew_Metrics_EmptyProtocols(t *testing.T) {
 	var collected metricdata.ResourceMetrics
 	require.NoError(t, reader.Collect(t.Context(), &collected))
 
-	assert.EqualValues(t, 2, protocolGaugeValue(t, collected, "orca.ports.used", port.ProtocolTCP))
+	assert.EqualValues(t, 2, protocolGaugeValue(t, collected, "takt.ports.used", port.ProtocolTCP))
 
 	// Observed rather than absent, so a range that emptied reads as zero instead of
 	// as a series that stopped being reported.
-	assert.EqualValues(t, 0, protocolGaugeValue(t, collected, "orca.ports.used", port.ProtocolUDP))
+	assert.EqualValues(t, 0, protocolGaugeValue(t, collected, "takt.ports.used", port.ProtocolUDP))
 }
 
 // gaugeValue returns the single data point of the named gauge, failing the test
@@ -151,7 +151,7 @@ func TestAllocator_Allocate(t *testing.T) {
 	})
 
 	t.Run("skips a port something on the host is listening on", func(t *testing.T) {
-		// A listener orca knows nothing about is exactly the case the bind check
+		// A listener takt knows nothing about is exactly the case the bind check
 		// exists for: the database has no record of it, so only trying the port
 		// reveals that it is unusable. Narrowing the range to two ports and holding
 		// one leaves exactly one answer.

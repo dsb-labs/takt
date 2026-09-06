@@ -9,8 +9,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/secret"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/secret"
 )
 
 // The directory a backup archive holds the keyring under, mirroring where the
@@ -121,11 +121,11 @@ func NewAdminService(config AdminServiceConfig) *AdminService {
 	}
 }
 
-// PrepareBackup takes a snapshot of what orca holds on disk.
+// PrepareBackup takes a snapshot of what takt holds on disk.
 //
 // The backup covers a consistent snapshot of the database, and the keyring when the
 // options ask for it. It covers neither volume data, which is arbitrary user data
-// orca has no business copying, nor the mounted secret files, which are transient
+// takt has no business copying, nor the mounted secret files, which are transient
 // and rewritten as a workload starts.
 //
 // The returned Backup must be closed.
@@ -139,7 +139,7 @@ func (s *AdminService) PrepareBackup(ctx context.Context, options BackupOptions)
 	}
 
 	// Beside the database rather than in the system temporary directory. That is the
-	// one place orca knows it can write and knows is readable only by the user
+	// one place takt knows it can write and knows is readable only by the user
 	// running the server, and a snapshot is the size of the database — which is more
 	// than a small tmpfs is willing to hold.
 	//

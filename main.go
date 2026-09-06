@@ -1,4 +1,4 @@
-// Package main provides the entrypoint to the orca binary.
+// Package main provides the entrypoint to the takt binary.
 //
 //go:generate go tool oapi-codegen -config api/oapi-codegen.yaml api/openapi.yaml
 //go:generate go tool mockery
@@ -13,20 +13,20 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/cmd/admin"
-	"github.com/dsb-labs/orca/cmd/dev"
-	"github.com/dsb-labs/orca/cmd/secret"
-	"github.com/dsb-labs/orca/cmd/serve"
-	"github.com/dsb-labs/orca/cmd/service"
-	"github.com/dsb-labs/orca/cmd/variable"
-	"github.com/dsb-labs/orca/cmd/volume"
-	"github.com/dsb-labs/orca/cmd/workload"
-	"github.com/dsb-labs/orca/internal/server/driver/exec"
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/cmd/admin"
+	"github.com/dsb-labs/takt/cmd/dev"
+	"github.com/dsb-labs/takt/cmd/secret"
+	"github.com/dsb-labs/takt/cmd/serve"
+	"github.com/dsb-labs/takt/cmd/service"
+	"github.com/dsb-labs/takt/cmd/variable"
+	"github.com/dsb-labs/takt/cmd/volume"
+	"github.com/dsb-labs/takt/cmd/workload"
+	"github.com/dsb-labs/takt/internal/server/driver/exec"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 func main() {
-	// Before anything else, because this process may not be orca at all: the exec
+	// Before anything else, because this process may not be takt at all: the exec
 	// driver confines a workload by executing this binary, which applies a ruleset to
 	// itself and then becomes the workload's command. Nothing set up here would survive
 	// that, and the trampoline is not a subcommand, so it is dispatched ahead of cobra
@@ -39,7 +39,7 @@ func main() {
 	var address, caCert string
 
 	cmd := &cobra.Command{
-		Use:          "orca",
+		Use:          "takt",
 		Short:        "A single-node workload orchestrator",
 		SilenceUsage: true,
 		CompletionOptions: cobra.CompletionOptions{
@@ -67,7 +67,7 @@ func main() {
 	}
 
 	flags := cmd.PersistentFlags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the orca server")
+	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the takt server")
 	flags.StringVar(&caCert, "ca-cert", "", "path to a PEM file holding the certificate authority to check the server against")
 
 	if info, ok := debug.ReadBuildInfo(); ok {

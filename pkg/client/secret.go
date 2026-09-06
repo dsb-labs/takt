@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/generated/api"
 )
 
 type (
 	// The Secret type is the client-side view of a secret: a value a workload can
 	// read and an operator cannot.
 	//
-	// There is no value on it. Nothing reads a secret back out of orca, so there is
+	// There is no value on it. Nothing reads a secret back out of takt, so there is
 	// nothing for this type to carry.
 	Secret struct {
 		// The name that identifies the secret, and which a manifest references.

@@ -7,10 +7,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
-// Command returns the "volume list" command used to list the volumes the orca server
+// Command returns the "volume list" command used to list the volumes the takt server
 // holds.
 func Command() *cobra.Command {
 	var queries []string
@@ -25,8 +25,8 @@ func Command() *cobra.Command {
 			"Repeat --query to narrow the result. A volume has to match all of them.\n" +
 			"A query is a JSON path into the volume's labels and the value it must\n" +
 			"hold:\n\n" +
-			"  orca volume list --query '$.labels.app=web'\n" +
-			"  orca volume list -q '$.labels.app=web' -q '$.labels.env=prod'",
+			"  takt volume list --query '$.labels.app=web'\n" +
+			"  takt volume list -q '$.labels.app=web' -q '$.labels.env=prod'",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())

@@ -19,7 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/certificate"
+	"github.com/dsb-labs/takt/internal/server/certificate"
 )
 
 func TestNew(t *testing.T) {
@@ -169,7 +169,7 @@ func generatePair(t *testing.T, cert, key string) *big.Int {
 
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "orca test"},
+		Subject:      pkix.Name{CommonName: "takt test"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},

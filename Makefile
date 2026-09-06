@@ -1,5 +1,5 @@
 # Shortcuts around go commands. The test and dev targets run inside a delegated
-# cgroup subtree, which is what lets orca enforce resource limits on exec
+# cgroup subtree, which is what lets takt enforce resource limits on exec
 # workloads — see the "Delegation" section of docs/operating.md.
 
 .PHONY: test e2e dev lint generate ui dev-ui

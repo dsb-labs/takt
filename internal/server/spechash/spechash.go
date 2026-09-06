@@ -1,4 +1,4 @@
-// Package spechash provides the hash orca computes over a workload's specification.
+// Package spechash provides the hash takt computes over a workload's specification.
 //
 // The hash decides whether a running instance is destroyed and replaced, which gives
 // everything here a constraint almost nothing else in the codebase has: what it
@@ -19,14 +19,14 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 type (
 	// The Inputs type contains what reaches a specification's hash without being
 	// stored alongside it.
 	//
-	// Each field is something orca resolved rather than something the operator
+	// Each field is something takt resolved rather than something the operator
 	// wrote. The specification is stored on its own, and this travels with it only
 	// as far as the hash.
 	Inputs struct {

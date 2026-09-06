@@ -54,7 +54,7 @@ const variableRefs = refsOf("variable");
 const workloadRefs = refsOf("workload");
 
 // Host paths get a card of their own rather than a reference card: a path
-// mount reaches outside orca-managed state, so there is no resource to link.
+// mount reaches outside takt-managed state, so there is no resource to link.
 const pathMounts = computed(() => (spec.value ? hostPaths(spec.value) : []));
 const command = computed(() => {
   const runtime = spec.value?.container ?? spec.value?.exec;

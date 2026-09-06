@@ -12,9 +12,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/driver/exec"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/driver/exec"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestEnforceable(t *testing.T) {
@@ -45,7 +45,7 @@ func TestDriver_ResourceLimits(t *testing.T) {
 		// Read through the process rather than through the driver's internals, so
 		// what is asserted is what the kernel is actually enforcing on the command.
 		path := cgroupOf(t, pid)
-		assert.Equal(t, "orca-"+testID+"-0-1", filepath.Base(path))
+		assert.Equal(t, "takt-"+testID+"-0-1", filepath.Base(path))
 		assert.Equal(t, strconv.Itoa(32*1024*1024), limitOf(t, path, "memory.max"))
 		assert.Equal(t, "0", limitOf(t, path, "memory.swap.max"))
 		assert.Equal(t, "50000 100000", limitOf(t, path, "cpu.max"))
@@ -119,7 +119,7 @@ func TestDriver_ResourceLimits(t *testing.T) {
 		// The unlimited path has to keep working on a host with no delegation at
 		// all: the command inherits whatever cgroup the server runs in, exactly
 		// as before limits existed.
-		assert.NotContains(t, filepath.Base(cgroupOf(t, pid)), "orca-"+testID)
+		assert.NotContains(t, filepath.Base(cgroupOf(t, pid)), "takt-"+testID)
 
 		require.NoError(t, d.Stop(t.Context(), testID, "example"))
 	})

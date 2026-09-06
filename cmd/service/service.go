@@ -5,10 +5,10 @@ package service
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/cmd/service/apply"
-	delcmd "github.com/dsb-labs/orca/cmd/service/delete"
-	"github.com/dsb-labs/orca/cmd/service/get"
-	"github.com/dsb-labs/orca/cmd/service/list"
+	"github.com/dsb-labs/takt/cmd/service/apply"
+	delcmd "github.com/dsb-labs/takt/cmd/service/delete"
+	"github.com/dsb-labs/takt/cmd/service/get"
+	"github.com/dsb-labs/takt/cmd/service/list"
 )
 
 // Command returns the "service" command, which does nothing on its own and holds

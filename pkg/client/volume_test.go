@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/pkg/client"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/pkg/client"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestClient_CreateVolume(t *testing.T) {
@@ -34,7 +34,7 @@ func TestClient_CreateVolume(t *testing.T) {
 			},
 			Assert: func(t *testing.T, volume client.Volume) {
 				assert.Equal(t, "example-data", volume.Name)
-				assert.Equal(t, "/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0", volume.Path)
+				assert.Equal(t, "/var/lib/takt/volumes/cvhs0dq0kqj4c9r8m1a0", volume.Path)
 			},
 		},
 		{
@@ -132,7 +132,7 @@ func TestClient_GetVolume(t *testing.T) {
 
 		assert.Equal(t, "example-data", got.Name)
 		assert.Equal(t, []string{"alpha", "bravo"}, got.UsedBy)
-		assert.Equal(t, "/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0", got.Path)
+		assert.Equal(t, "/var/lib/takt/volumes/cvhs0dq0kqj4c9r8m1a0", got.Path)
 	})
 
 	t.Run("reports a volume nothing mounts", func(t *testing.T) {
@@ -329,7 +329,7 @@ func TestClient_VolumeNameWithASlashIsRefused(t *testing.T) {
 }
 
 func apiVolume(name string) api.Volume {
-	path := "/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0"
+	path := "/var/lib/takt/volumes/cvhs0dq0kqj4c9r8m1a0"
 
 	return api.Volume{
 		Name:      name,

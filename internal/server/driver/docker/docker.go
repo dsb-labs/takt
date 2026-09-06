@@ -1,4 +1,4 @@
-// Package docker provides the driver that runs orca workloads as Docker containers.
+// Package docker provides the driver that runs takt workloads as Docker containers.
 package docker
 
 import (
@@ -28,14 +28,14 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/telemetry"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // The name this package's telemetry is recorded under, which describes the code
 // declaring it rather than whatever assembles the server.
-const scope = "github.com/dsb-labs/orca/internal/server/driver/docker"
+const scope = "github.com/dsb-labs/takt/internal/server/driver/docker"
 
 // Name is how this driver identifies itself, and is what the server maps a
 // workload's runtime onto when deciding which driver runs it.
@@ -44,13 +44,13 @@ const Name = "container"
 const (
 	// LabelWorkload names the container label holding the workload a container
 	// belongs to. It is how the driver recognises its own work.
-	LabelWorkload = "orca.workload"
+	LabelWorkload = "takt.workload"
 	// LabelSpecHash names the container label holding the hash of the
 	// specification a container was created from.
-	LabelSpecHash = "orca.spec-hash"
+	LabelSpecHash = "takt.spec-hash"
 	// LabelVersion names the container label holding the workload version a
 	// container was created from.
-	LabelVersion = "orca.version"
+	LabelVersion = "takt.version"
 	// LabelAttempt names the container label holding which attempt at running a
 	// workload a container is.
 	//
@@ -63,11 +63,11 @@ const (
 	// be written onto a container once something has replaced it. It does not need to
 	// be: a container is superseded exactly when its instance has another container
 	// with a higher attempt, which is a comparison rather than a mark.
-	LabelAttempt = "orca.attempt"
+	LabelAttempt = "takt.attempt"
 	// LabelInstance names the container label holding the index of the workload
 	// instance a container runs as. A container without it records the first
 	// instance, which is what every container was before the label existed.
-	LabelInstance = "orca.instance"
+	LabelInstance = "takt.instance"
 )
 
 var (
@@ -156,9 +156,9 @@ func New(config Config) *Driver {
 // Start creates and starts a container for the given workload, pulling its image
 // first when it isn't already present locally.
 //
-// The container is created with orca's ownership labels, which is the only record
+// The container is created with takt's ownership labels, which is the only record
 // that ties it back to a workload — the server stores no container identifier.
-// Docker's own restart policy is deliberately left unset: orca owns restart
+// Docker's own restart policy is deliberately left unset: takt owns restart
 // decisions so that they can be paced by its own backoff and remain visible in
 // the workload's observed state.
 func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
@@ -253,7 +253,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 // restart both take: the reconciler stops before it starts, so removing everything
 // here is what used to discard the output of the attempt that just failed. Docker keeps
 // the logs of a container that exists, so retaining the container is all it takes and
-// orca does not have to invent a retention policy or a size cap of its own.
+// takt does not have to invent a retention policy or a size cap of its own.
 //
 // Exactly one is retained per instance, and every other container the instance has —
 // including whatever the previous stop retained — is removed in the same call.
@@ -722,7 +722,7 @@ func (d *Driver) ensureImage(ctx context.Context, ref string, policy manifest.Pu
 	// The measurement covers the drain below as well as the request: the pull is
 	// only complete once its progress stream has been read to the end.
 	ctx, span := d.tracer.Start(ctx, "image.pull",
-		trace.WithAttributes(attribute.String("orca.image", ref)))
+		trace.WithAttributes(attribute.String("takt.image", ref)))
 	defer span.End()
 
 	started := time.Now()
@@ -791,14 +791,14 @@ func state(status container.ContainerState) driver.State {
 	case container.StateCreated, container.StatePaused:
 		return driver.StatePending
 	case container.StateRemoving:
-		// Being removed is orca's own doing — a replacement or a delete in
+		// Being removed is takt's own doing — a replacement or a delete in
 		// progress — so it is reported as terminating rather than as a failure.
 		return driver.StateTerminating
 	case container.StateExited:
 		return driver.StateExited
 	case container.StateDead:
 		// Docker could not remove the container and will retry when the daemon
-		// restarts. Nothing orca can do will move it on, so it stays a failure.
+		// restarts. Nothing takt can do will move it on, so it stays a failure.
 		return driver.StateFailed
 	default:
 		return driver.StatePending
@@ -918,7 +918,7 @@ func environment(env map[string]string) []string {
 // rather than being removed on the way past. The instance keeps the workload's
 // instances from colliding with one another the same way.
 func containerName(workload string, version, instance, attempt int) string {
-	return fmt.Sprintf("orca-%s-%d-%d-%d", workload, version, instance, attempt)
+	return fmt.Sprintf("takt-%s-%d-%d-%d", workload, version, instance, attempt)
 }
 
 // nextAttempt reports which attempt at running an instance the next container is,

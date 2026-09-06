@@ -8,14 +8,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/internal/server"
+	"github.com/dsb-labs/takt/internal/server"
 )
 
-// Command returns the "serve" command used to start and run the orca server.
+// Command returns the "serve" command used to start and run the takt server.
 func Command() *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve [config-file]",
-		Short: "Run the orca server",
+		Short: "Run the takt server",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config := server.DefaultConfig()

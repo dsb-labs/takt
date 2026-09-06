@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 // The Result type is what the command reports about the file it wrote.
@@ -33,7 +33,7 @@ func Command() *cobra.Command {
 			"state.db by hand does not do this: the database runs in write-ahead\n" +
 			"logging mode, so what is committed at any moment is spread across three\n" +
 			"files and a copy of one of them is stale or torn.\n\n" +
-			"Volume data is not in the archive. Run \"orca volume list\" for the path\n" +
+			"Volume data is not in the archive. Run \"takt volume list\" for the path\n" +
 			"of each volume on the host and back those up separately.\n\n" +
 			"The keyring is not in the archive either, unless --include-keys is\n" +
 			"passed. A database without its keys decrypts nothing, which is what makes\n" +
@@ -89,7 +89,7 @@ func Command() *cobra.Command {
 			// too late otherwise.
 			out := cmd.ErrOrStderr()
 
-			fmt.Fprintln(out, "Volume data is not in this backup. Run \"orca volume list\" for each volume's path.")
+			fmt.Fprintln(out, "Volume data is not in this backup. Run \"takt volume list\" for each volume's path.")
 
 			if !includeKeys {
 				fmt.Fprintln(out, "The keyring is not in this backup. It needs a backup of its own,")

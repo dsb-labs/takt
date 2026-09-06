@@ -1,8 +1,8 @@
-project_name: "orca"
+project_name: "takt"
 version: 2
 builds:
-  - id: orca
-    binary: orca
+  - id: takt
+    binary: takt
     mod_timestamp: "{{ .CommitTimestamp }}"
     goos:
       - linux
@@ -27,32 +27,32 @@ archives:
       - zip
 
 nfpms:
-  - id: orca
+  - id: takt
     ids:
-      - orca
+      - takt
     formats:
       - deb
       - rpm
     file_name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     vendor: dsb-labs
-    homepage: https://github.com/dsb-labs/orca
+    homepage: https://github.com/dsb-labs/takt
     maintainer: David Bond <david@dsb.dev>
     description: |-
       Single-node workload orchestrator.
-      orca runs container and exec workloads on one host, reconciling them
+      takt runs container and exec workloads on one host, reconciling them
       against applied manifests. Exec workloads require Linux 6.2 or later.
     license: MIT
     bindir: /usr/bin
     contents:
-      - src: packaging/orca.service
-        dst: /usr/lib/systemd/system/orca.service
+      - src: packaging/takt.service
+        dst: /usr/lib/systemd/system/takt.service
       - src: packaging/sysusers.conf
-        dst: /usr/lib/sysusers.d/orca.conf
+        dst: /usr/lib/sysusers.d/takt.conf
       - src: packaging/config.toml
-        dst: /etc/orca/config.toml
+        dst: /etc/takt/config.toml
         type: config|noreplace
       - src: LICENSE.md
-        dst: /usr/share/doc/orca/LICENSE.md
+        dst: /usr/share/doc/takt/LICENSE.md
     scripts:
       postinstall: packaging/postinstall.sh
 

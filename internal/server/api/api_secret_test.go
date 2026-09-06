@@ -17,9 +17,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	generated "github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/server/api"
-	"github.com/dsb-labs/orca/internal/server/service"
+	generated "github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/service"
 )
 
 func TestSecretAPI_SetSecret(t *testing.T) {
@@ -70,7 +70,7 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 			ExpectStatus: http.StatusCreated,
 		},
 		{
-			Name:         "rejects a name orca would not accept",
+			Name:         "rejects a name takt would not accept",
 			Target:       "/api/v1/secrets/DB_PASSWORD",
 			Body:         generated.SecretSpec{Value: "hunter2"},
 			ExpectStatus: http.StatusBadRequest,
@@ -343,7 +343,7 @@ func TestSecretAPI_HidesInternalFailures(t *testing.T) {
 	// A failure while handling a secret could quote the value it was handling, so what
 	// reaches the caller matters more here than elsewhere.
 	internal := errors.New(`failed to encrypt secret: hunter2 under key ` +
-		`/var/lib/orca/keys/da879s0hpe2ten8re4u0.key: cipher: message authentication failed`)
+		`/var/lib/takt/keys/da879s0hpe2ten8re4u0.key: cipher: message authentication failed`)
 
 	tt := []struct {
 		Name       string

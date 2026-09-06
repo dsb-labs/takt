@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 var (
@@ -25,12 +25,12 @@ var (
 	// ErrVolumeInUse is returned when a volume a workload mounts is deleted without
 	// being forced.
 	ErrVolumeInUse = errors.New("volume is in use")
-	// ErrInvalidVolume is returned when a volume's name is not one orca will accept.
+	// ErrInvalidVolume is returned when a volume's name is not one takt will accept.
 	ErrInvalidVolume = errors.New("invalid volume")
 )
 
 // The names a volume may have, which are the names a workload may have. A volume's
-// name reaches orca from a manifest and is reported back to an operator, so it is
+// name reaches takt from a manifest and is reported back to an operator, so it is
 // held to the same shape rather than to whatever a filesystem would tolerate.
 var volumeNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
@@ -64,7 +64,7 @@ type (
 		//
 		// Reported to a caller of the API, which is how something taking a backup
 		// finds it. Not given to the workloads mounting the volume: one told where it
-		// sits inside orca's data directory could walk out of it.
+		// sits inside takt's data directory could walk out of it.
 		Path string
 		// The names of the workloads whose specifications mount the volume.
 		UsedBy []string
@@ -150,7 +150,7 @@ func (s *VolumeService) Create(ctx context.Context, volume manifest.Volume) (Vol
 		return Volume{}, err
 	}
 
-	// Readable only by the user running the server, like everything else orca keeps.
+	// Readable only by the user running the server, like everything else takt keeps.
 	// A workload runs as that user, so this is about what else on the host can read
 	// a workload's data rather than about the workload itself. A volume naming an
 	// owner or a mode replaces that default, which is what lets a container running
@@ -325,7 +325,7 @@ func (s *VolumeService) List(ctx context.Context, queries ...string) ([]Volume, 
 // Delete removes the volume with the given name and everything stored in it.
 //
 // A volume a workload mounts is refused unless force is set, and the error names the
-// workloads holding it. Nothing else in orca removes a volume, so this is the only
+// workloads holding it. Nothing else in takt removes a volume, so this is the only
 // thing that destroys stored data.
 func (s *VolumeService) Delete(ctx context.Context, name string, force bool) error {
 	stored, err := s.volumes.Get(ctx, name)
@@ -356,7 +356,7 @@ func (s *VolumeService) Delete(ctx context.Context, name string, force bool) err
 	// name.
 	//
 	// A permission failure names its fix, because nothing else about it says why a
-	// directory orca created cannot be removed: a container wrote to the volume as a
+	// directory takt created cannot be removed: a container wrote to the volume as a
 	// user other than the server's, which is what an image that switches user does.
 	if err = os.RemoveAll(path); err != nil {
 		if errors.Is(err, fs.ErrPermission) {
@@ -460,8 +460,8 @@ func (s *VolumeService) hydrate(row database.Volume, usedBy []string) (Volume, e
 //
 // The identifier is checked before it becomes a path component, for the same reason
 // the exec driver checks a workload's: a value that has not been looked at should not
-// be joined onto a directory orca removes things from. It comes from the database
-// here rather than from a manifest, which makes this a guard against orca's own
+// be joined onto a directory takt removes things from. It comes from the database
+// here rather than from a manifest, which makes this a guard against takt's own
 // mistakes rather than a caller's.
 func (s *VolumeService) path(id string) (string, error) {
 	if !idPattern.MatchString(id) {

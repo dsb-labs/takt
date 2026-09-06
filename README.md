@@ -1,8 +1,8 @@
-# orca
+# takt
 
 A single-node workload orchestrator.
 
-You describe a workload in a YAML file and submit it. orca stores that as the desired
+You describe a workload in a YAML file and submit it. takt stores that as the desired
 state and reconciles the machine against it continuously. It starts what should be
 running, replaces what runs an outdated specification, restarts what died, and stops
 what nothing asked for.
@@ -12,11 +12,11 @@ A workload runs either as a Docker container or as a command on the host.
 ## Quick start
 
 Download an archive for your platform from the
-[releases](https://github.com/dsb-labs/orca/releases) page and put `orca` on your
+[releases](https://github.com/dsb-labs/takt/releases) page and put `takt` on your
 `PATH`. Then start the server:
 
 ```sh
-orca serve          # listens on 127.0.0.1:7373
+takt serve          # listens on 127.0.0.1:7373
 ```
 
 Write a manifest and apply it:
@@ -31,11 +31,11 @@ container:
   image: nginx:1.27-alpine
 EOF
 
-orca workload apply example.yaml
-orca workload get example
+takt workload apply example.yaml
+takt workload get example
 ```
 
-`get` reports the host port orca allocated, which is how the workload is reached.
+`get` reports the host port takt allocated, which is how the workload is reached.
 
 Each release also publishes `.deb` and `.rpm` packages that install the server as
 a systemd service. See
@@ -77,7 +77,7 @@ to either too, though the exec runtime needs the host to delegate a cgroup subtr
 and refuses the limits when it does not.
 
 A `volumes` entry names a volume, a secret or a variable. A volume is storage. The
-other two are files holding the value orca stores under that name.
+other two are files holding the value takt stores under that name.
 
 A volume is created before the workload that mounts it and outlives that workload, so
 deleting a workload never destroys what it stored. Its manifest is a name and nothing
@@ -89,15 +89,15 @@ name: example-data
 ```
 
 ```sh
-orca volume create volume.yaml
-orca workload apply example.yaml
+takt volume create volume.yaml
+takt workload apply example.yaml
 ```
 
 An `env` value can read a secret rather than holding one. The value is stored
 encrypted, and only a workload starting ever sees it:
 
 ```sh
-printf %s hunter2 | orca secret set db-password
+printf %s hunter2 | takt secret set db-password
 ```
 
 ```yaml
@@ -118,7 +118,7 @@ volumes:
     signal: SIGHUP
 ```
 
-`signal` asks orca to rewrite the file and signal the workload when the value changes,
+`signal` asks takt to rewrite the file and signal the workload when the value changes,
 rather than replacing the workload. Leave it out to have the workload replaced.
 Mounting a secret writes it to the host filesystem, which
 [Secrets](docs/secrets.md) covers.
@@ -127,7 +127,7 @@ A variable is the same thing for a value worth reading back — a hostname, a lo
 a feature flag:
 
 ```sh
-orca variable set db-host db.internal
+takt variable set db-host db.internal
 ```
 
 ```yaml
@@ -136,7 +136,7 @@ env:
 ```
 
 An `env` value can also read the address of another workload, so one workload can be
-pointed at another without either of them naming a port orca chose:
+pointed at another without either of them naming a port takt chose:
 
 ```yaml
 version: v1
@@ -153,7 +153,7 @@ env:
   DSN: postgres://app:${secret:db-password}@${workload:postgres:pg}/app
 ```
 
-`${workload:postgres:pg}` becomes the address that port is reached at. If orca ever
+`${workload:postgres:pg}` becomes the address that port is reached at. If takt ever
 moves the port, the workloads reading it are redeployed with the new address, so the
 dependency keeps working without being re-applied.
 
@@ -166,17 +166,17 @@ dependency keeps working without being re-applied.
 - [Secrets](docs/secrets.md) — storing a value a workload can read and you cannot.
 - [Variables](docs/variables.md) — storing a value both you and a workload can read.
 - [Configuration](docs/configuration.md) — the server's TOML file.
-- [Operating orca](docs/operating.md) — exposure, the web UI, state on disk, backups, and reading logs.
+- [Operating takt](docs/operating.md) — exposure, the web UI, state on disk, backups, and reading logs.
 - [Upgrading](docs/upgrading.md) — replacing the binary, and what survives it.
 - [Design](docs/design.md) — how reconciliation works and why it is built this way.
 - [Reconciliation](docs/reconciliation.md) — the reconciler's mechanics, with diagrams.
 
-[CONTRIBUTING.md](CONTRIBUTING.md) covers building and testing orca.
+[CONTRIBUTING.md](CONTRIBUTING.md) covers building and testing takt.
 
 ## Requirements
 
 - Linux, on the host rather than in a container. The `exec:` runtime starts
-  processes on the machine orca runs on, and reads `/proc` to identify them. See
+  processes on the machine takt runs on, and reads `/proc` to identify them. See
   [Not in a container](docs/operating.md#not-in-a-container).
 - Linux 6.2 or later with Landlock enabled, for workloads that name `exec:`. Every
   `exec` workload is confined by the kernel, and a host that cannot do that refuses to

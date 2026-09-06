@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server"
+	"github.com/dsb-labs/takt/internal/server"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -30,19 +30,19 @@ func TestLoadConfig(t *testing.T) {
 			File: "full.toml",
 			Assert: func(t *testing.T, config server.Config) {
 				assert.Equal(t, "localhost:9999", config.HTTP.Address)
-				assert.Equal(t, "/var/lib/orca", config.Data.Directory)
+				assert.Equal(t, "/var/lib/takt", config.Data.Directory)
 				assert.Equal(t, "tcp://localhost:2375", config.Docker.Host)
-				assert.Equal(t, "/etc/orca/docker-config.json", config.Docker.ConfigFile)
+				assert.Equal(t, "/etc/takt/docker-config.json", config.Docker.ConfigFile)
 				assert.Equal(t, 30*time.Second, config.Reconcile.Interval)
-				assert.Equal(t, []string{"orca.example.com"}, config.HTTP.Hosts)
-				assert.Equal(t, "/etc/orca/tls/cert.pem", config.HTTP.TLSCert)
-				assert.Equal(t, "/etc/orca/tls/key.pem", config.HTTP.TLSKey)
+				assert.Equal(t, []string{"takt.example.com"}, config.HTTP.Hosts)
+				assert.Equal(t, "/etc/takt/tls/cert.pem", config.HTTP.TLSCert)
+				assert.Equal(t, "/etc/takt/tls/key.pem", config.HTTP.TLSKey)
 				assert.True(t, config.HTTP.TLSEnabled())
 				assert.Equal(t, "0.0.0.0", config.Workload.Bind)
 				assert.Equal(t, 25000, config.Workload.MinPort)
 				assert.Equal(t, 26000, config.Workload.MaxPort)
-				assert.Equal(t, "/etc/orca/keys", config.Secrets.Keys)
-				assert.Equal(t, "/etc/orca/keys", config.KeysPath())
+				assert.Equal(t, "/etc/takt/keys", config.Secrets.Keys)
+				assert.Equal(t, "/etc/takt/keys", config.KeysPath())
 				assert.Equal(t, []string{"/opt/runtime", "/nix/store"}, config.Exec.AllowPaths)
 				assert.Equal(t, []string{"/mnt/media", "/var/run/docker.sock"}, config.Workload.AllowHostPaths)
 				assert.Equal(t, "http://collector.example.com:4318", config.Telemetry.OTLPEndpoint)
@@ -191,19 +191,19 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			Name: "a tls certificate pair",
 			Mutate: func(c *server.Config) {
-				c.HTTP.TLSCert, c.HTTP.TLSKey = "/etc/orca/tls/cert.pem", "/etc/orca/tls/key.pem"
+				c.HTTP.TLSCert, c.HTTP.TLSKey = "/etc/takt/tls/cert.pem", "/etc/takt/tls/key.pem"
 			},
 		},
 		{
 			// Half a pair caught here is a clearer failure than a server that
 			// cannot present a certificate.
 			Name:         "a tls certificate without its key",
-			Mutate:       func(c *server.Config) { c.HTTP.TLSCert = "/etc/orca/tls/cert.pem" },
+			Mutate:       func(c *server.Config) { c.HTTP.TLSCert = "/etc/takt/tls/cert.pem" },
 			ExpectsError: true,
 		},
 		{
 			Name:         "a tls key without its certificate",
-			Mutate:       func(c *server.Config) { c.HTTP.TLSKey = "/etc/orca/tls/key.pem" },
+			Mutate:       func(c *server.Config) { c.HTTP.TLSKey = "/etc/takt/tls/key.pem" },
 			ExpectsError: true,
 		},
 		{
@@ -211,14 +211,14 @@ func TestConfig_Validate(t *testing.T) {
 			// key material.
 			Name: "a relative tls certificate",
 			Mutate: func(c *server.Config) {
-				c.HTTP.TLSCert, c.HTTP.TLSKey = "cert.pem", "/etc/orca/tls/key.pem"
+				c.HTTP.TLSCert, c.HTTP.TLSKey = "cert.pem", "/etc/takt/tls/key.pem"
 			},
 			ExpectsError: true,
 		},
 		{
 			Name: "a relative tls key",
 			Mutate: func(c *server.Config) {
-				c.HTTP.TLSCert, c.HTTP.TLSKey = "/etc/orca/tls/cert.pem", "key.pem"
+				c.HTTP.TLSCert, c.HTTP.TLSKey = "/etc/takt/tls/cert.pem", "key.pem"
 			},
 			ExpectsError: true,
 		},
@@ -244,7 +244,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			// Refused rather than taken as a default, because docker reads an empty
-			// host address as every interface — the opposite of what orca defaults to.
+			// host address as every interface — the opposite of what takt defaults to.
 			Name:         "an empty workload bind address",
 			Mutate:       func(c *server.Config) { c.Workload.Bind = "" },
 			ExpectsError: true,
@@ -284,7 +284,7 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			Name:   "an absolute docker config file",
-			Mutate: func(c *server.Config) { c.Docker.ConfigFile = "/etc/orca/docker-config.json" },
+			Mutate: func(c *server.Config) { c.Docker.ConfigFile = "/etc/takt/docker-config.json" },
 		},
 		{
 			// The server's working directory is nowhere an operator meant to keep
@@ -352,10 +352,10 @@ func TestConfig_Validate_ResolvesDataDirectory(t *testing.T) {
 
 	t.Run("leaves an absolute directory alone", func(t *testing.T) {
 		config := server.DefaultConfig()
-		config.Data.Directory = "/var/lib/orca"
+		config.Data.Directory = "/var/lib/takt"
 
 		require.NoError(t, config.Validate())
-		assert.Equal(t, "/var/lib/orca", config.Data.Directory)
+		assert.Equal(t, "/var/lib/takt", config.Data.Directory)
 	})
 
 	// Resolving an empty directory would silently turn it into the working
@@ -388,9 +388,9 @@ func TestConfig_DatabasePath(t *testing.T) {
 	// restoring a node has to write the database back and has the configuration and
 	// nothing else to go on.
 	config := server.DefaultConfig()
-	config.Data.Directory = "/var/lib/orca"
+	config.Data.Directory = "/var/lib/takt"
 
-	assert.Equal(t, filepath.Join("/var/lib/orca", "state.db"), config.DatabasePath())
+	assert.Equal(t, filepath.Join("/var/lib/takt", "state.db"), config.DatabasePath())
 }
 
 func TestConfig_KeysPath(t *testing.T) {
@@ -398,20 +398,20 @@ func TestConfig_KeysPath(t *testing.T) {
 
 	t.Run("puts the keyring beside the database by default", func(t *testing.T) {
 		config := server.DefaultConfig()
-		config.Data.Directory = "/var/lib/orca"
+		config.Data.Directory = "/var/lib/takt"
 
 		// Resolved against the data directory as configured, not as defaulted. A path
-		// computed before the file was read would name the directory orca is not using.
-		assert.Equal(t, filepath.Join("/var/lib/orca", "keys"), config.KeysPath())
+		// computed before the file was read would name the directory takt is not using.
+		assert.Equal(t, filepath.Join("/var/lib/takt", "keys"), config.KeysPath())
 	})
 
 	t.Run("uses the directory it was given", func(t *testing.T) {
 		config := server.DefaultConfig()
-		config.Data.Directory = "/var/lib/orca"
-		config.Secrets.Keys = "/etc/orca/keys"
+		config.Data.Directory = "/var/lib/takt"
+		config.Secrets.Keys = "/etc/takt/keys"
 
 		// Keeping the keys off the disk holding the database is a decision an operator
 		// is allowed to make.
-		assert.Equal(t, "/etc/orca/keys", config.KeysPath())
+		assert.Equal(t, "/etc/takt/keys", config.KeysPath())
 	})
 }

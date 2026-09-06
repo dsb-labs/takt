@@ -155,13 +155,13 @@ its backoff clears.
 
 A manifest that sets `restart.attempts` puts a limit on the pacing. An instance
 that reaches it is given up on: left exactly as it ended so the outcome stays
-readable, counted once on the `orca_workload_giveups_total` metric, and started
-again only by a specification change. Zero attempts — the default — means orca
+readable, counted once on the `takt_workload_giveups_total` metric, and started
+again only by a specification change. Zero attempts — the default — means takt
 keeps trying, which is what a long-running service wants.
 
 Why a start failed is kept in memory as the workload's `lastError`, reported by
-`orca workload get` until a pass over the workload succeeds. A failed start also
-abandons the host ports orca chose for that instance — the port may be what the
+`takt workload get` until a pass over the workload succeeds. A failed start also
+abandons the host ports takt chose for that instance — the port may be what the
 start is failing on, and the next attempt tries different ones. Pinned ports are
 left alone: they were asked for.
 

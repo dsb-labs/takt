@@ -485,7 +485,7 @@ type GetSecretResult struct {
 	// Secret A secret, together with the workloads currently reading it.
 	//
 	// There is no value on this schema, on purpose. Nothing reads a secret back out
-	// of orca: once set, the only thing that sees the value is a workload being
+	// of takt: once set, the only thing that sees the value is a workload being
 	// started.
 	Secret Secret `json:"secret"`
 }
@@ -657,7 +657,7 @@ type InstanceState string
 //
 // Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 // underscores or slashes, up to 63 characters, so a key like
-// app.example.com/name works. Keys with the "orca." prefix are refused: the
+// app.example.com/name works. Keys with the "takt." prefix are refused: the
 // server writes its own labels under it.
 //
 // Values are free text without control characters, up to 256 bytes. An empty
@@ -746,7 +746,7 @@ type OverlapPolicy string
 // Leaving `from` unset asks the server to allocate a host port, which is the
 // usual case: the workload keeps a fixed port of its own and callers discover
 // the allocated one from the workload's instances. Setting it pins the host
-// port, which is worth doing only when something outside orca has to know the
+// port, which is worth doing only when something outside takt has to know the
 // address in advance.
 type PortMapping struct {
 	// From The host port that reaches `to`. Allocated by the server when unset.
@@ -874,7 +874,7 @@ type ResolvedPort struct {
 // is a question about the workload, and the limits mean the same thing on
 // either runtime. A container's are enforced by its own runtime. An exec
 // workload's are enforced with a cgroup of its own, which needs the host to
-// delegate a cgroup subtree to orca — running the server under systemd with
+// delegate a cgroup subtree to takt — running the server under systemd with
 // Delegate=yes grants one. A host without one refuses the apply rather than
 // accepting limits that would silently never apply.
 type ResourcesSpec struct {
@@ -919,7 +919,7 @@ type RestartPolicy string
 // RestartSpec What the server does when a workload's instance ends, and how hard it tries.
 type RestartSpec struct {
 	// Attempts How many consecutive restarts to attempt before giving up. Unset means
-	// orca keeps trying, which is what a long-running service wants.
+	// takt keeps trying, which is what a long-running service wants.
 	//
 	// A workload that gives up is left as it ended. Changing its specification
 	// starts it again.
@@ -1000,7 +1000,7 @@ type ScheduleSpec struct {
 // Secret A secret, together with the workloads currently reading it.
 //
 // There is no value on this schema, on purpose. Nothing reads a secret back out
-// of orca: once set, the only thing that sees the value is a workload being
+// of takt: once set, the only thing that sees the value is a workload being
 // started.
 type Secret struct {
 	// CreatedAt When the secret was created.
@@ -1011,7 +1011,7 @@ type Secret struct {
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
-	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// app.example.com/name works. Keys with the "takt." prefix are refused: the
 	// server writes its own labels under it.
 	//
 	// Values are free text without control characters, up to 256 bytes. An empty
@@ -1060,7 +1060,7 @@ type SecretSpec struct {
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
-	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// app.example.com/name works. Keys with the "takt." prefix are refused: the
 	// server writes its own labels under it.
 	//
 	// Values are free text without control characters, up to 256 bytes. An empty
@@ -1094,7 +1094,7 @@ type Service struct {
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
-	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// app.example.com/name works. Keys with the "takt." prefix are refused: the
 	// server writes its own labels under it.
 	//
 	// Values are free text without control characters, up to 256 bytes. An empty
@@ -1139,7 +1139,7 @@ type ServiceSpec struct {
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
-	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// app.example.com/name works. Keys with the "takt." prefix are refused: the
 	// server writes its own labels under it.
 	//
 	// Values are free text without control characters, up to 256 bytes. An empty
@@ -1191,7 +1191,7 @@ type SetSecretResult struct {
 	// Secret A secret, together with the workloads currently reading it.
 	//
 	// There is no value on this schema, on purpose. Nothing reads a secret back out
-	// of orca: once set, the only thing that sees the value is a workload being
+	// of takt: once set, the only thing that sees the value is a workload being
 	// started.
 	Secret Secret `json:"secret"`
 }
@@ -1256,7 +1256,7 @@ type Variable struct {
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
-	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// app.example.com/name works. Keys with the "takt." prefix are refused: the
 	// server writes its own labels under it.
 	//
 	// Values are free text without control characters, up to 256 bytes. An empty
@@ -1293,7 +1293,7 @@ type VariableSpec struct {
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
-	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// app.example.com/name works. Keys with the "takt." prefix are refused: the
 	// server writes its own labels under it.
 	//
 	// Values are free text without control characters, up to 256 bytes. An empty
@@ -1320,7 +1320,7 @@ type Volume struct {
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
-	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// app.example.com/name works. Keys with the "takt." prefix are refused: the
 	// server writes its own labels under it.
 	//
 	// Values are free text without control characters, up to 256 bytes. An empty
@@ -1346,8 +1346,8 @@ type Volume struct {
 	// backup needs.
 	//
 	// Reported to a caller of this API and not to the workloads mounting the
-	// volume. An operator asking orca where data lives has a reason to know.
-	// A workload told where it sits inside orca's data directory could walk
+	// volume. An operator asking takt where data lives has a reason to know.
+	// A workload told where it sits inside takt's data directory could walk
 	// out of it.
 	Path *string `json:"path,omitempty"`
 
@@ -1363,7 +1363,7 @@ type Volume struct {
 // one it is decides what appears at the path. `name` mounts a volume, which is
 // a directory that outlives the workload. `secret` and `var` mount a file
 // holding what the server holds under that name, so a value an operator keeps
-// in orca can be read by a workload that wants a file rather than an
+// in takt can be read by a workload that wants a file rather than an
 // environment variable. `path` mounts a host file or directory the server does
 // not manage, and only a path the server's configuration allows is accepted.
 //
@@ -1381,11 +1381,11 @@ type Volume struct {
 // `to: /var/lib/example` puts the volume at `var/lib/example` relative to where
 // the process starts. **Such a workload has to reach it by the relative path.**
 // Making the absolute one resolve there would need the process to be confined to
-// its directory, which needs privileges orca does not have, so an absolute path
+// its directory, which needs privileges takt does not have, so an absolute path
 // in a command reaches the host's own root instead.
 //
 // Either way nothing tells the workload where the mount sits on the host, which
-// for an exec workload would be orca's own layout.
+// for an exec workload would be takt's own layout.
 type VolumeMount struct {
 	// From Where the volume's data is on the host, resolved by the server from the
 	// named volume. Ignored when a specification is submitted, and absent for a
@@ -1401,7 +1401,7 @@ type VolumeMount struct {
 	// move the hash for a reason the operator did not ask for.
 	//
 	//
-	// Examples: /home/user/.local/share/orca/volumes/cvhs0dq0kqj4c9r8m1a0
+	// Examples: /home/user/.local/share/takt/volumes/cvhs0dq0kqj4c9r8m1a0
 	From *string `json:"from,omitempty"`
 
 	// Name The volume to mount, which must already exist.
@@ -1484,7 +1484,7 @@ type VolumeSpec struct {
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
-	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// app.example.com/name works. Keys with the "takt." prefix are refused: the
 	// server writes its own labels under it.
 	//
 	// Values are free text without control characters, up to 256 bytes. An empty
@@ -1671,7 +1671,7 @@ type WorkloadSpec struct {
 	//
 	// Keys are lowercase alphanumeric, optionally separated by dots, dashes,
 	// underscores or slashes, up to 63 characters, so a key like
-	// app.example.com/name works. Keys with the "orca." prefix are refused: the
+	// app.example.com/name works. Keys with the "takt." prefix are refused: the
 	// server writes its own labels under it.
 	//
 	// Values are free text without control characters, up to 256 bytes. An empty
@@ -1705,7 +1705,7 @@ type WorkloadSpec struct {
 	// is a question about the workload, and the limits mean the same thing on
 	// either runtime. A container's are enforced by its own runtime. An exec
 	// workload's are enforced with a cgroup of its own, which needs the host to
-	// delegate a cgroup subtree to orca — running the server under systemd with
+	// delegate a cgroup subtree to takt — running the server under systemd with
 	// Delegate=yes grants one. A host without one refuses the apply rather than
 	// accepting limits that would silently never apply.
 	Resources *ResourcesSpec `json:"resources,omitempty"`
@@ -1796,7 +1796,7 @@ type GetBackupParams struct {
 	// Off by default, and the default is the one to prefer. A database
 	// without its keys decrypts nothing, and that separability is what makes
 	// a copy of it safe to keep somewhere a key would not be. An archive
-	// holding both is key material: it opens every secret orca holds, and it
+	// holding both is key material: it opens every secret takt holds, and it
 	// keeps opening them long after this request.
 	//
 	// Every key is included, not only the one sealing secrets now. A key that
@@ -2041,7 +2041,7 @@ type ClientInterface interface {
 
 	// GetBackup Download a backup of the node
 	//
-	// Returns a zip archive holding a consistent snapshot of orca's database,
+	// Returns a zip archive holding a consistent snapshot of takt's database,
 	// taken while the server keeps running.
 	//
 	// The database runs in write-ahead logging mode, so at any moment the
@@ -2054,7 +2054,7 @@ type ClientInterface interface {
 	// in flight.
 	//
 	// **Volume data is not in the archive.** Copying arbitrary user data is not
-	// something orca should do. `GET /api/v1/volumes` reports each volume's path
+	// something takt should do. `GET /api/v1/volumes` reports each volume's path
 	// on the host for exactly this reason, and backing those up is separate work.
 	//
 	// The files under `mounts/` are not in the archive either. They are transient
@@ -2201,7 +2201,7 @@ type ClientInterface interface {
 	// Returns the secret with the given name, including the workloads reading it.
 	//
 	// The value is not part of the response. Nothing reads a secret back out of
-	// orca: once set, the only thing that sees the value is a workload being
+	// takt: once set, the only thing that sees the value is a workload being
 	// started.
 	//
 	// Corresponds with GET /api/v1/secrets/{name} (the `GetSecret` operationId).
@@ -2428,7 +2428,7 @@ type ClientInterface interface {
 	//
 	// A volume a workload mounts is refused rather than removed, and the response
 	// names the workloads holding it. That is what makes deletion deliberate: a
-	// volume outlives the workloads using it, so nothing else in orca will ever
+	// volume outlives the workloads using it, so nothing else in takt will ever
 	// remove one.
 	//
 	// Deletion is synchronous, unlike a workload's. There is nothing running to
@@ -2733,7 +2733,7 @@ type ClientInterface interface {
 
 // GetBackup Download a backup of the node
 //
-// Returns a zip archive holding a consistent snapshot of orca's database,
+// Returns a zip archive holding a consistent snapshot of takt's database,
 // taken while the server keeps running.
 //
 // The database runs in write-ahead logging mode, so at any moment the
@@ -2746,7 +2746,7 @@ type ClientInterface interface {
 // in flight.
 //
 // **Volume data is not in the archive.** Copying arbitrary user data is not
-// something orca should do. `GET /api/v1/volumes` reports each volume's path
+// something takt should do. `GET /api/v1/volumes` reports each volume's path
 // on the host for exactly this reason, and backing those up is separate work.
 //
 // The files under `mounts/` are not in the archive either. They are transient
@@ -2973,7 +2973,7 @@ func (c *Client) DeleteSecret(ctx context.Context, name SecretName, params *Dele
 // Returns the secret with the given name, including the workloads reading it.
 //
 // The value is not part of the response. Nothing reads a secret back out of
-// orca: once set, the only thing that sees the value is a workload being
+// takt: once set, the only thing that sees the value is a workload being
 // started.
 //
 // Corresponds with GET /api/v1/secrets/{name} (the `GetSecret` operationId).
@@ -3360,7 +3360,7 @@ func (c *Client) CreateVolume(ctx context.Context, body CreateVolumeJSONRequestB
 //
 // A volume a workload mounts is refused rather than removed, and the response
 // names the workloads holding it. That is what makes deletion deliberate: a
-// volume outlives the workloads using it, so nothing else in orca will ever
+// volume outlives the workloads using it, so nothing else in takt will ever
 // remove one.
 //
 // Deletion is synchronous, unlike a workload's. There is nothing running to
@@ -5353,7 +5353,7 @@ type ClientWithResponsesInterface interface {
 
 	// GetBackupWithResponse Download a backup of the node
 	//
-	// Returns a zip archive holding a consistent snapshot of orca's database,
+	// Returns a zip archive holding a consistent snapshot of takt's database,
 	// taken while the server keeps running.
 	//
 	// The database runs in write-ahead logging mode, so at any moment the
@@ -5366,7 +5366,7 @@ type ClientWithResponsesInterface interface {
 	// in flight.
 	//
 	// **Volume data is not in the archive.** Copying arbitrary user data is not
-	// something orca should do. `GET /api/v1/volumes` reports each volume's path
+	// something takt should do. `GET /api/v1/volumes` reports each volume's path
 	// on the host for exactly this reason, and backing those up is separate work.
 	//
 	// The files under `mounts/` are not in the archive either. They are transient
@@ -5525,7 +5525,7 @@ type ClientWithResponsesInterface interface {
 	// Returns the secret with the given name, including the workloads reading it.
 	//
 	// The value is not part of the response. Nothing reads a secret back out of
-	// orca: once set, the only thing that sees the value is a workload being
+	// takt: once set, the only thing that sees the value is a workload being
 	// started.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -5768,7 +5768,7 @@ type ClientWithResponsesInterface interface {
 	//
 	// A volume a workload mounts is refused rather than removed, and the response
 	// names the workloads holding it. That is what makes deletion deliberate: a
-	// volume outlives the workloads using it, so nothing else in orca will ever
+	// volume outlives the workloads using it, so nothing else in takt will ever
 	// remove one.
 	//
 	// Deletion is synchronous, unlike a workload's. There is nothing running to
@@ -7874,7 +7874,7 @@ func (r StopWorkloadResponse) ContentType() string {
 
 // GetBackupWithResponse Download a backup of the node
 //
-// Returns a zip archive holding a consistent snapshot of orca's database,
+// Returns a zip archive holding a consistent snapshot of takt's database,
 // taken while the server keeps running.
 //
 // The database runs in write-ahead logging mode, so at any moment the
@@ -7887,7 +7887,7 @@ func (r StopWorkloadResponse) ContentType() string {
 // in flight.
 //
 // **Volume data is not in the archive.** Copying arbitrary user data is not
-// something orca should do. `GET /api/v1/volumes` reports each volume's path
+// something takt should do. `GET /api/v1/volumes` reports each volume's path
 // on the host for exactly this reason, and backing those up is separate work.
 //
 // The files under `mounts/` are not in the archive either. They are transient
@@ -8094,7 +8094,7 @@ func (c *ClientWithResponses) DeleteSecretWithResponse(ctx context.Context, name
 // Returns the secret with the given name, including the workloads reading it.
 //
 // The value is not part of the response. Nothing reads a secret back out of
-// orca: once set, the only thing that sees the value is a workload being
+// takt: once set, the only thing that sees the value is a workload being
 // started.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -8433,7 +8433,7 @@ func (c *ClientWithResponses) CreateVolumeWithResponse(ctx context.Context, body
 //
 // A volume a workload mounts is refused rather than removed, and the response
 // names the workloads holding it. That is what makes deletion deliberate: a
-// volume outlives the workloads using it, so nothing else in orca will ever
+// volume outlives the workloads using it, so nothing else in takt will ever
 // remove one.
 //
 // Deletion is synchronous, unlike a workload's. There is nothing running to

@@ -18,12 +18,12 @@ import (
 	"github.com/docker/go-units"
 	"golang.org/x/sys/unix"
 
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 var (
-	// ErrNotEnforceable is returned when the host gives orca no cgroup subtree of its
+	// ErrNotEnforceable is returned when the host gives takt no cgroup subtree of its
 	// own, which is what an exec workload's resource limits are enforced with.
 	//
 	// There is deliberately no degraded mode, for the reason confinement has none: a
@@ -51,7 +51,7 @@ const (
 	serverCgroup = "main"
 	// The prefix on every cgroup the driver creates for a workload, which is what
 	// tells its own directories from anything else in the delegated subtree.
-	cgroupPrefix = "orca-"
+	cgroupPrefix = "takt-"
 	// The process limit while the trampoline runs, for a workload that asked for a
 	// smaller one. Enough threads for a Go runtime doing almost nothing, and a
 	// bound rather than no limit, so even the moment before the exec cannot fork
@@ -81,7 +81,7 @@ type cgroup struct {
 	pids int
 }
 
-// Enforceable reports whether this host lets orca enforce resource limits on an exec
+// Enforceable reports whether this host lets takt enforce resource limits on an exec
 // workload, returning ErrNotEnforceable when it does not.
 //
 // Asked before a workload is started rather than discovered while starting one, for
@@ -101,12 +101,12 @@ func (d *Driver) Enforceable() error {
 	return Enforceable()
 }
 
-// delegated finds the cgroup subtree the host has given orca to manage, asking only
+// delegated finds the cgroup subtree the host has given takt to manage, asking only
 // once: a process cannot change which cgroup it was started in, so the answer cannot
 // change either.
 var delegated = sync.OnceValues(delegation)
 
-// delegation locates the delegated subtree and reports whether orca can enforce
+// delegation locates the delegated subtree and reports whether takt can enforce
 // limits beneath it.
 //
 // The subtree is derived rather than configured: the cgroup this process is in is
@@ -136,14 +136,14 @@ func delegation() (string, error) {
 	available := strings.Fields(string(data))
 	for _, controller := range []string{"memory", "cpu", "pids"} {
 		if !slices.Contains(available, controller) {
-			return "", fmt.Errorf("%w: the %s controller is not delegated (run orca under systemd with Delegate=yes)",
+			return "", fmt.Errorf("%w: the %s controller is not delegated (run takt under systemd with Delegate=yes)",
 				ErrNotEnforceable, controller)
 		}
 	}
 
 	for _, path := range []string{own, filepath.Join(own, "cgroup.subtree_control")} {
 		if err = unix.Access(path, unix.W_OK); err != nil {
-			return "", fmt.Errorf("%w: the subtree is not writable (run orca under systemd with Delegate=yes)",
+			return "", fmt.Errorf("%w: the subtree is not writable (run takt under systemd with Delegate=yes)",
 				ErrNotEnforceable)
 		}
 	}

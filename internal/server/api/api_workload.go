@@ -9,13 +9,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/middleware"
-	"github.com/dsb-labs/orca/internal/server/port"
-	"github.com/dsb-labs/orca/internal/server/service"
-	"github.com/dsb-labs/orca/internal/wire"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/middleware"
+	"github.com/dsb-labs/takt/internal/server/port"
+	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/internal/wire"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 type (
@@ -563,11 +563,11 @@ func (w *flushWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// instanceHealth maps what orca established about a workload's health onto the wire
+// instanceHealth maps what takt established about a workload's health onto the wire
 // format, falling back to what the runtime reports for an image that declares its own
 // check.
 //
-// The check orca performs takes precedence: it is the one the operator asked for,
+// The check takt performs takes precedence: it is the one the operator asked for,
 // where the runtime's is whatever the image happened to carry.
 func instanceHealth(reported service.Health, instance driver.Instance) *api.InstanceHealth {
 	if reported.Checked {
@@ -589,7 +589,7 @@ func instanceHealth(reported service.Health, instance driver.Instance) *api.Inst
 		return nil
 	}
 
-	// Reported but not acted on: orca did not ask for this check and has no retry
+	// Reported but not acted on: takt did not ask for this check and has no retry
 	// policy for it, so surfacing it is strictly more useful than discarding it.
 	return &api.InstanceHealth{Status: api.HealthStatus(instance.RuntimeHealth)}
 }

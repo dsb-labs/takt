@@ -14,10 +14,10 @@ import (
 func Command() *cobra.Command {
 	return &cobra.Command{
 		Use:    "serve [config-file]",
-		Short:  "Run the orca server",
+		Short:  "Run the takt server",
 		Hidden: true,
 		RunE: func(*cobra.Command, []string) error {
-			return errors.New("the orca server only runs on linux")
+			return errors.New("the takt server only runs on linux")
 		},
 	}
 }

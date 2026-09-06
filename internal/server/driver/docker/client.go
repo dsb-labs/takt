@@ -62,7 +62,7 @@ type (
 )
 
 // NewClient returns a Client talking to the Docker daemon described by the
-// environment, negotiating the API version so that orca works against older
+// environment, negotiating the API version so that takt works against older
 // daemons rather than failing on an unsupported version.
 //
 // When host is empty the environment's configuration is used, which falls back

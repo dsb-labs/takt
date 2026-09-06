@@ -1,6 +1,6 @@
 # Configuration
 
-The server reads a TOML file, given as the argument to `orca serve`. Every value has a
+The server reads a TOML file, given as the argument to `takt serve`. Every value has a
 default, so the server runs with no file at all and a file only has to describe what it
 changes.
 
@@ -12,7 +12,7 @@ tls-cert = ""
 tls-key = ""
 
 [data]
-directory = "~/.local/share/orca"
+directory = "~/.local/share/takt"
 
 [docker]
 host = ""
@@ -49,28 +49,28 @@ level = "info"
 | `tls-key` | empty | The PEM private key for `tls-cert`. |
 
 The default is loopback. Reaching the API is enough to run code on the host, so read
-[Operating orca](operating.md) before binding it to a network.
+[Operating takt](operating.md) before binding it to a network.
 
-`hosts` names the host names orca accepts a request for. An address literal and
-`localhost` are always accepted, so an operator reaching orca directly needs nothing
-here. Set it to the name a reverse proxy in front of orca serves:
+`hosts` names the host names takt accepts a request for. An address literal and
+`localhost` are always accepted, so an operator reaching takt directly needs nothing
+here. Set it to the name a reverse proxy in front of takt serves:
 
 ```toml
 [http]
 address = "127.0.0.1:7373"
-hosts = ["orca.example.com"]
+hosts = ["takt.example.com"]
 ```
 
 A request naming anything else is refused with `421`. That check is what stops a page
 in the operator's browser from reaching a loopback-bound API — see
-[Operating orca](operating.md#exposure).
+[Operating takt](operating.md#exposure).
 
 Set `tls-cert` and `tls-key` together, or not at all, and give both as absolute
 paths. With the pair set, the server terminates TLS itself instead of speaking
 plain HTTP. The key file must be readable only by the user running the server,
 which is the same rule the secret keyring applies. The pair is reread when the
 certificate file changes, so a renewal does not need a restart. See
-[Operating orca](operating.md#serving-tls-directly) for when to prefer this over
+[Operating takt](operating.md#serving-tls-directly) for when to prefer this over
 a reverse proxy.
 
 A request body is read up to 1 MiB and no further. There is no key for it: a manifest
@@ -82,10 +82,10 @@ refused with `400` and `request body too large`.
 
 | Key | Default | Description |
 |---|---|---|
-| `directory` | `~/.local/share/orca` | Where orca keeps its state. |
+| `directory` | `~/.local/share/takt` | Where takt keeps its state. |
 
 Holds the SQLite database and the directories the `exec` runtime gives each workload.
-orca creates it readable only by the user running the server.
+takt creates it readable only by the user running the server.
 
 ## docker
 
@@ -102,16 +102,16 @@ image is pulled, or its digest resolved for `pull: always`, the driver reads the
 file and sends the credentials it holds for the image's registry. Empty reads
 docker's own default location — `~/.docker/config.json`, or wherever
 `DOCKER_CONFIG` points — so a `docker login` by the user running the server just
-works. Set it when that default holds nothing, notably when orca itself runs in a
+works. Set it when that default holds nothing, notably when takt itself runs in a
 container:
 
 ```toml
 [docker]
-config-file = "/etc/orca/docker-config.json"
+config-file = "/etc/takt/docker-config.json"
 ```
 
 The path must be absolute. The file is read when a pull happens rather than at
-startup, so a `docker login` on the host takes effect without restarting orca.
+startup, so a `docker login` on the host takes effect without restarting takt.
 Credential helpers named by the file — a `credsStore` or `credHelpers` entry —
 are run, so logins kept in the OS keychain work, provided the helper is on the
 server's `PATH`. An absent file means anonymous pulls, which is all a public
@@ -125,18 +125,18 @@ image needs.
 
 The interval is a floor on convergence rather than the usual case. A driver reporting
 a change triggers a pass at once, and so does an apply. Shortening this mostly affects
-how quickly orca notices something it was never told about.
+how quickly takt notices something it was never told about.
 
 ## workload
 
 | Key | Default | Description |
 |---|---|---|
 | `bind` | `0.0.0.0` | The address a workload's host ports are published on. |
-| `min-port` | `20000` | The lowest host port orca will allocate. |
-| `max-port` | `32000` | The highest host port orca will allocate. |
+| `min-port` | `20000` | The lowest host port takt will allocate. |
+| `max-port` | `32000` | The highest host port takt will allocate. |
 | `allow-host-paths` | empty | The prefixes a path mount may sit beneath. |
 
-`min-port` and `max-port` are the range orca allocates from for a container port that
+`min-port` and `max-port` are the range takt allocates from for a container port that
 names no host port. A port a manifest pins is used as given, whether or not it falls in
 this range.
 
@@ -167,7 +167,7 @@ dial. A workload
 referencing another is given the address of the interface carrying the default route
 instead, which is how anything on this host reaches the host.
 
-This applies to a port orca publishes for a workload, which means a container. An
+This applies to a port takt publishes for a workload, which means a container. An
 `exec` workload binds its own port, so what it listens on is the process's business and
 this setting does not reach it.
 
@@ -185,7 +185,7 @@ Each prefix must be absolute. Comparison respects path boundaries, so `/mnt/medi
 does not cover `/mnt/media-cache`.
 
 There is no manifest equivalent, for the reason the exec `allow-paths` list has none.
-A host path reaches outside orca-managed state — the docker socket in particular is
+A host path reaches outside takt-managed state — the docker socket in particular is
 control of the daemon — so which paths are opened is the operator's decision. The
 list is checked when a manifest is applied. A workload already stored keeps its
 mounts if the list later narrows, the way an exec workload keeps the paths it was
@@ -227,7 +227,7 @@ directory. Which paths are opened is the operator's decision.
 Empty puts the keyring at `keys/` inside the data directory. A key is generated on
 first start, 32 random bytes, readable only by the user running the server.
 
-It is a directory rather than a single file because `orca admin rekey` writes a new
+It is a directory rather than a single file because `takt admin rekey` writes a new
 key before anything points at it. Each key is named by an identifier the database
 records, so which one is current is a question the database answers. The keyring keeps the keys
 it has replaced, since they still open the backups taken before the rekey.
@@ -236,7 +236,7 @@ Set this to keep the keyring off the same disk as the database:
 
 ```toml
 [secrets]
-keys = "/etc/orca/keys"
+keys = "/etc/takt/keys"
 ```
 
 The keyring needs a backup, and the backup should not sit beside the database. A value
@@ -256,7 +256,7 @@ the server always collects them and serves them at `/api/v1/metrics`. See
 
 Set this to a URL such as `http://collector.internal:4318` to export traces and
 logs over OTLP/HTTP. The scheme decides whether the connection uses TLS. The value
-names where to send the telemetry and nothing else — orca does not know or care
+names where to send the telemetry and nothing else — takt does not know or care
 what consumes it.
 
 Everything beyond the endpoint is read from the standard `OTEL_*` environment

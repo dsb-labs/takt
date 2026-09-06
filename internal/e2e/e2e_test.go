@@ -1,7 +1,7 @@
-// Package e2e provides end-to-end tests that exercise a real orca server against a
+// Package e2e provides end-to-end tests that exercise a real takt server against a
 // real Docker daemon.
 //
-// These tests are the only place orca's layers are exercised together as an operator
+// These tests are the only place takt's layers are exercised together as an operator
 // uses them: a manifest goes in through the client and containers come out on the
 // daemon. They deliberately cover whole journeys rather than individual behaviours —
 // the unit tests own the edge cases — and they are what catches the mistakes that
@@ -9,7 +9,7 @@
 // the shutdown it was meant to follow.
 //
 // The suite is not parallel, and cannot be. Every server shares one Docker daemon,
-// and the reconciler stops any orca-labelled container that no workload asks for, so
+// and the reconciler stops any takt-labelled container that no workload asks for, so
 // two servers running at once would tear down each other's work.
 package e2e_test
 
@@ -30,15 +30,15 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/dsb-labs/orca/internal/restore"
-	execdriver "github.com/dsb-labs/orca/internal/server/driver/exec"
-	"github.com/dsb-labs/orca/pkg/client"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/restore"
+	execdriver "github.com/dsb-labs/takt/internal/server/driver/exec"
+	"github.com/dsb-labs/takt/pkg/client"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 const (
 	// The image the tests run. Small, quick to start, and long-running, so a
-	// workload built from it stays up until orca stops it.
+	// workload built from it stays up until takt stops it.
 	testImage = "nginx:1.27-alpine"
 	// How long to wait for the server to converge on a desired state. Generous
 	// because the first workload to want the image pays to pull it, which is part
@@ -176,7 +176,7 @@ func (s *Suite) TestListQuery() {
 }
 
 // TestDynamicPortIsAllocated covers the usual case for a port: the manifest names
-// only the port inside the container and orca picks the host port that reaches it.
+// only the port inside the container and takt picks the host port that reaches it.
 func (s *Suite) TestDynamicPortIsAllocated() {
 	name := s.workloadName()
 	s.T().Cleanup(func() { s.cleanup(name) })
@@ -279,7 +279,7 @@ func (s *Suite) TestWorkloadReplacedWhenSpecChanges() {
 	s.awaitInstanceOtherThan(name, first)
 }
 
-// TestWorkloadRestartedAfterItDies covers recovery from a workload dying, which orca
+// TestWorkloadRestartedAfterItDies covers recovery from a workload dying, which takt
 // owns rather than delegating to docker's restart policy.
 func (s *Suite) TestWorkloadRestartedAfterItDies() {
 	name := s.workloadName()
@@ -453,25 +453,25 @@ func (s *Suite) TestWorkloadAdoptedAfterServerRestart() {
 }
 
 // TestOrphanedContainerIsStopped covers what a delete performed while the server was
-// down leaves behind: a container orca owns that no workload asks for.
+// down leaves behind: a container takt owns that no workload asks for.
 func (s *Suite) TestOrphanedContainerIsStopped() {
 	name := s.workloadName()
 
-	// Removed here as well as by orca. The test asserts orca reaps it, so a failure
+	// Removed here as well as by takt. The test asserts takt reaps it, so a failure
 	// leaves it behind — and the name is derived from the test, so the container would
 	// then collide with the next run of it. Docker reports that as an exit status
 	// rather than as a message, which is a poor thing to debug from.
 	s.T().Cleanup(func() { s.cleanup(name) })
 
-	container := "orca-" + name + "-orphan"
+	container := "takt-" + name + "-orphan"
 
 	// Any output docker produces is captured, because the exit status alone says
 	// nothing about why: a name conflict and a missing image look the same.
 	create := exec.Command("docker", "run", "--detach",
 		"--name", container,
-		"--label", "orca.workload="+name,
-		"--label", "orca.spec-hash=deadbeef",
-		"--label", "orca.version=1",
+		"--label", "takt.workload="+name,
+		"--label", "takt.spec-hash=deadbeef",
+		"--label", "takt.version=1",
 		testImage,
 	)
 
@@ -631,7 +631,7 @@ func (s *Suite) TestDefaultPolicyStillRestarts() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 
 	// No restart stanza at all, and a command that ends cleanly. Under the default the
-	// clean exit is not a reason to stop, so orca brings it back.
+	// clean exit is not a reason to stop, so takt brings it back.
 	spec := s.jobSpec(name, "", 0)
 	spec.Restart = nil
 
@@ -651,7 +651,7 @@ func (s *Suite) TestDefaultPolicyStillRestarts() {
 }
 
 // TestCompletedJobIsNotRestarted covers a workload that finishes, which is what the
-// restart policy exists for: the runtime reports it gone, and orca must leave it gone.
+// restart policy exists for: the runtime reports it gone, and takt must leave it gone.
 func (s *Suite) TestCompletedJobIsNotRestarted() {
 	name := s.workloadName()
 	s.T().Cleanup(func() { s.cleanup(name) })
@@ -663,7 +663,7 @@ func (s *Suite) TestCompletedJobIsNotRestarted() {
 	s.Require().Len(workload.Instances, 1)
 	s.Equal(client.InstanceStateCompleted, workload.Instances[0].State)
 
-	// The instance that ran stays the instance that ran. Anything else means orca
+	// The instance that ran stays the instance that ran. Anything else means takt
 	// restarted work nobody asked it to repeat.
 	instance := workload.Instances[0].ID
 	for range 8 {
@@ -844,7 +844,7 @@ func (s *Suite) TestNeverPullPolicyRefusesAnAbsentImage() {
 	// An image no host holds: the tag does not exist, so a fall-through to a pull
 	// would fail this test through the timeout below rather than silently pass it.
 	spec := s.containerSpec(name)
-	spec.Container.Image = "orca-e2e/does-not-exist:latest"
+	spec.Container.Image = "takt-e2e/does-not-exist:latest"
 	spec.Container.Pull = manifest.PullNever
 
 	_, _, err := s.client.Apply(s.ctx(), spec)
@@ -1046,7 +1046,7 @@ func (s *Suite) TestExecJobIsRestartedWhenItFails() {
 // yet and the one that did is the one worth reading.
 //
 // Before the driver kept a stopped container, this output was destroyed by the same pass
-// that started the replacement, so `orca workload logs` reported the attempt which had
+// that started the replacement, so `takt workload logs` reported the attempt which had
 // yet to fail — exactly inverted from what the operator needs.
 func (s *Suite) TestLogsOfAReplacedContainerSurviveIt() {
 	name := s.workloadName()
@@ -1349,7 +1349,7 @@ func (s *Suite) TestDeletingAWorkloadRemovesWhatWasRetained() {
 	s.Require().NoError(err)
 
 	// Nothing left, including what was kept. Docker is asked directly rather than the
-	// API, since the question is what is on the host once orca says the workload is gone.
+	// API, since the question is what is on the host once takt says the workload is gone.
 	s.Require().Eventuallyf(func() bool {
 		return len(s.containers(name)) == 0
 	}, convergeTimeout, 500*time.Millisecond, "a retained container outlived the workload it belonged to")
@@ -1481,7 +1481,7 @@ func (s *Suite) TestScheduledWorkloadRunsOnItsSchedule() {
 	// ended cleanly did what its occurrence asked of it.
 	s.awaitState(name, client.WorkloadStateStopped)
 
-	// Once it has run, orca reports when it runs again.
+	// Once it has run, takt reports when it runs again.
 	workload, err := s.client.Get(s.ctx(), name)
 	s.Require().NoError(err)
 	s.False(workload.NextRun.IsZero(), "a workload that has run should report its next occurrence")
@@ -1804,14 +1804,14 @@ func (s *Suite) TestWorkloadMountingAnUnknownVolumeIsRejected() {
 	s.ErrorIs(err, client.ErrVolumeNotFound)
 }
 
-// TestPathMountReachesTheHost covers a workload reading data orca does not manage,
+// TestPathMountReachesTheHost covers a workload reading data takt does not manage,
 // which is what a path mount exists for. The server is restarted with the host
 // directory allowed, since the default configuration refuses every path mount.
 func (s *Suite) TestPathMountReachesTheHost() {
 	name := s.workloadName()
 	s.T().Cleanup(func() { s.cleanup(name) })
 
-	// A host directory outside orca's data directory, holding a file the workload
+	// A host directory outside takt's data directory, holding a file the workload
 	// reads back through the mount.
 	host := s.T().TempDir()
 	s.Require().NoError(os.WriteFile(filepath.Join(host, "greeting"), []byte("hello from the host\n"), 0o644))
@@ -2573,7 +2573,7 @@ func (s *Suite) TestMissingVariable() {
 // the value reaches the workload as a file it can read, and nothing about the value is
 // stored.
 // TestWorkloadReachesAnotherWorkload covers the whole point of referencing a
-// workload: the address orca chose reaches the workload it names, from inside another
+// workload: the address takt chose reaches the workload it names, from inside another
 // container.
 func (s *Suite) TestWorkloadReachesAnotherWorkload() {
 	backend, consumer := s.workloadName()+"-backend", s.workloadName()+"-consumer"
@@ -2602,7 +2602,7 @@ func (s *Suite) TestWorkloadReachesAnotherWorkload() {
 	var out bytes.Buffer
 	s.Require().NoError(s.client.Logs(s.ctx(), &out, consumer, client.WithTail(10)))
 
-	// The host port orca allocated, resolved into the consumer's environment on the
+	// The host port takt allocated, resolved into the consumer's environment on the
 	// path that actually starts work.
 	s.Contains(out.String(), ":"+strconv.Itoa(served.Ports[0].From)+"]")
 
@@ -2611,7 +2611,7 @@ func (s *Suite) TestWorkloadReachesAnotherWorkload() {
 	s.Contains(out.String(), "REACHED")
 
 	// What was stored is the reference. An address in the specification would be one
-	// the workload keeps after orca has moved it.
+	// the workload keeps after takt has moved it.
 	workload, err := s.client.Get(s.ctx(), consumer)
 	s.Require().NoError(err)
 	s.Require().NotNil(workload.Spec.Env)
@@ -2764,7 +2764,7 @@ func (s *Suite) TestWorkloadMountsValues() {
 	s.Contains(out.String(), `{"level":"debug"}`)
 
 	// What was stored is the name of what is read. A path resolved into the stored
-	// specification would put orca's own layout in the API and move the hash with
+	// specification would put takt's own layout in the API and move the hash with
 	// every version.
 	workload, err := s.client.Get(s.ctx(), name)
 	s.Require().NoError(err)
@@ -2788,7 +2788,7 @@ func (s *Suite) TestWorkloadMountsValues() {
 }
 
 // TestReadOnlyRootfsLeavesMountsUsable covers the interaction between a read-only
-// root filesystem and what orca mounts: a volume and a mounted value are bind mounts
+// root filesystem and what takt mounts: a volume and a mounted value are bind mounts
 // with rules of their own, so the volume stays writable and the value stays readable
 // at its 0444 mode while the image's own filesystem refuses writes.
 func (s *Suite) TestReadOnlyRootfsLeavesMountsUsable() {
@@ -3012,11 +3012,11 @@ func (s *Suite) TestObservability() {
 	var metrics bytes.Buffer
 	s.Require().NoError(s.client.Metrics(s.ctx(), &metrics))
 
-	// The pass counter proves orca's own instruments are on the scrape, and the
+	// The pass counter proves takt's own instruments are on the scrape, and the
 	// workload gauge proves per-workload measurement made it through a real
 	// converge.
-	s.Contains(metrics.String(), "orca_reconcile_passes_total")
-	s.Contains(metrics.String(), "orca_workloads")
+	s.Contains(metrics.String(), "takt_reconcile_passes_total")
+	s.Contains(metrics.String(), "takt_workloads")
 }
 
 // TestDebugBundle proves every test leaves the server's spans and logs on disk,
@@ -3067,7 +3067,7 @@ func (s *Suite) TestBackupRestoresANode() {
 	s.awaitState(name, client.WorkloadStateRunning)
 
 	// Taken against the server that is still running, which is what makes this
-	// different from stopping orca and copying files.
+	// different from stopping takt and copying files.
 	var archive bytes.Buffer
 	s.Require().NoError(s.client.Backup(s.ctx(), &archive, client.WithKeys()))
 

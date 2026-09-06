@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
-	"github.com/dsb-labs/orca/internal/server/driver/exec"
+	"github.com/dsb-labs/takt/internal/server/driver/exec"
 )
 
 func TestConfine(t *testing.T) {
@@ -61,7 +61,7 @@ func TestConfine(t *testing.T) {
 	})
 
 	t.Run("reports a path the kernel refused, naming it", func(t *testing.T) {
-		// A ruleset naming something that is not there is a bug in orca or a volume
+		// A ruleset naming something that is not there is a bug in takt or a volume
 		// that went missing. Either way the workload must not start, and the failure has
 		// to say which path caused it — the alternative is an unexplained exit code.
 		missing := filepath.Join(t.TempDir(), "not-here")
@@ -316,7 +316,7 @@ func ambient(t *testing.T) bool {
 }
 
 // trampoline runs the test binary as a confinement trampoline against the given
-// ruleset, the same way the driver runs orca itself.
+// ruleset, the same way the driver runs takt itself.
 //
 // The test binary is the binary under test, so this exercises the real code path: the
 // ruleset goes in over a pipe, the reason it failed comes back over another, and

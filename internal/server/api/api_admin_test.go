@@ -17,10 +17,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/api"
-	"github.com/dsb-labs/orca/internal/server/database"
-	secretstore "github.com/dsb-labs/orca/internal/server/secret"
-	"github.com/dsb-labs/orca/internal/server/service"
+	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/database"
+	secretstore "github.com/dsb-labs/takt/internal/server/secret"
+	"github.com/dsb-labs/takt/internal/server/service"
 )
 
 func TestAdminAPI_GetBackup(t *testing.T) {

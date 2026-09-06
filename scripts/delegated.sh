@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Runs a command inside a delegated cgroup subtree, which is what lets orca
+# Runs a command inside a delegated cgroup subtree, which is what lets takt
 # enforce resource limits on exec workloads. A command already inside one runs
 # unchanged, so the wrapper costs nothing where the environment is already
 # right. See the "Delegation" section of docs/operating.md.

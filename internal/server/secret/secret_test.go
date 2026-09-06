@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dsb-labs/orca/internal/server/secret"
+	"github.com/dsb-labs/takt/internal/server/secret"
 )
 
 func TestCipher_Seal(t *testing.T) {
@@ -234,7 +234,7 @@ func TestStore(t *testing.T) {
 	t.Run("refuses a key others can write", func(t *testing.T) {
 		store, id := writeKey(t, 0o622, make([]byte, secret.KeyLength))
 
-		// Replacing a key is enough to make orca seal new values under one somebody
+		// Replacing a key is enough to make takt seal new values under one somebody
 		// else chose, without ever reading the one it had.
 		_, err := store.Read(id)
 		assert.ErrorIs(t, err, secret.ErrKeyReadable)

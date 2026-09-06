@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/wire"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/wire"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestToService(t *testing.T) {
@@ -45,7 +45,7 @@ func TestToService(t *testing.T) {
 	t.Run("resolves the protocol default", func(t *testing.T) {
 		t.Parallel()
 
-		// A service reaching orca over HTTP means what the same service written
+		// A service reaching takt over HTTP means what the same service written
 		// as a manifest file means, so the unset protocol resolves here too.
 		got := wire.ToService(api.ServiceSpec{
 			Version: "v1",

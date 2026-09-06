@@ -35,7 +35,7 @@ type Store struct {
 // nothing is there.
 //
 // The directory is readable only by the user running the server. Anything that can
-// read it can read every secret orca holds.
+// read it can read every secret takt holds.
 func NewStore(directory string) (*Store, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create keyring directory: %w", err)
@@ -89,7 +89,7 @@ func (s *Store) Create() (string, error) {
 //
 // A key anyone other than its owner can read is refused rather than narrowed.
 // Whoever could read it has already had the chance, so tightening the mode would
-// hide that rather than undo it, and orca cannot tell a mistake from a deliberate
+// hide that rather than undo it, and takt cannot tell a mistake from a deliberate
 // share.
 func (s *Store) Read(id string) ([]byte, error) {
 	path := s.path(id)

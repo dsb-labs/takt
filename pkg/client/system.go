@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/generated/api"
 )
 
 // The Readiness type is the client-side view of whether the server can do its

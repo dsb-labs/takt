@@ -17,14 +17,14 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	generated "github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/server/api"
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/health"
-	"github.com/dsb-labs/orca/internal/server/port"
-	"github.com/dsb-labs/orca/internal/server/service"
-	"github.com/dsb-labs/orca/internal/server/state"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	generated "github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/health"
+	"github.com/dsb-labs/takt/internal/server/port"
+	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/internal/server/state"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
@@ -443,7 +443,7 @@ func TestWorkloadAPI_HidesInternalFailures(t *testing.T) {
 	// Shaped like the errors that actually arrive here: wrapped on the way up, and
 	// carrying operational detail picked up along the route.
 	internal := errors.New(`failed to query workloads: SELECT id, name FROM workload: ` +
-		`unable to open database file /var/lib/orca/state.db`)
+		`unable to open database file /var/lib/takt/state.db`)
 
 	tt := []struct {
 		Name       string
@@ -553,7 +553,7 @@ func TestWorkloadAPI_HidesInternalFailures(t *testing.T) {
 			// The response says what failed, and nothing about how the server is put
 			// together. A caller learning the database's path or the text of a query
 			// is being handed reconnaissance.
-			assert.NotContains(t, resp.Body.String(), "/var/lib/orca")
+			assert.NotContains(t, resp.Body.String(), "/var/lib/takt")
 			assert.NotContains(t, resp.Body.String(), "SELECT")
 			assert.NotContains(t, resp.Body.String(), "database file")
 		})
@@ -646,7 +646,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		assert.NotNil(t, reported.CheckedAt)
 	})
 
-	t.Run("reports what the runtime says when orca checks nothing", func(t *testing.T) {
+	t.Run("reports what the runtime says when takt checks nothing", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 
 		// An image carrying its own HEALTHCHECK is being checked by docker whether or
@@ -673,7 +673,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		require.NotNil(t, reported)
 		assert.Equal(t, generated.Healthy, reported.Status)
 
-		// orca did not run this check, so it counted no failures against it.
+		// takt did not run this check, so it counted no failures against it.
 		assert.Nil(t, reported.Failures)
 	})
 

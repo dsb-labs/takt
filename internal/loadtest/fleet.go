@@ -5,12 +5,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 const (
 	// The image every container workload runs. Trivial and already on any host that
-	// has run the end-to-end suite, so a run measures orca rather than a pull.
+	// has run the end-to-end suite, so a run measures takt rather than a pull.
 	image = "busybox:latest"
 	// What a workload does while it is up, which is as little as possible.
 	//
@@ -21,7 +21,7 @@ const (
 	// nine hundredths of a second with it.
 	//
 	// That matters because teardown is the slowest thing a run does, and a run
-	// measuring the daemon's grace period is not measuring orca. The sleep is
+	// measuring the daemon's grace period is not measuring takt. The sleep is
 	// backgrounded and waited on for the same reason: a shell does not act on a trap
 	// until the command in front of it returns.
 	idle = `trap "exit 0" TERM INT; while true; do echo tick; sleep 5 & wait $!; done`
@@ -32,7 +32,7 @@ const (
 	once = "echo ran"
 	// The port a workload listens on inside its runtime, and serves a health check
 	// from. Every workload publishing a port uses the same one, because the host
-	// port is what has to differ and orca is what chooses it.
+	// port is what has to differ and takt is what chooses it.
 	port = 8080
 	// What that port is called, which is how a health check and another workload's
 	// reference both name it.
@@ -131,8 +131,8 @@ func Build(scenario Scenario, prefix string) ([]Workload, Names) {
 // targetsOf names the workloads a reference can point at: the containers publishing a
 // port.
 //
-// An address is the host port orca published on a workload's behalf, which is
-// something it does for a container. An exec workload binds its own port, so orca has
+// An address is the host port takt published on a workload's behalf, which is
+// something it does for a container. An exec workload binds its own port, so takt has
 // no address to report for one.
 func targetsOf(scenario Scenario, prefix string) []string {
 	fleet := scenario.Fleet
@@ -193,7 +193,7 @@ func build(scenario Scenario, names Names, targets []string, name string, index,
 		command = once
 
 		// A schedule replaces the restart policy: a job that runs on a schedule is
-		// not one that is kept up, and orca refuses the combination.
+		// not one that is kept up, and takt refuses the combination.
 		spec.Schedule = &manifest.Schedule{Cron: "* * * * *"}
 		spec.Restart = &manifest.Restart{Policy: manifest.RestartNever}
 	}
@@ -210,7 +210,7 @@ func build(scenario Scenario, names Names, targets []string, name string, index,
 	case has(index, total, fleet.DynamicPorts):
 		spec.Ports = []manifest.Port{{Name: portName, To: port}}
 	case within(index, total, fleet.DynamicPorts, fleet.DynamicPorts+fleet.FixedPorts):
-		// Pinned above the range orca allocates from, so a scenario's fixed ports
+		// Pinned above the range takt allocates from, so a scenario's fixed ports
 		// collide with each other rather than with what the allocator hands out.
 		spec.Ports = []manifest.Port{{Name: portName, To: port, From: 40000 + index}}
 	}

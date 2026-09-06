@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/internal/restore"
-	"github.com/dsb-labs/orca/internal/server"
+	"github.com/dsb-labs/takt/internal/restore"
+	"github.com/dsb-labs/takt/internal/server"
 )
 
 // How long the check for a running server waits for a connection. Long enough for a
@@ -28,7 +28,7 @@ func Command() *cobra.Command {
 		Long: "Put a node back from a backup archive.\n\n" +
 			"Run this with the server stopped. Unlike the other commands here this\n" +
 			"one talks to no server at all: it reads the same configuration file\n" +
-			"\"orca serve\" does, works over the data directory directly, and refuses\n" +
+			"\"takt serve\" does, works over the data directory directly, and refuses\n" +
 			"to run while something is listening on the configured address.\n\n" +
 			"The database is written into the data directory and the keyring into\n" +
 			"wherever the configuration puts it, along with removing any stale\n" +
@@ -95,7 +95,7 @@ func Command() *cobra.Command {
 //
 // A connection is the question rather than a health check. What matters is whether
 // something holds the port, which does not depend on the address having a scheme or
-// on that something answering like orca.
+// on that something answering like takt.
 func stopped(address string) error {
 	conn, err := net.DialTimeout("tcp", address, dialTimeout)
 	if err != nil {

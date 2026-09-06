@@ -16,8 +16,8 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 var (
@@ -49,8 +49,8 @@ type (
 	// The AddressResolver type turns a reference to another workload into the address
 	// that workload is reached at.
 	//
-	// The host is the same for every workload, since orca publishes their ports on
-	// this one machine. What differs is the port, which orca may have chosen and may
+	// The host is the same for every workload, since takt publishes their ports on
+	// this one machine. What differs is the port, which takt may have chosen and may
 	// revise, and which is the reason a workload's address is worth referencing
 	// rather than writing down.
 	AddressResolver struct {

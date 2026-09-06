@@ -10,7 +10,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/dsb-labs/orca/internal/server/telemetry"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
 )
 
 func TestOutcomeOf(t *testing.T) {
@@ -33,7 +33,7 @@ func TestCounter(t *testing.T) {
 		reader := sdkmetric.NewManualReader()
 		meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
 
-		counter := telemetry.Counter(meter, "orca.test", "A counter the test builds.", "{thing}")
+		counter := telemetry.Counter(meter, "takt.test", "A counter the test builds.", "{thing}")
 		counter.Add(t.Context(), 2)
 
 		var collected metricdata.ResourceMetrics
@@ -41,13 +41,13 @@ func TestCounter(t *testing.T) {
 
 		require.Len(t, collected.ScopeMetrics, 1)
 		require.Len(t, collected.ScopeMetrics[0].Metrics, 1)
-		assert.Equal(t, "orca.test", collected.ScopeMetrics[0].Metrics[0].Name)
+		assert.Equal(t, "takt.test", collected.ScopeMetrics[0].Metrics[0].Name)
 	})
 
 	t.Run("records nothing without a meter", func(t *testing.T) {
 		// The point is that a caller never guards: a nil meter yields an
 		// instrument that is safe to record into.
-		counter := telemetry.Counter(nil, "orca.test", "A counter the test builds.", "{thing}")
+		counter := telemetry.Counter(nil, "takt.test", "A counter the test builds.", "{thing}")
 		counter.Add(t.Context(), 1)
 	})
 

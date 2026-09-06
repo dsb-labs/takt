@@ -1,4 +1,4 @@
-// Package ui serves the web UI embedded in the orca binary.
+// Package ui serves the web UI embedded in the takt binary.
 //
 // The UI is a single-page application built from the sources under app/ into
 // dist/, which is embedded at build time. A binary built without the bundle

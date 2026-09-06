@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 var (
@@ -23,7 +23,7 @@ var (
 	// ErrSecretInUse is returned when a secret a workload references is deleted
 	// without being forced.
 	ErrSecretInUse = errors.New("secret is in use")
-	// ErrInvalidSecret is returned when a secret's name is not one orca will accept.
+	// ErrInvalidSecret is returned when a secret's name is not one takt will accept.
 	ErrInvalidSecret = errors.New("invalid secret")
 )
 
@@ -305,7 +305,7 @@ func (s *SecretService) Delete(ctx context.Context, name string, force bool) err
 	}
 
 	// The workloads that referenced it are rehashed for the same reason a rotation
-	// rehashes them: what they were started against no longer describes what orca
+	// rehashes them: what they were started against no longer describes what takt
 	// holds, and the hash is how that is reported.
 	if err = s.redeploy(ctx, name); err != nil {
 		return err
@@ -457,7 +457,7 @@ func (s *SecretService) Rekey(ctx context.Context, cipher Cipher, keyID string) 
 		resealed, err := cipher.Seal(secret.Name, opened)
 
 		// Zeroed as soon as it has been resealed rather than left for the collector.
-		// Every plaintext orca holds is in this loop, which is the largest number of
+		// Every plaintext takt holds is in this loop, which is the largest number of
 		// them that are ever in memory at once.
 		clear(opened)
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 // The largest value that will be read.
@@ -37,8 +37,8 @@ func Command() *cobra.Command {
 			"start.\n\n" +
 			"The value is taken exactly as given, including any trailing newline. Use\n" +
 			"--from-file to read a file, or pipe the value in:\n\n" +
-			"  orca secret set db-password --from-file ./password\n" +
-			"  printf %s hunter2 | orca secret set db-password\n\n" +
+			"  takt secret set db-password --from-file ./password\n" +
+			"  printf %s hunter2 | takt secret set db-password\n\n" +
 			"Labels are replaced, not merged, the way a workload manifest replaces a\n" +
 			"workload's. Setting a value without --label removes the labels the secret\n" +
 			"had. Labelling one is not a rotation: the revision stays put and nothing\n" +

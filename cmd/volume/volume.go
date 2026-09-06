@@ -5,11 +5,11 @@ package volume
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/cmd/volume/create"
-	delcmd "github.com/dsb-labs/orca/cmd/volume/delete"
-	"github.com/dsb-labs/orca/cmd/volume/get"
-	"github.com/dsb-labs/orca/cmd/volume/list"
-	"github.com/dsb-labs/orca/cmd/volume/update"
+	"github.com/dsb-labs/takt/cmd/volume/create"
+	delcmd "github.com/dsb-labs/takt/cmd/volume/delete"
+	"github.com/dsb-labs/takt/cmd/volume/get"
+	"github.com/dsb-labs/takt/cmd/volume/list"
+	"github.com/dsb-labs/takt/cmd/volume/update"
 )
 
 // Command returns the "volume" command, which does nothing on its own and holds the

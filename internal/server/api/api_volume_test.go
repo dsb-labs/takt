@@ -16,10 +16,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	generated "github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/server/api"
-	"github.com/dsb-labs/orca/internal/server/service"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	generated "github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestVolumeAPI_CreateVolume(t *testing.T) {
@@ -45,7 +45,7 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 
 				// Where the data is, which is what something taking a backup needs.
 				require.NotNil(t, v.Path)
-				assert.Equal(t, "/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0", *v.Path)
+				assert.Equal(t, "/var/lib/takt/volumes/cvhs0dq0kqj4c9r8m1a0", *v.Path)
 			},
 		},
 		{
@@ -82,7 +82,7 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 			ExpectStatus: http.StatusConflict,
 		},
 		{
-			Name: "reports a name orca will not accept",
+			Name: "reports a name takt will not accept",
 			Body: generated.VolumeSpec{Version: "v1", Name: "Example_Data"},
 			SetupMocks: func(svc *MockVolumeService) {
 				svc.EXPECT().Create(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool { return v.Name == "Example_Data" })).
@@ -225,7 +225,7 @@ func TestVolumeAPI_ListVolumes(t *testing.T) {
 
 				// Where the data is, which is what something taking a backup needs.
 				require.NotNil(t, volumes[0].Path)
-				assert.Equal(t, "/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0", *volumes[0].Path)
+				assert.Equal(t, "/var/lib/takt/volumes/cvhs0dq0kqj4c9r8m1a0", *volumes[0].Path)
 			},
 		},
 		{
@@ -381,7 +381,7 @@ func TestVolumeAPI_HidesInternalFailures(t *testing.T) {
 	// Shaped like the errors that actually arrive here: wrapped on the way up, and
 	// carrying operational detail picked up along the route.
 	internal := errors.New("failed to remove volume directory: unlinkat " +
-		"/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0: permission denied")
+		"/var/lib/takt/volumes/cvhs0dq0kqj4c9r8m1a0: permission denied")
 
 	tt := []struct {
 		Name       string
@@ -443,7 +443,7 @@ func TestVolumeAPI_HidesInternalFailures(t *testing.T) {
 
 			// None of what the error carried reaches the caller: not the path, not the
 			// syscall, not the reason.
-			assert.NotContains(t, resp.Body.String(), "/var/lib/orca")
+			assert.NotContains(t, resp.Body.String(), "/var/lib/takt")
 			assert.NotContains(t, resp.Body.String(), "unlinkat")
 			assert.NotContains(t, resp.Body.String(), "permission denied")
 		})
@@ -453,7 +453,7 @@ func TestVolumeAPI_HidesInternalFailures(t *testing.T) {
 func testVolume(name string) service.Volume {
 	return service.Volume{
 		Name:      name,
-		Path:      "/var/lib/orca/volumes/cvhs0dq0kqj4c9r8m1a0",
+		Path:      "/var/lib/takt/volumes/cvhs0dq0kqj4c9r8m1a0",
 		CreatedAt: time.Now().UTC().Truncate(time.Second),
 	}
 }

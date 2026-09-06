@@ -1,4 +1,4 @@
-// Package api provides the HTTP API surface of the orca server.
+// Package api provides the HTTP API surface of the takt server.
 //
 // The routes, request decoding and response marshalling are generated from
 // api/openapi.yaml. This package implements the generated interface. The
@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/generated/api"
 )
 
 type (

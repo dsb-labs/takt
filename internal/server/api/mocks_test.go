@@ -8,10 +8,10 @@ import (
 	"context"
 	"io"
 
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/reconciler"
-	"github.com/dsb-labs/orca/internal/server/service"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/reconciler"
+	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 	mock "github.com/stretchr/testify/mock"
 )
 

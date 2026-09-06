@@ -1,9 +1,9 @@
 openapi: 3.1.0
 
 info:
-  title: orca
+  title: takt
   description: |
-    orca is a single-node workload orchestrator. Workloads are submitted as desired
+    takt is a single-node workload orchestrator. Workloads are submitted as desired
     state and continuously reconciled against the runtime so that what is running
     matches what was asked for.
 
@@ -19,7 +19,7 @@ info:
 
 servers:
   - url: http://localhost:7373
-    description: Local orca server.
+    description: Local takt server.
 
 tags:
   - name: workloads
@@ -642,7 +642,7 @@ paths:
 
         A volume a workload mounts is refused rather than removed, and the response
         names the workloads holding it. That is what makes deletion deliberate: a
-        volume outlives the workloads using it, so nothing else in orca will ever
+        volume outlives the workloads using it, so nothing else in takt will ever
         remove one.
 
         Deletion is synchronous, unlike a workload's. There is nothing running to
@@ -859,7 +859,7 @@ paths:
         Returns the secret with the given name, including the workloads reading it.
 
         The value is not part of the response. Nothing reads a secret back out of
-        orca: once set, the only thing that sees the value is a workload being
+        takt: once set, the only thing that sees the value is a workload being
         started.
       responses:
         "200":
@@ -1114,7 +1114,7 @@ paths:
       tags: [admin]
       summary: Download a backup of the node
       description: |
-        Returns a zip archive holding a consistent snapshot of orca's database,
+        Returns a zip archive holding a consistent snapshot of takt's database,
         taken while the server keeps running.
 
         The database runs in write-ahead logging mode, so at any moment the
@@ -1127,7 +1127,7 @@ paths:
         in flight.
 
         **Volume data is not in the archive.** Copying arbitrary user data is not
-        something orca should do. `GET /api/v1/volumes` reports each volume's path
+        something takt should do. `GET /api/v1/volumes` reports each volume's path
         on the host for exactly this reason, and backing those up is separate work.
 
         The files under `mounts/` are not in the archive either. They are transient
@@ -1142,7 +1142,7 @@ paths:
             Off by default, and the default is the one to prefer. A database
             without its keys decrypts nothing, and that separability is what makes
             a copy of it safe to keep somewhere a key would not be. An archive
-            holding both is key material: it opens every secret orca holds, and it
+            holding both is key material: it opens every secret takt holds, and it
             keeps opening them long after this request.
 
             Every key is included, not only the one sealing secrets now. A key that
@@ -1558,7 +1558,7 @@ components:
         is a question about the workload, and the limits mean the same thing on
         either runtime. A container's are enforced by its own runtime. An exec
         workload's are enforced with a cgroup of its own, which needs the host to
-        delegate a cgroup subtree to orca — running the server under systemd with
+        delegate a cgroup subtree to takt — running the server under systemd with
         Delegate=yes grants one. A host without one refuses the apply rather than
         accepting limits that would silently never apply.
       properties:
@@ -1634,7 +1634,7 @@ components:
           type: integer
           description: |
             How many consecutive restarts to attempt before giving up. Unset means
-            orca keeps trying, which is what a long-running service wants.
+            takt keeps trying, which is what a long-running service wants.
 
             A workload that gives up is left as it ended. Changing its specification
             starts it again.
@@ -1750,7 +1750,7 @@ components:
         Leaving `from` unset asks the server to allocate a host port, which is the
         usual case: the workload keeps a fixed port of its own and callers discover
         the allocated one from the workload's instances. Setting it pins the host
-        port, which is worth doing only when something outside orca has to know the
+        port, which is worth doing only when something outside takt has to know the
         address in advance.
       required: [to]
       properties:
@@ -1849,7 +1849,7 @@ components:
         one it is decides what appears at the path. `name` mounts a volume, which is
         a directory that outlives the workload. `secret` and `var` mount a file
         holding what the server holds under that name, so a value an operator keeps
-        in orca can be read by a workload that wants a file rather than an
+        in takt can be read by a workload that wants a file rather than an
         environment variable. `path` mounts a host file or directory the server does
         not manage, and only a path the server's configuration allows is accepted.
 
@@ -1867,11 +1867,11 @@ components:
         `to: /var/lib/example` puts the volume at `var/lib/example` relative to where
         the process starts. **Such a workload has to reach it by the relative path.**
         Making the absolute one resolve there would need the process to be confined to
-        its directory, which needs privileges orca does not have, so an absolute path
+        its directory, which needs privileges takt does not have, so an absolute path
         in a command reaches the host's own root instead.
 
         Either way nothing tells the workload where the mount sits on the host, which
-        for an exec workload would be orca's own layout.
+        for an exec workload would be takt's own layout.
       required: [to]
       properties:
         name:
@@ -1950,7 +1950,7 @@ components:
             A mounted value carries none. Where the server writes the file is its own
             layout and changes with every version of the workload, so storing it would
             move the hash for a reason the operator did not ask for.
-          examples: ["/home/user/.local/share/orca/volumes/cvhs0dq0kqj4c9r8m1a0"]
+          examples: ["/home/user/.local/share/takt/volumes/cvhs0dq0kqj4c9r8m1a0"]
 
     MountSignal:
       type: string
@@ -2033,8 +2033,8 @@ components:
             backup needs.
 
             Reported to a caller of this API and not to the workloads mounting the
-            volume. An operator asking orca where data lives has a reason to know.
-            A workload told where it sits inside orca's data directory could walk
+            volume. An operator asking takt where data lives has a reason to know.
+            A workload told where it sits inside takt's data directory could walk
             out of it.
         createdAt:
           type: string
@@ -2189,7 +2189,7 @@ components:
         A secret, together with the workloads currently reading it.
 
         There is no value on this schema, on purpose. Nothing reads a secret back out
-        of orca: once set, the only thing that sees the value is a workload being
+        of takt: once set, the only thing that sees the value is a workload being
         started.
       required: [name, revision, createdAt, updatedAt]
       properties:
@@ -2540,7 +2540,7 @@ components:
 
         Keys are lowercase alphanumeric, optionally separated by dots, dashes,
         underscores or slashes, up to 63 characters, so a key like
-        app.example.com/name works. Keys with the "orca." prefix are refused: the
+        app.example.com/name works. Keys with the "takt." prefix are refused: the
         server writes its own labels under it.
 
         Values are free text without control characters, up to 256 bytes. An empty

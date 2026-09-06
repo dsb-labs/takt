@@ -1,4 +1,4 @@
-// Package service provides the domain orchestration layer for the orca server.
+// Package service provides the domain orchestration layer for the takt server.
 package service
 
 import (
@@ -12,15 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/health"
-	"github.com/dsb-labs/orca/internal/server/port"
-	"github.com/dsb-labs/orca/internal/server/resolve"
-	"github.com/dsb-labs/orca/internal/server/specdiff"
-	"github.com/dsb-labs/orca/internal/server/spechash"
-	"github.com/dsb-labs/orca/internal/server/state"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/health"
+	"github.com/dsb-labs/takt/internal/server/port"
+	"github.com/dsb-labs/takt/internal/server/resolve"
+	"github.com/dsb-labs/takt/internal/server/specdiff"
+	"github.com/dsb-labs/takt/internal/server/spechash"
+	"github.com/dsb-labs/takt/internal/server/state"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // How long a read will wait on the driver before reporting desired state without
@@ -225,7 +225,7 @@ type (
 		// whatever is running. False for a workload that does not exist, which has
 		// nothing to replace.
 		Replaced bool
-		// The paths into the reported specification whose values orca settles only
+		// The paths into the reported specification whose values takt settles only
 		// as it applies. A host port it has yet to allocate is the only one, and it
 		// is reported rather than invented.
 		Unknown []string
@@ -239,10 +239,10 @@ type (
 		Changed []string
 	}
 
-	// The Health type reports what orca established about a workload's health,
+	// The Health type reports what takt established about a workload's health,
 	// and whether it checks the workload at all.
 	Health struct {
-		// Whether the workload declares a check orca performs.
+		// Whether the workload declares a check takt performs.
 		Checked bool
 		// The most recent outcome, meaningful only when Checked.
 		Result health.Result
@@ -425,7 +425,7 @@ type WorkloadServiceConfig struct {
 	Reconciler Reconciler
 	// The absolute prefixes a path mount may sit beneath. Empty rejects every
 	// path mount, which is the safe default: a host path reaches outside
-	// orca-managed state, so which ones are reachable is the operator's call.
+	// takt-managed state, so which ones are reachable is the operator's call.
 	AllowHostPaths []string
 }
 
@@ -671,7 +671,7 @@ func (s *WorkloadService) DryRun(ctx context.Context, spec manifest.Spec) (DryRu
 	return run, nil
 }
 
-// unknown names the ports orca settles only as it applies, as paths into the
+// unknown names the ports takt settles only as it applies, as paths into the
 // specification it reports.
 //
 // Paths rather than a flag on each port, because the question is which values are
@@ -694,12 +694,12 @@ func unknown(mappings []manifest.Port) []string {
 //
 // Allocation reads the ports already promised and then claims one, so two applies
 // racing each other can choose the same free port. The unique constraint on the
-// claim means one of them loses. That collision is orca's to resolve rather than the
+// claim means one of them loses. That collision is takt's to resolve rather than the
 // caller's, so a dynamic port is simply resolved again against what is now allocated.
 // A pinned port that collides is a different matter entirely: the caller asked for
 // something specific and has to be told it isn't available.
 func (s *WorkloadService) store(ctx context.Context, resolved resolution) (database.Workload, bool, error) {
-	// Bounded because a caller waiting on a request would rather hear that orca
+	// Bounded because a caller waiting on a request would rather hear that takt
 	// couldn't settle its ports than wait indefinitely for a quiet moment.
 	const attempts = 5
 
@@ -845,7 +845,7 @@ func (s *WorkloadService) Delete(ctx context.Context, name string, force bool) (
 
 	// Rehashed once the workload is on its way out, for the reason a deleted secret
 	// rehashes what read it: what those workloads were started against no longer
-	// describes what orca holds, and the hash is how that is reported.
+	// describes what takt holds, and the hash is how that is reported.
 	s.rehashAll(ctx, name, referencing)
 
 	s.logger.With("workload", name).Debug("workload marked for deletion")
@@ -1024,7 +1024,7 @@ func parseQueries(queries []string) ([]database.Query, error) {
 // dynamically, reporting whether anything changed.
 //
 // This exists for the reconciler to call when a workload fails to start, which may
-// be because a host port orca chose has been taken by something outside orca. Only
+// be because a host port takt chose has been taken by something outside takt. Only
 // dynamic ports move: a pinned port was asked for explicitly, so replacing it would
 // be overriding the operator rather than revising a guess, and a workload with no
 // dynamic ports is left entirely alone.
@@ -1201,7 +1201,7 @@ func (s *WorkloadService) ReallocateInstance(ctx context.Context, name string, i
 // stored, and reporting its apply or its reallocation as failed would describe
 // something that did not happen. A consumer left unrehashed is holding an address that
 // may well still reach the workload, and the next thing to touch it recomputes the
-// hash against what orca currently holds.
+// hash against what takt currently holds.
 func (s *WorkloadService) redeploy(ctx context.Context, name string) {
 	referencing, err := s.workloads.ReferencedBy(ctx, name)
 	if err != nil {
@@ -1240,7 +1240,7 @@ func (s *WorkloadService) rehashAll(ctx context.Context, name string, referencin
 // old value and the new one is resolved as they start.
 //
 // Something that has been deleted moves the hash too. The workload is then asking for
-// something orca no longer holds, which is reported when it next tries to start
+// something takt no longer holds, which is reported when it next tries to start
 // rather than by silently leaving the old value running.
 //
 // A pull-always workload's image digest is resolved again here as well, so a rehash
@@ -1280,7 +1280,7 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 		// Nothing about the workload moved, which for a workload mounting a value it
 		// asked to be signalled about is exactly right: such a value stays out of the
 		// hash so that the instance is not replaced. The reconciler is still woken, or
-		// nothing would compare what was delivered against what orca now holds until
+		// nothing would compare what was delivered against what takt now holds until
 		// its next tick.
 		if len(read.refreshed) > 0 {
 			s.wake()
@@ -1290,7 +1290,7 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 	}
 
 	// The workload keeps the ports it holds. The specification already names them, so
-	// resolving them again would be asking for the allocation orca has, and the write
+	// resolving them again would be asking for the allocation takt has, and the write
 	// has to carry them or it would clear them.
 	held, err := s.ports.List(ctx, row.ID)
 	if err != nil {
@@ -1320,7 +1320,7 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 // Only a mount naming a volume is resolved. A mounted secret or variable is written
 // by the reconciler as the workload starts, at a path that changes with every version,
 // so storing one would move the hash for a reason the operator did not ask for and put
-// orca's own layout in the API.
+// takt's own layout in the API.
 //
 // A path mount is gated here rather than by validation, because whether a host
 // allows a path is this host's configuration rather than a property of the
@@ -1692,7 +1692,7 @@ func (s *WorkloadService) lastError(workload string) (string, time.Time) {
 	return message, at
 }
 
-// healths returns what orca knows about each instance's health, keyed by the
+// healths returns what takt knows about each instance's health, keyed by the
 // instance's index. Only the observed instances are asked after, since a result can
 // only exist for an instance that runs.
 func (s *WorkloadService) healths(workload string, instances []driver.Instance) map[int]Health {
@@ -1865,7 +1865,7 @@ type Workload struct {
 	Instances []driver.Instance
 	// The port mappings the server settled on, including any it allocated.
 	Ports []ResolvedPort
-	// What orca established about whether each instance is working, keyed by the
+	// What takt established about whether each instance is working, keyed by the
 	// instance's index.
 	Healths map[int]Health
 	// The workload's overall state, derived from its instances and whether it is

@@ -5,10 +5,10 @@ package secret
 import (
 	"github.com/spf13/cobra"
 
-	delcmd "github.com/dsb-labs/orca/cmd/secret/delete"
-	"github.com/dsb-labs/orca/cmd/secret/get"
-	"github.com/dsb-labs/orca/cmd/secret/list"
-	"github.com/dsb-labs/orca/cmd/secret/set"
+	delcmd "github.com/dsb-labs/takt/cmd/secret/delete"
+	"github.com/dsb-labs/takt/cmd/secret/get"
+	"github.com/dsb-labs/takt/cmd/secret/list"
+	"github.com/dsb-labs/takt/cmd/secret/set"
 )
 
 // Command returns the "secret" command, which does nothing on its own and holds the

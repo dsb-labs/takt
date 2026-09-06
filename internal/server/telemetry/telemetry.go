@@ -65,7 +65,7 @@ type (
 //
 // Everything beyond the endpoint — headers, timeouts, sampling, resource
 // attributes — is read from the standard OTEL_* environment variables the SDK
-// already honours, rather than repeated in orca's own configuration.
+// already honours, rather than repeated in takt's own configuration.
 func New(ctx context.Context, config Config) (*Telemetry, error) {
 	res, err := resource.New(ctx,
 		resource.WithTelemetrySDK(),
@@ -73,7 +73,7 @@ func New(ctx context.Context, config Config) (*Telemetry, error) {
 		// several export to the same collector.
 		resource.WithHost(),
 		resource.WithAttributes(
-			semconv.ServiceName("orca"),
+			semconv.ServiceName("takt"),
 			semconv.ServiceVersion(version()),
 		),
 		// Last, so OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES override the
@@ -130,7 +130,7 @@ func New(ctx context.Context, config Config) (*Telemetry, error) {
 			sdklog.WithResource(res),
 		)
 
-		telemetry.handler = otelslog.NewHandler("orca", otelslog.WithLoggerProvider(provider))
+		telemetry.handler = otelslog.NewHandler("takt", otelslog.WithLoggerProvider(provider))
 		telemetry.shutdowns = append(telemetry.shutdowns, provider.Shutdown)
 	}
 

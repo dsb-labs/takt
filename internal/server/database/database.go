@@ -1,4 +1,4 @@
-// Package database provides the SQLite-backed persistence layer for the orca server.
+// Package database provides the SQLite-backed persistence layer for the takt server.
 //
 // The database stores desired state only — what the operator asked for. What is
 // actually running is observed from the driver on demand, so nothing here can go
@@ -59,7 +59,7 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 	// connections, and a one-shot PRAGMA applies only to whichever connection
 	// happened to run it.
 	//
-	// foreign_keys is off by default in SQLite, and orca relies on it: a workload's
+	// foreign_keys is off by default in SQLite, and takt relies on it: a workload's
 	// port allocations are removed by ON DELETE CASCADE rather than by hand, so
 	// without enforcement a delete would silently leak host ports that nothing owns
 	// and nothing reclaims.
@@ -67,7 +67,7 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 	// busy_timeout makes a connection wait for a contended write lock instead of
 	// immediately failing with SQLITE_BUSY. Without it, concurrent applies fail
 	// outright — an operator applying a directory of manifests in parallel loses
-	// most of them — because SQLite permits one writer at a time and orca has
+	// most of them — because SQLite permits one writer at a time and takt has
 	// several: the API accepting applies and the reconciler finishing deletions.
 	// Thirty seconds rather than SQLite's suggested five, because a rotation
 	// under load queues a write per reading workload: a stampede run measured the
@@ -79,7 +79,7 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 	// while the reconciler may be writing to it.
 	//
 	// _txlock=immediate makes a transaction take the write lock as it opens rather
-	// than on its first write. Orca's transactions read before they write — an upsert
+	// than on its first write. Takt's transactions read before they write — an upsert
 	// looks for an existing workload before storing one — and SQLite gives such a
 	// transaction a shared lock it must later upgrade. Two of them each holding a
 	// shared lock cannot both upgrade, so rather than queueing on the busy timeout

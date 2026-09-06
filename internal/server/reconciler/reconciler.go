@@ -24,18 +24,18 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/dsb-labs/orca/internal/server/database"
-	"github.com/dsb-labs/orca/internal/server/driver"
-	"github.com/dsb-labs/orca/internal/server/health"
-	"github.com/dsb-labs/orca/internal/server/mount"
-	"github.com/dsb-labs/orca/internal/server/state"
-	"github.com/dsb-labs/orca/internal/server/telemetry"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/health"
+	"github.com/dsb-labs/takt/internal/server/mount"
+	"github.com/dsb-labs/takt/internal/server/state"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // The name this package's telemetry is recorded under, which describes the code
 // declaring it rather than whatever assembles the server.
-const scope = "github.com/dsb-labs/orca/internal/server/reconciler"
+const scope = "github.com/dsb-labs/takt/internal/server/reconciler"
 
 type (
 	// The Driver interface describes the runtime operations the reconciler uses to
@@ -141,7 +141,7 @@ type (
 	}
 
 	// The Checker interface describes how the reconciler registers and reads what
-	// orca established about a workload's health.
+	// takt established about a workload's health.
 	Checker interface {
 		// Set should register the check for one instance of a workload, replacing
 		// any it already had.
@@ -238,13 +238,13 @@ type (
 		// for — so one is only ever nil where no workload can mount anything, as in
 		// tests.
 		Mounts Mounts
-		// Reports what orca's own health checks established. May be nil, in which
+		// Reports what takt's own health checks established. May be nil, in which
 		// case only the state the driver reports is acted on.
 		Checker Checker
 		// The address a workload's host ports are published on, which is where a
 		// health check is performed. Empty probes loopback.
 		Bind string
-		// Called to abandon the host ports orca chose for one instance of a
+		// Called to abandon the host ports takt chose for one instance of a
 		// workload when it fails to start, reporting whether anything changed. May
 		// be nil, in which case ports are never reallocated.
 		Reallocate func(ctx context.Context, workload string, instance int) (bool, error)
@@ -701,7 +701,7 @@ func (r *Reconciler) measure(ctx context.Context, rows []database.Workload, obse
 //
 // Concurrency is bounded rather than unbounded. A pass over a thousand workloads
 // should not open a thousand connections to a daemon that will queue them anyway, and
-// a bound keeps the load orca offers a runtime a property of the server rather than of
+// a bound keeps the load takt offers a runtime a property of the server rather than of
 // how many workloads happen to exist.
 func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, observed map[string][]driver.Instance, indexes map[string]map[int]struct{}) {
 	var wg sync.WaitGroup
@@ -723,7 +723,7 @@ func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, 
 			defer func() { <-slots }()
 
 			ctx, span := r.tracer.Start(ctx, "converge",
-				trace.WithAttributes(attribute.String("orca.workload", row.Name)))
+				trace.WithAttributes(attribute.String("takt.workload", row.Name)))
 			defer span.End()
 
 			started := time.Now()
@@ -872,7 +872,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	// A workload mounting a value it asked to be signalled about is told here,
 	// because its specification is current by construction: such a value stays out
 	// of the hash, so a change to one leaves the workload looking exactly as it
-	// does now. Comparing what was delivered against what orca holds is the only
+	// does now. Comparing what was delivered against what takt holds is the only
 	// thing that would notice.
 	return r.refresh(ctx, row)
 }
@@ -1103,7 +1103,7 @@ func (r *Reconciler) slotHash(ctx context.Context, row database.Workload, index 
 // This is the other half of what a mount naming a signal asks for. Such a value is
 // deliberately absent from the specification's hash, so nothing about the workload
 // moves when it changes and the stale check will never fire: the file on disk is
-// compared against what orca holds, and the workload is told.
+// compared against what takt holds, and the workload is told.
 //
 // The signal follows the write, so a workload told to reload always finds the new
 // contents. A failure to signal is returned rather than swallowed: the file has moved
@@ -1372,7 +1372,7 @@ func healthPort(check manifest.Health, ports []database.Port) (int, error) {
 	return 0, fmt.Errorf("port %q is not published by the workload over %s", check.Port, manifest.ProtocolTCP)
 }
 
-// checked folds what orca's health check established into an instance's state, so
+// checked folds what takt's health check established into an instance's state, so
 // that a workload the driver reports as running but which cannot serve converges
 // instead of being left alone.
 //
@@ -1618,7 +1618,7 @@ func (r *Reconciler) suspend(ctx context.Context, row database.Workload, instanc
 // with the same backoff a repeatedly-crashing instance gets.
 //
 // An instance can fail to start for reasons no amount of retrying will fix — an
-// image that does not exist, a host port held by something outside orca and no free
+// image that does not exist, a host port held by something outside takt and no free
 // port to move to. Without pacing, it is retried on every pass and every driver
 // event, which was measured filling the log at over a thousand errors in four
 // minutes while achieving nothing.
@@ -1831,7 +1831,7 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 	//
 	// Ahead of the start rather than inside its error path: a reference that cannot be
 	// resolved would otherwise be treated as a workload that failed to start, which
-	// gives up the host ports orca chose for it. Ports have nothing to do with why
+	// gives up the host ports takt chose for it. Ports have nothing to do with why
 	// this failed, and churning them would move the workload's address for a reason
 	// the operator cannot see. Returning here instead leaves the backoff to pace the
 	// retries, so a workload waiting on a secret does not fill the log.
@@ -1860,10 +1860,10 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 	id, err := d.Start(startCtx, w)
 	if err != nil {
 		// A workload that cannot start may be sitting on a host port something
-		// outside orca has taken, which nothing orca does will free. Rather than
+		// outside takt has taken, which nothing takt does will free. Rather than
 		// try to recognise that specific failure — docker reports it as an
 		// untyped error whose wording is not part of any contract — any failure
-		// gives up the ports orca chose for this instance. Ports the specification
+		// gives up the ports takt chose for this instance. Ports the specification
 		// pinned are left alone: they were asked for, so moving them would be
 		// overriding a decision rather than revising a guess.
 		r.abandonPorts(ctx, row, index)
@@ -1927,7 +1927,7 @@ func (r *Reconciler) observe(ctx context.Context) ([]driver.Instance, error) {
 // how long the answer took.
 func (r *Reconciler) observeDriver(ctx context.Context, name string, d Driver) ([]driver.Instance, error) {
 	ctx, span := r.tracer.Start(ctx, "driver.observe",
-		trace.WithAttributes(attribute.String("orca.driver", name)))
+		trace.WithAttributes(attribute.String("takt.driver", name)))
 	defer span.End()
 
 	started := time.Now()
@@ -2001,7 +2001,7 @@ func (r *Reconciler) watch(ctx context.Context) (<-chan driver.Event, error) {
 	return merged, nil
 }
 
-// abandonPorts gives up the host ports orca chose for a workload, so that the next
+// abandonPorts gives up the host ports takt chose for a workload, so that the next
 // pass tries different ones. Failures are logged rather than returned: the caller is
 // already reporting why the workload didn't start, and a workload that keeps its
 // ports is no worse off than before.

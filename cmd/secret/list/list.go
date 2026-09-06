@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/orca/pkg/client"
+	"github.com/dsb-labs/takt/pkg/client"
 )
 
 // Command returns the "secret list" command used to list the secrets the server holds.
@@ -24,8 +24,8 @@ func Command() *cobra.Command {
 			"Repeat --query to narrow the result. A secret has to match all of them.\n" +
 			"A query is a JSON path into the secret's labels and the value it must\n" +
 			"hold:\n\n" +
-			"  orca secret list --query '$.labels.app=web'\n" +
-			"  orca secret list -q '$.labels.app=web' -q '$.labels.env=prod'",
+			"  takt secret list --query '$.labels.app=web'\n" +
+			"  takt secret list -q '$.labels.app=web' -q '$.labels.env=prod'",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())

@@ -5,8 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dsb-labs/orca/internal/wire"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/wire"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestFromVolume(t *testing.T) {

@@ -83,7 +83,7 @@ type (
 		// Whether to run the workload again. Empty means RestartAlways.
 		Policy RestartPolicy `json:"policy,omitempty"`
 		// How many consecutive restarts to attempt before giving up. Zero means
-		// orca keeps trying.
+		// takt keeps trying.
 		Attempts int `json:"attempts,omitempty"`
 		// How long to wait before the first restart, doubling on each consecutive
 		// failure. Zero means DefaultRestartDelay.
@@ -92,12 +92,12 @@ type (
 
 	// The Spec type describes the desired state of a workload.
 	//
-	// It is the canonical shape of a workload throughout orca's public API: what
+	// It is the canonical shape of a workload throughout takt's public API: what
 	// ParseWorkload produces from a manifest file, and what the client submits. Optional
 	// values are plain zero values rather than pointers, so callers can build one
 	// by hand without ceremony.
 	//
-	// The JSON tags are explicit on every field because this encoding is what orca
+	// The JSON tags are explicit on every field because this encoding is what takt
 	// stores a workload as, and what its specification hash covers. A hash that moves
 	// replaces every running instance, so the encoding must not follow a Go field
 	// name that somebody is free to rename. A field added later must be omitempty for
@@ -254,8 +254,8 @@ type (
 	//
 	// Exactly one source must be named, and which one it is decides what appears at
 	// the path: a volume is a directory that outlives the workload, a secret or
-	// a variable is a file holding what orca holds under that name, and a path is a
-	// file or directory on the host that orca does not manage. The source is
+	// a variable is a file holding what takt holds under that name, and a path is a
+	// file or directory on the host that takt does not manage. The source is
 	// derived from the field that is present rather than from a discriminator, as a
 	// specification's runtime is.
 	VolumeMount struct {
@@ -282,9 +282,9 @@ type (
 		Var string `json:"var,omitempty"`
 		// The host file or directory to mount, written as an absolute path.
 		//
-		// This is how a workload reaches data orca does not manage: a media
+		// This is how a workload reaches data takt does not manage: a media
 		// library on its own mount point, or the docker socket. A host path
-		// reaches outside orca-managed state, so the server accepts one only
+		// reaches outside takt-managed state, so the server accepts one only
 		// when its configuration allows the path. This package cannot check
 		// that, because it validates manifests on machines that are not the
 		// host.
@@ -296,7 +296,7 @@ type (
 		// For a container it is the path inside the container. For an exec workload
 		// what is mounted is placed at this path relative to the workload's working
 		// directory, and such a workload reaches it by that relative path: confining
-		// the process so the absolute one resolved there would need privileges orca
+		// the process so the absolute one resolved there would need privileges takt
 		// does not have.
 		To string `json:"to"`
 		// The signal to send the workload when the mounted value changes, rather than
@@ -304,7 +304,7 @@ type (
 		// workload that reads a file once wants.
 		//
 		// Only a mounted secret or variable may name one. A volume holds whatever the
-		// workload puts there, so there is no change orca could report.
+		// workload puts there, so there is no change takt could report.
 		Signal Signal `json:"signal,omitempty"`
 		// Whether the workload may only read what is mounted. Applies to any
 		// source, so a shared volume can be handed to a workload that should not
@@ -387,7 +387,7 @@ const (
 	MountSecret MountKind = "secret"
 	// MountVariable mounts a variable's value as a file.
 	MountVariable MountKind = "var"
-	// MountPath mounts a file or directory on the host that orca does not manage.
+	// MountPath mounts a file or directory on the host that takt does not manage.
 	MountPath MountKind = "path"
 )
 
@@ -606,7 +606,7 @@ func (s *Schedule) defaults() {
 //
 // A manifest naming no protocol asks for TCP, which is what a specification written
 // before the protocol existed meant. Resolving it here rather than at every reader
-// keeps a port's protocol something the rest of orca can rely on being set.
+// keeps a port's protocol something the rest of takt can rely on being set.
 func (p *Port) defaults() {
 	if p.Protocol == "" {
 		p.Protocol = ProtocolTCP
@@ -626,7 +626,7 @@ func (r *Restart) defaults() {
 // Restarts reports whether the policy calls for another run after an instance ended
 // with the given exit code, having already been attempted the given number of times.
 //
-// Attempts are counted so that a workload can be told to give up. Zero means orca
+// Attempts are counted so that a workload can be told to give up. Zero means takt
 // keeps trying, which is what a long-running service wants.
 func (r *Restart) Restarts(exitCode, attempts int) bool {
 	if r.Attempts > 0 && attempts >= r.Attempts {
@@ -783,7 +783,7 @@ func validateRestart(restart *Restart) error {
 	return nil
 }
 
-// validateCount reports whether the workload's instance count is one orca can run.
+// validateCount reports whether the workload's instance count is one takt can run.
 func validateCount(spec Spec) error {
 	if spec.Count < 1 {
 		return errors.New("invalid count: must be at least 1")
@@ -792,7 +792,7 @@ func validateCount(spec Spec) error {
 	return nil
 }
 
-// validateSchedule reports whether the workload's schedule is one orca can act on.
+// validateSchedule reports whether the workload's schedule is one takt can act on.
 func validateSchedule(spec Spec) error {
 	schedule := spec.Schedule
 	if schedule == nil {
@@ -831,7 +831,7 @@ func validateSchedule(spec Spec) error {
 //
 // A runtime with nothing to publish rejects them rather than ignoring them, for the
 // same reason a check it cannot perform is rejected: a workload whose ports never
-// reach anything looks like orca failing rather than the manifest being wrong.
+// reach anything looks like takt failing rather than the manifest being wrong.
 func validatePorts(spec Spec, runtime Runtime) error {
 	if len(spec.Ports) == 0 {
 		return nil
@@ -881,7 +881,7 @@ func validatePorts(spec Spec, runtime Runtime) error {
 //
 // A runtime that cannot enforce them rejects them rather than ignoring them, for the
 // same reason a port it cannot publish is rejected: a limit that never applies looks
-// like orca failing rather than the manifest being wrong.
+// like takt failing rather than the manifest being wrong.
 func validateResources(spec Spec, runtime Runtime) error {
 	resources := spec.Resources
 	if resources == nil {
@@ -920,7 +920,7 @@ func validateResources(spec Spec, runtime Runtime) error {
 	}
 }
 
-// validateVolumes reports whether the workload's mounts are ones orca can honour.
+// validateVolumes reports whether the workload's mounts are ones takt can honour.
 //
 // The rules are the same for either runtime, which is the point of the field: a
 // workload moved between them keeps its manifest, and nobody has to remember which
@@ -931,7 +931,7 @@ func validateResources(spec Spec, runtime Runtime) error {
 // The one exception is a read-only mount, which is why the runtime is passed. The
 // exec runtime mounts through a symbolic link, which cannot make anything
 // read-only, so it rejects the field rather than ignoring it — for the reason a
-// port it cannot publish is rejected: a promise that never applies looks like orca
+// port it cannot publish is rejected: a promise that never applies looks like takt
 // failing rather than the manifest being wrong.
 //
 // A mount names exactly one source, and the rules that follow from the source are
@@ -1008,10 +1008,10 @@ func validateVolumes(mounts []VolumeMount, runtime Runtime) error {
 	return nil
 }
 
-// validateMountSignal reports whether the signal a mount names is one orca will send
+// validateMountSignal reports whether the signal a mount names is one takt will send
 // for a mount of that kind.
 //
-// A volume or a host path takes none at all. orca does not know what changes inside
+// A volume or a host path takes none at all. takt does not know what changes inside
 // either, so there is no change it could report — and a manifest naming a signal
 // there is asking for something that would never happen, which is worth saying
 // rather than ignoring.
@@ -1021,7 +1021,7 @@ func validateMountSignal(mount VolumeMount, kind MountKind) error {
 	}
 
 	if kind == MountVolume || kind == MountPath {
-		return fmt.Errorf("invalid volumes: %s %q cannot name a signal, because orca does not "+
+		return fmt.Errorf("invalid volumes: %s %q cannot name a signal, because takt does not "+
 			"know when its contents change", kind, mount.Source())
 	}
 
@@ -1051,7 +1051,7 @@ func acceptedSignals() string {
 // probe fields do not: a check is performed against an address, and a runtime with
 // nothing to address cannot be probed. Rejecting that combination matters more than
 // ignoring it would — a workload whose check can never run would sit reported as
-// starting forever, which looks like orca failing rather than the manifest being
+// starting forever, which looks like takt failing rather than the manifest being
 // wrong.
 func validateHealth(spec Spec, runtime Runtime) error {
 	health := spec.Health

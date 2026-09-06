@@ -1,14 +1,14 @@
 [Unit]
-Description=orca workload orchestrator
-Documentation=https://github.com/dsb-labs/orca
+Description=takt workload orchestrator
+Documentation=https://github.com/dsb-labs/takt
 Wants=network-online.target
 After=network-online.target docker.service
 
 [Service]
 Type=notify
-User=orca
-ExecStart=/usr/bin/orca serve /etc/orca/config.toml
-StateDirectory=orca
+User=takt
+ExecStart=/usr/bin/takt serve /etc/takt/config.toml
+StateDirectory=takt
 StateDirectoryMode=0700
 Restart=on-failure
 

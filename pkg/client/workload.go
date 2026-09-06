@@ -10,9 +10,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/dsb-labs/orca/internal/generated/api"
-	"github.com/dsb-labs/orca/internal/wire"
-	"github.com/dsb-labs/orca/pkg/manifest"
+	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/wire"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 type (
@@ -144,7 +144,7 @@ type (
 		// Whether the instance is working.
 		Status HealthStatus
 		// How many consecutive checks have failed. Nil when the check is the
-		// runtime's own rather than one orca performs, since orca counts no
+		// runtime's own rather than one takt performs, since takt counts no
 		// failures against a check it did not run.
 		Failures *int
 		// When the check last ran, if it has run at all.

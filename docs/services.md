@@ -3,7 +3,7 @@
 A service is a named selection of workload instances to balance requests across. It
 selects workloads by their labels, and reports the address of every selected
 instance that is fit to serve. An external load balancer reads those addresses and
-spreads requests across them — orca stays off the data path and runs no proxy of
+spreads requests across them — takt stays off the data path and runs no proxy of
 its own.
 
 ```yaml
@@ -16,8 +16,8 @@ target:
 ```
 
 ```sh
-orca service apply service.yaml
-orca service get web
+takt service apply service.yaml
+takt service get web
 ```
 
 ```json
@@ -56,7 +56,7 @@ target:
 A workload is selected when it carries every label the target names. At least one
 label is required, because a target selecting everything is more likely a mistake
 than an intent. The labels are the workload's own — the same ones
-`orca workload list --query` filters by — so one selector can span several
+`takt workload list --query` filters by — so one selector can span several
 workloads.
 
 The port is always a number: the port inside the workload, as a manifest's `ports`
@@ -92,11 +92,11 @@ a health change or a scale is reflected the next time the service is read.
 
 ## Feeding a balancer
 
-`orca service get` reports every backend, so an external balancer is configured
+`takt service get` reports every backend, so an external balancer is configured
 from one read:
 
 ```sh
-orca service get web | jq -r '.Backends[].Address'
+takt service get web | jq -r '.Backends[].Address'
 ```
 
 The backends move when the fleet does — a scale, a failed check, a reallocated
@@ -107,11 +107,11 @@ feed that pushes changes to a balancer plugin is planned but not built yet.
 ## Labels on the service
 
 A service carries labels of its own, separate from the target's, held to the
-[same rules](manifest.md#labels) as every other resource's. `orca service list
+[same rules](manifest.md#labels) as every other resource's. `takt service list
 --query` filters by them:
 
 ```sh
-orca service list --query '$.labels.env=prod'
+takt service list --query '$.labels.env=prod'
 ```
 
 A query reaches only the service's own labels. The target's labels say what the
@@ -120,7 +120,7 @@ service selects rather than what it is.
 ## Deleting a service
 
 ```sh
-orca service delete web
+takt service delete web
 ```
 
 The workloads the service selected keep running. What stops is the service
