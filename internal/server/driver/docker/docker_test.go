@@ -256,45 +256,18 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
-			Name:     "pulls the image when it isn't present locally",
+			// A pull no longer happens inside Start: the image being absent
+			// reports the background pull instead, which is covered by the
+			// dedicated pull tests below.
+			Name:     "reports a pull in progress when the image isn't present locally",
 			Workload: workload("example", 0, "", containerSpec("example/example:latest", nil), nil, nil),
 			SetupMocks: func(c *MockClient) {
-				// Read to number the attempt, so a replacement cannot collide with a
-				// container being kept for its output.
-				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
-
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return(nil, nil).Once()
 				c.EXPECT().ImagePull(mock.Anything, "example/example:latest", mock.Anything).
-					Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
-				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-					Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
-				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+					Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Maybe()
 			},
-			Assert: func(t *testing.T, id string) {
-				assert.Equal(t, "container-one", id)
-			},
-		},
-		{
-			// An always policy exists to fetch the tag's current content, so what is
-			// held locally is not even asked about: the strict mocks fail this case
-			// if ImageList is called.
-			Name:     "pulls on every start under the always policy",
-			Workload: workload("example", 0, "", pulledSpec("example/example:latest", manifest.PullAlways), nil, nil),
-			SetupMocks: func(c *MockClient) {
-				// Read to number the attempt, so a replacement cannot collide with a
-				// container being kept for its output.
-				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
-
-				c.EXPECT().ImagePull(mock.Anything, "example/example:latest", mock.Anything).
-					Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
-				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-					Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
-				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
-			},
-			Assert: func(t *testing.T, id string) {
-				assert.Equal(t, "container-one", id)
-			},
+			ExpectErr: driver.ErrImagePulling,
 		},
 		{
 			// A never policy that fell through to a pull would be indistinguishable
@@ -487,6 +460,97 @@ func TestDriver_Start(t *testing.T) {
 			tc.Assert(t, id)
 		})
 	}
+}
+
+func TestDriver_Start_PullsInBackground(t *testing.T) {
+	t.Parallel()
+
+	// A pull runs behind the reconcile pass rather than inside it. The first
+	// start reports the pull in progress, and a later one finds it finished
+	// and starts the container.
+	client := NewMockClient(t)
+
+	client.EXPECT().ImageList(mock.Anything, mock.Anything).Return(nil, nil)
+	client.EXPECT().ImagePull(mock.Anything, "example/example:latest", mock.Anything).
+		Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
+	client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+	client.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+	client.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+
+	d := testDriver(t, client)
+	w := workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil)
+
+	_, err := d.Start(t.Context(), w)
+	require.ErrorIs(t, err, driver.ErrImagePulling)
+
+	var id string
+
+	require.Eventually(t, func() bool {
+		got, err := d.Start(t.Context(), w)
+		if err != nil {
+			return false
+		}
+
+		id = got
+
+		return true
+	}, 5*time.Second, 10*time.Millisecond)
+
+	assert.Equal(t, "container-one", id)
+}
+
+func TestDriver_Start_AlwaysPolicyPullsInBackground(t *testing.T) {
+	t.Parallel()
+
+	// An always policy exists to fetch the tag's current content, so what is
+	// held locally is not even asked about: the strict mocks fail this test
+	// if ImageList is called. The pull still runs in the background.
+	client := NewMockClient(t)
+
+	client.EXPECT().ImagePull(mock.Anything, "example/example:latest", mock.Anything).
+		Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
+	client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+	client.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+	client.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+
+	d := testDriver(t, client)
+	w := workload("example", 0, "", pulledSpec("example/example:latest", manifest.PullAlways), nil, nil)
+
+	_, err := d.Start(t.Context(), w)
+	require.ErrorIs(t, err, driver.ErrImagePulling)
+
+	require.Eventually(t, func() bool {
+		_, err := d.Start(t.Context(), w)
+
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestDriver_Start_ReportsPullFailure(t *testing.T) {
+	t.Parallel()
+
+	// A failed pull is reported by the start that finds it finished, so the
+	// failure reaches the workload's state rather than being swallowed by the
+	// background.
+	client := NewMockClient(t)
+
+	client.EXPECT().ImageList(mock.Anything, mock.Anything).Return(nil, nil)
+	client.EXPECT().ImagePull(mock.Anything, "example/example:latest", mock.Anything).
+		Return(nil, errors.New("registry unreachable")).Once()
+
+	d := testDriver(t, client)
+	w := workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil)
+
+	_, err := d.Start(t.Context(), w)
+	require.ErrorIs(t, err, driver.ErrImagePulling)
+
+	require.Eventually(t, func() bool {
+		_, err := d.Start(t.Context(), w)
+
+		return err != nil && !errors.Is(err, driver.ErrImagePulling)
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 func TestDriver_Start_PublishAddress(t *testing.T) {
@@ -1517,7 +1581,7 @@ func TestDriver_Start_RegistryAuth(t *testing.T) {
 	// container being kept for its output.
 	client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
-	client.EXPECT().ImageList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+	client.EXPECT().ImageList(mock.Anything, mock.Anything).Return(nil, nil)
 
 	client.EXPECT().ImagePull(mock.Anything, "registry.example.com/app:latest",
 		mock.MatchedBy(func(options image.PullOptions) bool {
@@ -1530,9 +1594,16 @@ func TestDriver_Start_RegistryAuth(t *testing.T) {
 	client.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
 
 	d := credentialedDriver(t, client, credentialFile(t, "registry.example.com", "some-user", "some-password"))
+	w := workload("example", 1, "hash-one", containerSpec("registry.example.com/app:latest", nil), nil, nil)
 
-	_, err := d.Start(t.Context(), workload("example", 1, "hash-one", containerSpec("registry.example.com/app:latest", nil), nil, nil))
-	require.NoError(t, err)
+	_, err := d.Start(t.Context(), w)
+	require.ErrorIs(t, err, driver.ErrImagePulling)
+
+	require.Eventually(t, func() bool {
+		_, err := d.Start(t.Context(), w)
+
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 // multiplexed frames payload the way the docker daemon frames the output of a

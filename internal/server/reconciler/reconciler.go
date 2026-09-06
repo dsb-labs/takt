@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -1859,6 +1860,17 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 
 	id, err := d.Start(startCtx, w)
 	if err != nil {
+		// An image still being fetched is a waiting state rather than a failure.
+		// The instance stays pending with its ports and pacing untouched, and a
+		// later pass — hurried along by the driver when the pull lands — starts
+		// it. Deliberately not recorded as the workload's last error, because a
+		// pull in progress is nothing an operator has to act on.
+		if errors.Is(err, driver.ErrImagePulling) {
+			r.logger.With("workload", row.Name, "instance", index).Debug("waiting for image pull")
+
+			return nil
+		}
+
 		// A workload that cannot start may be sitting on a host port something
 		// outside takt has taken, which nothing takt does will free. Rather than
 		// try to recognise that specific failure — docker reports it as an

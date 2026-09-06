@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
@@ -85,6 +86,22 @@ type (
 		configFile  string
 		tracer      trace.Tracer
 		instruments instruments
+
+		// The pulls running in the background, keyed by image reference so that
+		// several instances waiting on one image share one pull. An entry is
+		// created when a pull starts and consumed by the first Start to see it
+		// finished. pullEvents is how a finished pull hurries the next pass
+		// along rather than waiting out the tick.
+		pullMux    sync.Mutex
+		pulls      map[string]*pull
+		pullEvents chan driver.Event
+	}
+
+	// The pull type records how a background image pull is going, and how it
+	// ended.
+	pull struct {
+		done bool
+		err  error
 	}
 
 	// The Config type contains fields used to construct a Driver.
@@ -150,6 +167,10 @@ func New(config Config) *Driver {
 		configFile:  config.ConfigFile,
 		tracer:      telemetry.Tracer(config.TracerProvider, scope),
 		instruments: newInstruments(telemetry.Meter(config.MeterProvider, scope)),
+		pulls:       make(map[string]*pull),
+		// Buffered so a pull finishing when nothing watches does not block it.
+		// A dropped event costs a tick of latency, not correctness.
+		pullEvents: make(chan driver.Event, 16),
 	}
 }
 
@@ -167,7 +188,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", ErrNotContainerWorkload
 	}
 
-	if err := d.ensureImage(ctx, spec.Image, spec.Pull); err != nil {
+	if err := d.ensureImage(ctx, w.Name, spec.Image, spec.Pull); err != nil {
 		return "", err
 	}
 
@@ -544,6 +565,15 @@ func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 				case <-ctx.Done():
 					return
 				}
+			case event := <-d.pullEvents:
+				// A background pull finished. The event hurries the next
+				// pass along so the waiting instances start now rather
+				// than at the tick.
+				select {
+				case out <- event:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}()
@@ -694,7 +724,14 @@ func (d *Driver) inspect(ctx context.Context, instance *driver.Instance) {
 // looking at what is held locally, since the point of asking for it is to fetch the
 // tag's current content. A never policy must fail when the image is absent rather
 // than falling through to a pull, or it is indistinguishable from missing.
-func (d *Driver) ensureImage(ctx context.Context, ref string, policy manifest.PullPolicy) error {
+//
+// A pull runs in the background rather than here. A registry round-trip can take
+// minutes, and a Start that waited it out would hold the caller's reconcile pass
+// open, stalling every workload changed after the pass began. The first call
+// starts the pull and returns driver.ErrImagePulling, later calls report the same
+// while it runs, and the call that finds it finished consumes the outcome — a
+// failure is returned exactly once, and a success falls through to the start.
+func (d *Driver) ensureImage(ctx context.Context, workload, ref string, policy manifest.PullPolicy) error {
 	if policy != manifest.PullAlways {
 		images, err := d.client.ImageList(ctx, image.ListOptions{
 			Filters: filters.NewArgs(filters.Arg("reference", ref)),
@@ -712,6 +749,66 @@ func (d *Driver) ensureImage(ctx context.Context, ref string, policy manifest.Pu
 		}
 	}
 
+	d.pullMux.Lock()
+
+	if p, ok := d.pulls[ref]; ok {
+		if !p.done {
+			d.pullMux.Unlock()
+
+			return driver.ErrImagePulling
+		}
+
+		delete(d.pulls, ref)
+		d.pullMux.Unlock()
+
+		return p.err
+	}
+
+	p := &pull{}
+	d.pulls[ref] = p
+	d.pullMux.Unlock()
+
+	go d.pullImage(workload, ref, p)
+
+	return driver.ErrImagePulling
+}
+
+// How long a background image pull may take before it is abandoned. Generous,
+// because a large image over a slow line is a pull working rather than a pull
+// stuck, and an abandoned pull surfaces as a failure the next start reports.
+const pullTimeout = 15 * time.Minute
+
+// pullImage fetches ref from its registry and records how it went in p, then
+// nudges the watcher so the next pass starts the waiting instances without
+// waiting out the tick.
+func (d *Driver) pullImage(workload, ref string, p *pull) {
+	// The driver's own context rather than a caller's: the pass that asked for
+	// the image has moved on, and its cancellation must not abandon the pull.
+	ctx, cancel := context.WithTimeout(context.Background(), pullTimeout)
+	defer cancel()
+
+	err := d.fetch(ctx, ref)
+
+	d.pullMux.Lock()
+	p.done = true
+	p.err = err
+	d.pullMux.Unlock()
+
+	if err != nil {
+		d.logger.With("image", ref, "error", err).Error("image pull failed")
+	} else {
+		d.logger.With("image", ref).Info("image pulled")
+	}
+
+	select {
+	case d.pullEvents <- driver.Event{Workload: workload}:
+	default:
+	}
+}
+
+// fetch performs one pull against the image's registry, returning once the image
+// is held locally.
+func (d *Driver) fetch(ctx context.Context, ref string) error {
 	auth, err := d.registryAuth(ref)
 	if err != nil {
 		return err
@@ -731,17 +828,17 @@ func (d *Driver) ensureImage(ctx context.Context, ref string, policy manifest.Pu
 			metric.WithAttributes(attribute.String("image", ref)))
 	}()
 
-	pull, err := d.client.ImagePull(ctx, ref, image.PullOptions{RegistryAuth: auth})
+	body, err := d.client.ImagePull(ctx, ref, image.PullOptions{RegistryAuth: auth})
 	if err != nil {
 		span.SetStatus(codes.Error, err.Error())
 
 		return fmt.Errorf("failed to pull image: %w", err)
 	}
-	defer pull.Close()
+	defer body.Close()
 
 	// The pull only runs to completion while its progress stream is being read,
 	// so the body has to be drained even though nothing here reports progress.
-	if _, err = io.Copy(io.Discard, pull); err != nil {
+	if _, err = io.Copy(io.Discard, body); err != nil {
 		span.SetStatus(codes.Error, err.Error())
 
 		return fmt.Errorf("failed to pull image: %w", err)

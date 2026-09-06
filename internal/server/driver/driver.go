@@ -10,11 +10,21 @@
 package driver
 
 import (
+	"errors"
 	"time"
 
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
+
+// ErrImagePulling is returned by a driver's Start when the workload's image is
+// being fetched and the instance cannot start until it arrives.
+//
+// It is a waiting state rather than a failure: the caller should leave the
+// instance pending and try again on a later pass, keeping its ports and its
+// restart pacing untouched. The pull itself runs in the driver's background,
+// so returning this is what keeps a slow registry out of the reconcile pass.
+var ErrImagePulling = errors.New("image pull in progress")
 
 // The State type describes the state of a single instance as reported by its driver.
 type State string
