@@ -4,4 +4,3 @@ Codename: stable
 Architectures: amd64 arm64
 Components: main
 Description: The apt repository for takt, a single-node workload orchestrator
-SignWith: yes

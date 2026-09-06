@@ -27,5 +27,20 @@ done
 # removed once the repository is built.
 cp packaging/apt/distributions site/conf/distributions
 reprepro -b site includedeb stable debs/*.deb
+
+# The suite is signed here rather than by reprepro, whose gpgme asks a
+# pinentry for the passphrase and dies on a runner with no terminal.
+# Loopback mode reads it from the APT_SIGNING_PASSPHRASE variable
+# instead, and an unset variable means a key that has none.
+sign() {
+	gpg --batch --yes --pinentry-mode loopback \
+		${APT_SIGNING_PASSPHRASE:+--passphrase "$APT_SIGNING_PASSPHRASE"} "$@"
+}
+
+sign --armor --detach-sign \
+	--output site/dists/stable/Release.gpg site/dists/stable/Release
+sign --clearsign \
+	--output site/dists/stable/InRelease site/dists/stable/Release
+
 gpg --armor --export >site/key.asc
 rm -rf site/conf site/db debs

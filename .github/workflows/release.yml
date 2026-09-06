@@ -77,6 +77,7 @@ jobs:
         run: ./scripts/apt.sh
         env:
           GH_TOKEN: ${{ github.token }}
+          APT_SIGNING_PASSPHRASE: ${{ secrets.APT_SIGNING_PASSPHRASE }}
 
       - name: Configure pages
         uses: actions/configure-pages@v5
