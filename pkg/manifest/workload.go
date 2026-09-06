@@ -217,6 +217,10 @@ type (
 		// Kernel capabilities to remove from the runtime's default set. Dropping ALL
 		// and adding back what the workload needs is the hardened configuration.
 		CapDrop []string `yaml:"capDrop" json:"capDrop,omitempty"`
+		// The pid namespace the container runs in, spelled the way docker spells
+		// it. Only "host" is accepted, which shares the host's namespace the way
+		// an exec workload always does. Empty runs in a namespace of its own.
+		PidMode string `yaml:"pidMode" json:"pidMode,omitempty"`
 	}
 
 	// The Port type describes a port to publish.
@@ -1172,6 +1176,13 @@ func validateContainer(spec Container) error {
 				return fmt.Errorf("invalid container: capability element %d is empty", i)
 			}
 		}
+	}
+
+	// Docker also accepts "container:<id>", which names a container takt did not
+	// start and cannot promise anything about, so only the host namespace is
+	// accepted here.
+	if spec.PidMode != "" && spec.PidMode != "host" {
+		return errors.New(`invalid container: pidMode must be "host" or absent`)
 	}
 
 	return nil

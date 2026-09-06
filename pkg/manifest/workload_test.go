@@ -692,6 +692,21 @@ func TestParse(t *testing.T) {
 			File:         "container_empty_capability.yaml",
 			ExpectsError: true,
 		},
+		{
+			Name: "parses a container sharing the host pid namespace",
+			File: "container_host_pid.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Container)
+				assert.Equal(t, "host", spec.Container.PidMode)
+			},
+		},
+		{
+			// Docker also accepts "container:<id>", which names a container takt
+			// did not start and cannot promise anything about.
+			Name:         "rejects a pid mode that is not the host's",
+			File:         "container_bad_pid_mode.yaml",
+			ExpectsError: true,
+		},
 	}
 
 	for _, tc := range tt {
