@@ -322,6 +322,17 @@ type (
 		// yaml.v3 matches against the lowercased Go field name, and the key is
 		// spelled camelCase on the wire.
 		ReadOnly bool `yaml:"readOnly" json:"readOnly,omitempty"`
+		// How mount events travel between the host and the container, spelled
+		// the way docker spells it. "rslave" makes a filesystem mounted on the
+		// host after the workload starts visible inside, which is what a
+		// workload observing the whole host wants. "rshared" also carries the
+		// mounts the workload creates back to the host. Empty keeps docker's
+		// default, which carries nothing in either direction.
+		//
+		// A host path only, on the container runtime only. Nothing is ever
+		// mounted beneath a takt-managed volume, and the exec runtime mounts
+		// through a symbolic link that cannot propagate anything.
+		Propagation string `json:"propagation,omitempty"`
 	}
 )
 
@@ -982,6 +993,10 @@ func validateVolumes(mounts []VolumeMount, runtime Runtime) error {
 				"runtime mounts through a symbolic link and cannot enforce it", kind, source, runtime)
 		}
 
+		if err = validatePropagation(mount, kind, runtime); err != nil {
+			return err
+		}
+
 		key := Reference{Kind: ReferenceKind(kind), Name: source}
 		if _, ok := sources[key]; ok {
 			return fmt.Errorf("invalid volumes: %s %q is mounted more than once", kind, source)
@@ -1007,6 +1022,37 @@ func validateVolumes(mounts []VolumeMount, runtime Runtime) error {
 			return fmt.Errorf("invalid volumes: %q is mounted more than once", to)
 		}
 		paths[to] = struct{}{}
+	}
+
+	return nil
+}
+
+// validatePropagation reports whether a mount's propagation is one takt can
+// honour: a docker spelling it accepts, on a host path, on the container
+// runtime.
+//
+// Only the recursive values are accepted. Nobody has named a use for the
+// non-recursive pair, and the private pair is docker's default, which an
+// empty field already says.
+func validatePropagation(mount VolumeMount, kind MountKind, runtime Runtime) error {
+	if mount.Propagation == "" {
+		return nil
+	}
+
+	if mount.Propagation != "rslave" && mount.Propagation != "rshared" {
+		return fmt.Errorf("invalid volumes: propagation must be %q, %q or absent, got %q",
+			"rslave", "rshared", mount.Propagation)
+	}
+
+	if kind != MountPath {
+		return fmt.Errorf("invalid volumes: %s %q cannot name a propagation, because "+
+			"nothing is ever mounted beneath a %s", kind, mount.Source(), kind)
+	}
+
+	if runtime == RuntimeExec {
+		return fmt.Errorf("invalid volumes: path %q cannot name a propagation, because the %s "+
+			"runtime mounts through a symbolic link and cannot propagate anything",
+			mount.Source(), runtime)
 	}
 
 	return nil

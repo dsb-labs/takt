@@ -1,0 +1,14 @@
+version: v1
+name: example
+
+volumes:
+  - path: /
+    to: /host
+    readOnly: true
+    propagation: rslave
+  - path: /mnt/fuse
+    to: /mnt/fuse
+    propagation: rshared
+
+container:
+  image: example/example:latest

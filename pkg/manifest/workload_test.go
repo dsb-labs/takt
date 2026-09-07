@@ -563,6 +563,38 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			Name: "mounts host paths with a propagation",
+			File: "mounts_propagation.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, []manifest.VolumeMount{
+					{Path: "/", To: "/host", ReadOnly: true, Propagation: "rslave"},
+					{Path: "/mnt/fuse", To: "/mnt/fuse", Propagation: "rshared"},
+				}, spec.Volumes)
+			},
+		},
+		{
+			// Only the recursive values are accepted: nobody has named a use for
+			// the non-recursive pair, and the private pair is the default an
+			// empty field already says.
+			Name:         "rejects a propagation takt does not accept",
+			File:         "mounts_propagation_value.yaml",
+			ExpectsError: true,
+		},
+		{
+			// Nothing is ever mounted beneath a takt-managed volume, so a
+			// propagation there promises events that never occur.
+			Name:         "rejects a propagation on a named volume",
+			File:         "mounts_propagation_volume.yaml",
+			ExpectsError: true,
+		},
+		{
+			// The exec runtime mounts through a symbolic link, which cannot
+			// propagate anything.
+			Name:         "rejects a propagation in an exec workload",
+			File:         "mounts_propagation_exec.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:      "rejects a mount naming nothing to mount",
 			File:      "mounts_no_source.yaml",
 			ExpectErr: manifest.ErrNoMountSource,

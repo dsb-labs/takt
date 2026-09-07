@@ -1,0 +1,10 @@
+version: v1
+name: example
+
+volumes:
+  - path: /mnt/media
+    to: /media
+    propagation: shared
+
+container:
+  image: example/example:latest

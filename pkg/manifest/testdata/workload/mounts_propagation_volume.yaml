@@ -1,0 +1,10 @@
+version: v1
+name: example
+
+volumes:
+  - name: example-data
+    to: /var/lib/example
+    propagation: rslave
+
+container:
+  image: example/example:latest

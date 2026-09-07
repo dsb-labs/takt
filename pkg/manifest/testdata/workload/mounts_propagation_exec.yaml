@@ -1,0 +1,10 @@
+version: v1
+name: example
+
+volumes:
+  - path: /mnt/media
+    to: /media
+    propagation: rslave
+
+exec:
+  command: ["/usr/local/bin/backup", "--target", "/mnt/media"]
