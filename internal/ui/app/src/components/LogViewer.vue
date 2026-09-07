@@ -151,7 +151,7 @@ onUnmounted(() => controller?.abort());
   <div>
     <div class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
       <label
-        class="flex items-center gap-1.5 text-slate-600 dark:text-slate-400"
+        class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-600 dark:text-slate-400"
       >
         Instance
         <select
@@ -166,7 +166,7 @@ onUnmounted(() => controller?.abort());
       </label>
 
       <label
-        class="flex items-center gap-1.5 text-slate-600 dark:text-slate-400"
+        class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-600 dark:text-slate-400"
       >
         Tail
         <select
@@ -184,7 +184,7 @@ onUnmounted(() => controller?.abort());
         text="Container workloads only. Exec output carries no timestamps to filter on."
       >
         <label
-          class="flex items-center gap-1.5 text-slate-600 dark:text-slate-400"
+          class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-600 dark:text-slate-400"
         >
           Since
           <select
@@ -201,7 +201,7 @@ onUnmounted(() => controller?.abort());
       </Tooltip>
 
       <label
-        class="flex items-center gap-1.5 text-slate-600 dark:text-slate-400"
+        class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-600 dark:text-slate-400"
       >
         <input v-model="previous" type="checkbox" class="accent-pulse-600" />
         Previous
@@ -215,7 +215,7 @@ onUnmounted(() => controller?.abort());
         "
       >
         <label
-          class="flex items-center gap-1.5 text-slate-600 dark:text-slate-400"
+          class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-600 dark:text-slate-400"
           :class="{ 'opacity-50': followDisabled }"
         >
           <input
@@ -230,14 +230,14 @@ onUnmounted(() => controller?.abort());
 
       <button
         v-if="!follow"
-        class="ml-auto rounded-md border border-slate-300 px-2.5 py-1 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+        class="rounded-md border border-slate-300 px-2.5 py-1 text-slate-600 hover:bg-slate-100 sm:ml-auto dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
         @click="load"
       >
         Refresh
       </button>
       <span
         v-else
-        class="ml-auto flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400"
+        class="flex items-center gap-1.5 text-xs text-slate-500 sm:ml-auto dark:text-slate-400"
       >
         <span class="h-2 w-2 animate-pulse rounded-full bg-emerald-500"></span>
         following

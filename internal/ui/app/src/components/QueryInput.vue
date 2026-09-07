@@ -10,6 +10,6 @@ const filter = defineModel<string>({ required: true });
     v-model="filter"
     type="search"
     placeholder="$.labels.app=web"
-    class="w-72 rounded-md border border-slate-300 bg-white px-3 py-1.5 font-mono text-sm placeholder:text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:placeholder:text-slate-500"
+    class="w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 py-1.5 font-mono text-sm placeholder:text-slate-400 sm:w-72 dark:border-slate-700 dark:bg-slate-800 dark:placeholder:text-slate-500"
   />
 </template>

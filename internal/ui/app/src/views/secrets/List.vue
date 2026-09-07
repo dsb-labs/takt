@@ -12,8 +12,8 @@ const secrets = useSecrets(() => queries.value);
 
 const columns = [
   { name: "name", label: "Name" },
-  { name: "revision", label: "Revision" },
-  { name: "updated", label: "Updated" },
+  { name: "revision", label: "Revision", class: "hidden md:table-cell" },
+  { name: "updated", label: "Updated", class: "hidden sm:table-cell" },
   { name: "usedBy", label: "Used by" },
 ];
 
@@ -31,16 +31,19 @@ await secrets.suspense().catch(() => {});
 
 <template>
   <div>
-    <div class="flex flex-wrap items-center justify-between gap-3">
+    <!-- On a phone the title and the button share the first row and the
+         filter takes a full row beneath, the way the views without a button
+         lay out. On a wider screen everything sits on one row. -->
+    <div class="flex flex-wrap items-center gap-3">
       <h1 class="text-xl font-semibold">Secrets</h1>
-      <div class="flex items-center gap-3">
+      <RouterLink
+        to="/secrets/new"
+        class="bg-pulse-600 hover:bg-pulse-700 order-2 ml-auto rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap text-white sm:order-3 sm:ml-0"
+      >
+        Set a secret
+      </RouterLink>
+      <div class="order-3 w-full sm:order-2 sm:ml-auto sm:w-auto">
         <QueryInput v-model="filter" />
-        <RouterLink
-          to="/secrets/new"
-          class="bg-pulse-600 hover:bg-pulse-700 rounded-md px-3 py-1.5 text-sm font-medium text-white"
-        >
-          Set a secret
-        </RouterLink>
       </div>
     </div>
 
@@ -66,12 +69,12 @@ await secrets.suspense().catch(() => {});
           </RouterLink>
         </td>
         <td
-          class="px-4 py-3 font-mono text-xs text-slate-500 dark:text-slate-400"
+          class="hidden px-4 py-3 font-mono text-xs text-slate-500 md:table-cell dark:text-slate-400"
         >
           {{ secret.revision }}
         </td>
         <td
-          class="px-4 py-3 text-slate-600 dark:text-slate-400"
+          class="hidden px-4 py-3 text-slate-600 sm:table-cell dark:text-slate-400"
           :title="absoluteTime(secret.updatedAt)"
         >
           {{ relativeTime(secret.updatedAt) }}

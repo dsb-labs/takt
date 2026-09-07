@@ -144,19 +144,22 @@ await Promise.all([
 
 <template>
   <div>
-    <div class="flex flex-wrap items-center justify-between gap-3">
+    <!-- On a phone the title and the checkbox share the first row and the
+         filter takes a full row beneath, the way the list views with a
+         button lay out. On a wider screen everything sits on one row. -->
+    <div class="flex flex-wrap items-center gap-3">
       <h1 class="text-xl font-semibold">Graph</h1>
-      <div class="flex items-center gap-4">
-        <label
-          class="flex items-center gap-1.5 text-sm text-slate-600 dark:text-slate-400"
-        >
-          <input
-            v-model="hideUnconnected"
-            type="checkbox"
-            class="accent-pulse-600"
-          />
-          Hide unconnected
-        </label>
+      <label
+        class="order-2 ml-auto flex shrink-0 items-center gap-1.5 text-sm whitespace-nowrap text-slate-600 sm:order-3 sm:ml-0 dark:text-slate-400"
+      >
+        <input
+          v-model="hideUnconnected"
+          type="checkbox"
+          class="accent-pulse-600"
+        />
+        Hide unconnected
+      </label>
+      <div class="order-3 w-full sm:order-2 sm:ml-auto sm:w-auto">
         <QueryInput v-model="filter" />
       </div>
     </div>
@@ -168,7 +171,7 @@ await Promise.all([
 
     <div
       v-else
-      class="mt-6 h-[calc(100vh-11rem)] min-h-96 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950"
+      class="mt-6 h-[calc(100dvh-19rem)] min-h-64 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 sm:h-[calc(100vh-11rem)] dark:border-slate-800 dark:bg-slate-950"
     >
       <VueFlow
         :nodes="nodes"

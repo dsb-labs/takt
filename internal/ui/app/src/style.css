@@ -1,6 +1,32 @@
 @import "tailwindcss";
 
 /*
+ * Scrolls without showing a bar. For the containers that pan sideways on a
+ * phone — the section nav, a table wider than the screen — where the bar
+ * is noise and touch still scrolls.
+ */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/*
+ * The page background lives on the root element too, so overscroll and any
+ * overflow past the app's own container show the theme rather than white.
+ */
+html {
+  background-color: var(--color-slate-50);
+}
+
+@media (prefers-color-scheme: dark) {
+  html {
+    background-color: var(--color-slate-950);
+  }
+}
+
+/*
  * The takt palette. Light surfaces are manuscript paper and dark ones are the
  * near-black of a lacquered metronome case. The accent is the brass of its
  * pendulum.

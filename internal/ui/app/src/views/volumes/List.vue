@@ -12,7 +12,7 @@ const volumes = useVolumes(() => queries.value);
 
 const columns = [
   { name: "name", label: "Name" },
-  { name: "created", label: "Created" },
+  { name: "created", label: "Created", class: "hidden sm:table-cell" },
   { name: "usedBy", label: "Used by" },
 ];
 
@@ -56,7 +56,7 @@ await volumes.suspense().catch(() => {});
           </RouterLink>
         </td>
         <td
-          class="px-4 py-3 text-slate-600 dark:text-slate-400"
+          class="hidden px-4 py-3 text-slate-600 sm:table-cell dark:text-slate-400"
           :title="absoluteTime(volume.createdAt)"
         >
           {{ relativeTime(volume.createdAt) }}

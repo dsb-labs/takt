@@ -326,7 +326,9 @@ await workload.suspense().catch(() => {});
                   class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
                 >
                   <td class="px-4 py-2.5">{{ instance.index ?? 0 }}</td>
-                  <td class="hidden px-4 py-2.5 font-mono text-xs sm:table-cell">
+                  <td
+                    class="hidden px-4 py-2.5 font-mono text-xs sm:table-cell"
+                  >
                     <span class="inline-flex items-center gap-1.5">
                       <span :title="instance.id">{{
                         instance.id.slice(0, 12)
@@ -450,7 +452,9 @@ await workload.suspense().catch(() => {});
                     </a>
                     <template v-else>{{ port.from }}</template>
                   </td>
-                  <td class="hidden px-4 py-2.5 font-mono text-xs sm:table-cell">
+                  <td
+                    class="hidden px-4 py-2.5 font-mono text-xs sm:table-cell"
+                  >
                     {{ port.to }}
                   </td>
                   <td

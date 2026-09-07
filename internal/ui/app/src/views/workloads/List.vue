@@ -59,13 +59,15 @@ const counts = computed(() => {
     .map((state) => ({ state, count: byState.get(state)! }));
 });
 
+// A phone shows the name and the state. The rest of the columns arrive
+// with the room to read them.
 const columns = [
   { name: "name", label: "Name" },
   { name: "state", label: "State" },
-  { name: "health", label: "Health" },
-  { name: "runtime", label: "Runtime" },
-  { name: "instances", label: "Instances" },
-  { name: "nextRun", label: "Next run" },
+  { name: "health", label: "Health", class: "hidden sm:table-cell" },
+  { name: "runtime", label: "Runtime", class: "hidden md:table-cell" },
+  { name: "instances", label: "Instances", class: "hidden md:table-cell" },
+  { name: "nextRun", label: "Next run", class: "hidden md:table-cell" },
 ];
 
 const sort = useSort(() => workloads.data.value, "name", {
@@ -130,19 +132,25 @@ await workloads.suspense().catch(() => {});
             :title="workload.lastError"
           ></span>
         </td>
-        <td class="px-4 py-3">
+        <td class="hidden px-4 py-3 sm:table-cell">
           <span v-if="health(workload)" :class="health(workload)!.style">
             {{ health(workload)!.label }}
           </span>
           <span v-else class="text-slate-400 dark:text-slate-500">—</span>
         </td>
-        <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
+        <td
+          class="hidden px-4 py-3 text-slate-600 md:table-cell dark:text-slate-400"
+        >
           {{ workload.runtime }}
         </td>
-        <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
+        <td
+          class="hidden px-4 py-3 text-slate-600 md:table-cell dark:text-slate-400"
+        >
           {{ runningInstances(workload) }}
         </td>
-        <td class="px-4 py-3 text-slate-600 dark:text-slate-400">
+        <td
+          class="hidden px-4 py-3 text-slate-600 md:table-cell dark:text-slate-400"
+        >
           {{ workload.nextRun ? relativeTime(workload.nextRun) : "—" }}
         </td>
       </template>

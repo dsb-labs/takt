@@ -4,9 +4,11 @@ import type { Sort } from "../sort";
 
 // The table every list view renders: a bordered shell, sortable headers, an
 // empty-state row, and one hoverable row per item. The cells stay with the
-// view, which passes them through the row slot.
+// view, which passes them through the row slot. A column's class is how a
+// view hides it at narrow widths, and the matching cells carry the same
+// class themselves.
 defineProps<{
-  columns: { name: string; label: string }[];
+  columns: { name: string; label: string; class?: string }[];
   sort: Sort<T>;
   rowKey: (item: T) => string;
   empty: string;
@@ -15,7 +17,7 @@ defineProps<{
 
 <template>
   <div
-    class="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+    class="mt-6 scrollbar-none overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
   >
     <table class="w-full text-left text-sm">
       <thead>
@@ -26,6 +28,7 @@ defineProps<{
             v-for="column in columns"
             :key="column.name"
             :name="column.name"
+            :class="column.class"
             :sort-key="sort.key.value"
             :descending="sort.descending.value"
             @sort="sort.toggle"

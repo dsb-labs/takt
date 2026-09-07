@@ -45,14 +45,16 @@ const navigation = [
         }}</span>
       </RouterLink>
 
+      <!-- Scrollable within itself on a phone, so a section past the edge
+           is reachable without the page growing sideways. -->
       <nav
-        class="flex divide-slate-100 border-y border-slate-100 sm:flex-col sm:divide-y dark:divide-slate-800 dark:border-slate-800"
+        class="flex scrollbar-none divide-slate-100 overflow-x-auto border-y border-slate-100 sm:flex-col sm:divide-y sm:overflow-visible dark:divide-slate-800 dark:border-slate-800"
       >
         <RouterLink
           v-for="item in navigation"
           :key="item.to"
           :to="item.to"
-          class="px-4 py-2.5 text-sm font-medium"
+          class="shrink-0 px-4 py-2.5 text-sm font-medium whitespace-nowrap"
           :class="
             active(item.to)
               ? 'bg-pulse-50 text-pulse-800 dark:bg-pulse-950 dark:text-pulse-200'

@@ -25,10 +25,13 @@ defineProps<{
     <ErrorBanner v-if="error" :message="error" />
 
     <template v-else>
+      <!-- On a phone the actions take a full row beneath the name and its
+           badges, the way the list views lay their controls out. On a wider
+           screen they sit at the right of the same row. -->
       <header class="mt-4 flex flex-wrap items-center gap-3">
-        <h1 class="text-xl font-semibold">{{ name }}</h1>
+        <h1 class="min-w-0 text-xl font-semibold break-all">{{ name }}</h1>
         <slot name="header" />
-        <div class="ml-auto flex gap-2 text-sm">
+        <div class="flex w-full flex-wrap gap-2 text-sm sm:ml-auto sm:w-auto">
           <slot name="actions" />
         </div>
       </header>
