@@ -1904,6 +1904,19 @@ components:
             Container workloads only. The exec runtime mounts through a symbolic
             link, which cannot make anything read-only, so it rejects the field
             rather than ignoring it.
+        propagation:
+          type: string
+          enum: [rslave, rshared]
+          description: |
+            How mount events travel between the host and the container, spelled
+            the way docker spells it. "rslave" makes a filesystem mounted on the
+            host after the workload starts visible inside. "rshared" also
+            carries the mounts the workload creates back to the host. Absent
+            keeps docker's default, which carries nothing in either direction.
+
+            A host path only, on the container runtime only. Nothing is ever
+            mounted beneath a takt-managed volume, and the exec runtime mounts
+            through a symbolic link that cannot propagate anything.
         signal:
           $ref: "#/components/schemas/MountSignal"
         to:

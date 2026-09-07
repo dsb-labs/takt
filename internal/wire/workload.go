@@ -159,6 +159,9 @@ func ToVolumeMount(mount api.VolumeMount) manifest.VolumeMount {
 	if mount.ReadOnly != nil {
 		out.ReadOnly = *mount.ReadOnly
 	}
+	if mount.Propagation != nil {
+		out.Propagation = string(*mount.Propagation)
+	}
 
 	return out
 }
@@ -425,6 +428,9 @@ func FromVolumeMount(mount manifest.VolumeMount) api.VolumeMount {
 	}
 	if mount.ReadOnly {
 		out.ReadOnly = new(mount.ReadOnly)
+	}
+	if mount.Propagation != "" {
+		out.Propagation = new(api.VolumeMountPropagation(mount.Propagation))
 	}
 
 	return out

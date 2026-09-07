@@ -236,6 +236,24 @@ func (e ServiceTargetProtocol) Valid() bool {
 	}
 }
 
+// Defines values for VolumeMountPropagation.
+const (
+	Rshared VolumeMountPropagation = "rshared"
+	Rslave  VolumeMountPropagation = "rslave"
+)
+
+// Valid indicates whether the value is a known member of the VolumeMountPropagation enum.
+func (e VolumeMountPropagation) Valid() bool {
+	switch e {
+	case Rshared:
+		return true
+	case Rslave:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WorkloadState.
 const (
 	WorkloadStateCompleted   WorkloadState = "completed"
@@ -1447,6 +1465,17 @@ type VolumeMount struct {
 	// Examples: /mnt/media
 	Path *string `json:"path,omitempty"`
 
+	// Propagation How mount events travel between the host and the container, spelled
+	// the way docker spells it. "rslave" makes a filesystem mounted on the
+	// host after the workload starts visible inside. "rshared" also
+	// carries the mounts the workload creates back to the host. Absent
+	// keeps docker's default, which carries nothing in either direction.
+	//
+	// A host path only, on the container runtime only. Nothing is ever
+	// mounted beneath a takt-managed volume, and the exec runtime mounts
+	// through a symbolic link that cannot propagate anything.
+	Propagation *VolumeMountPropagation `json:"propagation,omitempty"`
+
 	// ReadOnly Whether the workload may only read what is mounted. Applies to any
 	// source, so a shared volume can be handed to a workload that should not
 	// change it and a mounted secret cannot be altered through the mount.
@@ -1500,6 +1529,17 @@ type VolumeMount struct {
 	// Examples: app-config
 	Var *string `json:"var,omitempty"`
 }
+
+// VolumeMountPropagation How mount events travel between the host and the container, spelled
+// the way docker spells it. "rslave" makes a filesystem mounted on the
+// host after the workload starts visible inside. "rshared" also
+// carries the mounts the workload creates back to the host. Absent
+// keeps docker's default, which carries nothing in either direction.
+//
+// A host path only, on the container runtime only. Nothing is ever
+// mounted beneath a takt-managed volume, and the exec runtime mounts
+// through a symbolic link that cannot propagate anything.
+type VolumeMountPropagation string
 
 // VolumeSpec The desired state of a volume: a name, and what the directory backing it
 // looks like to the workloads writing into it.

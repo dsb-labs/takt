@@ -1208,6 +1208,19 @@ export interface components {
        *     rather than ignoring it.
        */
       readOnly?: boolean;
+      /**
+       * @description How mount events travel between the host and the container, spelled
+       *     the way docker spells it. "rslave" makes a filesystem mounted on the
+       *     host after the workload starts visible inside. "rshared" also
+       *     carries the mounts the workload creates back to the host. Absent
+       *     keeps docker's default, which carries nothing in either direction.
+       *
+       *     A host path only, on the container runtime only. Nothing is ever
+       *     mounted beneath a takt-managed volume, and the exec runtime mounts
+       *     through a symbolic link that cannot propagate anything.
+       * @enum {string}
+       */
+      propagation?: "rslave" | "rshared";
       signal?: components["schemas"]["MountSignal"];
       /**
        * @description Where the workload finds what is mounted. Must be an absolute path, and

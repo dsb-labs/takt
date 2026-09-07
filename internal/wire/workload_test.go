@@ -112,7 +112,7 @@ func TestFromSpec(t *testing.T) {
 			Resources: &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 100},
 			Volumes: []manifest.VolumeMount{
 				{Name: "example-data", To: "/var/lib/example", ReadOnly: true},
-				{Path: "/mnt/media", To: "/media", ReadOnly: true},
+				{Path: "/mnt/media", To: "/media", ReadOnly: true, Propagation: "rslave"},
 				{Secret: "tls-cert", To: "/etc/tls/cert.pem", Signal: manifest.SignalHUP},
 			},
 			Container: &manifest.Container{
