@@ -46,11 +46,14 @@ export function references(spec: WorkloadSpec): Reference[] {
 }
 
 // mountedAt describes where a workload finds a mount, carrying the read-only
-// flag so a restricted mount reads differently from a writable one.
+// flag and the propagation so a restricted or propagating mount reads
+// differently from a plain one.
 export function mountedAt(mount: VolumeMount): string {
-  return mount.readOnly
+  const at = mount.readOnly
     ? `mounted read-only at ${mount.to}`
     : `mounted at ${mount.to}`;
+
+  return mount.propagation ? `${at}, ${mount.propagation}` : at;
 }
 
 // hostPaths lists the host paths the given specification mounts, shaped as
