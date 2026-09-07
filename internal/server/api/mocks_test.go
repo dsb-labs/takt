@@ -1281,17 +1281,18 @@ func (_m *MockVolumeService) EXPECT() *MockVolumeService_Expecter {
 	return &MockVolumeService_Expecter{mock: &_m.Mock}
 }
 
-// Create provides a mock function for the type MockVolumeService
-func (_mock *MockVolumeService) Create(ctx context.Context, volume manifest.Volume) (service.Volume, error) {
+// Apply provides a mock function for the type MockVolumeService
+func (_mock *MockVolumeService) Apply(ctx context.Context, volume manifest.Volume) (service.Volume, bool, error) {
 	ret := _mock.Called(ctx, volume)
 
 	if len(ret) == 0 {
-		panic("no return value specified for Create")
+		panic("no return value specified for Apply")
 	}
 
 	var r0 service.Volume
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) (service.Volume, error)); ok {
+	var r1 bool
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) (service.Volume, bool, error)); ok {
 		return returnFunc(ctx, volume)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) service.Volume); ok {
@@ -1299,27 +1300,32 @@ func (_mock *MockVolumeService) Create(ctx context.Context, volume manifest.Volu
 	} else {
 		r0 = ret.Get(0).(service.Volume)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Volume) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Volume) bool); ok {
 		r1 = returnFunc(ctx, volume)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(bool)
 	}
-	return r0, r1
+	if returnFunc, ok := ret.Get(2).(func(context.Context, manifest.Volume) error); ok {
+		r2 = returnFunc(ctx, volume)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
 }
 
-// MockVolumeService_Create_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Create'
-type MockVolumeService_Create_Call struct {
+// MockVolumeService_Apply_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Apply'
+type MockVolumeService_Apply_Call struct {
 	*mock.Call
 }
 
-// Create is a helper method to define mock.On call
+// Apply is a helper method to define mock.On call
 //   - ctx context.Context
 //   - volume manifest.Volume
-func (_e *MockVolumeService_Expecter) Create(ctx any, volume any) *MockVolumeService_Create_Call {
-	return &MockVolumeService_Create_Call{Call: _e.mock.On("Create", ctx, volume)}
+func (_e *MockVolumeService_Expecter) Apply(ctx any, volume any) *MockVolumeService_Apply_Call {
+	return &MockVolumeService_Apply_Call{Call: _e.mock.On("Apply", ctx, volume)}
 }
 
-func (_c *MockVolumeService_Create_Call) Run(run func(ctx context.Context, volume manifest.Volume)) *MockVolumeService_Create_Call {
+func (_c *MockVolumeService_Apply_Call) Run(run func(ctx context.Context, volume manifest.Volume)) *MockVolumeService_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1337,12 +1343,12 @@ func (_c *MockVolumeService_Create_Call) Run(run func(ctx context.Context, volum
 	return _c
 }
 
-func (_c *MockVolumeService_Create_Call) Return(volume1 service.Volume, err error) *MockVolumeService_Create_Call {
-	_c.Call.Return(volume1, err)
+func (_c *MockVolumeService_Apply_Call) Return(volume1 service.Volume, b bool, err error) *MockVolumeService_Apply_Call {
+	_c.Call.Return(volume1, b, err)
 	return _c
 }
 
-func (_c *MockVolumeService_Create_Call) RunAndReturn(run func(ctx context.Context, volume manifest.Volume) (service.Volume, error)) *MockVolumeService_Create_Call {
+func (_c *MockVolumeService_Apply_Call) RunAndReturn(run func(ctx context.Context, volume manifest.Volume) (service.Volume, bool, error)) *MockVolumeService_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1549,72 +1555,6 @@ func (_c *MockVolumeService_List_Call) Return(volumes []service.Volume, err erro
 }
 
 func (_c *MockVolumeService_List_Call) RunAndReturn(run func(ctx context.Context, queries ...string) ([]service.Volume, error)) *MockVolumeService_List_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Update provides a mock function for the type MockVolumeService
-func (_mock *MockVolumeService) Update(ctx context.Context, volume manifest.Volume) (service.Volume, error) {
-	ret := _mock.Called(ctx, volume)
-
-	if len(ret) == 0 {
-		panic("no return value specified for Update")
-	}
-
-	var r0 service.Volume
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) (service.Volume, error)); ok {
-		return returnFunc(ctx, volume)
-	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) service.Volume); ok {
-		r0 = returnFunc(ctx, volume)
-	} else {
-		r0 = ret.Get(0).(service.Volume)
-	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Volume) error); ok {
-		r1 = returnFunc(ctx, volume)
-	} else {
-		r1 = ret.Error(1)
-	}
-	return r0, r1
-}
-
-// MockVolumeService_Update_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Update'
-type MockVolumeService_Update_Call struct {
-	*mock.Call
-}
-
-// Update is a helper method to define mock.On call
-//   - ctx context.Context
-//   - volume manifest.Volume
-func (_e *MockVolumeService_Expecter) Update(ctx any, volume any) *MockVolumeService_Update_Call {
-	return &MockVolumeService_Update_Call{Call: _e.mock.On("Update", ctx, volume)}
-}
-
-func (_c *MockVolumeService_Update_Call) Run(run func(ctx context.Context, volume manifest.Volume)) *MockVolumeService_Update_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 manifest.Volume
-		if args[1] != nil {
-			arg1 = args[1].(manifest.Volume)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *MockVolumeService_Update_Call) Return(volume1 service.Volume, err error) *MockVolumeService_Update_Call {
-	_c.Call.Return(volume1, err)
-	return _c
-}
-
-func (_c *MockVolumeService_Update_Call) RunAndReturn(run func(ctx context.Context, volume manifest.Volume) (service.Volume, error)) *MockVolumeService_Update_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
-func TestClient_CreateVolume(t *testing.T) {
+func TestClient_ApplyVolume(t *testing.T) {
 	t.Parallel()
 
 	tt := []struct {
@@ -24,13 +24,13 @@ func TestClient_CreateVolume(t *testing.T) {
 		Assert    func(*testing.T, client.Volume)
 	}{
 		{
-			Name: "creates a volume",
+			Name: "applies a volume the server created",
 			Handler: func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, http.MethodPost, r.Method)
-				assert.Equal(t, "/api/v1/volumes", r.URL.Path)
+				assert.Equal(t, http.MethodPut, r.Method)
+				assert.Equal(t, "/api/v1/volumes/example-data", r.URL.Path)
 
 				writeJSON(t, w, http.StatusCreated,
-					api.CreateVolumeResult{Volume: apiVolume("example-data")})
+					api.ApplyVolumeResult{Volume: apiVolume("example-data")})
 			},
 			Assert: func(t *testing.T, volume client.Volume) {
 				assert.Equal(t, "example-data", volume.Name)
@@ -38,12 +38,14 @@ func TestClient_CreateVolume(t *testing.T) {
 			},
 		},
 		{
-			Name: "reports a name another volume holds",
+			Name: "applies a volume the server updated",
 			Handler: func(w http.ResponseWriter, _ *http.Request) {
-				writeJSON(t, w, http.StatusConflict,
-					api.ErrorResponse{Error: `volume "example-data" already exists`})
+				writeJSON(t, w, http.StatusOK,
+					api.ApplyVolumeResult{Volume: apiVolume("example-data")})
 			},
-			ExpectErr: client.ErrVolumeExists,
+			Assert: func(t *testing.T, volume client.Volume) {
+				assert.Equal(t, "example-data", volume.Name)
+			},
 		},
 		{
 			Name: "reports a name the server will not accept",
@@ -55,7 +57,7 @@ func TestClient_CreateVolume(t *testing.T) {
 			Name: "reports an unexpected failure",
 			Handler: func(w http.ResponseWriter, _ *http.Request) {
 				writeJSON(t, w, http.StatusInternalServerError,
-					api.ErrorResponse{Error: "failed to create volume"})
+					api.ErrorResponse{Error: "failed to apply volume"})
 			},
 		},
 	}
@@ -64,7 +66,7 @@ func TestClient_CreateVolume(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			c := newTestClient(t, tc.Handler)
 
-			volume, err := c.CreateVolume(t.Context(), manifest.Volume{Version: "v1", Name: "example-data"})
+			volume, err := c.ApplyVolume(t.Context(), manifest.Volume{Version: "v1", Name: "example-data"})
 			switch {
 			case tc.ExpectErr != nil:
 				assert.ErrorIs(t, err, tc.ExpectErr)
@@ -82,7 +84,7 @@ func TestClient_CreateVolume(t *testing.T) {
 	}
 }
 
-func TestClient_CreateVolume_CarriesOwnerAndMode(t *testing.T) {
+func TestClient_ApplyVolume_CarriesOwnerAndMode(t *testing.T) {
 	t.Parallel()
 
 	// The handler decodes what was sent and echoes it back, so this proves the
@@ -99,10 +101,10 @@ func TestClient_CreateVolume_CarriesOwnerAndMode(t *testing.T) {
 		volume := apiVolume("example-data")
 		volume.Owner, volume.Mode = spec.Owner, spec.Mode
 
-		writeJSON(t, w, http.StatusCreated, api.CreateVolumeResult{Volume: volume})
+		writeJSON(t, w, http.StatusCreated, api.ApplyVolumeResult{Volume: volume})
 	})
 
-	volume, err := c.CreateVolume(t.Context(), manifest.Volume{
+	volume, err := c.ApplyVolume(t.Context(), manifest.Volume{
 		Version: "v1",
 		Name:    "example-data",
 		Owner:   "470:470",

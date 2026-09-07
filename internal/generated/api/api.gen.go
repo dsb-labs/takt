@@ -279,6 +279,12 @@ type ApplyServiceResult struct {
 	Service Service `json:"service"`
 }
 
+// ApplyVolumeResult The body returned when a volume is applied.
+type ApplyVolumeResult struct {
+	// Volume A volume, together with the workloads currently mounting it.
+	Volume Volume `json:"volume"`
+}
+
 // ApplyWorkloadResult The body returned when a workload is applied.
 //
 // Whether the workload was created or updated is the status code rather than a
@@ -380,12 +386,6 @@ type ContainerSpec struct {
 //
 // Examples: ["ALL"]
 type ContainerSpecPidMode string
-
-// CreateVolumeResult The body returned when a volume is created.
-type CreateVolumeResult struct {
-	// Volume A volume, together with the workloads currently mounting it.
-	Volume Volume `json:"volume"`
-}
 
 // DeleteSecretResult The body returned when a secret is deleted, which has nothing in it yet, for
 // the same reason deleting a volume returns one.
@@ -1265,12 +1265,6 @@ type StopWorkloadResult struct {
 	Workload Workload `json:"workload"`
 }
 
-// UpdateVolumeResult The body returned when a volume is updated.
-type UpdateVolumeResult struct {
-	// Volume A volume, together with the workloads currently mounting it.
-	Volume Volume `json:"volume"`
-}
-
 // Variable A variable, together with its value and the workloads currently reading it.
 //
 // The value is on this schema and there is no revision, which is where a
@@ -1975,11 +1969,8 @@ type ApplyServiceJSONRequestBody = ServiceSpec
 // SetVariableJSONRequestBody defines body for SetVariable for application/json ContentType.
 type SetVariableJSONRequestBody = VariableSpec
 
-// CreateVolumeJSONRequestBody defines body for CreateVolume for application/json ContentType.
-type CreateVolumeJSONRequestBody = VolumeSpec
-
-// UpdateVolumeJSONRequestBody defines body for UpdateVolume for application/json ContentType.
-type UpdateVolumeJSONRequestBody = VolumeSpec
+// ApplyVolumeJSONRequestBody defines body for ApplyVolume for application/json ContentType.
+type ApplyVolumeJSONRequestBody = VolumeSpec
 
 // ApplyWorkloadJSONRequestBody defines body for ApplyWorkload for application/json ContentType.
 type ApplyWorkloadJSONRequestBody = WorkloadSpec
@@ -2425,34 +2416,6 @@ type ClientInterface interface {
 	// Corresponds with GET /api/v1/volumes (the `ListVolumes` operationId).
 	ListVolumes(ctx context.Context, params *ListVolumesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateVolumeWithBody Create a volume
-	//
-	// Creates a volume and the directory backing it.
-	//
-	// A volume has to exist before a workload can mount it, so that a mistyped
-	// name is reported rather than silently becoming a second empty volume.
-	// Creating one that already exists is rejected, because a volume holds data and
-	// an accidental second create should not read as success.
-	//
-	// Takes any type of body and a specified content type.
-	//
-	// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
-	CreateVolumeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// CreateVolume Create a volume
-	//
-	// Creates a volume and the directory backing it.
-	//
-	// A volume has to exist before a workload can mount it, so that a mistyped
-	// name is reported rather than silently becoming a second empty volume.
-	// Creating one that already exists is rejected, because a volume holds data and
-	// an accidental second create should not read as success.
-	//
-	// Takes a body of the `application/json` content type.
-	//
-	// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
-	CreateVolume(ctx context.Context, body CreateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// DeleteVolume Delete a volume and the data it holds
 	//
 	// Removes the volume and everything stored in it.
@@ -2475,43 +2438,47 @@ type ClientInterface interface {
 	// Corresponds with GET /api/v1/volumes/{name} (the `GetVolume` operationId).
 	GetVolume(ctx context.Context, name VolumeName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// UpdateVolumeWithBody Update a volume's labels
+	// ApplyVolumeWithBody Create or update a volume
 	//
-	// Replaces the labels on the volume with the given name.
+	// Stores the volume the manifest describes, creating it when the name is
+	// new and replacing its labels, owner and mode when it is not. The
+	// operation is idempotent: the stored volume becomes what the manifest
+	// says, however many times it is applied.
 	//
-	// The labels are the whole of what a volume has to change. Its name identifies
-	// it, the directory holding its data is named for the identifier it was
-	// assigned, and its contents are the workloads' to write.
+	// A volume has to exist before a workload can mount it, so that a
+	// mistyped name is reported rather than silently becoming a second empty
+	// volume. The directory keeps its path across an apply, so nothing
+	// mounting the volume is redeployed, and the owner and mode are
+	// reapplied to it.
 	//
-	// The labels given replace the ones stored, as applying a workload manifest
-	// replaces a workload's. Sending none removes them all.
-	//
-	// Nothing mounting the volume is redeployed. A label says nothing about the
-	// storage, so no specification hash moves.
+	// An owner or a mode the manifest leaves empty stops being enforced
+	// rather than being reverted: the directory keeps whatever it has.
 	//
 	// Takes any type of body and a specified content type.
 	//
-	// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
-	UpdateVolumeWithBody(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
+	ApplyVolumeWithBody(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// UpdateVolume Update a volume's labels
+	// ApplyVolume Create or update a volume
 	//
-	// Replaces the labels on the volume with the given name.
+	// Stores the volume the manifest describes, creating it when the name is
+	// new and replacing its labels, owner and mode when it is not. The
+	// operation is idempotent: the stored volume becomes what the manifest
+	// says, however many times it is applied.
 	//
-	// The labels are the whole of what a volume has to change. Its name identifies
-	// it, the directory holding its data is named for the identifier it was
-	// assigned, and its contents are the workloads' to write.
+	// A volume has to exist before a workload can mount it, so that a
+	// mistyped name is reported rather than silently becoming a second empty
+	// volume. The directory keeps its path across an apply, so nothing
+	// mounting the volume is redeployed, and the owner and mode are
+	// reapplied to it.
 	//
-	// The labels given replace the ones stored, as applying a workload manifest
-	// replaces a workload's. Sending none removes them all.
-	//
-	// Nothing mounting the volume is redeployed. A label says nothing about the
-	// storage, so no specification hash moves.
+	// An owner or a mode the manifest leaves empty stops being enforced
+	// rather than being reverted: the directory keeps whatever it has.
 	//
 	// Takes a body of the `application/json` content type.
 	//
-	// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
-	UpdateVolume(ctx context.Context, name VolumeName, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
+	ApplyVolume(ctx context.Context, name VolumeName, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListWorkloads List workloads
 	//
@@ -3337,54 +3304,6 @@ func (c *Client) ListVolumes(ctx context.Context, params *ListVolumesParams, req
 	return c.Client.Do(req)
 }
 
-// CreateVolumeWithBody Create a volume
-//
-// Creates a volume and the directory backing it.
-//
-// A volume has to exist before a workload can mount it, so that a mistyped
-// name is reported rather than silently becoming a second empty volume.
-// Creating one that already exists is rejected, because a volume holds data and
-// an accidental second create should not read as success.
-//
-// Takes any type of body and a specified content type.
-//
-// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
-func (c *Client) CreateVolumeWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateVolumeRequestWithBody(c.Server, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-// CreateVolume Create a volume
-//
-// Creates a volume and the directory backing it.
-//
-// A volume has to exist before a workload can mount it, so that a mistyped
-// name is reported rather than silently becoming a second empty volume.
-// Creating one that already exists is rejected, because a volume holds data and
-// an accidental second create should not read as success.
-//
-// Takes a body of the `application/json` content type.
-//
-// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
-func (c *Client) CreateVolume(ctx context.Context, body CreateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateVolumeRequest(c.Server, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
 // DeleteVolume Delete a volume and the data it holds
 //
 // Removes the volume and everything stored in it.
@@ -3427,25 +3346,27 @@ func (c *Client) GetVolume(ctx context.Context, name VolumeName, reqEditors ...R
 	return c.Client.Do(req)
 }
 
-// UpdateVolumeWithBody Update a volume's labels
+// ApplyVolumeWithBody Create or update a volume
 //
-// Replaces the labels on the volume with the given name.
+// Stores the volume the manifest describes, creating it when the name is
+// new and replacing its labels, owner and mode when it is not. The
+// operation is idempotent: the stored volume becomes what the manifest
+// says, however many times it is applied.
 //
-// The labels are the whole of what a volume has to change. Its name identifies
-// it, the directory holding its data is named for the identifier it was
-// assigned, and its contents are the workloads' to write.
+// A volume has to exist before a workload can mount it, so that a
+// mistyped name is reported rather than silently becoming a second empty
+// volume. The directory keeps its path across an apply, so nothing
+// mounting the volume is redeployed, and the owner and mode are
+// reapplied to it.
 //
-// The labels given replace the ones stored, as applying a workload manifest
-// replaces a workload's. Sending none removes them all.
-//
-// Nothing mounting the volume is redeployed. A label says nothing about the
-// storage, so no specification hash moves.
+// An owner or a mode the manifest leaves empty stops being enforced
+// rather than being reverted: the directory keeps whatever it has.
 //
 // Takes any type of body and a specified content type.
 //
-// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
-func (c *Client) UpdateVolumeWithBody(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewUpdateVolumeRequestWithBody(c.Server, name, contentType, body)
+// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
+func (c *Client) ApplyVolumeWithBody(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyVolumeRequestWithBody(c.Server, name, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3456,25 +3377,27 @@ func (c *Client) UpdateVolumeWithBody(ctx context.Context, name VolumeName, cont
 	return c.Client.Do(req)
 }
 
-// UpdateVolume Update a volume's labels
+// ApplyVolume Create or update a volume
 //
-// Replaces the labels on the volume with the given name.
+// Stores the volume the manifest describes, creating it when the name is
+// new and replacing its labels, owner and mode when it is not. The
+// operation is idempotent: the stored volume becomes what the manifest
+// says, however many times it is applied.
 //
-// The labels are the whole of what a volume has to change. Its name identifies
-// it, the directory holding its data is named for the identifier it was
-// assigned, and its contents are the workloads' to write.
+// A volume has to exist before a workload can mount it, so that a
+// mistyped name is reported rather than silently becoming a second empty
+// volume. The directory keeps its path across an apply, so nothing
+// mounting the volume is redeployed, and the owner and mode are
+// reapplied to it.
 //
-// The labels given replace the ones stored, as applying a workload manifest
-// replaces a workload's. Sending none removes them all.
-//
-// Nothing mounting the volume is redeployed. A label says nothing about the
-// storage, so no specification hash moves.
+// An owner or a mode the manifest leaves empty stops being enforced
+// rather than being reverted: the directory keeps whatever it has.
 //
 // Takes a body of the `application/json` content type.
 //
-// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
-func (c *Client) UpdateVolume(ctx context.Context, name VolumeName, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewUpdateVolumeRequest(c.Server, name, body)
+// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
+func (c *Client) ApplyVolume(ctx context.Context, name VolumeName, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyVolumeRequest(c.Server, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4663,46 +4586,6 @@ func NewListVolumesRequest(server string, params *ListVolumesParams) (*http.Requ
 	return req, nil
 }
 
-// NewCreateVolumeRequest calls the generic CreateVolume builder with application/json body
-func NewCreateVolumeRequest(server string, body CreateVolumeJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewCreateVolumeRequestWithBody(server, "application/json", bodyReader)
-}
-
-// NewCreateVolumeRequestWithBody constructs an http.Request for the CreateVolume method, with any body, and a specified content type
-func NewCreateVolumeRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/api/v1/volumes")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	return req, nil
-}
-
 // NewDeleteVolumeRequest constructs an http.Request for the DeleteVolume method
 func NewDeleteVolumeRequest(server string, name VolumeName, params *DeleteVolumeParams) (*http.Request, error) {
 	var err error
@@ -4798,19 +4681,19 @@ func NewGetVolumeRequest(server string, name VolumeName) (*http.Request, error) 
 	return req, nil
 }
 
-// NewUpdateVolumeRequest calls the generic UpdateVolume builder with application/json body
-func NewUpdateVolumeRequest(server string, name VolumeName, body UpdateVolumeJSONRequestBody) (*http.Request, error) {
+// NewApplyVolumeRequest calls the generic ApplyVolume builder with application/json body
+func NewApplyVolumeRequest(server string, name VolumeName, body ApplyVolumeJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewUpdateVolumeRequestWithBody(server, name, "application/json", bodyReader)
+	return NewApplyVolumeRequestWithBody(server, name, "application/json", bodyReader)
 }
 
-// NewUpdateVolumeRequestWithBody constructs an http.Request for the UpdateVolume method, with any body, and a specified content type
-func NewUpdateVolumeRequestWithBody(server string, name VolumeName, contentType string, body io.Reader) (*http.Request, error) {
+// NewApplyVolumeRequestWithBody constructs an http.Request for the ApplyVolume method, with any body, and a specified content type
+func NewApplyVolumeRequestWithBody(server string, name VolumeName, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -5765,34 +5648,6 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/volumes (the `ListVolumes` operationId).
 	ListVolumesWithResponse(ctx context.Context, params *ListVolumesParams, reqEditors ...RequestEditorFn) (*ListVolumesResponse, error)
 
-	// CreateVolumeWithBodyWithResponse Create a volume
-	//
-	// Creates a volume and the directory backing it.
-	//
-	// A volume has to exist before a workload can mount it, so that a mistyped
-	// name is reported rather than silently becoming a second empty volume.
-	// Creating one that already exists is rejected, because a volume holds data and
-	// an accidental second create should not read as success.
-	//
-	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
-	CreateVolumeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateVolumeResponse, error)
-
-	// CreateVolumeWithResponse Create a volume
-	//
-	// Creates a volume and the directory backing it.
-	//
-	// A volume has to exist before a workload can mount it, so that a mistyped
-	// name is reported rather than silently becoming a second empty volume.
-	// Creating one that already exists is rejected, because a volume holds data and
-	// an accidental second create should not read as success.
-	//
-	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
-	CreateVolumeWithResponse(ctx context.Context, body CreateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateVolumeResponse, error)
-
 	// DeleteVolumeWithResponse Delete a volume and the data it holds
 	//
 	// Removes the volume and everything stored in it.
@@ -5819,43 +5674,47 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/volumes/{name} (the `GetVolume` operationId).
 	GetVolumeWithResponse(ctx context.Context, name VolumeName, reqEditors ...RequestEditorFn) (*GetVolumeResponse, error)
 
-	// UpdateVolumeWithBodyWithResponse Update a volume's labels
+	// ApplyVolumeWithBodyWithResponse Create or update a volume
 	//
-	// Replaces the labels on the volume with the given name.
+	// Stores the volume the manifest describes, creating it when the name is
+	// new and replacing its labels, owner and mode when it is not. The
+	// operation is idempotent: the stored volume becomes what the manifest
+	// says, however many times it is applied.
 	//
-	// The labels are the whole of what a volume has to change. Its name identifies
-	// it, the directory holding its data is named for the identifier it was
-	// assigned, and its contents are the workloads' to write.
+	// A volume has to exist before a workload can mount it, so that a
+	// mistyped name is reported rather than silently becoming a second empty
+	// volume. The directory keeps its path across an apply, so nothing
+	// mounting the volume is redeployed, and the owner and mode are
+	// reapplied to it.
 	//
-	// The labels given replace the ones stored, as applying a workload manifest
-	// replaces a workload's. Sending none removes them all.
-	//
-	// Nothing mounting the volume is redeployed. A label says nothing about the
-	// storage, so no specification hash moves.
+	// An owner or a mode the manifest leaves empty stops being enforced
+	// rather than being reverted: the directory keeps whatever it has.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
-	UpdateVolumeWithBodyWithResponse(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error)
+	// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
+	ApplyVolumeWithBodyWithResponse(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error)
 
-	// UpdateVolumeWithResponse Update a volume's labels
+	// ApplyVolumeWithResponse Create or update a volume
 	//
-	// Replaces the labels on the volume with the given name.
+	// Stores the volume the manifest describes, creating it when the name is
+	// new and replacing its labels, owner and mode when it is not. The
+	// operation is idempotent: the stored volume becomes what the manifest
+	// says, however many times it is applied.
 	//
-	// The labels are the whole of what a volume has to change. Its name identifies
-	// it, the directory holding its data is named for the identifier it was
-	// assigned, and its contents are the workloads' to write.
+	// A volume has to exist before a workload can mount it, so that a
+	// mistyped name is reported rather than silently becoming a second empty
+	// volume. The directory keeps its path across an apply, so nothing
+	// mounting the volume is redeployed, and the owner and mode are
+	// reapplied to it.
 	//
-	// The labels given replace the ones stored, as applying a workload manifest
-	// replaces a workload's. Sending none removes them all.
-	//
-	// Nothing mounting the volume is redeployed. A label says nothing about the
-	// storage, so no specification hash moves.
+	// An owner or a mode the manifest leaves empty stops being enforced
+	// rather than being reverted: the directory keeps whatever it has.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
-	UpdateVolumeWithResponse(ctx context.Context, name VolumeName, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error)
+	// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
+	ApplyVolumeWithResponse(ctx context.Context, name VolumeName, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error)
 
 	// ListWorkloadsWithResponse List workloads
 	//
@@ -7097,68 +6956,6 @@ func (r ListVolumesResponse) ContentType() string {
 	return ""
 }
 
-type CreateVolumeResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	// JSON201 the response for an HTTP 201 `application/json` response
-	JSON201 *CreateVolumeResult
-	// JSON400 the response for an HTTP 400 `application/json` response
-	JSON400 *BadRequest
-	// JSON409 the response for an HTTP 409 `application/json` response
-	JSON409 *ErrorResponse
-	// JSON500 the response for an HTTP 500 `application/json` response
-	JSON500 *InternalServerError
-}
-
-// GetJSON201 returns the response for an HTTP 201 `application/json` response
-func (r CreateVolumeResponse) GetJSON201() *CreateVolumeResult {
-	return r.JSON201
-}
-
-// GetJSON400 returns the response for an HTTP 400 `application/json` response
-func (r CreateVolumeResponse) GetJSON400() *BadRequest {
-	return r.JSON400
-}
-
-// GetJSON409 returns the response for an HTTP 409 `application/json` response
-func (r CreateVolumeResponse) GetJSON409() *ErrorResponse {
-	return r.JSON409
-}
-
-// GetJSON500 returns the response for an HTTP 500 `application/json` response
-func (r CreateVolumeResponse) GetJSON500() *InternalServerError {
-	return r.JSON500
-}
-
-// GetBody returns the raw response body bytes
-func (r CreateVolumeResponse) GetBody() []byte {
-	return r.Body
-}
-
-// Status returns HTTPResponse.Status
-func (r CreateVolumeResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r CreateVolumeResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r CreateVolumeResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
 type DeleteVolumeResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7276,46 +7073,46 @@ func (r GetVolumeResponse) ContentType() string {
 	return ""
 }
 
-type UpdateVolumeResponse struct {
+type ApplyVolumeResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *UpdateVolumeResult
+	JSON200 *ApplyVolumeResult
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *ApplyVolumeResult
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *BadRequest
-	// JSON404 the response for an HTTP 404 `application/json` response
-	JSON404 *NotFound
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r UpdateVolumeResponse) GetJSON200() *UpdateVolumeResult {
+func (r ApplyVolumeResponse) GetJSON200() *ApplyVolumeResult {
 	return r.JSON200
 }
 
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r ApplyVolumeResponse) GetJSON201() *ApplyVolumeResult {
+	return r.JSON201
+}
+
 // GetJSON400 returns the response for an HTTP 400 `application/json` response
-func (r UpdateVolumeResponse) GetJSON400() *BadRequest {
+func (r ApplyVolumeResponse) GetJSON400() *BadRequest {
 	return r.JSON400
 }
 
-// GetJSON404 returns the response for an HTTP 404 `application/json` response
-func (r UpdateVolumeResponse) GetJSON404() *NotFound {
-	return r.JSON404
-}
-
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
-func (r UpdateVolumeResponse) GetJSON500() *InternalServerError {
+func (r ApplyVolumeResponse) GetJSON500() *InternalServerError {
 	return r.JSON500
 }
 
 // GetBody returns the raw response body bytes
-func (r UpdateVolumeResponse) GetBody() []byte {
+func (r ApplyVolumeResponse) GetBody() []byte {
 	return r.Body
 }
 
 // Status returns HTTPResponse.Status
-func (r UpdateVolumeResponse) Status() string {
+func (r ApplyVolumeResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -7323,7 +7120,7 @@ func (r UpdateVolumeResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r UpdateVolumeResponse) StatusCode() int {
+func (r ApplyVolumeResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -7331,7 +7128,7 @@ func (r UpdateVolumeResponse) StatusCode() int {
 }
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r UpdateVolumeResponse) ContentType() string {
+func (r ApplyVolumeResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8418,46 +8215,6 @@ func (c *ClientWithResponses) ListVolumesWithResponse(ctx context.Context, param
 	return ParseListVolumesResponse(rsp)
 }
 
-// CreateVolumeWithBodyWithResponse Create a volume
-//
-// Creates a volume and the directory backing it.
-//
-// A volume has to exist before a workload can mount it, so that a mistyped
-// name is reported rather than silently becoming a second empty volume.
-// Creating one that already exists is rejected, because a volume holds data and
-// an accidental second create should not read as success.
-//
-// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
-//
-// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
-func (c *ClientWithResponses) CreateVolumeWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateVolumeResponse, error) {
-	rsp, err := c.CreateVolumeWithBody(ctx, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateVolumeResponse(rsp)
-}
-
-// CreateVolumeWithResponse Create a volume
-//
-// Creates a volume and the directory backing it.
-//
-// A volume has to exist before a workload can mount it, so that a mistyped
-// name is reported rather than silently becoming a second empty volume.
-// Creating one that already exists is rejected, because a volume holds data and
-// an accidental second create should not read as success.
-//
-// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
-//
-// Corresponds with POST /api/v1/volumes (the `CreateVolume` operationId).
-func (c *ClientWithResponses) CreateVolumeWithResponse(ctx context.Context, body CreateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateVolumeResponse, error) {
-	rsp, err := c.CreateVolume(ctx, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateVolumeResponse(rsp)
-}
-
 // DeleteVolumeWithResponse Delete a volume and the data it holds
 //
 // Removes the volume and everything stored in it.
@@ -8496,54 +8253,58 @@ func (c *ClientWithResponses) GetVolumeWithResponse(ctx context.Context, name Vo
 	return ParseGetVolumeResponse(rsp)
 }
 
-// UpdateVolumeWithBodyWithResponse Update a volume's labels
+// ApplyVolumeWithBodyWithResponse Create or update a volume
 //
-// Replaces the labels on the volume with the given name.
+// Stores the volume the manifest describes, creating it when the name is
+// new and replacing its labels, owner and mode when it is not. The
+// operation is idempotent: the stored volume becomes what the manifest
+// says, however many times it is applied.
 //
-// The labels are the whole of what a volume has to change. Its name identifies
-// it, the directory holding its data is named for the identifier it was
-// assigned, and its contents are the workloads' to write.
+// A volume has to exist before a workload can mount it, so that a
+// mistyped name is reported rather than silently becoming a second empty
+// volume. The directory keeps its path across an apply, so nothing
+// mounting the volume is redeployed, and the owner and mode are
+// reapplied to it.
 //
-// The labels given replace the ones stored, as applying a workload manifest
-// replaces a workload's. Sending none removes them all.
-//
-// Nothing mounting the volume is redeployed. A label says nothing about the
-// storage, so no specification hash moves.
+// An owner or a mode the manifest leaves empty stops being enforced
+// rather than being reverted: the directory keeps whatever it has.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
-// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
-func (c *ClientWithResponses) UpdateVolumeWithBodyWithResponse(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error) {
-	rsp, err := c.UpdateVolumeWithBody(ctx, name, contentType, body, reqEditors...)
+// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
+func (c *ClientWithResponses) ApplyVolumeWithBodyWithResponse(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error) {
+	rsp, err := c.ApplyVolumeWithBody(ctx, name, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseUpdateVolumeResponse(rsp)
+	return ParseApplyVolumeResponse(rsp)
 }
 
-// UpdateVolumeWithResponse Update a volume's labels
+// ApplyVolumeWithResponse Create or update a volume
 //
-// Replaces the labels on the volume with the given name.
+// Stores the volume the manifest describes, creating it when the name is
+// new and replacing its labels, owner and mode when it is not. The
+// operation is idempotent: the stored volume becomes what the manifest
+// says, however many times it is applied.
 //
-// The labels are the whole of what a volume has to change. Its name identifies
-// it, the directory holding its data is named for the identifier it was
-// assigned, and its contents are the workloads' to write.
+// A volume has to exist before a workload can mount it, so that a
+// mistyped name is reported rather than silently becoming a second empty
+// volume. The directory keeps its path across an apply, so nothing
+// mounting the volume is redeployed, and the owner and mode are
+// reapplied to it.
 //
-// The labels given replace the ones stored, as applying a workload manifest
-// replaces a workload's. Sending none removes them all.
-//
-// Nothing mounting the volume is redeployed. A label says nothing about the
-// storage, so no specification hash moves.
+// An owner or a mode the manifest leaves empty stops being enforced
+// rather than being reverted: the directory keeps whatever it has.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// Corresponds with PUT /api/v1/volumes/{name} (the `UpdateVolume` operationId).
-func (c *ClientWithResponses) UpdateVolumeWithResponse(ctx context.Context, name VolumeName, body UpdateVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateVolumeResponse, error) {
-	rsp, err := c.UpdateVolume(ctx, name, body, reqEditors...)
+// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
+func (c *ClientWithResponses) ApplyVolumeWithResponse(ctx context.Context, name VolumeName, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error) {
+	rsp, err := c.ApplyVolume(ctx, name, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseUpdateVolumeResponse(rsp)
+	return ParseApplyVolumeResponse(rsp)
 }
 
 // ListWorkloadsWithResponse List workloads
@@ -9599,53 +9360,6 @@ func ParseListVolumesResponse(rsp *http.Response) (*ListVolumesResponse, error) 
 	return response, nil
 }
 
-// ParseCreateVolumeResponse parses an HTTP response from a CreateVolumeWithResponse call
-func ParseCreateVolumeResponse(rsp *http.Response) (*CreateVolumeResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &CreateVolumeResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest CreateVolumeResult
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON201 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest BadRequest
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest ErrorResponse
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON409 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
-		var dest InternalServerError
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON500 = &dest
-
-	}
-
-	return response, nil
-}
-
 // ParseDeleteVolumeResponse parses an HTTP response from a DeleteVolumeWithResponse call
 func ParseDeleteVolumeResponse(rsp *http.Response) (*DeleteVolumeResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -9733,26 +9447,33 @@ func ParseGetVolumeResponse(rsp *http.Response) (*GetVolumeResponse, error) {
 	return response, nil
 }
 
-// ParseUpdateVolumeResponse parses an HTTP response from a UpdateVolumeWithResponse call
-func ParseUpdateVolumeResponse(rsp *http.Response) (*UpdateVolumeResponse, error) {
+// ParseApplyVolumeResponse parses an HTTP response from a ApplyVolumeWithResponse call
+func ParseApplyVolumeResponse(rsp *http.Response) (*ApplyVolumeResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &UpdateVolumeResponse{
+	response := &ApplyVolumeResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest UpdateVolumeResult
+		var dest ApplyVolumeResult
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ApplyVolumeResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest BadRequest
@@ -9760,13 +9481,6 @@ func ParseUpdateVolumeResponse(rsp *http.Response) (*UpdateVolumeResponse, error
 			return nil, err
 		}
 		response.JSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest NotFound
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -10266,18 +9980,15 @@ type ServerInterface interface {
 	// ListVolumes List volumes
 	// (GET /api/v1/volumes)
 	ListVolumes(w http.ResponseWriter, r *http.Request, params ListVolumesParams)
-	// CreateVolume Create a volume
-	// (POST /api/v1/volumes)
-	CreateVolume(w http.ResponseWriter, r *http.Request)
 	// DeleteVolume Delete a volume and the data it holds
 	// (DELETE /api/v1/volumes/{name})
 	DeleteVolume(w http.ResponseWriter, r *http.Request, name VolumeName, params DeleteVolumeParams)
 	// GetVolume Get a single volume
 	// (GET /api/v1/volumes/{name})
 	GetVolume(w http.ResponseWriter, r *http.Request, name VolumeName)
-	// UpdateVolume Update a volume's labels
+	// ApplyVolume Create or update a volume
 	// (PUT /api/v1/volumes/{name})
-	UpdateVolume(w http.ResponseWriter, r *http.Request, name VolumeName)
+	ApplyVolume(w http.ResponseWriter, r *http.Request, name VolumeName)
 	// ListWorkloads List workloads
 	// (GET /api/v1/workloads)
 	ListWorkloads(w http.ResponseWriter, r *http.Request, params ListWorkloadsParams)
@@ -10803,20 +10514,6 @@ func (siw *ServerInterfaceWrapper) ListVolumes(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
-// CreateVolume operation middleware
-func (siw *ServerInterfaceWrapper) CreateVolume(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.CreateVolume(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
 // DeleteVolume operation middleware
 func (siw *ServerInterfaceWrapper) DeleteVolume(w http.ResponseWriter, r *http.Request) {
 
@@ -10885,8 +10582,8 @@ func (siw *ServerInterfaceWrapper) GetVolume(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
-// UpdateVolume operation middleware
-func (siw *ServerInterfaceWrapper) UpdateVolume(w http.ResponseWriter, r *http.Request) {
+// ApplyVolume operation middleware
+func (siw *ServerInterfaceWrapper) ApplyVolume(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -10901,7 +10598,7 @@ func (siw *ServerInterfaceWrapper) UpdateVolume(w http.ResponseWriter, r *http.R
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateVolume(w, r, name)
+		siw.Handler.ApplyVolume(w, r, name)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11366,10 +11063,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/restart", wrapper.RestartWorkload)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/dry-run", wrapper.DryRunWorkload)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/volumes", wrapper.ListVolumes)
-	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/volumes", wrapper.CreateVolume)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.DeleteVolume)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.GetVolume)
-	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.UpdateVolume)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/volumes/{name}", wrapper.ApplyVolume)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/services", wrapper.ListServices)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/services/{name}", wrapper.DeleteService)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/services/{name}", wrapper.GetService)
@@ -12352,72 +12048,6 @@ func (response ListVolumes500JSONResponse) VisitListVolumesResponse(w http.Respo
 	return err
 }
 
-type CreateVolumeRequestObject struct {
-	Body *CreateVolumeJSONRequestBody
-}
-
-type CreateVolumeResponseObject interface {
-	VisitCreateVolumeResponse(w http.ResponseWriter) error
-}
-
-type CreateVolume201JSONResponse CreateVolumeResult
-
-func (response CreateVolume201JSONResponse) VisitCreateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(201)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type CreateVolume400JSONResponse struct{ BadRequestJSONResponse }
-
-func (response CreateVolume400JSONResponse) VisitCreateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type CreateVolume409JSONResponse ErrorResponse
-
-func (response CreateVolume409JSONResponse) VisitCreateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(409)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type CreateVolume500JSONResponse struct {
-	InternalServerErrorJSONResponse
-}
-
-func (response CreateVolume500JSONResponse) VisitCreateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(500)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type DeleteVolumeRequestObject struct {
 	Name   VolumeName `json:"name"`
 	Params DeleteVolumeParams
@@ -12537,18 +12167,18 @@ func (response GetVolume500JSONResponse) VisitGetVolumeResponse(w http.ResponseW
 	return err
 }
 
-type UpdateVolumeRequestObject struct {
+type ApplyVolumeRequestObject struct {
 	Name VolumeName `json:"name"`
-	Body *UpdateVolumeJSONRequestBody
+	Body *ApplyVolumeJSONRequestBody
 }
 
-type UpdateVolumeResponseObject interface {
-	VisitUpdateVolumeResponse(w http.ResponseWriter) error
+type ApplyVolumeResponseObject interface {
+	VisitApplyVolumeResponse(w http.ResponseWriter) error
 }
 
-type UpdateVolume200JSONResponse UpdateVolumeResult
+type ApplyVolume200JSONResponse ApplyVolumeResult
 
-func (response UpdateVolume200JSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
+func (response ApplyVolume200JSONResponse) VisitApplyVolumeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -12560,9 +12190,23 @@ func (response UpdateVolume200JSONResponse) VisitUpdateVolumeResponse(w http.Res
 	return err
 }
 
-type UpdateVolume400JSONResponse struct{ BadRequestJSONResponse }
+type ApplyVolume201JSONResponse ApplyVolumeResult
 
-func (response UpdateVolume400JSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
+func (response ApplyVolume201JSONResponse) VisitApplyVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyVolume400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApplyVolume400JSONResponse) VisitApplyVolumeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -12574,25 +12218,11 @@ func (response UpdateVolume400JSONResponse) VisitUpdateVolumeResponse(w http.Res
 	return err
 }
 
-type UpdateVolume404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response UpdateVolume404JSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type UpdateVolume500JSONResponse struct {
+type ApplyVolume500JSONResponse struct {
 	InternalServerErrorJSONResponse
 }
 
-func (response UpdateVolume500JSONResponse) VisitUpdateVolumeResponse(w http.ResponseWriter) error {
+func (response ApplyVolume500JSONResponse) VisitApplyVolumeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -13286,18 +12916,15 @@ type StrictServerInterface interface {
 	// ListVolumes List volumes
 	// (GET /api/v1/volumes)
 	ListVolumes(ctx context.Context, request ListVolumesRequestObject) (ListVolumesResponseObject, error)
-	// CreateVolume Create a volume
-	// (POST /api/v1/volumes)
-	CreateVolume(ctx context.Context, request CreateVolumeRequestObject) (CreateVolumeResponseObject, error)
 	// DeleteVolume Delete a volume and the data it holds
 	// (DELETE /api/v1/volumes/{name})
 	DeleteVolume(ctx context.Context, request DeleteVolumeRequestObject) (DeleteVolumeResponseObject, error)
 	// GetVolume Get a single volume
 	// (GET /api/v1/volumes/{name})
 	GetVolume(ctx context.Context, request GetVolumeRequestObject) (GetVolumeResponseObject, error)
-	// UpdateVolume Update a volume's labels
+	// ApplyVolume Create or update a volume
 	// (PUT /api/v1/volumes/{name})
-	UpdateVolume(ctx context.Context, request UpdateVolumeRequestObject) (UpdateVolumeResponseObject, error)
+	ApplyVolume(ctx context.Context, request ApplyVolumeRequestObject) (ApplyVolumeResponseObject, error)
 	// ListWorkloads List workloads
 	// (GET /api/v1/workloads)
 	ListWorkloads(ctx context.Context, request ListWorkloadsRequestObject) (ListWorkloadsResponseObject, error)
@@ -13856,37 +13483,6 @@ func (sh *strictHandler) ListVolumes(w http.ResponseWriter, r *http.Request, par
 	}
 }
 
-// CreateVolume operation middleware
-func (sh *strictHandler) CreateVolume(w http.ResponseWriter, r *http.Request) {
-	var request CreateVolumeRequestObject
-
-	var body CreateVolumeJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.CreateVolume(ctx, request.(CreateVolumeRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "CreateVolume")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(CreateVolumeResponseObject); ok {
-		if err := validResponse.VisitCreateVolumeResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
 // DeleteVolume operation middleware
 func (sh *strictHandler) DeleteVolume(w http.ResponseWriter, r *http.Request, name VolumeName, params DeleteVolumeParams) {
 	var request DeleteVolumeRequestObject
@@ -13940,13 +13536,13 @@ func (sh *strictHandler) GetVolume(w http.ResponseWriter, r *http.Request, name 
 	}
 }
 
-// UpdateVolume operation middleware
-func (sh *strictHandler) UpdateVolume(w http.ResponseWriter, r *http.Request, name VolumeName) {
-	var request UpdateVolumeRequestObject
+// ApplyVolume operation middleware
+func (sh *strictHandler) ApplyVolume(w http.ResponseWriter, r *http.Request, name VolumeName) {
+	var request ApplyVolumeRequestObject
 
 	request.Name = name
 
-	var body UpdateVolumeJSONRequestBody
+	var body ApplyVolumeJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
 		return
@@ -13954,18 +13550,18 @@ func (sh *strictHandler) UpdateVolume(w http.ResponseWriter, r *http.Request, na
 	request.Body = &body
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.UpdateVolume(ctx, request.(UpdateVolumeRequestObject))
+		return sh.ssi.ApplyVolume(ctx, request.(ApplyVolumeRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "UpdateVolume")
+		handler = middleware(handler, "ApplyVolume")
 	}
 
 	response, err := handler(r.Context(), w, r, request)
 
 	if err != nil {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(UpdateVolumeResponseObject); ok {
-		if err := validResponse.VisitUpdateVolumeResponse(w); err != nil {
+	} else if validResponse, ok := response.(ApplyVolumeResponseObject); ok {
+		if err := validResponse.VisitApplyVolumeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -18,26 +18,28 @@ import (
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
-func TestVolumeService_Create(t *testing.T) {
+func TestVolumeService_Apply(t *testing.T) {
 	t.Parallel()
 
 	t.Run("creates the volume and the directory backing it", func(t *testing.T) {
 		t.Parallel()
 
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, database.Volume{Name: "example-data", Labels: map[string]string{"app": "web"}}).
+		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Labels: map[string]string{"app": "web"}}).
 			Return(database.Volume{
 				ID:        testVolumeID,
 				Name:      "example-data",
 				Labels:    map[string]string{"app": "web"},
 				CreatedAt: time.Now(),
-			}, nil).Once()
+			}, true, nil).Once()
+		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
 
 		svc, root := newVolumeService(t, repo)
 
-		volume, err := svc.Create(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"app": "web"}})
+		volume, created, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"app": "web"}})
 		require.NoError(t, err)
 
+		assert.True(t, created, "a first apply did not report creation")
 		assert.Equal(t, "example-data", volume.Name)
 
 		// The directory is named for the identifier rather than the name, which is
@@ -60,18 +62,19 @@ func TestVolumeService_Create(t *testing.T) {
 		owner := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, database.Volume{Name: "example-data", Owner: owner, Mode: "0755"}).
+		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Owner: owner, Mode: "0755"}).
 			Return(database.Volume{
 				ID:        testVolumeID,
 				Name:      "example-data",
 				Owner:     owner,
 				Mode:      "0755",
 				CreatedAt: time.Now(),
-			}, nil).Once()
+			}, true, nil).Once()
+		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
 
 		svc, _ := newVolumeService(t, repo)
 
-		volume, err := svc.Create(t.Context(), manifest.Volume{Name: "example-data", Owner: owner, Mode: "0755"})
+		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: owner, Mode: "0755"})
 		require.NoError(t, err)
 
 		assert.Equal(t, owner, volume.Owner)
@@ -87,6 +90,56 @@ func TestVolumeService_Create(t *testing.T) {
 		assert.Equal(t, os.Getgid(), int(stat.Gid))
 	})
 
+	t.Run("replaces the fields of a volume that exists", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockVolumeRepository(t)
+		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Labels: map[string]string{"app": "api"}}).
+			Return(database.Volume{
+				ID:     testVolumeID,
+				Name:   "example-data",
+				Labels: map[string]string{"app": "api"},
+			}, false, nil).Once()
+		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
+
+		svc, _ := newVolumeService(t, repo)
+
+		volume, created, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"app": "api"}})
+		require.NoError(t, err)
+		assert.False(t, created, "an apply of an existing volume reported creation")
+		assert.Equal(t, map[string]string{"app": "api"}, volume.Labels)
+	})
+
+	t.Run("reapplies the owner and mode to the directory", func(t *testing.T) {
+		t.Parallel()
+
+		// An apply is how a live volume changes hands, so what is stored has to
+		// reach the directory rather than only the row.
+		owner := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
+
+		repo := NewMockVolumeRepository(t)
+		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Owner: owner, Mode: "0750"}).
+			Return(database.Volume{
+				ID:    testVolumeID,
+				Name:  "example-data",
+				Owner: owner,
+				Mode:  "0750",
+			}, false, nil).Once()
+		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
+
+		svc, root := newVolumeService(t, repo)
+
+		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: owner, Mode: "0750"})
+		require.NoError(t, err)
+
+		assert.Equal(t, owner, volume.Owner)
+		assert.Equal(t, "0750", volume.Mode)
+
+		info, err := os.Stat(filepath.Join(root, "volumes", testVolumeID))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o750), info.Mode().Perm())
+	})
+
 	t.Run("refuses a mode that is not octal", func(t *testing.T) {
 		t.Parallel()
 
@@ -95,7 +148,7 @@ func TestVolumeService_Create(t *testing.T) {
 		repo := NewMockVolumeRepository(t)
 		svc, _ := newVolumeService(t, repo)
 
-		_, err := svc.Create(t.Context(), manifest.Volume{Name: "example-data", Mode: "rwxr-xr-x"})
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Mode: "rwxr-xr-x"})
 		assert.ErrorIs(t, err, service.ErrInvalidVolume)
 	})
 
@@ -110,19 +163,42 @@ func TestVolumeService_Create(t *testing.T) {
 		// permission error says so. The row and the directory are both rolled
 		// back, so a failed create leaves nothing behind.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, mock.Anything).
-			Return(database.Volume{ID: testVolumeID, Name: "example-data", Owner: "0:0"}, nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			Return(database.Volume{ID: testVolumeID, Name: "example-data", Owner: "0:0"}, true, nil).Once()
 		repo.EXPECT().Delete(mock.Anything, "example-data").Return(nil).Once()
 
 		svc, root := newVolumeService(t, repo)
 
-		_, err := svc.Create(t.Context(), manifest.Volume{Name: "example-data", Owner: "0:0"})
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: "0:0"})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "CAP_CHOWN",
 			"the error does not say what grants the ability to assign another user")
 
 		_, err = os.Stat(filepath.Join(root, "volumes", testVolumeID))
 		assert.True(t, os.IsNotExist(err), "the directory outlived the failed create")
+	})
+
+	t.Run("leaves an updated volume standing when the owner cannot be assigned", func(t *testing.T) {
+		t.Parallel()
+
+		if os.Geteuid() == 0 {
+			t.Skip("this user assigns any owner, so the refusal under test cannot happen")
+		}
+
+		// The rollback belongs to a failed create alone. An updated volume's
+		// directory holds data, so it is left as it stands — which the strict
+		// mock proves by expecting no Delete.
+		repo := NewMockVolumeRepository(t)
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			Return(database.Volume{ID: testVolumeID, Name: "example-data", Owner: "0:0"}, false, nil).Once()
+
+		svc, root := newVolumeService(t, repo)
+
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: "0:0"})
+		require.Error(t, err)
+
+		_, err = os.Stat(filepath.Join(root, "volumes", testVolumeID))
+		assert.NoError(t, err, "the directory did not survive the failed update")
 	})
 
 	t.Run("refuses a name takt would not accept", func(t *testing.T) {
@@ -134,24 +210,20 @@ func TestVolumeService_Create(t *testing.T) {
 		svc, _ := newVolumeService(t, repo)
 
 		for _, name := range []string{"Example_Data", "", "-leading", "trailing-", "a/b", ".."} {
-			_, err := svc.Create(t.Context(), manifest.Volume{Name: name})
+			_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: name})
 			assert.ErrorIs(t, err, service.ErrInvalidVolume, "accepted the name %q", name)
 		}
 	})
 
-	t.Run("reports a name another volume holds", func(t *testing.T) {
+	t.Run("refuses a label takt reserves for itself", func(t *testing.T) {
 		t.Parallel()
 
-		// A volume holds data, so handing a caller who meant a new name somebody
-		// else's storage is worse than failing.
-		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, mock.Anything).
-			Return(database.Volume{}, database.ErrVolumeExists).Once()
+		// Refused before the repository is reached, which the mock asserts by
+		// expecting nothing.
+		svc, _ := newVolumeService(t, NewMockVolumeRepository(t))
 
-		svc, _ := newVolumeService(t, repo)
-
-		_, err := svc.Create(t.Context(), manifest.Volume{Name: "example-data"})
-		assert.ErrorIs(t, err, service.ErrVolumeExists)
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"takt.workload": "sneaky"}})
+		assert.ErrorIs(t, err, service.ErrInvalidVolume)
 	})
 
 	t.Run("removes the row when the directory cannot be created", func(t *testing.T) {
@@ -161,8 +233,8 @@ func TestVolumeService_Create(t *testing.T) {
 		// volume nothing can reach, and nothing later creates the directory. Better to
 		// leave nothing behind.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, mock.Anything).
-			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, true, nil).Once()
 		repo.EXPECT().Delete(mock.Anything, "example-data").Return(nil).Once()
 
 		// A file where the volumes directory belongs, so creating one beneath it fails
@@ -176,7 +248,7 @@ func TestVolumeService_Create(t *testing.T) {
 			Root:    filepath.Join(root, "volumes"),
 		})
 
-		_, err := svc.Create(t.Context(), manifest.Volume{Name: "example-data"})
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"})
 		assert.Error(t, err)
 	})
 }
@@ -190,8 +262,11 @@ func TestVolumeService_Delete(t *testing.T) {
 		// The only thing in takt that destroys stored data, so the directory going is
 		// worth asserting rather than assuming.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, mock.Anything).
-			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, true, nil).Once()
+		// Once for the apply that seeds the volume, beyond whatever the case
+		// under test reads.
+		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
 		repo.EXPECT().Get(mock.Anything, "example-data").
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
 		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
@@ -199,7 +274,7 @@ func TestVolumeService_Delete(t *testing.T) {
 
 		svc, _ := newVolumeService(t, repo)
 
-		volume, err := svc.Create(t.Context(), manifest.Volume{Name: "example-data"})
+		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"})
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(volume.Path, "file"), []byte("data"), 0o600))
 
@@ -217,15 +292,18 @@ func TestVolumeService_Delete(t *testing.T) {
 		// what grants that, because nothing else about a permission error says why a
 		// directory takt created cannot be removed.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Insert(mock.Anything, mock.Anything).
-			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, true, nil).Once()
+		// Once for the apply that seeds the volume, beyond whatever the case
+		// under test reads.
+		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
 		repo.EXPECT().Get(mock.Anything, "example-data").
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, nil).Once()
 		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
 
 		svc, _ := newVolumeService(t, repo)
 
-		volume, err := svc.Create(t.Context(), manifest.Volume{Name: "example-data"})
+		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"})
 		require.NoError(t, err)
 
 		// A directory this user cannot read stands in for one owned by another user,
@@ -584,85 +662,6 @@ const (
 
 // newVolumeService returns a volume service alongside the data directory it keeps
 // volumes under.
-func TestVolumeService_Update(t *testing.T) {
-	t.Parallel()
-
-	t.Run("replaces the labels", func(t *testing.T) {
-		t.Parallel()
-
-		// The only thing a volume has to change. Its name identifies it, its
-		// directory is named for its identifier, and its contents are the workloads'.
-		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Update(mock.Anything, database.Volume{Name: "example-data", Labels: map[string]string{"app": "api"}}).
-			Return(database.Volume{
-				ID:     testVolumeID,
-				Name:   "example-data",
-				Labels: map[string]string{"app": "api"},
-			}, nil).Once()
-		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
-
-		svc, _ := newVolumeService(t, repo)
-
-		volume, err := svc.Update(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"app": "api"}})
-		require.NoError(t, err)
-		assert.Equal(t, map[string]string{"app": "api"}, volume.Labels)
-	})
-
-	t.Run("reapplies the owner and mode to the directory", func(t *testing.T) {
-		t.Parallel()
-
-		// An update is how a live volume changes hands, so what is stored has to
-		// reach the directory rather than only the row.
-		owner := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
-
-		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Update(mock.Anything, database.Volume{Name: "example-data", Owner: owner, Mode: "0750"}).
-			Return(database.Volume{
-				ID:    testVolumeID,
-				Name:  "example-data",
-				Owner: owner,
-				Mode:  "0750",
-			}, nil).Once()
-		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
-
-		svc, root := newVolumeService(t, repo)
-
-		volume, err := svc.Update(t.Context(), manifest.Volume{Name: "example-data", Owner: owner, Mode: "0750"})
-		require.NoError(t, err)
-
-		assert.Equal(t, owner, volume.Owner)
-		assert.Equal(t, "0750", volume.Mode)
-
-		info, err := os.Stat(filepath.Join(root, "volumes", testVolumeID))
-		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0o750), info.Mode().Perm())
-	})
-
-	t.Run("reports a volume that does not exist", func(t *testing.T) {
-		t.Parallel()
-
-		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Update(mock.Anything, mock.Anything).
-			Return(database.Volume{}, database.ErrVolumeNotFound).Once()
-
-		svc, _ := newVolumeService(t, repo)
-
-		_, err := svc.Update(t.Context(), manifest.Volume{Name: "example-data"})
-		assert.ErrorIs(t, err, service.ErrVolumeNotFound)
-	})
-
-	t.Run("refuses a label takt reserves for itself", func(t *testing.T) {
-		t.Parallel()
-
-		// Refused before the repository is reached, which the mock asserts by
-		// expecting nothing.
-		svc, _ := newVolumeService(t, NewMockVolumeRepository(t))
-
-		_, err := svc.Update(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"takt.workload": "sneaky"}})
-		assert.ErrorIs(t, err, service.ErrInvalidVolume)
-	})
-}
-
 func newVolumeService(t *testing.T, repo service.VolumeRepository) (*service.VolumeService, string) {
 	t.Helper()
 

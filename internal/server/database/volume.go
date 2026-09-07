@@ -13,8 +13,6 @@ import (
 var (
 	// ErrVolumeNotFound is returned when no volume exists with the requested name.
 	ErrVolumeNotFound = errors.New("volume not found")
-	// ErrVolumeExists is returned when a volume already exists with the given name.
-	ErrVolumeExists = errors.New("volume already exists")
 )
 
 type (
@@ -57,34 +55,52 @@ func NewVolumeRepository(db *sql.DB) *VolumeRepository {
 	return &VolumeRepository{db: db}
 }
 
-// Insert records a new volume, returning it with the identifier and creation time
-// the server assigned. The given volume's identifier and creation time are ignored:
-// both are this repository's to hand out.
+// Upsert stores the volume, creating it when no volume holds the name and
+// replacing the labels, the owner and the mode when one does. The second
+// return reports whether it was created. The given volume's identifier and
+// creation time are ignored: both are this repository's to hand out.
 //
-// Returns ErrVolumeExists when a volume already holds the name. Creating one that
-// exists is an error rather than a no-op, because a volume holds data: a caller who
-// meant a name they had not used yet would otherwise be handed someone else's.
-func (r *VolumeRepository) Insert(ctx context.Context, volume Volume) (Volume, error) {
-	const q = `INSERT INTO volume (id, name, labels, owner, mode, created_at) VALUES (?, ?, jsonb(?), ?, ?, ?)`
+// An upsert rather than an insert-or-fail, because applying the same manifest
+// twice means the file is the truth, which is how a workload's apply already
+// behaves. The name identifies the volume, the directory holding its data is
+// named for the identifier it keeps across an update, and its contents are
+// the workloads' to write — so these fields are the whole of what an apply
+// can change.
+func (r *VolumeRepository) Upsert(ctx context.Context, volume Volume) (Volume, bool, error) {
+	const q = `
+		INSERT INTO volume (id, name, labels, owner, mode, created_at)
+		VALUES (?, ?, jsonb(?), ?, ?, ?)
+		ON CONFLICT (name) DO UPDATE SET
+			labels = excluded.labels,
+			owner = excluded.owner,
+			mode = excluded.mode
+		RETURNING id, created_at
+	`
 
 	encoded, err := marshalLabels(volume.Labels)
 	if err != nil {
-		return Volume{}, err
+		return Volume{}, false, err
 	}
 
-	volume.ID = xid.New().String()
-	volume.CreatedAt = time.Now().UTC()
+	// The identifier is generated ahead of the write. A conflict keeps the
+	// existing row's identifier, so the returned one reports which happened.
+	id := xid.New().String()
 
-	_, err = r.db.ExecContext(ctx, q,
-		volume.ID, volume.Name, encoded, volume.Owner, volume.Mode, formatTime(volume.CreatedAt))
-	switch {
-	case IsUniqueError(err):
-		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeExists, volume.Name)
-	case err != nil:
-		return Volume{}, fmt.Errorf("failed to insert volume: %w", err)
+	var createdAt string
+
+	err = r.db.QueryRowContext(ctx, q,
+		id, volume.Name, encoded, volume.Owner, volume.Mode, formatTime(time.Now().UTC())).
+		Scan(&volume.ID, &createdAt)
+	if err != nil {
+		return Volume{}, false, fmt.Errorf("failed to upsert volume: %w", err)
 	}
 
-	return volume, nil
+	volume.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		return Volume{}, false, fmt.Errorf("failed to parse created_at: %w", err)
+	}
+
+	return volume, volume.ID == id, nil
 }
 
 // Get returns the volume with the given name, reporting ErrVolumeNotFound when no
@@ -116,38 +132,6 @@ func (r *VolumeRepository) Get(ctx context.Context, name string) (Volume, error)
 	}
 
 	return volume, nil
-}
-
-// Update replaces the mutable fields of the volume with the given name, reporting
-// ErrVolumeNotFound when no such volume exists.
-//
-// The labels, the owner and the mode. A volume's name identifies it, its
-// identifier is what its directory is named for, and its contents are the
-// workloads' to write — so these are the whole of what an update of a volume can
-// mean.
-func (r *VolumeRepository) Update(ctx context.Context, volume Volume) (Volume, error) {
-	const q = `UPDATE volume SET labels = jsonb(?), owner = ?, mode = ? WHERE name = ?`
-
-	encoded, err := marshalLabels(volume.Labels)
-	if err != nil {
-		return Volume{}, err
-	}
-
-	tag, err := r.db.ExecContext(ctx, q, encoded, volume.Owner, volume.Mode, volume.Name)
-	if err != nil {
-		return Volume{}, fmt.Errorf("failed to update volume: %w", err)
-	}
-
-	affected, err := tag.RowsAffected()
-	if err != nil {
-		return Volume{}, fmt.Errorf("failed to update volume: %w", err)
-	}
-
-	if affected == 0 {
-		return Volume{}, fmt.Errorf("%w: %s", ErrVolumeNotFound, volume.Name)
-	}
-
-	return r.Get(ctx, volume.Name)
 }
 
 // List returns the volumes matching every one of the given queries, ordered by

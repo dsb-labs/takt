@@ -1677,7 +1677,7 @@ func (s *Suite) TestVolumeSurvivesAnExecWorkloadBeingReplaced() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupVolume(volume) })
 
-	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
+	created, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
 	s.Require().NoError(err)
 	s.Require().NotEmpty(created.Path)
 
@@ -1716,7 +1716,7 @@ func (s *Suite) TestVolumeOutlivesTheWorkloadThatMountsIt() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupVolume(volume) })
 
-	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
+	created, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
 	s.Require().NoError(err)
 
 	spec := s.execSpec(name, "sh", "-c", "echo precious > var/lib/example/file; exit 0")
@@ -1764,7 +1764,7 @@ func (s *Suite) TestVolumeMountedIntoAContainer() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupVolume(volume) })
 
-	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
+	created, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
 	s.Require().NoError(err)
 
 	// An absolute path, used as written: a container has a filesystem of its own, so
@@ -1891,7 +1891,7 @@ func (s *Suite) TestVolumeOwnershipReachesTheDirectory() {
 	// a chown needs no capability for.
 	owner := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 
-	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{
+	created, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{
 		Version: "v1",
 		Name:    volume,
 		Owner:   owner,
@@ -1907,7 +1907,7 @@ func (s *Suite) TestVolumeOwnershipReachesTheDirectory() {
 
 	// An update is how a live volume changes hands, so the new mode has to reach
 	// the directory rather than only the row.
-	updated, err := s.client.UpdateVolume(s.ctx(), manifest.Volume{
+	updated, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{
 		Version: "v1",
 		Name:    volume,
 		Owner:   owner,
@@ -1928,6 +1928,29 @@ func (s *Suite) TestMissingVolume() {
 	s.ErrorIs(err, client.ErrVolumeNotFound)
 
 	s.ErrorIs(s.client.DeleteVolume(s.ctx(), "does-not-exist"), client.ErrVolumeNotFound)
+}
+
+// TestVolumeApplyIsIdempotent covers the reason apply replaced create: the
+// stored volume becomes what the manifest says, however many times it is
+// applied, and the path and creation time it was given never move.
+func (s *Suite) TestVolumeApplyIsIdempotent() {
+	volume := s.volumeName()
+	s.T().Cleanup(func() { s.cleanupVolume(volume) })
+
+	spec := manifest.Volume{
+		Version: "v1",
+		Name:    volume,
+		Labels:  map[string]string{"app": "example"},
+	}
+
+	created, err := s.client.ApplyVolume(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	applied, err := s.client.ApplyVolume(s.ctx(), spec)
+	s.Require().NoError(err)
+	s.Equal(created.Path, applied.Path)
+	s.Equal(created.CreatedAt, applied.CreatedAt)
+	s.Equal(created.Labels, applied.Labels)
 }
 
 // TestWorkloadReadsASecret covers the whole point of a secret: the value reaches the
@@ -2116,7 +2139,7 @@ func (s *Suite) TestVolumeLabelsSurviveAnUpdate() {
 	volume := s.volumeName()
 	s.T().Cleanup(func() { s.cleanupVolume(volume) })
 
-	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{
+	created, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{
 		Version: "v1",
 		Name:    volume,
 		Labels:  map[string]string{"app": "web"},
@@ -2124,7 +2147,7 @@ func (s *Suite) TestVolumeLabelsSurviveAnUpdate() {
 	s.Require().NoError(err)
 	s.Equal(map[string]string{"app": "web"}, created.Labels)
 
-	updated, err := s.client.UpdateVolume(s.ctx(), manifest.Volume{
+	updated, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{
 		Version: "v1",
 		Name:    volume,
 		Labels:  map[string]string{"app": "api"},
@@ -2154,14 +2177,14 @@ func (s *Suite) TestListQueryOnLabels() {
 
 	// The suite shares one server, so the labels carry this test's unique names
 	// rather than values another test might also use.
-	_, err := s.client.CreateVolume(s.ctx(), manifest.Volume{
+	_, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{
 		Version: "v1",
 		Name:    web,
 		Labels:  map[string]string{"suite": marker, "role": "web"},
 	})
 	s.Require().NoError(err)
 
-	_, err = s.client.CreateVolume(s.ctx(), manifest.Volume{
+	_, err = s.client.ApplyVolume(s.ctx(), manifest.Volume{
 		Version: "v1",
 		Name:    api,
 		Labels:  map[string]string{"suite": marker, "role": "api"},
@@ -2800,7 +2823,7 @@ func (s *Suite) TestReadOnlyRootfsLeavesMountsUsable() {
 	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("hunter2"), nil)
 	s.Require().NoError(err)
 
-	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
+	created, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
 	s.Require().NoError(err)
 
 	// The command proves all three properties at once: the mounted value is readable,
@@ -3127,7 +3150,7 @@ func (s *Suite) TestRestoreBringsBackVolumeData() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupVolume(volume) })
 
-	created, err := s.client.CreateVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
+	created, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
 	s.Require().NoError(err)
 
 	writer := s.execSpec(name, "sh", "-c", "echo precious > var/lib/example/file; exit 0")

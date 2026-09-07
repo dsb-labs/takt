@@ -26,8 +26,6 @@ var (
 	ErrWorkloadInUse = errors.New("workload is in use")
 	// ErrVolumeNotFound is returned when no volume exists with the given name.
 	ErrVolumeNotFound = errors.New("volume not found")
-	// ErrVolumeExists is returned when a volume already holds the given name.
-	ErrVolumeExists = errors.New("volume already exists")
 	// ErrVolumeInUse is returned when a volume a workload mounts is deleted without
 	// being forced.
 	ErrVolumeInUse = errors.New("volume is in use")

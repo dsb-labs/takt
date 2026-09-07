@@ -124,7 +124,7 @@ func setup(ctx context.Context, config Config, collected *collector, names Names
 	for _, name := range names.Volumes {
 		group.Go(func() error {
 			return collected.measure("volume.create", func() error {
-				_, err := config.Client.CreateVolume(ctx, manifest.Volume{Version: "v1", Name: name})
+				_, err := config.Client.ApplyVolume(ctx, manifest.Volume{Version: "v1", Name: name})
 
 				return err
 			})

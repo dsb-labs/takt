@@ -22,7 +22,7 @@ import (
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
-func TestVolumeAPI_CreateVolume(t *testing.T) {
+func TestVolumeAPI_ApplyVolume(t *testing.T) {
 	t.Parallel()
 
 	tt := []struct {
@@ -33,11 +33,11 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 		Assert       func(*testing.T, generated.Volume)
 	}{
 		{
-			Name: "creates a volume",
+			Name: "answers 201 for a volume it created",
 			Body: generated.VolumeSpec{Version: "v1", Name: "example-data"},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool { return v.Name == "example-data" })).
-					Return(testVolume("example-data"), nil).Once()
+				svc.EXPECT().Apply(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool { return v.Name == "example-data" })).
+					Return(testVolume("example-data"), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
 			Assert: func(t *testing.T, v generated.Volume) {
@@ -49,10 +49,22 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 			},
 		},
 		{
+			Name: "answers 200 for a volume it updated",
+			Body: generated.VolumeSpec{Version: "v1", Name: "example-data"},
+			SetupMocks: func(svc *MockVolumeService) {
+				svc.EXPECT().Apply(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool { return v.Name == "example-data" })).
+					Return(testVolume("example-data"), false, nil).Once()
+			},
+			ExpectStatus: http.StatusOK,
+			Assert: func(t *testing.T, v generated.Volume) {
+				assert.Equal(t, "example-data", v.Name)
+			},
+		},
+		{
 			Name: "carries the owner and mode through",
 			Body: generated.VolumeSpec{Version: "v1", Name: "example-data", Owner: new("470:470"), Mode: new("0755")},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool {
+				svc.EXPECT().Apply(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool {
 					return v.Name == "example-data" && v.Owner == "470:470" && v.Mode == "0755"
 				})).Return(func() service.Volume {
 					volume := testVolume("example-data")
@@ -60,7 +72,7 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 					volume.Mode = "0755"
 
 					return volume
-				}(), nil).Once()
+				}(), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
 			Assert: func(t *testing.T, v generated.Volume) {
@@ -71,22 +83,22 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 			},
 		},
 		{
-			Name: "reports a name another volume holds",
-			Body: generated.VolumeSpec{Version: "v1", Name: "example-data"},
+			// The path names the volume being applied, so a body carrying a
+			// different name is applied under the path's.
+			Name: "takes the name from the path rather than the body",
+			Body: generated.VolumeSpec{Version: "v1", Name: "some-other-name"},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool { return v.Name == "example-data" })).
-					Return(service.Volume{}, service.ErrVolumeExists).Once()
+				svc.EXPECT().Apply(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool { return v.Name == "example-data" })).
+					Return(testVolume("example-data"), false, nil).Once()
 			},
-			// A volume holds data, so a repeated create is reported rather than
-			// treated as success.
-			ExpectStatus: http.StatusConflict,
+			ExpectStatus: http.StatusOK,
 		},
 		{
-			Name: "reports a name takt will not accept",
-			Body: generated.VolumeSpec{Version: "v1", Name: "Example_Data"},
+			Name: "reports a volume the service refuses",
+			Body: generated.VolumeSpec{Version: "v1", Name: "example-data"},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool { return v.Name == "Example_Data" })).
-					Return(service.Volume{}, service.ErrInvalidVolume).Once()
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Volume{}, false, service.ErrInvalidVolume).Once()
 			},
 			ExpectStatus: http.StatusBadRequest,
 		},
@@ -100,8 +112,8 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 			Name: "reports an unexpected failure",
 			Body: generated.VolumeSpec{Version: "v1", Name: "example-data"},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, mock.MatchedBy(func(v manifest.Volume) bool { return v.Name == "example-data" })).
-					Return(service.Volume{}, errors.New("disk is full")).Once()
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Volume{}, false, errors.New("disk is full")).Once()
 			},
 			ExpectStatus: http.StatusInternalServerError,
 		},
@@ -119,14 +131,14 @@ func TestVolumeAPI_CreateVolume(t *testing.T) {
 				body = bytes.NewReader(encoded)
 			}
 
-			resp := doVolume(t, svc, http.MethodPost, "/api/v1/volumes", body)
+			resp := doVolume(t, svc, http.MethodPut, "/api/v1/volumes/example-data", body)
 			require.Equal(t, tc.ExpectStatus, resp.Code)
 
 			if tc.Assert == nil {
 				return
 			}
 
-			var result generated.CreateVolumeResult
+			var result generated.ApplyVolumeResult
 			require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
 			tc.Assert(t, result.Volume)
 		})
@@ -391,13 +403,13 @@ func TestVolumeAPI_HidesInternalFailures(t *testing.T) {
 		SetupMocks func(*MockVolumeService)
 	}{
 		{
-			Name:   "create",
-			Method: http.MethodPost,
-			Target: "/api/v1/volumes",
+			Name:   "apply",
+			Method: http.MethodPut,
+			Target: "/api/v1/volumes/example-data",
 			Body:   generated.VolumeSpec{Version: "v1", Name: "example-data"},
 			SetupMocks: func(svc *MockVolumeService) {
-				svc.EXPECT().Create(mock.Anything, mock.Anything).
-					Return(service.Volume{}, internal).Once()
+				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+					Return(service.Volume{}, false, internal).Once()
 			},
 		},
 		{

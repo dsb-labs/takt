@@ -49,50 +49,24 @@ func checkName(name string) error {
 	return nil
 }
 
-// CreateVolume creates a volume and the directory backing it, returning
-// ErrVolumeExists when one already holds the name.
+// ApplyVolume stores the volume the manifest describes, creating it when the
+// name is new and replacing its labels, owner and mode when it is not,
+// returning it as it now stands.
 //
-// A volume has to exist before a workload can mount it, so that a mistyped name is
-// reported rather than quietly becoming a second empty volume.
-func (c *Client) CreateVolume(ctx context.Context, volume manifest.Volume) (Volume, error) {
-	resp, err := c.api.CreateVolumeWithResponse(ctx, wire.FromVolume(volume))
-	if err != nil {
-		return Volume{}, fmt.Errorf("failed to send the request: %w", err)
-	}
-
-	switch {
-	case resp.JSON201 != nil:
-		return newVolume(resp.JSON201.Volume), nil
-	case resp.JSON409 != nil:
-		return Volume{}, fmt.Errorf("%s: %w", resp.JSON409.Error, ErrVolumeExists)
-	case resp.JSON400 != nil:
-		return Volume{}, newError(http.StatusBadRequest, resp.JSON400)
-	case resp.JSON500 != nil:
-		return Volume{}, newError(http.StatusInternalServerError, resp.JSON500)
-	default:
-		return Volume{}, newError(resp.StatusCode(), nil)
-	}
-}
-
-// UpdateVolume replaces the mutable fields of the volume the manifest names,
-// returning it as it now stands. Returns ErrVolumeNotFound when no such volume
-// exists.
+// The operation is idempotent: the stored volume becomes what the manifest
+// says, however many times it is applied. The directory keeps its path across
+// an apply, so nothing mounting the volume is redeployed, and the owner and
+// mode are reapplied to it — which is also how a live volume is handed to
+// another user. A manifest clearing either leaves the directory as it stands.
 //
-// The manifest's labels, owner and mode replace the ones stored, as applying a
-// workload manifest replaces a workload's. A manifest carrying no labels removes
-// them all. The owner and mode are reapplied to the volume's directory, so this is
-// also how a live volume is handed to another user; a manifest clearing either
-// leaves the directory as it stands.
-//
-// Those fields are the whole of what this changes. A volume's name identifies it,
-// the directory holding its data is named for the identifier it was assigned, and
-// its contents are the workloads' to write.
-func (c *Client) UpdateVolume(ctx context.Context, volume manifest.Volume) (Volume, error) {
+// A volume has to exist before a workload can mount it, so that a mistyped
+// name is reported rather than quietly becoming a second empty volume.
+func (c *Client) ApplyVolume(ctx context.Context, volume manifest.Volume) (Volume, error) {
 	if err := checkName(volume.Name); err != nil {
 		return Volume{}, err
 	}
 
-	resp, err := c.api.UpdateVolumeWithResponse(ctx, volume.Name, wire.FromVolume(volume))
+	resp, err := c.api.ApplyVolumeWithResponse(ctx, volume.Name, wire.FromVolume(volume))
 	if err != nil {
 		return Volume{}, fmt.Errorf("failed to send the request: %w", err)
 	}
@@ -100,8 +74,8 @@ func (c *Client) UpdateVolume(ctx context.Context, volume manifest.Volume) (Volu
 	switch {
 	case resp.JSON200 != nil:
 		return newVolume(resp.JSON200.Volume), nil
-	case resp.JSON404 != nil:
-		return Volume{}, fmt.Errorf("%s: %w", resp.JSON404.Error, ErrVolumeNotFound)
+	case resp.JSON201 != nil:
+		return newVolume(resp.JSON201.Volume), nil
 	case resp.JSON400 != nil:
 		return Volume{}, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON500 != nil:

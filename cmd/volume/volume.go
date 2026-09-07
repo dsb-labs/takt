@@ -5,11 +5,10 @@ package volume
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/dsb-labs/takt/cmd/volume/create"
+	"github.com/dsb-labs/takt/cmd/volume/apply"
 	delcmd "github.com/dsb-labs/takt/cmd/volume/delete"
 	"github.com/dsb-labs/takt/cmd/volume/get"
 	"github.com/dsb-labs/takt/cmd/volume/list"
-	"github.com/dsb-labs/takt/cmd/volume/update"
 )
 
 // Command returns the "volume" command, which does nothing on its own and holds the
@@ -25,9 +24,8 @@ func Command() *cobra.Command {
 	}
 
 	cmd.AddCommand(
-		create.Command(),
+		apply.Command(),
 		list.Command(),
-		update.Command(),
 		get.Command(),
 		delcmd.Command(),
 	)

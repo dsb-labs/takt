@@ -15,12 +15,11 @@ import (
 type (
 	// The VolumeService interface describes the volume operations the API exposes.
 	VolumeService interface {
-		// Create should create the given volume, along with the directory
-		// backing it, owned and moded as the volume asks.
-		Create(ctx context.Context, volume manifest.Volume) (service.Volume, error)
-		// Update should replace the volume's mutable fields — its labels, owner
-		// and mode — and reapply the owner and mode to its directory.
-		Update(ctx context.Context, volume manifest.Volume) (service.Volume, error)
+		// Apply should store the given volume, creating it and the directory
+		// backing it when the name is new, and replacing its labels, owner and
+		// mode when it is not, reporting which happened. The owner and mode
+		// should be reapplied to the directory either way.
+		Apply(ctx context.Context, volume manifest.Volume) (service.Volume, bool, error)
 		// Get should return the volume with the given name.
 		Get(ctx context.Context, name string) (service.Volume, error)
 		// List should return the volumes matching every one of the given
@@ -63,66 +62,38 @@ func (a *VolumeAPI) internalError(operation string, err error) string {
 	return "failed to " + operation
 }
 
-// CreateVolume creates a volume and the directory backing it.
-func (a *VolumeAPI) CreateVolume(ctx context.Context, request api.CreateVolumeRequestObject) (api.CreateVolumeResponseObject, error) {
+// ApplyVolume stores the volume the request describes, creating it when the
+// name is new and updating it when it is not, answering 201 or 200 to report
+// which happened.
+func (a *VolumeAPI) ApplyVolume(ctx context.Context, request api.ApplyVolumeRequestObject) (api.ApplyVolumeResponseObject, error) {
 	if request.Body == nil {
-		return api.CreateVolume400JSONResponse{
+		return api.ApplyVolume400JSONResponse{
 			Error: "request body is required",
 		}, nil
 	}
 
-	volume, err := a.volumes.Create(ctx, wire.ToVolume(*request.Body))
-	switch {
-	case errors.Is(err, service.ErrInvalidVolume):
-		return api.CreateVolume400JSONResponse{
-			Error: err.Error(),
-		}, nil
-	case errors.Is(err, service.ErrVolumeExists):
-		// A volume holds data, so creating one that already exists is reported
-		// rather than treated as success. The caller may well have meant a name they
-		// have not used yet.
-		return api.CreateVolume409JSONResponse{
-			Error: fmt.Sprintf("volume %q already exists", request.Body.Name),
-		}, nil
-	case err != nil:
-		return api.CreateVolume500JSONResponse{
-			Error: a.internalError("create volume", err),
-		}, nil
-	}
-
-	return api.CreateVolume201JSONResponse{Volume: newVolume(volume)}, nil
-}
-
-// UpdateVolume replaces the labels on a volume.
-func (a *VolumeAPI) UpdateVolume(ctx context.Context, request api.UpdateVolumeRequestObject) (api.UpdateVolumeResponseObject, error) {
-	if request.Body == nil {
-		return api.UpdateVolume400JSONResponse{
-			Error: "request body is required",
-		}, nil
-	}
-
-	// The path names the volume being updated, so the name in the body is
+	// The path names the volume being applied, so the name in the body is
 	// replaced rather than trusted to match.
 	spec := wire.ToVolume(*request.Body)
 	spec.Name = request.Name
 
-	volume, err := a.volumes.Update(ctx, spec)
+	volume, created, err := a.volumes.Apply(ctx, spec)
 	switch {
 	case errors.Is(err, service.ErrInvalidVolume):
-		return api.UpdateVolume400JSONResponse{
+		return api.ApplyVolume400JSONResponse{
 			Error: err.Error(),
 		}, nil
-	case errors.Is(err, service.ErrVolumeNotFound):
-		return api.UpdateVolume404JSONResponse{
-			Error: fmt.Sprintf("volume %q does not exist", request.Name),
-		}, nil
 	case err != nil:
-		return api.UpdateVolume500JSONResponse{
-			Error: a.internalError("update volume", err),
+		return api.ApplyVolume500JSONResponse{
+			Error: a.internalError("apply volume", err),
 		}, nil
 	}
 
-	return api.UpdateVolume200JSONResponse{Volume: newVolume(volume)}, nil
+	if created {
+		return api.ApplyVolume201JSONResponse{Volume: newVolume(volume)}, nil
+	}
+
+	return api.ApplyVolume200JSONResponse{Volume: newVolume(volume)}, nil
 }
 
 // GetVolume returns the volume with the given name.

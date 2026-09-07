@@ -10,7 +10,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/database"
 )
 
-func TestVolumeRepository_Insert(t *testing.T) {
+func TestVolumeRepository_Upsert(t *testing.T) {
 	t.Parallel()
 
 	t.Run("stores a volume and assigns it an identifier", func(t *testing.T) {
@@ -18,26 +18,39 @@ func TestVolumeRepository_Insert(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		stored, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data"})
+		stored, created, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"})
 		require.NoError(t, err)
 
+		assert.True(t, created, "a first upsert did not report creation")
 		assert.Equal(t, "example-data", stored.Name)
 		assert.NotEmpty(t, stored.ID, "the volume was given no identifier")
 		assert.False(t, stored.CreatedAt.IsZero(), "the volume was given no creation time")
 	})
 
-	t.Run("refuses a name another volume holds", func(t *testing.T) {
+	t.Run("replaces the mutable fields of a volume that exists", func(t *testing.T) {
 		t.Parallel()
 
-		// A volume holds data. Treating a repeated create as success would hand a
-		// caller who meant a new name somebody else's storage.
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		_, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data"})
+		stored, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data", Owner: "470", Mode: "0700"})
 		require.NoError(t, err)
 
-		_, err = volumes.Insert(t.Context(), database.Volume{Name: "example-data"})
-		assert.ErrorIs(t, err, database.ErrVolumeExists)
+		got, created, err := volumes.Upsert(t.Context(), database.Volume{
+			Name:   "example-data",
+			Labels: map[string]string{"app": "web"},
+			Owner:  "470:470",
+			Mode:   "0755",
+		})
+		require.NoError(t, err)
+
+		// The identifier and the creation time are the volume's own, kept
+		// across an update so its directory never moves.
+		assert.False(t, created, "an upsert of an existing volume reported creation")
+		assert.Equal(t, stored.ID, got.ID)
+		assert.WithinDuration(t, stored.CreatedAt, got.CreatedAt, 0)
+		assert.Equal(t, map[string]string{"app": "web"}, got.Labels)
+		assert.Equal(t, "470:470", got.Owner)
+		assert.Equal(t, "0755", got.Mode)
 	})
 }
 
@@ -49,7 +62,7 @@ func TestVolumeRepository_Get(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		stored, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data"})
+		stored, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"})
 		require.NoError(t, err)
 
 		got, err := volumes.Get(t.Context(), "example-data")
@@ -65,7 +78,7 @@ func TestVolumeRepository_Get(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		_, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data", Owner: "470:470", Mode: "0755"})
+		_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data", Owner: "470:470", Mode: "0755"})
 		require.NoError(t, err)
 
 		got, err := volumes.Get(t.Context(), "example-data")
@@ -85,41 +98,6 @@ func TestVolumeRepository_Get(t *testing.T) {
 	})
 }
 
-func TestVolumeRepository_Update(t *testing.T) {
-	t.Parallel()
-
-	t.Run("replaces the mutable fields", func(t *testing.T) {
-		t.Parallel()
-
-		volumes := database.NewVolumeRepository(newTestDatabase(t))
-
-		stored, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data", Owner: "470", Mode: "0700"})
-		require.NoError(t, err)
-
-		got, err := volumes.Update(t.Context(), database.Volume{
-			Name:   "example-data",
-			Labels: map[string]string{"app": "web"},
-			Owner:  "470:470",
-			Mode:   "0755",
-		})
-		require.NoError(t, err)
-
-		assert.Equal(t, stored.ID, got.ID)
-		assert.Equal(t, map[string]string{"app": "web"}, got.Labels)
-		assert.Equal(t, "470:470", got.Owner)
-		assert.Equal(t, "0755", got.Mode)
-	})
-
-	t.Run("reports a volume that does not exist", func(t *testing.T) {
-		t.Parallel()
-
-		volumes := database.NewVolumeRepository(newTestDatabase(t))
-
-		_, err := volumes.Update(t.Context(), database.Volume{Name: "nope"})
-		assert.ErrorIs(t, err, database.ErrVolumeNotFound)
-	})
-}
-
 func TestVolumeRepository_List(t *testing.T) {
 	t.Parallel()
 
@@ -129,7 +107,7 @@ func TestVolumeRepository_List(t *testing.T) {
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
 		for _, name := range []string{"charlie", "alpha", "bravo"} {
-			_, err := volumes.Insert(t.Context(), database.Volume{Name: name})
+			_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: name})
 			require.NoError(t, err)
 		}
 
@@ -169,7 +147,7 @@ func TestVolumeRepository_List_Query(t *testing.T) {
 		}
 
 		for name, volumeLabels := range labels {
-			_, err := volumes.Insert(t.Context(), database.Volume{Name: name, Labels: volumeLabels})
+			_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: name, Labels: volumeLabels})
 			require.NoError(t, err)
 		}
 	}
@@ -252,7 +230,7 @@ func TestVolumeRepository_Delete(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		_, err := volumes.Insert(t.Context(), database.Volume{Name: "example-data"})
+		_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"})
 		require.NoError(t, err)
 
 		require.NoError(t, volumes.Delete(t.Context(), "example-data"))

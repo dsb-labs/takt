@@ -263,16 +263,7 @@ export interface paths {
      */
     get: operations["listVolumes"];
     put?: never;
-    /**
-     * Create a volume
-     * @description Creates a volume and the directory backing it.
-     *
-     *     A volume has to exist before a workload can mount it, so that a mistyped
-     *     name is reported rather than silently becoming a second empty volume.
-     *     Creating one that already exists is rejected, because a volume holds data and
-     *     an accidental second create should not read as success.
-     */
-    post: operations["createVolume"];
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -295,20 +286,22 @@ export interface paths {
      */
     get: operations["getVolume"];
     /**
-     * Update a volume's labels
-     * @description Replaces the labels on the volume with the given name.
+     * Create or update a volume
+     * @description Stores the volume the manifest describes, creating it when the name is
+     *     new and replacing its labels, owner and mode when it is not. The
+     *     operation is idempotent: the stored volume becomes what the manifest
+     *     says, however many times it is applied.
      *
-     *     The labels are the whole of what a volume has to change. Its name identifies
-     *     it, the directory holding its data is named for the identifier it was
-     *     assigned, and its contents are the workloads' to write.
+     *     A volume has to exist before a workload can mount it, so that a
+     *     mistyped name is reported rather than silently becoming a second empty
+     *     volume. The directory keeps its path across an apply, so nothing
+     *     mounting the volume is redeployed, and the owner and mode are
+     *     reapplied to it.
      *
-     *     The labels given replace the ones stored, as applying a workload manifest
-     *     replaces a workload's. Sending none removes them all.
-     *
-     *     Nothing mounting the volume is redeployed. A label says nothing about the
-     *     storage, so no specification hash moves.
+     *     An owner or a mode the manifest leaves empty stops being enforced
+     *     rather than being reverted: the directory keeps whatever it has.
      */
-    put: operations["updateVolume"];
+    put: operations["applyVolume"];
     post?: never;
     /**
      * Delete a volume and the data it holds
@@ -1883,12 +1876,8 @@ export interface components {
     GetVolumeResult: {
       volume: components["schemas"]["Volume"];
     };
-    /** @description The body returned when a volume is created. */
-    CreateVolumeResult: {
-      volume: components["schemas"]["Volume"];
-    };
-    /** @description The body returned when a volume is updated. */
-    UpdateVolumeResult: {
+    /** @description The body returned when a volume is applied. */
+    ApplyVolumeResult: {
       volume: components["schemas"]["Volume"];
     };
     /**
@@ -2497,41 +2486,6 @@ export interface operations {
       500: components["responses"]["InternalServerError"];
     };
   };
-  createVolume: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["VolumeSpec"];
-      };
-    };
-    responses: {
-      /** @description The volume was created. */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["CreateVolumeResult"];
-        };
-      };
-      400: components["responses"]["BadRequest"];
-      /** @description A volume with that name already exists. */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["ErrorResponse"];
-        };
-      };
-      500: components["responses"]["InternalServerError"];
-    };
-  };
   getVolume: {
     parameters: {
       query?: never;
@@ -2557,7 +2511,7 @@ export interface operations {
       500: components["responses"]["InternalServerError"];
     };
   };
-  updateVolume: {
+  applyVolume: {
     parameters: {
       query?: never;
       header?: never;
@@ -2573,17 +2527,25 @@ export interface operations {
       };
     };
     responses: {
-      /** @description The updated volume. */
+      /** @description The volume already existed and was updated. */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["UpdateVolumeResult"];
+          "application/json": components["schemas"]["ApplyVolumeResult"];
+        };
+      };
+      /** @description The volume was created. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApplyVolumeResult"];
         };
       };
       400: components["responses"]["BadRequest"];
-      404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
   };

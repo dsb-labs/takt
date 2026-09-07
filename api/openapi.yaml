@@ -540,41 +540,6 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
-    post:
-      operationId: createVolume
-      tags: [volumes]
-      summary: Create a volume
-      description: |
-        Creates a volume and the directory backing it.
-
-        A volume has to exist before a workload can mount it, so that a mistyped
-        name is reported rather than silently becoming a second empty volume.
-        Creating one that already exists is rejected, because a volume holds data and
-        an accidental second create should not read as success.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/VolumeSpec"
-      responses:
-        "201":
-          description: The volume was created.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CreateVolumeResult"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "409":
-          description: A volume with that name already exists.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          $ref: "#/components/responses/InternalServerError"
-
   /api/v1/volumes/{name}:
     parameters:
       - $ref: "#/components/parameters/VolumeName"
@@ -598,21 +563,23 @@ paths:
           $ref: "#/components/responses/InternalServerError"
 
     put:
-      operationId: updateVolume
+      operationId: applyVolume
       tags: [volumes]
-      summary: Update a volume's labels
+      summary: Create or update a volume
       description: |
-        Replaces the labels on the volume with the given name.
+        Stores the volume the manifest describes, creating it when the name is
+        new and replacing its labels, owner and mode when it is not. The
+        operation is idempotent: the stored volume becomes what the manifest
+        says, however many times it is applied.
 
-        The labels are the whole of what a volume has to change. Its name identifies
-        it, the directory holding its data is named for the identifier it was
-        assigned, and its contents are the workloads' to write.
+        A volume has to exist before a workload can mount it, so that a
+        mistyped name is reported rather than silently becoming a second empty
+        volume. The directory keeps its path across an apply, so nothing
+        mounting the volume is redeployed, and the owner and mode are
+        reapplied to it.
 
-        The labels given replace the ones stored, as applying a workload manifest
-        replaces a workload's. Sending none removes them all.
-
-        Nothing mounting the volume is redeployed. A label says nothing about the
-        storage, so no specification hash moves.
+        An owner or a mode the manifest leaves empty stops being enforced
+        rather than being reverted: the directory keeps whatever it has.
       requestBody:
         required: true
         content:
@@ -621,15 +588,19 @@ paths:
               $ref: "#/components/schemas/VolumeSpec"
       responses:
         "200":
-          description: The updated volume.
+          description: The volume already existed and was updated.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/UpdateVolumeResult"
+                $ref: "#/components/schemas/ApplyVolumeResult"
+        "201":
+          description: The volume was created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyVolumeResult"
         "400":
           $ref: "#/components/responses/BadRequest"
-        "404":
-          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -2746,17 +2717,9 @@ components:
         volume:
           $ref: "#/components/schemas/Volume"
 
-    CreateVolumeResult:
+    ApplyVolumeResult:
       type: object
-      description: The body returned when a volume is created.
-      required: [volume]
-      properties:
-        volume:
-          $ref: "#/components/schemas/Volume"
-
-    UpdateVolumeResult:
-      type: object
-      description: The body returned when a volume is updated.
+      description: The body returned when a volume is applied.
       required: [volume]
       properties:
         volume:
