@@ -434,6 +434,37 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
+			// The propagation reaches docker as a bind option, so a filesystem
+			// mounted on the host after the workload starts is visible inside.
+			Name: "carries a mount's propagation to the bind",
+			Workload: withVolumes(
+				workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
+				driver.Volume{Name: "/", Host: "/", Target: "/host", ReadOnly: true, Propagation: "rslave"},
+			),
+			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						return len(host.Mounts) == 1 &&
+							host.Mounts[0].BindOptions != nil &&
+							host.Mounts[0].BindOptions.Propagation == mount.PropagationRSlave
+					}),
+					mock.Anything, mock.Anything, mock.Anything,
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
 			// A read-only root filesystem applies to the image's own layers. A volume
 			// and a mounted value are bind mounts with rules of their own, so they
 			// must not inherit the flag or a workload could not write its data.

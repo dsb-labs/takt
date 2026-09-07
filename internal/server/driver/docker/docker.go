@@ -942,12 +942,20 @@ func mounts(volumes []driver.Volume) []mount.Mount {
 
 	out := make([]mount.Mount, 0, len(volumes))
 	for _, volume := range volumes {
-		out = append(out, mount.Mount{
+		m := mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   volume.Host,
 			Target:   volume.Target,
 			ReadOnly: volume.ReadOnly,
-		})
+		}
+
+		// Only set when the mount asks, so every other bind keeps docker's
+		// default rather than a spelling of it.
+		if volume.Propagation != "" {
+			m.BindOptions = &mount.BindOptions{Propagation: mount.Propagation(volume.Propagation)}
+		}
+
+		out = append(out, m)
 	}
 
 	return out

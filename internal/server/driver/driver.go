@@ -224,6 +224,10 @@ type (
 		// Whether the workload may only read what is mounted. Validation proves
 		// this reaches only runtimes that can enforce it.
 		ReadOnly bool
+		// How mount events travel between the host and the container, in
+		// docker's spelling. Validation proves this reaches only a host path
+		// on a runtime that can honour it. Empty carries nothing.
+		Propagation string
 	}
 
 	// The Event type reports that a driver's view of an instance has changed, so
@@ -314,10 +318,11 @@ func NewWorkload(row database.Workload) (Workload, error) {
 				// the server to resolve. Whether the host allows the path was
 				// settled when the specification was accepted.
 				w.Volumes = append(w.Volumes, Volume{
-					Name:     mount.Path,
-					Host:     mount.Path,
-					Target:   mount.To,
-					ReadOnly: mount.ReadOnly,
+					Name:        mount.Path,
+					Host:        mount.Path,
+					Target:      mount.To,
+					ReadOnly:    mount.ReadOnly,
+					Propagation: mount.Propagation,
 				})
 			}
 		}
