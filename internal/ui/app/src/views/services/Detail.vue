@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useDeleteService } from "../../api/mutations";
@@ -16,10 +15,14 @@ import { useSort } from "../../sort";
 
 const route = useRoute();
 const router = useRouter();
-const name = computed(() => route.params.name as string);
+// A snapshot rather than a computed: Suspense keeps this view on screen
+// while the next one loads, and a reactive read would watch the route it
+// is leaving and render the page empty. The view is remounted per path,
+// so the value cannot go stale.
+const name = route.params.name as string;
 
-const service = useService(() => name.value);
-const deleteService = useDeleteService(() => name.value);
+const service = useService(() => name);
+const deleteService = useDeleteService(() => name);
 
 const backendSort = useSort(() => service.data.value?.backends, "instance", {
   workload: (b) => b.workload,

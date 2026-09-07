@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useDeleteVolume } from "../../api/mutations";
@@ -14,10 +13,14 @@ import { absoluteTime, relativeTime } from "../../format";
 
 const route = useRoute();
 const router = useRouter();
-const name = computed(() => route.params.name as string);
+// A snapshot rather than a computed: Suspense keeps this view on screen
+// while the next one loads, and a reactive read would watch the route it
+// is leaving and render the page empty. The view is remounted per path,
+// so the value cannot go stale.
+const name = route.params.name as string;
 
-const volume = useVolume(() => name.value);
-const deleteVolume = useDeleteVolume(() => name.value);
+const volume = useVolume(() => name);
+const deleteVolume = useDeleteVolume(() => name);
 
 // Awaited so Suspense holds the previous view until this one has its
 // data. A failure is left for the error banner this view already renders.

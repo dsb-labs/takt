@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useDeleteSecret, useSetSecret } from "../../api/mutations";
@@ -16,11 +16,15 @@ import { absoluteTime, relativeTime } from "../../format";
 
 const route = useRoute();
 const router = useRouter();
-const name = computed(() => route.params.name as string);
+// A snapshot rather than a computed: Suspense keeps this view on screen
+// while the next one loads, and a reactive read would watch the route it
+// is leaving and render the page empty. The view is remounted per path,
+// so the value cannot go stale.
+const name = route.params.name as string;
 
-const secret = useSecret(() => name.value);
+const secret = useSecret(() => name);
 const setSecret = useSetSecret();
-const deleteSecret = useDeleteSecret(() => name.value);
+const deleteSecret = useDeleteSecret(() => name);
 
 const rotateError = ref("");
 const rotated = ref(false);
@@ -29,7 +33,7 @@ async function rotate(_: string, value: string) {
   rotateError.value = "";
   rotated.value = false;
   try {
-    await setSecret.mutateAsync({ name: name.value, value });
+    await setSecret.mutateAsync({ name: name, value });
     rotated.value = true;
   } catch (cause) {
     rotateError.value = cause instanceof Error ? cause.message : String(cause);

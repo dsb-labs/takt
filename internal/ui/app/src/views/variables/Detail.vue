@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useDeleteVariable, useSetVariable } from "../../api/mutations";
@@ -16,11 +16,15 @@ import { absoluteTime, relativeTime } from "../../format";
 
 const route = useRoute();
 const router = useRouter();
-const name = computed(() => route.params.name as string);
+// A snapshot rather than a computed: Suspense keeps this view on screen
+// while the next one loads, and a reactive read would watch the route it
+// is leaving and render the page empty. The view is remounted per path,
+// so the value cannot go stale.
+const name = route.params.name as string;
 
-const variable = useVariable(() => name.value);
+const variable = useVariable(() => name);
 const setVariable = useSetVariable();
-const deleteVariable = useDeleteVariable(() => name.value);
+const deleteVariable = useDeleteVariable(() => name);
 
 const editError = ref("");
 const saved = ref(false);
@@ -29,7 +33,7 @@ async function save(_: string, value: string) {
   editError.value = "";
   saved.value = false;
   try {
-    await setVariable.mutateAsync({ name: name.value, value });
+    await setVariable.mutateAsync({ name: name, value });
     saved.value = true;
   } catch (cause) {
     editError.value = cause instanceof Error ? cause.message : String(cause);

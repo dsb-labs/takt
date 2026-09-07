@@ -21,15 +21,19 @@ import { hostPaths, references } from "../../references";
 import { useSort } from "../../sort";
 
 const route = useRoute();
-const name = computed(() => route.params.name as string);
+// A snapshot rather than a computed: Suspense keeps this view on screen
+// while the next one loads, and a reactive read would watch the route it
+// is leaving and render the page empty. The view is remounted per path,
+// so the value cannot go stale.
+const name = route.params.name as string;
 
-const workload = useWorkload(() => name.value);
+const workload = useWorkload(() => name);
 
 const router = useRouter();
-const stop = useWorkloadAction("stop", () => name.value);
-const start = useWorkloadAction("start", () => name.value);
-const restart = useWorkloadAction("restart", () => name.value);
-const deletion = useDeleteWorkload(() => name.value);
+const stop = useWorkloadAction("stop", () => name);
+const start = useWorkloadAction("start", () => name);
+const restart = useWorkloadAction("restart", () => name);
+const deletion = useDeleteWorkload(() => name);
 const actionError = ref("");
 
 async function act(action: { mutateAsync: () => Promise<unknown> }) {
@@ -290,23 +294,24 @@ await workload.suspense().catch(() => {});
           >
             Nothing is running.
           </p>
-          <div v-else class="overflow-x-auto">
+          <div v-else class="scrollbar-none overflow-x-auto">
             <table class="w-full text-left text-sm">
               <thead>
                 <tr
                   class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
                 >
                   <SortHeader
-                    v-for="[column, label] in [
+                    v-for="[column, label, cls] in [
                       ['index', 'Index'],
-                      ['id', 'ID'],
+                      ['id', 'ID', 'hidden sm:table-cell'],
                       ['state', 'State'],
                       ['health', 'Health'],
-                      ['started', 'Started'],
-                      ['exit', 'Exit code'],
+                      ['started', 'Started', 'hidden sm:table-cell'],
+                      ['exit', 'Exit code', 'hidden sm:table-cell'],
                     ]"
                     :key="column"
                     :name="column!"
+                    :class="cls"
                     :sort-key="instanceSort.key.value"
                     :descending="instanceSort.descending.value"
                     @sort="instanceSort.toggle"
@@ -321,7 +326,7 @@ await workload.suspense().catch(() => {});
                   class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
                 >
                   <td class="px-4 py-2.5">{{ instance.index ?? 0 }}</td>
-                  <td class="px-4 py-2.5 font-mono text-xs">
+                  <td class="hidden px-4 py-2.5 font-mono text-xs sm:table-cell">
                     <span class="inline-flex items-center gap-1.5">
                       <span :title="instance.id">{{
                         instance.id.slice(0, 12)
@@ -371,14 +376,18 @@ await workload.suspense().catch(() => {});
                   >
                     {{ healthLabel(instance) }}
                   </td>
-                  <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
+                  <td
+                    class="hidden px-4 py-2.5 text-slate-500 sm:table-cell dark:text-slate-400"
+                  >
                     {{
                       instance.startedAt
                         ? relativeTime(instance.startedAt)
                         : "—"
                     }}
                   </td>
-                  <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
+                  <td
+                    class="hidden px-4 py-2.5 text-slate-500 sm:table-cell dark:text-slate-400"
+                  >
                     {{ instance.exitCode ?? "—" }}
                   </td>
                 </tr>
@@ -394,23 +403,24 @@ await workload.suspense().catch(() => {});
           >
             This workload publishes no ports.
           </p>
-          <div v-else class="overflow-x-auto">
+          <div v-else class="scrollbar-none overflow-x-auto">
             <table class="w-full text-left text-sm">
               <thead>
                 <tr
                   class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
                 >
                   <SortHeader
-                    v-for="[column, label] in [
-                      ['instance', 'Instance'],
+                    v-for="[column, label, cls] in [
+                      ['instance', 'Instance', 'hidden sm:table-cell'],
                       ['name', 'Name'],
                       ['host', 'Host'],
-                      ['workload', 'Workload'],
-                      ['protocol', 'Protocol'],
-                      ['allocation', 'Allocation'],
+                      ['workload', 'Workload', 'hidden sm:table-cell'],
+                      ['protocol', 'Protocol', 'hidden sm:table-cell'],
+                      ['allocation', 'Allocation', 'hidden sm:table-cell'],
                     ]"
                     :key="column"
                     :name="column!"
+                    :class="cls"
                     :sort-key="portSort.key.value"
                     :descending="portSort.descending.value"
                     @sort="portSort.toggle"
@@ -424,7 +434,9 @@ await workload.suspense().catch(() => {});
                   :key="`${port.instance}-${port.to}-${port.protocol}`"
                   class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
                 >
-                  <td class="px-4 py-2.5">{{ port.instance ?? 0 }}</td>
+                  <td class="hidden px-4 py-2.5 sm:table-cell">
+                    {{ port.instance ?? 0 }}
+                  </td>
                   <td class="px-4 py-2.5">{{ port.name || "—" }}</td>
                   <td class="px-4 py-2.5 font-mono text-xs">
                     <a
@@ -438,11 +450,17 @@ await workload.suspense().catch(() => {});
                     </a>
                     <template v-else>{{ port.from }}</template>
                   </td>
-                  <td class="px-4 py-2.5 font-mono text-xs">{{ port.to }}</td>
-                  <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
+                  <td class="hidden px-4 py-2.5 font-mono text-xs sm:table-cell">
+                    {{ port.to }}
+                  </td>
+                  <td
+                    class="hidden px-4 py-2.5 text-slate-500 sm:table-cell dark:text-slate-400"
+                  >
                     {{ port.protocol }}
                   </td>
-                  <td class="px-4 py-2.5 text-slate-500 dark:text-slate-400">
+                  <td
+                    class="hidden px-4 py-2.5 text-slate-500 sm:table-cell dark:text-slate-400"
+                  >
                     {{ port.dynamic ? "dynamic" : "pinned" }}
                   </td>
                 </tr>

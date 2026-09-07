@@ -97,13 +97,25 @@ const navigation = [
 
       <!-- Suspense keeps the current view on screen until the next one has
            its data, so navigation swaps a finished page in rather than
-           flashing an empty one. Each view awaits its query in async setup. -->
+           flashing an empty one. Each view awaits its query in async setup,
+           and reads its route params as a snapshot so the outgoing view
+           does not react to the route it is leaving. The fallback covers a
+           slow load: past the timeout the spinner replaces the old view. -->
       <!-- Keyed on the path, not the full URL: moving between two detail
            pages remounts the view so Suspense applies, while the filter
            writing to the query string does not. -->
       <RouterView v-slot="{ Component }">
-        <Suspense>
+        <Suspense timeout="150">
           <component :is="Component" :key="$route.path" />
+          <template #fallback>
+            <div class="flex justify-center py-24">
+              <span
+                class="border-pulse-600 dark:border-pulse-300 h-8 w-8 animate-spin rounded-full border-2 border-t-transparent dark:border-t-transparent"
+                role="status"
+                aria-label="Loading"
+              ></span>
+            </div>
+          </template>
         </Suspense>
       </RouterView>
     </main>
