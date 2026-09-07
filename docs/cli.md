@@ -13,8 +13,7 @@ takt workload stop <name>               Stop a workload and hold it down
 takt workload start <name>              Start a stopped workload
 takt workload restart <name>            Replace a workload's running instances
 
-takt volume create <manifest>           Create a volume from a manifest file
-takt volume update <manifest>           Update a volume from a manifest file
+takt volume apply <manifest>            Create or update a volume from a manifest file
 takt volume list                        List volumes                         (alias: ls)
 takt volume get <name>                  Show a single volume
 takt volume delete <name>               Delete a volume and the data it holds (alias: rm)
@@ -329,15 +328,17 @@ nothing would start until it is started again.
 The request is held in memory rather than stored. One the server has not acted on
 yet is lost with the server, and can simply be sent again.
 
-## volume create
+## volume apply
 
 ```sh
-takt volume create volume.yaml
+takt volume apply volume.yaml
 ```
 
-Creates a volume and the directory backing it. The manifest is a name, labels if you
-want them, and optionally who owns the directory and what permission bits it carries
-— see [Volumes](volumes.md#ownership) for what `owner` and `mode` mean:
+Creates the volume when the name is new, and updates it when it is not. The stored
+volume becomes what the manifest says, however many times it is applied. The
+manifest is a name, labels if you want them, and optionally who owns the directory
+and what permission bits it carries — see [Volumes](volumes.md#ownership) for what
+`owner` and `mode` mean:
 
 ```yaml
 version: v1
@@ -350,27 +351,15 @@ mode: "0755"
 ```
 
 A volume has to exist before a workload can mount it, so that a mistyped name is
-reported rather than becoming a second empty volume. Creating one that already exists
-is refused, because a volume holds data and the caller may well have meant a name they
-have not used yet.
+reported rather than becoming a second empty volume.
 
-## volume update
-
-```sh
-takt volume update volume.yaml
-```
-
-Replaces the labels, the owner and the mode on the volume the manifest names.
-
-Those are the whole of what this changes, and the whole of what a volume has to
-change. Its name identifies it, the directory holding its data is named for the
-identifier it was assigned, and its contents are the workloads' to write.
-
-The fields in the manifest replace the ones stored, the way applying a workload
-manifest replaces a workload's. A manifest carrying no labels removes them all. The
-owner and mode are applied to the directory again, which is how a live volume is
-handed to another user. A manifest clearing either leaves the directory as it
-stands.
+The labels, the owner and the mode are the whole of what an apply changes on a
+volume that exists. Its name identifies it, the directory holding its data is named
+for the identifier it keeps across an apply, and its contents are the workloads' to
+write. The fields in the manifest replace the ones stored, so a manifest carrying no
+labels removes them all. The owner and mode are applied to the directory again,
+which is how a live volume is handed to another user. A manifest clearing either
+leaves the directory as it stands.
 
 Nothing mounting the volume is redeployed. None of these fields say anything about
 the volume's place in a workload's specification, so no specification hash moves.

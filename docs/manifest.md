@@ -535,7 +535,7 @@ that does not is rejected, so a mistyped name is reported rather than quietly be
 a second empty volume:
 
 ```sh
-takt volume create volume.yaml
+takt volume apply volume.yaml
 takt workload apply example.yaml
 ```
 

@@ -99,7 +99,7 @@ name: example-data
 ```
 
 ```sh
-takt volume create volume.yaml
+takt volume apply volume.yaml
 takt workload apply example.yaml
 ```
 

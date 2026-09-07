@@ -6,7 +6,7 @@ data through every replacement, restart and deletion until the volume itself is
 deleted.
 
 ```sh
-takt volume create volume.yaml
+takt volume apply volume.yaml
 takt workload apply example.yaml
 ```
 
@@ -41,9 +41,11 @@ A volume has to exist before a workload can mount it. Applying a workload
 manifest naming one that does not is rejected, so a mistyped name is reported
 rather than quietly becoming a second empty volume.
 
-Labels follow the rules in [Labels](manifest.md#labels), unchanged.
-`takt volume update` replaces them. Nothing mounting the volume is redeployed,
-because a label says nothing about the storage.
+Applying the manifest again updates the volume rather than creating a second
+one, and the stored fields become what the manifest says. Labels follow the
+rules in [Labels](manifest.md#labels), unchanged. Nothing mounting the volume
+is redeployed by a change to them, because a label says nothing about the
+storage.
 
 ## Ownership
 
@@ -57,7 +59,7 @@ different hosts. `mode` is an octal string such as `"0755"`, up to four digits
 so a shared volume can carry the setgid bit.
 
 Both are applied to the directory when the volume is created, and again on
-`takt volume update`, which is how a live volume is handed to another user.
+every apply, which is how a live volume is handed to another user.
 Removing either from the manifest leaves the directory as it stands.
 
 Assigning another user needs the server to carry `CAP_CHOWN`. The packaged unit
@@ -67,14 +69,15 @@ systemd:
 ```ini
 [Service]
 User=takt
-AmbientCapabilities=CAP_DAC_OVERRIDE CAP_CHOWN
+AmbientCapabilities=CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
 ```
 
 The grant does not reach the workloads. takt drops its ambient capabilities
 before an exec workload's command runs, and a container's capabilities come
 from the Docker daemon rather than from takt. A server without the grant
 refuses only a volume manifest that names another user, and the error names the
-capability.
+capability. `CAP_FOWNER` is what lets an apply change the mode of a directory
+the server assigned away, and its refusal names it the same way.
 
 ## Where the data lives
 
