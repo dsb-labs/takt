@@ -602,6 +602,34 @@ The `to` rules are the volume's: written the same for either runtime, and reache
 the relative path in an exec workload. A path mount cannot name a `signal`, for the
 reason a volume cannot: takt does not know when its contents change.
 
+### Propagation
+
+By default a bind mount is a snapshot of the mount tree: a filesystem mounted on the
+host after the workload starts is not visible inside. `propagation` asks for the
+other behaviour, spelled the way docker spells it:
+
+```yaml
+volumes:
+  - path: /
+    to: /host
+    readOnly: true
+    propagation: rslave
+```
+
+`rslave` makes later host mounts visible inside, which is what a workload observing
+the whole host wants — a metrics exporter reading `/` sees a filesystem mounted
+after it started. `rshared` also carries the mounts the workload creates back to
+the host, for a workload whose job is mounting things, and needs the host path to
+sit on a shared mount or the start fails.
+
+Those are the only two values. Docker's non-recursive pair has no use anyone has
+named, and its private pair is the default an absent field already says.
+
+Only a host path may name a propagation. Nothing is ever mounted beneath a
+takt-managed volume, so there would be no event to propagate — and the exec runtime
+rejects the field the way it rejects `readOnly`, because a symbolic link cannot
+propagate anything.
+
 ## Mounting a value
 
 A mount can name a secret or a variable instead of a volume. The workload then finds a
