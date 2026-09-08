@@ -18,12 +18,13 @@ import (
 
 	"github.com/dsb-labs/takt/internal/server/api"
 	"github.com/dsb-labs/takt/internal/server/reconciler"
+	"github.com/dsb-labs/takt/internal/server/service"
 )
 
 func TestSystemAPI_GetHealth(t *testing.T) {
 	t.Parallel()
 
-	resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), nil, "/api/v1/system/health")
+	resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), nil, NewMockScrapeTargeter(t), "/api/v1/system/health")
 
 	assert.Equal(t, http.StatusOK, resp.Code)
 	assert.JSONEq(t, `{"status":"ok"}`, resp.Body.String())
@@ -88,7 +89,7 @@ func TestSystemAPI_GetReadiness(t *testing.T) {
 			observer := NewMockObserver(t)
 			observer.EXPECT().Observations().Return(tc.Observations).Once()
 
-			resp := doSystem(t, db, observer, nil, "/api/v1/system/ready")
+			resp := doSystem(t, db, observer, nil, NewMockScrapeTargeter(t), "/api/v1/system/ready")
 			assert.Equal(t, tc.ExpectStatus, resp.Code)
 
 			var body struct {
@@ -116,7 +117,7 @@ func TestSystemAPI_GetMetrics(t *testing.T) {
 		require.NoError(t, registry.Register(counter))
 		counter.Inc()
 
-		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), registry, "/api/v1/system/metrics")
+		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), registry, NewMockScrapeTargeter(t), "/api/v1/system/metrics")
 
 		assert.Equal(t, http.StatusOK, resp.Code)
 		assert.True(t, strings.HasPrefix(resp.Header().Get("Content-Type"), "text/plain"))
@@ -128,7 +129,7 @@ func TestSystemAPI_GetMetrics(t *testing.T) {
 			return nil, errors.New("collector broke")
 		})
 
-		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), failing, "/api/v1/system/metrics")
+		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), failing, NewMockScrapeTargeter(t), "/api/v1/system/metrics")
 
 		assert.Equal(t, http.StatusInternalServerError, resp.Code)
 		assert.Contains(t, resp.Body.String(), "failed to gather metrics")
@@ -143,7 +144,61 @@ func (f gatherFunc) Gather() ([]*dto.MetricFamily, error) {
 	return f()
 }
 
-func doSystem(t *testing.T, db api.Pinger, observer api.Observer, metrics prometheus.Gatherer, target string) *httptest.ResponseRecorder {
+func TestSystemAPI_GetPrometheusTargets(t *testing.T) {
+	t.Parallel()
+
+	t.Run("serves target groups in the http_sd shape", func(t *testing.T) {
+		t.Parallel()
+
+		targets := NewMockScrapeTargeter(t)
+		targets.EXPECT().ScrapeTargets(mock.Anything).Return([]service.ScrapeTarget{
+			{
+				Targets: []string{"10.0.0.5:23024", "10.0.0.5:22821"},
+				Labels:  map[string]string{"job": "dns", "__metrics_path__": "/", "takt_workload": "dns"},
+			},
+		}, nil).Once()
+
+		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), nil, targets, "/api/v1/system/prometheus-sd")
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		// Decoded the way prometheus decodes it, so the assertion is on the
+		// exact wire shape http_sd_configs reads.
+		var groups []struct {
+			Targets []string          `json:"targets"`
+			Labels  map[string]string `json:"labels"`
+		}
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &groups))
+		require.Len(t, groups, 1)
+		assert.Equal(t, []string{"10.0.0.5:23024", "10.0.0.5:22821"}, groups[0].Targets)
+		assert.Equal(t, "dns", groups[0].Labels["job"])
+		assert.Equal(t, "/", groups[0].Labels["__metrics_path__"])
+	})
+
+	t.Run("serves an empty array rather than null", func(t *testing.T) {
+		t.Parallel()
+
+		// Prometheus decodes the body as a list, and a fleet with nothing to
+		// scrape is still an answer.
+		targets := NewMockScrapeTargeter(t)
+		targets.EXPECT().ScrapeTargets(mock.Anything).Return(nil, nil).Once()
+
+		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), nil, targets, "/api/v1/system/prometheus-sd")
+		require.Equal(t, http.StatusOK, resp.Code)
+		assert.JSONEq(t, "[]", resp.Body.String())
+	})
+
+	t.Run("reports a discovery failure", func(t *testing.T) {
+		t.Parallel()
+
+		targets := NewMockScrapeTargeter(t)
+		targets.EXPECT().ScrapeTargets(mock.Anything).Return(nil, errors.New("database is gone")).Once()
+
+		resp := doSystem(t, NewMockPinger(t), NewMockObserver(t), nil, targets, "/api/v1/system/prometheus-sd")
+		require.Equal(t, http.StatusInternalServerError, resp.Code)
+	})
+}
+
+func doSystem(t *testing.T, db api.Pinger, observer api.Observer, metrics prometheus.Gatherer, targets api.ScrapeTargeter, target string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError}))
@@ -157,7 +212,7 @@ func doSystem(t *testing.T, db api.Pinger, observer api.Observer, metrics promet
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: NewMockVolumeService(t)}),
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: NewMockSecretService(t)}),
 		Variables: api.NewVariableAPI(api.VariableAPIConfig{Logger: logger, Variables: NewMockVariableService(t)}),
-		System:    api.NewSystemAPI(api.SystemAPIConfig{Logger: logger, DB: db, Observer: observer, Metrics: metrics}),
+		System:    api.NewSystemAPI(api.SystemAPIConfig{Logger: logger, DB: db, Observer: observer, Metrics: metrics, Targets: targets}),
 		Admin:     api.NewAdminAPI(api.AdminAPIConfig{Logger: logger, Admin: NewMockAdmin(t)}),
 	}).Register(mux)
 

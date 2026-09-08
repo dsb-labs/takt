@@ -1079,6 +1079,15 @@ type ScheduleSpec struct {
 	Overlap *OverlapPolicy `json:"overlap,omitempty"`
 }
 
+// ScrapeTargetGroup One target group in the shape prometheus's `http_sd_configs` reads.
+type ScrapeTargetGroup struct {
+	// Labels The labels attached to every series the targets produce.
+	Labels map[string]string `json:"labels"`
+
+	// Targets The addresses to scrape, one per workload instance.
+	Targets []string `json:"targets"`
+}
+
 // Secret A secret, together with the workloads currently reading it.
 //
 // There is no value on this schema, on purpose. Nothing reads a secret back out
@@ -2388,6 +2397,30 @@ type ClientInterface interface {
 	// Corresponds with GET /api/v1/system/metrics (the `GetMetrics` operationId).
 	GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetPrometheusTargets Discover scrape targets for prometheus
+	//
+	// Returns the workloads that opted into scraping as target groups in the
+	// shape prometheus's `http_sd_configs` reads: one group per workload,
+	// with a target per instance and the labels attached to every series
+	// they produce.
+	//
+	// A workload opts in with the `prometheus.scrape: "true"` label. The
+	// `prometheus.port` label selects which published port is scraped, by
+	// name or by number as a health check selects one, and is defaulted when
+	// the workload publishes exactly one. Every other label under the
+	// `prometheus.` namespace passes through with the prefix stripped, so a
+	// workload sets `__metrics_path__`, `__scheme__` or any label of its own
+	// in prometheus's vocabulary. The `job` label defaults to the workload's
+	// name, and `takt_workload` always carries it.
+	//
+	// Targets describe desired state rather than observation: an instance
+	// failing to start is still a target, so prometheus reports it down
+	// rather than never hearing of it. A suspended or scheduled workload
+	// contributes nothing.
+	//
+	// Corresponds with GET /api/v1/system/prometheus-sd (the `GetPrometheusTargets` operationId).
+	GetPrometheusTargets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetReadiness Report whether the server can do its job
 	//
 	// Reports whether the database answers and every configured driver answered
@@ -3196,6 +3229,40 @@ func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (
 // Corresponds with GET /api/v1/system/metrics (the `GetMetrics` operationId).
 func (c *Client) GetMetrics(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetMetricsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPrometheusTargets Discover scrape targets for prometheus
+//
+// Returns the workloads that opted into scraping as target groups in the
+// shape prometheus's `http_sd_configs` reads: one group per workload,
+// with a target per instance and the labels attached to every series
+// they produce.
+//
+// A workload opts in with the `prometheus.scrape: "true"` label. The
+// `prometheus.port` label selects which published port is scraped, by
+// name or by number as a health check selects one, and is defaulted when
+// the workload publishes exactly one. Every other label under the
+// `prometheus.` namespace passes through with the prefix stripped, so a
+// workload sets `__metrics_path__`, `__scheme__` or any label of its own
+// in prometheus's vocabulary. The `job` label defaults to the workload's
+// name, and `takt_workload` always carries it.
+//
+// Targets describe desired state rather than observation: an instance
+// failing to start is still a target, so prometheus reports it down
+// rather than never hearing of it. A suspended or scheduled workload
+// contributes nothing.
+//
+// Corresponds with GET /api/v1/system/prometheus-sd (the `GetPrometheusTargets` operationId).
+func (c *Client) GetPrometheusTargets(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPrometheusTargetsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -4365,6 +4432,33 @@ func NewGetMetricsRequest(server string) (*http.Request, error) {
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/system/metrics")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetPrometheusTargetsRequest constructs an http.Request for the GetPrometheusTargets method
+func NewGetPrometheusTargetsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/system/prometheus-sd")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -5610,6 +5704,32 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/system/metrics (the `GetMetrics` operationId).
 	GetMetricsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetMetricsResponse, error)
 
+	// GetPrometheusTargetsWithResponse Discover scrape targets for prometheus
+	//
+	// Returns the workloads that opted into scraping as target groups in the
+	// shape prometheus's `http_sd_configs` reads: one group per workload,
+	// with a target per instance and the labels attached to every series
+	// they produce.
+	//
+	// A workload opts in with the `prometheus.scrape: "true"` label. The
+	// `prometheus.port` label selects which published port is scraped, by
+	// name or by number as a health check selects one, and is defaulted when
+	// the workload publishes exactly one. Every other label under the
+	// `prometheus.` namespace passes through with the prefix stripped, so a
+	// workload sets `__metrics_path__`, `__scheme__` or any label of its own
+	// in prometheus's vocabulary. The `job` label defaults to the workload's
+	// name, and `takt_workload` always carries it.
+	//
+	// Targets describe desired state rather than observation: an instance
+	// failing to start is still a target, so prometheus reports it down
+	// rather than never hearing of it. A suspended or scheduled workload
+	// contributes nothing.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/system/prometheus-sd (the `GetPrometheusTargets` operationId).
+	GetPrometheusTargetsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetPrometheusTargetsResponse, error)
+
 	// GetReadinessWithResponse Report whether the server can do its job
 	//
 	// Reports whether the database answers and every configured driver answered
@@ -6679,6 +6799,54 @@ func (r GetMetricsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetMetricsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPrometheusTargetsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *[]ScrapeTargetGroup
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPrometheusTargetsResponse) GetJSON200() *[]ScrapeTargetGroup {
+	return r.JSON200
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetPrometheusTargetsResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPrometheusTargetsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPrometheusTargetsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPrometheusTargetsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPrometheusTargetsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8135,6 +8303,38 @@ func (c *ClientWithResponses) GetMetricsWithResponse(ctx context.Context, reqEdi
 	return ParseGetMetricsResponse(rsp)
 }
 
+// GetPrometheusTargetsWithResponse Discover scrape targets for prometheus
+//
+// Returns the workloads that opted into scraping as target groups in the
+// shape prometheus's `http_sd_configs` reads: one group per workload,
+// with a target per instance and the labels attached to every series
+// they produce.
+//
+// A workload opts in with the `prometheus.scrape: "true"` label. The
+// `prometheus.port` label selects which published port is scraped, by
+// name or by number as a health check selects one, and is defaulted when
+// the workload publishes exactly one. Every other label under the
+// `prometheus.` namespace passes through with the prefix stripped, so a
+// workload sets `__metrics_path__`, `__scheme__` or any label of its own
+// in prometheus's vocabulary. The `job` label defaults to the workload's
+// name, and `takt_workload` always carries it.
+//
+// Targets describe desired state rather than observation: an instance
+// failing to start is still a target, so prometheus reports it down
+// rather than never hearing of it. A suspended or scheduled workload
+// contributes nothing.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/system/prometheus-sd (the `GetPrometheusTargets` operationId).
+func (c *ClientWithResponses) GetPrometheusTargetsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetPrometheusTargetsResponse, error) {
+	rsp, err := c.GetPrometheusTargets(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPrometheusTargetsResponse(rsp)
+}
+
 // GetReadinessWithResponse Report whether the server can do its job
 //
 // Reports whether the database answers and every configured driver answered
@@ -9179,6 +9379,39 @@ func ParseGetMetricsResponse(rsp *http.Response) (*GetMetricsResponse, error) {
 	return response, nil
 }
 
+// ParseGetPrometheusTargetsResponse parses an HTTP response from a GetPrometheusTargetsWithResponse call
+func ParseGetPrometheusTargetsResponse(rsp *http.Response) (*GetPrometheusTargetsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPrometheusTargetsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []ScrapeTargetGroup
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetReadinessResponse parses an HTTP response from a GetReadinessWithResponse call
 func ParseGetReadinessResponse(rsp *http.Response) (*GetReadinessResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10035,6 +10268,9 @@ type ServerInterface interface {
 	// GetMetrics Read the server's metrics
 	// (GET /api/v1/system/metrics)
 	GetMetrics(w http.ResponseWriter, r *http.Request)
+	// GetPrometheusTargets Discover scrape targets for prometheus
+	// (GET /api/v1/system/prometheus-sd)
+	GetPrometheusTargets(w http.ResponseWriter, r *http.Request)
 	// GetReadiness Report whether the server can do its job
 	// (GET /api/v1/system/ready)
 	GetReadiness(w http.ResponseWriter, r *http.Request)
@@ -10404,6 +10640,20 @@ func (siw *ServerInterfaceWrapper) GetMetrics(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMetrics(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPrometheusTargets operation middleware
+func (siw *ServerInterfaceWrapper) GetPrometheusTargets(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPrometheusTargets(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11156,6 +11406,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/system/health", wrapper.GetHealth)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/system/ready", wrapper.GetReadiness)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/system/metrics", wrapper.GetMetrics)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/system/prometheus-sd", wrapper.GetPrometheusTargets)
 
 	return m
 }
@@ -11769,6 +12020,43 @@ type GetMetrics500JSONResponse struct {
 }
 
 func (response GetMetrics500JSONResponse) VisitGetMetricsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPrometheusTargetsRequestObject struct {
+}
+
+type GetPrometheusTargetsResponseObject interface {
+	VisitGetPrometheusTargetsResponse(w http.ResponseWriter) error
+}
+
+type GetPrometheusTargets200JSONResponse []ScrapeTargetGroup
+
+func (response GetPrometheusTargets200JSONResponse) VisitGetPrometheusTargetsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPrometheusTargets500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetPrometheusTargets500JSONResponse) VisitGetPrometheusTargetsResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -12971,6 +13259,9 @@ type StrictServerInterface interface {
 	// GetMetrics Read the server's metrics
 	// (GET /api/v1/system/metrics)
 	GetMetrics(ctx context.Context, request GetMetricsRequestObject) (GetMetricsResponseObject, error)
+	// GetPrometheusTargets Discover scrape targets for prometheus
+	// (GET /api/v1/system/prometheus-sd)
+	GetPrometheusTargets(ctx context.Context, request GetPrometheusTargetsRequestObject) (GetPrometheusTargetsResponseObject, error)
 	// GetReadiness Report whether the server can do its job
 	// (GET /api/v1/system/ready)
 	GetReadiness(ctx context.Context, request GetReadinessRequestObject) (GetReadinessResponseObject, error)
@@ -13387,6 +13678,30 @@ func (sh *strictHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetMetricsResponseObject); ok {
 		if err := validResponse.VisitGetMetricsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPrometheusTargets operation middleware
+func (sh *strictHandler) GetPrometheusTargets(w http.ResponseWriter, r *http.Request) {
+	var request GetPrometheusTargetsRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPrometheusTargets(ctx, request.(GetPrometheusTargetsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPrometheusTargets")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPrometheusTargetsResponseObject); ok {
+		if err := validResponse.VisitGetPrometheusTargetsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

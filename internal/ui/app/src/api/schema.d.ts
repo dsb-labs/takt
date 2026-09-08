@@ -707,6 +707,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/system/prometheus-sd": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Discover scrape targets for prometheus
+     * @description Returns the workloads that opted into scraping as target groups in the
+     *     shape prometheus's `http_sd_configs` reads: one group per workload,
+     *     with a target per instance and the labels attached to every series
+     *     they produce.
+     *
+     *     A workload opts in with the `prometheus.scrape: "true"` label. The
+     *     `prometheus.port` label selects which published port is scraped, by
+     *     name or by number as a health check selects one, and is defaulted when
+     *     the workload publishes exactly one. Every other label under the
+     *     `prometheus.` namespace passes through with the prefix stripped, so a
+     *     workload sets `__metrics_path__`, `__scheme__` or any label of its own
+     *     in prometheus's vocabulary. The `job` label defaults to the workload's
+     *     name, and `takt_workload` always carries it.
+     *
+     *     Targets describe desired state rather than observation: an instance
+     *     failing to start is still a target, so prometheus reports it down
+     *     rather than never hearing of it. A suspended or scheduled workload
+     *     contributes nothing.
+     */
+    get: operations["getPrometheusTargets"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1742,6 +1779,15 @@ export interface components {
      */
     InstanceState:
       "pending" | "running" | "terminating" | "exited" | "completed" | "failed";
+    /** @description One target group in the shape prometheus's `http_sd_configs` reads. */
+    ScrapeTargetGroup: {
+      /** @description The addresses to scrape, one per workload instance. */
+      targets: string[];
+      /** @description The labels attached to every series the targets produce. */
+      labels: {
+        [key: string]: string;
+      };
+    };
     /** @description The body returned for any unsuccessful request. */
     ErrorResponse: {
       /** @description A human-readable description of what went wrong. */
@@ -3152,6 +3198,27 @@ export interface operations {
         };
         content: {
           "text/plain": string;
+        };
+      };
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  getPrometheusTargets: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The target groups, ordered by workload name. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ScrapeTargetGroup"][];
         };
       };
       500: components["responses"]["InternalServerError"];

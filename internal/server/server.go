@@ -280,7 +280,8 @@ func Run(ctx context.Context, config Config) error {
 	claimer := port.NewClaimer(port.ClaimerConfig{Allocator: allocator, Ports: ports})
 
 	svc = service.NewWorkloadService(service.WorkloadServiceConfig{
-		Logger: logger,
+		Address: workloadAddress,
+		Logger:  logger,
 		Drivers: map[string]service.Driver{
 			docker.Name: dockerDriver,
 			exec.Name:   execDriver,
@@ -324,6 +325,7 @@ func Run(ctx context.Context, config Config) error {
 			// last answered is something only the passes asking them can hold.
 			Observer: reconcile,
 			Metrics:  tel.Gatherer(),
+			Targets:  svc,
 		}),
 		Admin: api.NewAdminAPI(api.AdminAPIConfig{Logger: logger, Admin: adminSvc}),
 	}).Register(mux)

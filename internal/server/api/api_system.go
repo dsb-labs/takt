@@ -13,6 +13,7 @@ import (
 
 	"github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/server/reconciler"
+	"github.com/dsb-labs/takt/internal/server/service"
 )
 
 type (
@@ -32,13 +33,23 @@ type (
 		Observations() map[string]reconciler.Observation
 	}
 
+	// The ScrapeTargeter interface describes how the discovery endpoint learns
+	// which workloads prometheus should scrape.
+	ScrapeTargeter interface {
+		// ScrapeTargets should report the workloads that opted into scraping
+		// as http_sd target groups, ordered by workload name.
+		ScrapeTargets(ctx context.Context) ([]service.ScrapeTarget, error)
+	}
+
 	// The SystemAPI type exposes HTTP endpoints describing the server itself:
-	// liveness, readiness and metrics.
+	// liveness, readiness, metrics, and the scrape targets it discovers for
+	// prometheus.
 	SystemAPI struct {
 		logger   *slog.Logger
 		db       Pinger
 		observer Observer
 		metrics  prometheus.Gatherer
+		targets  ScrapeTargeter
 	}
 
 	// The SystemAPIConfig type contains fields used to construct a SystemAPI.
@@ -52,6 +63,8 @@ type (
 		Observer Observer
 		// The gatherer the metrics endpoint reads from.
 		Metrics prometheus.Gatherer
+		// Reports the workloads prometheus should scrape.
+		Targets ScrapeTargeter
 	}
 )
 
@@ -62,6 +75,7 @@ func NewSystemAPI(config SystemAPIConfig) *SystemAPI {
 		db:       config.DB,
 		observer: config.Observer,
 		metrics:  config.Metrics,
+		targets:  config.Targets,
 	}
 }
 
@@ -150,4 +164,27 @@ func (r metricsResponse) VisitGetMetricsResponse(w http.ResponseWriter) error {
 	}
 
 	return nil
+}
+
+// GetPrometheusTargets reports the workloads that opted into scraping as
+// target groups in the shape prometheus's http_sd_configs reads.
+func (a *SystemAPI) GetPrometheusTargets(ctx context.Context, _ api.GetPrometheusTargetsRequestObject) (api.GetPrometheusTargetsResponseObject, error) {
+	groups, err := a.targets.ScrapeTargets(ctx)
+	if err != nil {
+		return api.GetPrometheusTargets500JSONResponse{
+			Error: a.internalError("discover scrape targets", err),
+		}, nil
+	}
+
+	// Empty is an array rather than null, because prometheus decodes the body
+	// as a list and a fleet with nothing to scrape is still an answer.
+	response := make(api.GetPrometheusTargets200JSONResponse, 0, len(groups))
+	for _, group := range groups {
+		response = append(response, api.ScrapeTargetGroup{
+			Targets: group.Targets,
+			Labels:  group.Labels,
+		})
+	}
+
+	return response, nil
 }

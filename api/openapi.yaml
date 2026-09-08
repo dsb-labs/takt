@@ -1259,6 +1259,42 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v1/system/prometheus-sd:
+    get:
+      operationId: getPrometheusTargets
+      tags: [system]
+      summary: Discover scrape targets for prometheus
+      description: |
+        Returns the workloads that opted into scraping as target groups in the
+        shape prometheus's `http_sd_configs` reads: one group per workload,
+        with a target per instance and the labels attached to every series
+        they produce.
+
+        A workload opts in with the `prometheus.scrape: "true"` label. The
+        `prometheus.port` label selects which published port is scraped, by
+        name or by number as a health check selects one, and is defaulted when
+        the workload publishes exactly one. Every other label under the
+        `prometheus.` namespace passes through with the prefix stripped, so a
+        workload sets `__metrics_path__`, `__scheme__` or any label of its own
+        in prometheus's vocabulary. The `job` label defaults to the workload's
+        name, and `takt_workload` always carries it.
+
+        Targets describe desired state rather than observation: an instance
+        failing to start is still a target, so prometheus reports it down
+        rather than never hearing of it. A suspended or scheduled workload
+        contributes nothing.
+      responses:
+        "200":
+          description: The target groups, ordered by workload name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ScrapeTargetGroup"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
 components:
   parameters:
     WorkloadName:
@@ -2527,6 +2563,24 @@ components:
         - exited
         - completed
         - failed
+
+    ScrapeTargetGroup:
+      type: object
+      description: |
+        One target group in the shape prometheus's `http_sd_configs` reads.
+      required: [targets, labels]
+      properties:
+        targets:
+          type: array
+          description: The addresses to scrape, one per workload instance.
+          items:
+            type: string
+            examples: ["10.0.0.5:20000"]
+        labels:
+          type: object
+          description: The labels attached to every series the targets produce.
+          additionalProperties:
+            type: string
 
     ErrorResponse:
       type: object
