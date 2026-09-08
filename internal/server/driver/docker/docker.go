@@ -194,6 +194,14 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 
 	exposed, bindings := portBindings(d.bind, w.Ports)
 
+	// A host-networked container shares the host's network namespace, so docker
+	// makes no port mapping and the process binds the host port itself. The
+	// exposed set and the bindings are meaningless there, so they are dropped
+	// rather than handed to a runtime that would ignore them.
+	if spec.NetworkMode == "host" {
+		exposed, bindings = nil, nil
+	}
+
 	// Which attempt this is, read from what the driver already holds. A retained
 	// container from the previous attempt keeps its name, so a replacement has to be
 	// named something else or docker refuses to create it.
@@ -241,6 +249,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 			CapDrop:        capabilities(spec.CapDrop),
 			ReadonlyRootfs: spec.ReadOnly,
 			PidMode:        container.PidMode(spec.PidMode),
+			NetworkMode:    container.NetworkMode(spec.NetworkMode),
 		},
 		nil, nil,
 		containerName(w.Name, w.Version, w.Instance, attempt),

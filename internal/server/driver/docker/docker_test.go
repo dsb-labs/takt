@@ -434,6 +434,38 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
+			// A host-networked container joins the host's network namespace and
+			// docker maps no ports, so the config carries host mode and no
+			// bindings.
+			Name: "joins the host network and publishes no bindings when asked",
+			Workload: workload("example", 1, "hash",
+				manifest.Container{Image: "example/example:latest", NetworkMode: "host"},
+				[]driver.Port{{Container: 80, Host: 80, Protocol: "tcp"}}, nil),
+			SetupMocks: func(c *MockClient) {
+				// Read to number the attempt, so a replacement cannot collide with a
+				// container being kept for its output.
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything,
+					mock.MatchedBy(func(config *dockercontainer.Config) bool {
+						return len(config.ExposedPorts) == 0
+					}),
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						return host.NetworkMode.IsHost() && len(host.PortBindings) == 0
+					}),
+					mock.Anything, mock.Anything, mock.Anything,
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
 			// The propagation reaches docker as a bind option, so a filesystem
 			// mounted on the host after the workload starts is visible inside.
 			Name: "carries a mount's propagation to the bind",
