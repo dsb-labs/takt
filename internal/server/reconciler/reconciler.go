@@ -1938,18 +1938,12 @@ func (r *Reconciler) observe(ctx context.Context) ([]driver.Instance, error) {
 // observeDriver asks one driver what it is running, recording how it answered and
 // how long the answer took.
 func (r *Reconciler) observeDriver(ctx context.Context, name string, d Driver) ([]driver.Instance, error) {
-	ctx, span := r.tracer.Start(ctx, "driver.observe",
-		trace.WithAttributes(attribute.String("takt.driver", name)))
-	defer span.End()
-
 	started := time.Now()
 
+	// The span for the call comes from the driver itself, which the server hands
+	// over wrapped in telemetry.WrapDriver.
 	instances, err := d.Observe(ctx)
 	r.recordObservation(name, err)
-
-	if err != nil {
-		span.SetStatus(codes.Error, err.Error())
-	}
 
 	r.instruments.observes.Record(ctx, time.Since(started).Seconds(), metric.WithAttributes(
 		attribute.String("driver", name),

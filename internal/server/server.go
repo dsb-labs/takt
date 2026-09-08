@@ -226,9 +226,11 @@ func Run(ctx context.Context, config Config) error {
 	// needs.
 	reconcile := reconciler.New(reconciler.Config{
 		Logger: logger,
+		// Wrapped so that every driver explains a converge the same way,
+		// whatever instrumentation the runtime behind it carries.
 		Drivers: map[string]reconciler.Driver{
-			docker.Name: dockerDriver,
-			exec.Name:   execDriver,
+			docker.Name: telemetry.WrapDriver(dockerDriver, tel.TracerProvider()),
+			exec.Name:   telemetry.WrapDriver(execDriver, tel.TracerProvider()),
 		},
 		Workloads: workloads,
 		Ports:     ports,
