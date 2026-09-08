@@ -26,7 +26,7 @@ func TestClient_Health(t *testing.T) {
 			Name: "healthy",
 			Handler: func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, http.MethodGet, r.Method)
-				assert.Equal(t, "/api/v1/health", r.URL.Path)
+				assert.Equal(t, "/api/v1/system/health", r.URL.Path)
 
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(api.GetHealthResult{Status: api.Ok})
@@ -74,7 +74,7 @@ func TestClient_Ready(t *testing.T) {
 			Name: "ready",
 			Handler: func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, http.MethodGet, r.Method)
-				assert.Equal(t, "/api/v1/ready", r.URL.Path)
+				assert.Equal(t, "/api/v1/system/ready", r.URL.Path)
 
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(api.GetReadinessResult{Ready: true})
@@ -118,7 +118,7 @@ func TestClient_Metrics(t *testing.T) {
 	t.Run("copies the scrape to the writer", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, http.MethodGet, r.Method)
-			assert.Equal(t, "/api/v1/metrics", r.URL.Path)
+			assert.Equal(t, "/api/v1/system/metrics", r.URL.Path)
 
 			w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 			_, _ = w.Write([]byte("takt_reconcile_passes_total{outcome=\"ok\"} 3\n"))

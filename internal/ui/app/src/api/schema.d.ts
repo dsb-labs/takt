@@ -626,7 +626,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/health": {
+  "/api/v1/system/health": {
     parameters: {
       query?: never;
       header?: never;
@@ -636,7 +636,7 @@ export interface paths {
     /**
      * Report that the server is alive
      * @description Answers as long as the process is serving requests. It says nothing about
-     *     whether the server can do its job — that is what `/api/v1/ready` reports —
+     *     whether the server can do its job — that is what `/api/v1/system/ready` reports —
      *     so it
      *     suits a supervisor deciding whether to restart the process.
      */
@@ -649,7 +649,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/ready": {
+  "/api/v1/system/ready": {
     parameters: {
       query?: never;
       header?: never;
@@ -660,7 +660,7 @@ export interface paths {
      * Report whether the server can do its job
      * @description Reports whether the database answers and every configured driver answered
      *     the most recent attempt to observe it. This is distinct from
-     *     `/api/v1/health`: a
+     *     `/api/v1/system/health`: a
      *     server whose Docker daemon has gone away is alive but cannot converge
      *     container workloads, and the two need different answers.
      *
@@ -678,7 +678,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/metrics": {
+  "/api/v1/system/metrics": {
     parameters: {
       query?: never;
       header?: never;

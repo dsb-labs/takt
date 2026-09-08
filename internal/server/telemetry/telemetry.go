@@ -1,5 +1,5 @@
 // Package telemetry provides the OpenTelemetry providers the server runs with.
-// Metrics are always collected and gathered by the /api/v1/metrics endpoint. Traces and
+// Metrics are always collected and gathered by the /api/v1/system/metrics endpoint. Traces and
 // logs are exported over OTLP when an endpoint is configured and are inert
 // otherwise.
 package telemetry
@@ -30,7 +30,7 @@ import (
 
 type (
 	// The Telemetry type contains the OpenTelemetry providers the server runs
-	// with: a meter provider gathered by the /api/v1/metrics endpoint, a tracer
+	// with: a meter provider gathered by the /api/v1/system/metrics endpoint, a tracer
 	// provider, and an optional slog handler that carries log records to an
 	// exporter.
 	Telemetry struct {
@@ -150,7 +150,7 @@ func (t *Telemetry) TracerProvider() trace.TracerProvider {
 }
 
 // Gatherer returns the prometheus gatherer holding everything the meter provider
-// records. The /api/v1/metrics endpoint reads from it.
+// records. The /api/v1/system/metrics endpoint reads from it.
 func (t *Telemetry) Gatherer() prometheus.Gatherer {
 	return t.registry
 }

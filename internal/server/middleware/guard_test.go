@@ -75,7 +75,7 @@ func TestGuard(t *testing.T) {
 			// targets takt by hostname needs the name in the configuration,
 			// while one targeting an address always passes. Pinned here because
 			// a scrape failing with a 421 is otherwise confusing to debug.
-			Path:         "/api/v1/metrics",
+			Path:         "/api/v1/system/metrics",
 			Host:         "takt.internal:7373",
 			ExpectStatus: http.StatusMisdirectedRequest,
 		},

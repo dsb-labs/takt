@@ -24,7 +24,7 @@ Variables are not protected at all. Anything that can reach the API can read eve
 variable and its value, which is what they are for. Put anything that would be
 damaging to report in a secret instead. See [Variables](variables.md).
 
-The `/api/v1/metrics` endpoint reports workload names as label values. Anything that can
+The `/api/v1/system/metrics` endpoint reports workload names as label values. Anything that can
 reach the port can already run arbitrary workloads, so the names disclose nothing
 new — but they are disclosed, and a scraper is one more thing with reach to
 account for.
@@ -594,16 +594,16 @@ request with a message saying the UI is not in the build. Build the bundle with
 The server describes itself on three endpoints, served from the same listener as
 everything else and declared in the same OpenAPI document:
 
-- `/api/v1/health` answers as long as the process serves requests. It suits a supervisor
+- `/api/v1/system/health` answers as long as the process serves requests. It suits a supervisor
   deciding whether to restart the process.
-- `/api/v1/ready` reports whether the server can do its job: the database answers, and
+- `/api/v1/system/ready` reports whether the server can do its job: the database answers, and
   every configured driver answered the most recent attempt to observe it. A server
   whose Docker daemon has gone away is alive but not ready, and the two need
   different answers. A not-ready response is a 503 carrying the reasons.
-- `/api/v1/metrics` serves everything the server measures in the Prometheus text format,
+- `/api/v1/system/metrics` serves everything the server measures in the Prometheus text format,
   ready to scrape with no collector in between.
 
-Driver answers on `/api/v1/ready` are cached from the reconciler's own passes rather than
+Driver answers on `/api/v1/system/ready` are cached from the reconciler's own passes rather than
 fetched per request, so polling costs nothing. The answer is at most one reconcile
 interval plus the driver timeout old. Before the first pass completes, the server
 reports not ready. Note that the exec driver reads local state and so almost
@@ -612,7 +612,7 @@ daemon.
 
 ### Scraping
 
-Point a Prometheus at `/api/v1/metrics`. A scrape target that names the server by address
+Point a Prometheus at `/api/v1/system/metrics`. A scrape target that names the server by address
 always passes the host check. One that names it by hostname must have that
 hostname in `hosts`, or every scrape fails with a 421. See
 [Configuration](configuration.md#http).
@@ -637,7 +637,7 @@ timings — which is where a leak in takt itself shows.
 ### Traces and logs
 
 Set `otlp-endpoint` under [telemetry](configuration.md#telemetry) to export traces
-and logs over OTLP. Without it, both are inert and `/api/v1/metrics` still works.
+and logs over OTLP. Without it, both are inert and `/api/v1/system/metrics` still works.
 
 Each reconciliation pass is a trace: a root span for the pass, a span per workload
 converged, a span per driver observation, a span per image pull, and a span per

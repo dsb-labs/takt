@@ -443,11 +443,11 @@ The server instruments itself with OpenTelemetry rather than a Prometheus client
 and the reason is traces. A reconciliation pass fans out across workloads with
 driver calls, image pulls and mount delivery inside it. A span tree answers "why
 did this pass take ninety seconds" in a way counters cannot. Metrics still come
-out as Prometheus text on `/api/v1/metrics`, through the OpenTelemetry exporter, so a
+out as Prometheus text on `/api/v1/system/metrics`, through the OpenTelemetry exporter, so a
 scrape needs no collector — and the tracing is already wired when someone wants
 it, rather than being a second instrumentation pass later.
 
-`/api/v1/health`, `/api/v1/ready` and `/api/v1/metrics` sit on the main listener and in the OpenAPI
+`/api/v1/system/health`, `/api/v1/system/ready` and `/api/v1/system/metrics` sit on the main listener and in the OpenAPI
 document. A separate metrics port would let a scraper reach the server while the
 control API stayed on loopback, which is a real pattern — it is rejected because
 it splits the surface in two and puts half of it outside the one document that
@@ -456,7 +456,7 @@ reverse proxy they already need. The endpoints carry no authentication for the
 same reason the rest of the API carries none: gating metrics behind something the
 control endpoints lack would be theatre.
 
-Readiness reads a cached answer rather than asking the drivers. `/api/v1/ready` is
+Readiness reads a cached answer rather than asking the drivers. `/api/v1/system/ready` is
 polled, and a poll must not cost a driver round-trip — so the reconciler records
 how each driver answered the observation every pass already makes, and readiness
 reports that record. The staleness is bounded by the pass interval, and a server

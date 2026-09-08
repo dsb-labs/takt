@@ -156,7 +156,7 @@ export function useReadiness() {
     queryFn: async () => {
       // A not-ready server answers with a 503 carrying the same shape, so the
       // response is read either way rather than treated as a failure.
-      const { data, error } = await client.GET("/api/v1/ready");
+      const { data, error } = await client.GET("/api/v1/system/ready");
       if (data) return data;
       if (error && "ready" in error) return error;
       throw new Error("failed to read readiness");
