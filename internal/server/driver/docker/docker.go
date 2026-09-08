@@ -778,7 +778,9 @@ func (d *Driver) ensureImage(ctx context.Context, workload, ref string, policy m
 	d.pulls[ref] = p
 	d.pullMux.Unlock()
 
-	go d.pullImage(workload, ref, p)
+	// The pull's span cannot be a child of this call's — the pull outlives the
+	// pass that asked for it — so the requester travels as a link instead.
+	go d.pullImage(workload, ref, p, trace.LinkFromContext(ctx))
 
 	return driver.ErrImagePulling
 }
@@ -791,13 +793,13 @@ const pullTimeout = 15 * time.Minute
 // pullImage fetches ref from its registry and records how it went in p, then
 // nudges the watcher so the next pass starts the waiting instances without
 // waiting out the tick.
-func (d *Driver) pullImage(workload, ref string, p *pull) {
+func (d *Driver) pullImage(workload, ref string, p *pull, requester trace.Link) {
 	// The driver's own context rather than a caller's: the pass that asked for
 	// the image has moved on, and its cancellation must not abandon the pull.
 	ctx, cancel := context.WithTimeout(context.Background(), pullTimeout)
 	defer cancel()
 
-	err := d.fetch(ctx, ref)
+	err := d.fetch(ctx, ref, requester)
 
 	d.pullMux.Lock()
 	p.done = true
@@ -818,7 +820,7 @@ func (d *Driver) pullImage(workload, ref string, p *pull) {
 
 // fetch performs one pull against the image's registry, returning once the image
 // is held locally.
-func (d *Driver) fetch(ctx context.Context, ref string) error {
+func (d *Driver) fetch(ctx context.Context, ref string, requester trace.Link) error {
 	auth, err := d.registryAuth(ref)
 	if err != nil {
 		return err
@@ -829,7 +831,8 @@ func (d *Driver) fetch(ctx context.Context, ref string) error {
 	// The measurement covers the drain below as well as the request: the pull is
 	// only complete once its progress stream has been read to the end.
 	ctx, span := d.tracer.Start(ctx, "image.pull",
-		trace.WithAttributes(attribute.String("takt.image", ref)))
+		trace.WithAttributes(attribute.String("takt.image", ref)),
+		trace.WithLinks(requester))
 	defer span.End()
 
 	started := time.Now()
@@ -840,6 +843,7 @@ func (d *Driver) fetch(ctx context.Context, ref string) error {
 
 	body, err := d.client.ImagePull(ctx, ref, image.PullOptions{RegistryAuth: auth})
 	if err != nil {
+		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 
 		return fmt.Errorf("failed to pull image: %w", err)
@@ -849,6 +853,7 @@ func (d *Driver) fetch(ctx context.Context, ref string) error {
 	// The pull only runs to completion while its progress stream is being read,
 	// so the body has to be drained even though nothing here reports progress.
 	if _, err = io.Copy(io.Discard, body); err != nil {
+		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 
 		return fmt.Errorf("failed to pull image: %w", err)
