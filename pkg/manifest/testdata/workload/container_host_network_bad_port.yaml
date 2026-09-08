@@ -1,0 +1,10 @@
+version: v1
+name: example
+
+ports:
+  - to: 80
+    from: 8080
+
+container:
+  image: example/example:latest
+  networkMode: host

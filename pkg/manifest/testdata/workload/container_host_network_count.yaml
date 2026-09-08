@@ -1,0 +1,11 @@
+version: v1
+name: example
+
+count: 2
+
+ports:
+  - to: 80
+
+container:
+  image: example/example:latest
+  networkMode: host

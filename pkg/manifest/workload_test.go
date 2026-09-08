@@ -739,6 +739,40 @@ func TestParse(t *testing.T) {
 			File:         "container_bad_pid_mode.yaml",
 			ExpectsError: true,
 		},
+		{
+			// A host-networked container binds the host port directly, so the host
+			// side is derived to equal the port inside — whether the manifest wrote
+			// it, as the https port does, or left it out, as the http port does.
+			Name: "parses a container on the host network and derives its host ports",
+			File: "container_host_network.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Container)
+				assert.Equal(t, "host", spec.Container.NetworkMode)
+				assert.Equal(t, 80, spec.Ports[0].From)
+				assert.Equal(t, 443, spec.Ports[1].From)
+			},
+		},
+		{
+			// Only the host network is accepted. The bridge is the default an
+			// empty field already names.
+			Name:         "rejects a network mode that is not the host's",
+			File:         "container_bad_network_mode.yaml",
+			ExpectsError: true,
+		},
+		{
+			// Host networking maps nothing, so a host port that differs from the
+			// port inside is asking for a mapping it cannot make.
+			Name:         "rejects a host-networked port whose host side differs",
+			File:         "container_host_network_bad_port.yaml",
+			ExpectsError: true,
+		},
+		{
+			// Two containers cannot both bind one host port, so a host-networked
+			// workload cannot run more than one instance.
+			Name:         "rejects a host-networked workload with a count",
+			File:         "container_host_network_count.yaml",
+			ExpectsError: true,
+		},
 	}
 
 	for _, tc := range tt {

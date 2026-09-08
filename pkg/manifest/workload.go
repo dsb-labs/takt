@@ -221,6 +221,17 @@ type (
 		// it. Only "host" is accepted, which shares the host's namespace the way
 		// an exec workload always does. Empty runs in a namespace of its own.
 		PidMode string `yaml:"pidMode" json:"pidMode,omitempty"`
+		// The network the container joins, spelled the way docker spells it. Only
+		// "host" is accepted, which shares the host's network namespace so the
+		// container binds host ports directly. Empty runs on docker's default
+		// bridge.
+		//
+		// A host-networked workload publishes ports the way an exec one does: the
+		// port it binds is the host port, so every port's host side equals the
+		// port inside and takt records it rather than allocating a mapping. This
+		// is why such a workload cannot run more than one instance — two
+		// containers cannot both bind one host port.
+		NetworkMode string `yaml:"networkMode" json:"networkMode,omitempty"`
 	}
 
 	// The Port type describes a port to publish.
@@ -597,6 +608,18 @@ func (s *Spec) Defaults() {
 		s.Ports[i].defaults()
 	}
 
+	// A host-networked container binds the host port directly, so the host side
+	// equals the port inside. Derived here so the pinned port reaches the hash
+	// and the claim the way an operator-written pin does, and so the rest of
+	// takt sees one shape whether or not the operator wrote the host port.
+	if s.Container != nil && s.Container.NetworkMode == "host" {
+		for i := range s.Ports {
+			if s.Ports[i].From == 0 {
+				s.Ports[i].From = s.Ports[i].To
+			}
+		}
+	}
+
 	if s.Schedule != nil {
 		s.Schedule.defaults()
 	}
@@ -856,6 +879,16 @@ func validatePorts(spec Spec, runtime Runtime) error {
 		return err
 	}
 
+	// A host-networked workload binds the host ports directly, so it is the exec
+	// case in a container: two instances cannot both bind one host port. Caught
+	// before the pinned check below so the message names the reason rather than
+	// the derived pin.
+	hostNet := spec.Container != nil && spec.Container.NetworkMode == "host"
+	if hostNet && spec.Count > 1 {
+		return errors.New("invalid ports: a host-networked workload cannot run more than one instance, " +
+			"because its ports bind the host directly")
+	}
+
 	// One host port reaches one listener, so a pinned port cannot serve more than
 	// one instance. Exec workloads must pin every port, which is why a count above
 	// one is a container-only feature for a workload that publishes anything.
@@ -870,6 +903,20 @@ func validatePorts(spec Spec, runtime Runtime) error {
 
 	switch runtime {
 	case RuntimeContainer:
+		if hostNet {
+			// Defaults derived the host side from the port inside, so every port
+			// must now agree with it. An explicit host port that differs is asking
+			// for a mapping host networking cannot make.
+			for _, port := range spec.Ports {
+				if port.From != port.To {
+					return fmt.Errorf("invalid ports: port %d cannot pin host port %d in a "+
+						"host-networked workload, which binds the port inside directly", port.To, port.From)
+				}
+			}
+
+			return nil
+		}
+
 		// A container listens inside its own namespace, so the host port is a mapping
 		// the server is free to choose.
 		return nil
@@ -1229,6 +1276,13 @@ func validateContainer(spec Container) error {
 	// accepted here.
 	if spec.PidMode != "" && spec.PidMode != "host" {
 		return errors.New(`invalid container: pidMode must be "host" or absent`)
+	}
+
+	// Docker also accepts "bridge", "none" and "container:<id>", none of which
+	// takt has a use for: the bridge is the default an empty field already
+	// names, and the others make ports mean something takt does not model.
+	if spec.NetworkMode != "" && spec.NetworkMode != "host" {
+		return errors.New(`invalid container: networkMode must be "host" or absent`)
 	}
 
 	return nil

@@ -1,0 +1,13 @@
+version: v1
+name: example
+
+ports:
+  - name: http
+    to: 80
+  - name: https
+    to: 443
+    from: 443
+
+container:
+  image: example/example:latest
+  networkMode: host
