@@ -157,6 +157,7 @@ container:
 | `capAdd` | no | Kernel capabilities to grant beyond the default set. |
 | `capDrop` | no | Kernel capabilities to remove from the default set. |
 | `pidMode` | no | The pid namespace the container runs in. Only `host` is accepted. |
+| `networkMode` | no | The network the container joins. Only `host` is accepted. |
 
 `pull: missing` pulls the image only when it is not present on the host, which pins a
 tag that is already there until something removes it. This rewards pinning a tag or a
@@ -206,6 +207,18 @@ processes — a metrics exporter, for one — and it is spelled the way docker s
 it. Docker's other mode, joining a named container's namespace, is not accepted:
 it would name a container takt did not start and cannot promise anything about. A single mount can be made
 read-only with the mount's own `readOnly` field — see [Volumes](#volumes).
+
+`networkMode: host` runs the container in the host's network namespace, so it binds
+host ports directly rather than through a mapping. This is for a workload that has
+to be on the host network — a reverse proxy binding the standard ports, or a
+workload something outside takt reaches at a fixed address. Docker's other modes
+are not accepted: the bridge is the default an empty field already names.
+
+A host-networked workload publishes ports the way an `exec` one does. The port it
+binds is the host port, so a port's `from` equals its `to`: leave `from` out and
+takt derives it, and naming a `from` that differs from `to` is rejected, because
+host networking has no mapping to make. Two containers cannot both bind one host
+port, so a host-networked workload cannot run a [count](#count) above one.
 
 ### exec
 
