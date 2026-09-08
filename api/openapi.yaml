@@ -1492,6 +1492,8 @@ components:
             stock images to be a reasonable default.
           items:
             type: string
+            minLength: 1
+          examples: [["ALL"]]
         pidMode:
           type: string
           enum: [host]
@@ -1500,8 +1502,19 @@ components:
             spells it. Only "host" is accepted, which shares the host's
             namespace the way an exec workload always does. Absent runs the
             container in a namespace of its own.
-            minLength: 1
-          examples: [["ALL"]]
+        networkMode:
+          type: string
+          enum: [host]
+          description: |
+            The network the container joins, spelled the way docker spells it.
+            Only "host" is accepted, which shares the host's network namespace
+            so the container binds host ports directly rather than through a
+            mapping. Absent runs the container on docker's default bridge.
+
+            A host-networked workload publishes ports the way an exec one does:
+            every port's host side equals the port inside, takt records it
+            rather than allocating a mapping, and the workload cannot run more
+            than one instance.
 
     PullPolicy:
       type: string

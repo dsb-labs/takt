@@ -20,15 +20,30 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for ContainerSpecNetworkMode.
+const (
+	ContainerSpecNetworkModeHost ContainerSpecNetworkMode = "host"
+)
+
+// Valid indicates whether the value is a known member of the ContainerSpecNetworkMode enum.
+func (e ContainerSpecNetworkMode) Valid() bool {
+	switch e {
+	case ContainerSpecNetworkModeHost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ContainerSpecPidMode.
 const (
-	Host ContainerSpecPidMode = "host"
+	ContainerSpecPidModeHost ContainerSpecPidMode = "host"
 )
 
 // Valid indicates whether the value is a known member of the ContainerSpecPidMode enum.
 func (e ContainerSpecPidMode) Valid() bool {
 	switch e {
-	case Host:
+	case ContainerSpecPidModeHost:
 		return true
 	default:
 		return false
@@ -331,6 +346,9 @@ type ContainerSpec struct {
 	// docker names them. Dropping ALL and adding back what the workload needs
 	// is the hardened configuration, and is opt-in because it breaks too many
 	// stock images to be a reasonable default.
+	//
+	//
+	// Examples: ["ALL"]
 	CapDrop *[]string `json:"capDrop,omitempty"`
 
 	// Command The command to run, replacing the one the image declares. Given as the
@@ -349,14 +367,21 @@ type ContainerSpec struct {
 	// Examples: example/example:latest
 	Image string `json:"image"`
 
+	// NetworkMode The network the container joins, spelled the way docker spells it.
+	// Only "host" is accepted, which shares the host's network namespace
+	// so the container binds host ports directly rather than through a
+	// mapping. Absent runs the container on docker's default bridge.
+	//
+	// A host-networked workload publishes ports the way an exec one does:
+	// every port's host side equals the port inside, takt records it
+	// rather than allocating a mapping, and the workload cannot run more
+	// than one instance.
+	NetworkMode *ContainerSpecNetworkMode `json:"networkMode,omitempty"`
+
 	// PidMode The pid namespace the container runs in, spelled the way docker
 	// spells it. Only "host" is accepted, which shares the host's
 	// namespace the way an exec workload always does. Absent runs the
 	// container in a namespace of its own.
-	// minLength: 1
-	//
-	//
-	// Examples: ["ALL"]
 	PidMode *ContainerSpecPidMode `json:"pidMode,omitempty"`
 
 	// Pull When the docker driver pulls the workload's image.
@@ -396,13 +421,21 @@ type ContainerSpec struct {
 	User *string `json:"user,omitempty"`
 }
 
+// ContainerSpecNetworkMode The network the container joins, spelled the way docker spells it.
+// Only "host" is accepted, which shares the host's network namespace
+// so the container binds host ports directly rather than through a
+// mapping. Absent runs the container on docker's default bridge.
+//
+// A host-networked workload publishes ports the way an exec one does:
+// every port's host side equals the port inside, takt records it
+// rather than allocating a mapping, and the workload cannot run more
+// than one instance.
+type ContainerSpecNetworkMode string
+
 // ContainerSpecPidMode The pid namespace the container runs in, spelled the way docker
 // spells it. Only "host" is accepted, which shares the host's
 // namespace the way an exec workload always does. Absent runs the
 // container in a namespace of its own.
-// minLength: 1
-//
-// Examples: ["ALL"]
 type ContainerSpecPidMode string
 
 // DeleteSecretResult The body returned when a secret is deleted, which has nothing in it yet, for

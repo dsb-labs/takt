@@ -113,6 +113,9 @@ func ToSpec(spec api.WorkloadSpec) (manifest.Spec, error) {
 		if spec.Container.PidMode != nil {
 			out.Container.PidMode = string(*spec.Container.PidMode)
 		}
+		if spec.Container.NetworkMode != nil {
+			out.Container.NetworkMode = string(*spec.Container.NetworkMode)
+		}
 	}
 
 	if spec.Exec != nil {
@@ -386,6 +389,9 @@ func FromSpec(s manifest.Spec) api.WorkloadSpec {
 		}
 		if s.Container.PidMode != "" {
 			spec.Container.PidMode = new(api.ContainerSpecPidMode(s.Container.PidMode))
+		}
+		if s.Container.NetworkMode != "" {
+			spec.Container.NetworkMode = new(api.ContainerSpecNetworkMode(s.Container.NetworkMode))
 		}
 	}
 

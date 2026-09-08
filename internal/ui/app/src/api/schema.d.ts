@@ -847,6 +847,9 @@ export interface components {
        *     docker names them. Dropping ALL and adding back what the workload needs
        *     is the hardened configuration, and is opt-in because it breaks too many
        *     stock images to be a reasonable default.
+       * @example [
+       *       "ALL"
+       *     ]
        */
       capDrop?: string[];
       /**
@@ -854,13 +857,22 @@ export interface components {
        *     spells it. Only "host" is accepted, which shares the host's
        *     namespace the way an exec workload always does. Absent runs the
        *     container in a namespace of its own.
-       *     minLength: 1
-       * @example [
-       *       "ALL"
-       *     ]
        * @enum {string}
        */
       pidMode?: "host";
+      /**
+       * @description The network the container joins, spelled the way docker spells it.
+       *     Only "host" is accepted, which shares the host's network namespace
+       *     so the container binds host ports directly rather than through a
+       *     mapping. Absent runs the container on docker's default bridge.
+       *
+       *     A host-networked workload publishes ports the way an exec one does:
+       *     every port's host side equals the port inside, takt records it
+       *     rather than allocating a mapping, and the workload cannot run more
+       *     than one instance.
+       * @enum {string}
+       */
+      networkMode?: "host";
     };
     /**
      * @description When the docker driver pulls the workload's image.

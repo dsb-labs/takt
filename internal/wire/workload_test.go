@@ -146,4 +146,24 @@ func TestFromSpec(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, spec, actual)
 	})
+
+	t.Run("round-trips a host-networked specification", func(t *testing.T) {
+		spec := manifest.Spec{
+			Version: "v1",
+			Name:    "example",
+			Count:   1,
+			Restart: &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay},
+			// The host port equals the port inside, which is what a host-networked
+			// workload's ports look like once the defaults have derived them.
+			Ports: []manifest.Port{{To: 80, From: 80, Protocol: manifest.ProtocolTCP}},
+			Container: &manifest.Container{
+				Image:       "example/example:latest",
+				NetworkMode: "host",
+			},
+		}
+
+		actual, err := wire.ToSpec(wire.FromSpec(spec))
+		require.NoError(t, err)
+		assert.Equal(t, spec, actual)
+	})
 }
