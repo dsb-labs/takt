@@ -527,6 +527,10 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	ctx, span := r.tracer.Start(ctx, "reconcile")
 
 	defer func() {
+		// Always set, so a TraceQL filter on the attribute needs no special
+		// case for the passes that went wrong.
+		span.SetAttributes(attribute.String("takt.outcome", string(outcome)))
+
 		if outcome != telemetry.OutcomeOK {
 			span.SetStatus(codes.Error, string(outcome))
 		}
@@ -543,10 +547,13 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	rows, err := r.workloads.List(ctx)
 	if err != nil {
 		outcome = outcomeListFailed
+		span.RecordError(err)
 		r.logger.With("error", err).Error("failed to list workloads")
 
 		return
 	}
+
+	span.SetAttributes(attribute.Int("takt.workloads", len(rows)))
 
 	observeCtx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
@@ -554,10 +561,13 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	instances, err := r.observe(observeCtx)
 	if err != nil {
 		outcome = outcomeObserveFailed
+		span.RecordError(err)
 		r.logger.With("error", err).Error("failed to observe driver instances")
 
 		return
 	}
+
+	span.SetAttributes(attribute.Int("takt.instances", len(instances)))
 
 	// Two views of the same observation, because two questions are being asked of it.
 	//
@@ -743,6 +753,7 @@ func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, 
 			// per thing rather than one per kind of thing.
 			r.instruments.converges.Record(ctx, time.Since(started).Seconds())
 			if err != nil {
+				span.RecordError(err)
 				span.SetStatus(codes.Error, err.Error())
 				r.logger.With("workload", row.Name, "error", err).Error("failed to reconcile workload")
 				r.fail(row.Name, err)
