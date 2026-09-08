@@ -19,6 +19,6 @@ type (
 func newInstruments(meter metric.Meter) instruments {
 	return instruments{
 		duration: telemetry.Histogram(meter, "takt.health.check.duration",
-			"How long each health probe took.", "s"),
+			"How long each health probe took.", "s", telemetry.SlowBoundaries),
 	}
 }

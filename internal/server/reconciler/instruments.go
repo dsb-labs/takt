@@ -41,9 +41,11 @@ func newInstruments(meter metric.Meter) instruments {
 		passes: telemetry.Counter(meter, "takt.reconcile.passes",
 			"The number of reconciliation passes completed.", "{pass}"),
 		passDuration: telemetry.Histogram(meter, "takt.reconcile.pass.duration",
-			"How long each reconciliation pass took.", "s"),
+			"How long each reconciliation pass took.", "s", telemetry.FastBoundaries),
+		// A converge that pulls an image or waits out a start period runs far
+		// longer than the pass around it, so it gets the longer tail.
 		converges: telemetry.Histogram(meter, "takt.workload.converge.duration",
-			"How long converging a workload took.", "s"),
+			"How long converging a workload took.", "s", telemetry.SlowBoundaries),
 		workloads: telemetry.Gauge(meter, "takt.workloads",
 			"The number of workloads in each state.", "{workload}"),
 		// These two name the workload where the converge histogram does not, and the
@@ -57,6 +59,6 @@ func newInstruments(meter metric.Meter) instruments {
 		giveups: telemetry.Counter(meter, "takt.workload.giveups",
 			"The number of workloads given up on because they would not stay up.", "{giveup}"),
 		observes: telemetry.Histogram(meter, "takt.driver.observe.duration",
-			"How long each driver took to report what it is running.", "s"),
+			"How long each driver took to report what it is running.", "s", telemetry.FastBoundaries),
 	}
 }

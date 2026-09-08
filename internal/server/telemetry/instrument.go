@@ -1,12 +1,27 @@
 package telemetry
 
 import (
+	"slices"
+
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
+)
+
+var (
+	// FastBoundaries bucket a duration histogram whose operations finish in
+	// milliseconds: log-spaced steps from 1ms to 10s. The OTel defaults start
+	// at 5 seconds, which puts every fast observation in one bucket and makes
+	// the quantiles fiction.
+	FastBoundaries = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
+
+	// SlowBoundaries extend FastBoundaries with a tail out to 5 minutes, for
+	// operations that are usually fast but legitimately stall — image pulls,
+	// start periods, health probes against a booting workload.
+	SlowBoundaries = slices.Concat(FastBoundaries, []float64{30, 60, 120, 300})
 )
 
 // The Outcome type labels a measurement with how the measured operation ended.
@@ -53,11 +68,14 @@ func Counter(meter metric.Meter, name, description, unit string) metric.Int64Cou
 }
 
 // Histogram returns the named histogram built against meter, under the same
-// rules as Counter.
-func Histogram(meter metric.Meter, name, description, unit string) metric.Float64Histogram {
+// rules as Counter. The boundaries are the explicit bucket boundaries the
+// histogram records into — FastBoundaries or SlowBoundaries, matched to the
+// range of the operation being timed.
+func Histogram(meter metric.Meter, name, description, unit string, boundaries []float64) metric.Float64Histogram {
 	histogram, err := orNoop(meter).Float64Histogram(name,
 		metric.WithDescription(description),
-		metric.WithUnit(unit))
+		metric.WithUnit(unit),
+		metric.WithExplicitBucketBoundaries(boundaries...))
 	if err != nil {
 		otel.Handle(err)
 		histogram, _ = noop.Meter{}.Float64Histogram(name)

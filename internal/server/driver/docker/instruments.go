@@ -19,6 +19,6 @@ type (
 func newInstruments(meter metric.Meter) instruments {
 	return instruments{
 		pulls: telemetry.Histogram(meter, "takt.image.pull.duration",
-			"How long each image pull took.", "s"),
+			"How long each image pull took.", "s", telemetry.SlowBoundaries),
 	}
 }

@@ -93,6 +93,16 @@ func New(ctx context.Context, config Config) (*Telemetry, error) {
 	meters := sdkmetric.NewMeterProvider(
 		sdkmetric.WithReader(reader),
 		sdkmetric.WithResource(res),
+		// otelsql creates this histogram itself with the OTel default
+		// boundaries, which start at 5 seconds. A view is the only place to
+		// give a library-owned instrument buckets that match sub-millisecond
+		// SQLite calls.
+		sdkmetric.WithView(sdkmetric.NewView(
+			sdkmetric.Instrument{Name: "db.client.operation.duration"},
+			sdkmetric.Stream{Aggregation: sdkmetric.AggregationExplicitBucketHistogram{
+				Boundaries: FastBoundaries,
+			}},
+		)),
 	)
 
 	// The runtime's own metrics — goroutines, memory, garbage collection — are

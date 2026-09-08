@@ -72,6 +72,37 @@ func TestNew(t *testing.T) {
 		assert.True(t, found, "expected the runtime's own metrics on the scrape")
 	})
 
+	t.Run("rebuckets the database histogram", func(t *testing.T) {
+		ctx := t.Context()
+
+		tel, err := telemetry.New(ctx, telemetry.Config{})
+		require.NoError(t, err)
+
+		// Recording under otelsql's instrument name is enough to exercise the
+		// view: the boundaries come from the provider, not the caller.
+		histogram, err := tel.MeterProvider().Meter("test").Float64Histogram("db.client.operation.duration")
+		require.NoError(t, err)
+		histogram.Record(ctx, 0.002)
+
+		families, err := tel.Gatherer().Gather()
+		require.NoError(t, err)
+
+		found := false
+		for _, family := range families {
+			if !strings.HasPrefix(family.GetName(), "db_client_operation_duration") {
+				continue
+			}
+
+			found = true
+
+			buckets := family.GetMetric()[0].GetHistogram().GetBucket()
+			require.NotEmpty(t, buckets)
+			assert.InDelta(t, telemetry.FastBoundaries[0], buckets[0].GetUpperBound(), 0)
+		}
+
+		assert.True(t, found, "expected the database histogram on the scrape")
+	})
+
 	t.Run("carries the host name on every signal", func(t *testing.T) {
 		ctx := t.Context()
 
