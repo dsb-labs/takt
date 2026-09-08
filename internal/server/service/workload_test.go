@@ -1284,6 +1284,167 @@ func TestWorkloadService_List(t *testing.T) {
 	})
 }
 
+func TestWorkloadService_ScrapeTargets(t *testing.T) {
+	t.Parallel()
+
+	// scraped builds a stored workload that opted in, publishing a dns port on
+	// both protocols and a metrics port, so the port selection has something
+	// real to choose between.
+	scraped := func(name string, labels map[string]string) database.Workload {
+		spec := containerSpec(name, "example/example:latest")
+		spec.Labels = labels
+		spec.Ports = []manifest.Port{
+			{Name: "dns", To: 53},
+			{Name: "dns", To: 53, Protocol: manifest.ProtocolUDP},
+			{Name: "metrics", To: 9100},
+		}
+		spec.Defaults()
+
+		row := storedWorkload(name)
+		row.ID = "id-" + name
+		row.Spec = encodedSpec(spec)
+		// The row carries the labels an apply writes beside the specification,
+		// which is what the hydrated workload reports.
+		row.Labels = labels
+
+		return row
+	}
+
+	t.Run("reports one group per workload with a target per instance", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().List(mock.Anything, mock.Anything).Return([]database.Workload{
+			scraped("dns", map[string]string{
+				"prometheus.scrape": "true",
+				"prometheus.port":   "metrics",
+				"prometheus.path":   "/",
+				"prometheus.team":   "platform",
+				"app":               "dns",
+			}),
+		}, nil).Once()
+
+		// The allocations are the source of the targets. Instance one is listed
+		// first to prove the targets come back in instance order regardless.
+		ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+			"id-dns": {
+				{WorkloadID: "id-dns", Instance: 1, Name: "metrics", Container: 9100, Host: 22821, Protocol: "tcp"},
+				{WorkloadID: "id-dns", Instance: 0, Name: "metrics", Container: 9100, Host: 23024, Protocol: "tcp"},
+				{WorkloadID: "id-dns", Instance: 0, Name: "dns", Container: 53, Host: 22440, Protocol: "tcp"},
+			},
+		}, nil).Once()
+
+		// Nothing is observed running. Discovery describes desired state, so the
+		// targets exist whatever the driver reports.
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		groups, err := svc.ScrapeTargets(t.Context())
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+
+		assert.Equal(t, []string{"10.0.0.5:23024", "10.0.0.5:22821"}, groups[0].Targets)
+
+		// The consumed labels are gone, the namespace passes through with the
+		// prefix stripped, and labels outside it stay off the series.
+		assert.Equal(t, map[string]string{
+			"job":              "dns",
+			"takt_workload":    "dns",
+			"__metrics_path__": "/",
+			"team":             "platform",
+		}, groups[0].Labels)
+	})
+
+	t.Run("defaults the port when the workload publishes exactly one", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		spec := containerSpec("exporter", "example/example:latest")
+		spec.Labels = map[string]string{"prometheus.scrape": "true"}
+		spec.Ports = []manifest.Port{{To: 9100}}
+		spec.Defaults()
+
+		row := storedWorkload("exporter")
+		row.ID = "id-exporter"
+		row.Spec = encodedSpec(spec)
+		row.Labels = spec.Labels
+
+		repo.EXPECT().List(mock.Anything, mock.Anything).Return([]database.Workload{row}, nil).Once()
+		ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+			"id-exporter": {{WorkloadID: "id-exporter", Instance: 0, Container: 9100, Host: 22508, Protocol: "tcp"}},
+		}, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		groups, err := svc.ScrapeTargets(t.Context())
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+		assert.Equal(t, []string{"10.0.0.5:22508"}, groups[0].Targets)
+		assert.Equal(t, "exporter", groups[0].Labels["job"])
+	})
+
+	t.Run("a job label overrides the default", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().List(mock.Anything, mock.Anything).Return([]database.Workload{
+			scraped("node-exporter", map[string]string{
+				"prometheus.scrape": "true",
+				"prometheus.port":   "metrics",
+				"prometheus.job":    "node",
+			}),
+		}, nil).Once()
+		ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+			"id-node-exporter": {{WorkloadID: "id-node-exporter", Instance: 0, Container: 9100, Host: 22508, Protocol: "tcp"}},
+		}, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		groups, err := svc.ScrapeTargets(t.Context())
+		require.NoError(t, err)
+		require.Len(t, groups, 1)
+		assert.Equal(t, "node", groups[0].Labels["job"])
+		assert.Equal(t, "node-exporter", groups[0].Labels["takt_workload"],
+			"the workload's identity did not survive the job override")
+	})
+
+	t.Run("contributes nothing when the port selection settles nothing", func(t *testing.T) {
+		t.Parallel()
+
+		// Three workloads, none scrapable: several ports and no selection,
+		// a selection matching nothing, and a scheduled workload. Labels are
+		// free text validated long before anything knows they are scrape
+		// configuration, so none of this is an error.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		cron := scraped("tick", map[string]string{"prometheus.scrape": "true", "prometheus.port": "metrics"})
+		spec, err := manifest.DecodeWorkload(cron.Spec)
+		require.NoError(t, err)
+		spec.Schedule = &manifest.Schedule{Cron: "* * * * *"}
+		spec.Defaults()
+		cron.Spec = encodedSpec(spec)
+
+		repo.EXPECT().List(mock.Anything, mock.Anything).Return([]database.Workload{
+			scraped("many-ports", map[string]string{"prometheus.scrape": "true"}),
+			scraped("bad-ref", map[string]string{"prometheus.scrape": "true", "prometheus.port": "nope"}),
+			cron,
+		}, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		groups, err := svc.ScrapeTargets(t.Context())
+		require.NoError(t, err)
+		assert.Empty(t, groups)
+	})
+}
+
 func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 	t.Parallel()
 
@@ -3281,6 +3442,7 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	config := service.WorkloadServiceConfig{
+		Address:   "10.0.0.5",
 		Logger:    newTestLogger(t),
 		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
@@ -3320,6 +3482,7 @@ func newTestImageAwareService(
 	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	config := service.WorkloadServiceConfig{
+		Address:   "10.0.0.5",
 		Logger:    newTestLogger(t),
 		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
@@ -3370,6 +3533,7 @@ func newTestReferenceAwareService(
 	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	config := service.WorkloadServiceConfig{
+		Address:   "10.0.0.5",
 		Logger:    newTestLogger(t),
 		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
