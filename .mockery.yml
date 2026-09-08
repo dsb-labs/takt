@@ -23,3 +23,6 @@ packages:
   github.com/dsb-labs/takt/internal/server/port:
     config:
       all: true
+  github.com/dsb-labs/takt/internal/server/telemetry:
+    config:
+      all: true
