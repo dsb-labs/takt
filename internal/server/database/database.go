@@ -85,7 +85,16 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 	// shared lock cannot both upgrade, so rather than queueing on the busy timeout
 	// they fail immediately: thirty-nine of fifty concurrent writes, measured. Taking
 	// the write lock up front makes them queue as intended.
-	options := []otelsql.Option{otelsql.WithAttributes(semconv.DBSystemNameSQLite)}
+	// Rows iteration and session resets are sub-millisecond bookkeeping that
+	// added a span apiece to every query, and a reset arriving after its
+	// request finished traced as a root of its own.
+	options := []otelsql.Option{
+		otelsql.WithAttributes(semconv.DBSystemNameSQLite),
+		otelsql.WithSpanOptions(otelsql.SpanOptions{
+			OmitRows:             true,
+			OmitConnResetSession: true,
+		}),
+	}
 	if config.MeterProvider != nil {
 		options = append(options, otelsql.WithMeterProvider(config.MeterProvider))
 	}
