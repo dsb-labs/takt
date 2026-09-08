@@ -634,6 +634,55 @@ HTTP server metrics, with request counts and durations per route and status, and
 the Go runtime's own metrics — goroutine count, memory use and garbage collection
 timings — which is where a leak in takt itself shows.
 
+### Discovering targets
+
+The workloads themselves are discovered rather than listed by hand.
+`/api/v1/system/prometheus-sd` answers in the shape `http_sd_configs` reads,
+with a target group per opted-in workload and a target per instance, so a
+reallocated port is picked up on the next refresh instead of by editing a
+file:
+
+```yaml
+scrape_configs:
+  - job_name: takt
+    http_sd_configs:
+      - url: http://127.0.0.1:7373/api/v1/system/prometheus-sd
+```
+
+A workload opts in with labels:
+
+```yaml
+labels:
+  prometheus.scrape: "true"
+  prometheus.port: metrics
+  prometheus.path: /
+```
+
+`prometheus.scrape: "true"` is the opt-in. `prometheus.port` selects which
+published port is scraped, by name or by number as a health check selects one,
+and is only needed when the workload publishes more than one. `prometheus.path`
+and `prometheus.scheme` are the spellings for prometheus's `__metrics_path__`
+and `__scheme__` — a takt label key cannot start a segment with an underscore,
+so the meta labels get takt spellings. Every other label under the
+`prometheus.` namespace passes through with the prefix stripped, so
+`prometheus.team: platform` puts a `team` label on every series. A passthrough
+key that is not a valid prometheus label name is prometheus's to refuse.
+
+The `job` label defaults to the workload's name, so targets do not collapse
+into the scrape configuration's single job, and `takt_workload` always carries
+the name through a `prometheus.job` override.
+
+Targets describe desired state rather than observation. An instance that is
+failing to start is still a target, so prometheus reports it down rather than
+never hearing of it — discovery says what should be scraped, and the scrape
+itself is the health check. A suspended workload contributes nothing, because
+the operator said stop, and neither does a scheduled one, which is down
+between runs by design.
+
+One cost to know: labels are part of a workload's specification, so changing
+its scrape labels replaces its instances the way any specification change
+does.
+
 ### Traces and logs
 
 Set `otlp-endpoint` under [telemetry](configuration.md#telemetry) to export traces
