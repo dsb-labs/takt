@@ -17,8 +17,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -3520,6 +3523,106 @@ func (s *Suite) TestExecWorkloadRunsMultipleInstances() {
 }
 
 // TestServiceReportsBackends covers the service resource end to end: a service
+// TestPrometheusDiscovery covers the discovery endpoint end to end: a workload
+// opts in by label, and the endpoint answers in the shape http_sd_configs
+// reads, with a target per instance at the port the labels selected.
+func (s *Suite) TestPrometheusDiscovery() {
+	// The helper derives one name from the test, and this test needs three
+	// workloads that survive each other's applies.
+	labelled := s.workloadName() + "-full"
+	bare := s.workloadName() + "-bare"
+	silent := s.workloadName() + "-silent"
+
+	s.T().Cleanup(func() {
+		s.cleanup(labelled)
+		s.cleanup(bare)
+		s.cleanup(silent)
+	})
+
+	// Two ports, so the selection has something to choose, and two instances,
+	// so the group carries a target per instance. The labels the endpoint
+	// consumes select the port, and the rest of the namespace passes through.
+	spec := s.containerSpec(labelled, manifest.Port{Name: "http", To: 80}, manifest.Port{Name: "metrics", To: 9100})
+	spec.Count = 2
+	spec.Labels = map[string]string{
+		"prometheus.scrape": "true",
+		"prometheus.port":   "metrics",
+		"prometheus.path":   "/",
+	}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	// One port and only the opt-in, so everything else is defaulted.
+	spec = s.containerSpec(bare, manifest.Port{To: 9100})
+	spec.Labels = map[string]string{"prometheus.scrape": "true"}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	// No labels, so the fleet having other workloads changes nothing.
+	spec = s.containerSpec(silent, manifest.Port{To: 80})
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	// Discovery describes desired state, so the targets exist as soon as the
+	// specifications are stored and their ports are allocated — nothing here
+	// waits for an instance to run.
+	resp, err := http.Get(s.address + "/api/v1/system/prometheus-sd")
+	s.Require().NoError(err)
+	defer resp.Body.Close()
+	s.Require().Equal(http.StatusOK, resp.StatusCode)
+
+	var groups []struct {
+		Targets []string          `json:"targets"`
+		Labels  map[string]string `json:"labels"`
+	}
+	s.Require().NoError(json.NewDecoder(resp.Body).Decode(&groups))
+
+	found := make(map[string]int)
+	for i, group := range groups {
+		found[group.Labels["takt_workload"]] = i
+	}
+
+	s.NotContains(found, silent, "a workload that did not opt in was discovered")
+
+	// The labelled workload: a target per instance, at the metrics port the
+	// label selected, with the namespace passed through prefix-stripped.
+	s.Require().Contains(found, labelled)
+	group := groups[found[labelled]]
+	s.Equal(labelled, group.Labels["job"])
+	s.Equal("/", group.Labels["__metrics_path__"])
+	s.NotContains(group.Labels, "scrape", "a consumed label leaked into the series")
+
+	stored, err := s.client.Get(s.ctx(), labelled)
+	s.Require().NoError(err)
+
+	// The host half of a target is the configured workload address, which the
+	// harness owns — the ports are what this test can hold the endpoint to.
+	expected := make([]string, 0, 2)
+	for _, port := range stored.Ports {
+		if port.Name == "metrics" {
+			expected = append(expected, strconv.Itoa(port.From))
+		}
+	}
+	s.Require().Len(expected, 2)
+
+	got := make([]string, 0, len(group.Targets))
+	for _, target := range group.Targets {
+		_, p, err := net.SplitHostPort(target)
+		s.Require().NoError(err)
+		got = append(got, p)
+	}
+	s.ElementsMatch(expected, got)
+
+	// The bare workload: the sole port selected without a label, the job
+	// defaulted to the workload's name.
+	s.Require().Contains(found, bare)
+	s.Equal(bare, groups[found[bare]].Labels["job"])
+	s.Len(groups[found[bare]].Targets, 1)
+}
+
 // selects workloads by label and reports the address of every running instance,
 // the backends drain when the workload stops, and deleting the service leaves
 // the workloads alone.

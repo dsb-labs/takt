@@ -46,8 +46,11 @@ type (
 		suite.Suite
 
 		client *client.Client
-		cancel context.CancelFunc
-		done   *errgroup.Group
+		// The base URL the server listens at, for the endpoints prometheus
+		// consumes raw rather than through the client.
+		address string
+		cancel  context.CancelFunc
+		done    *errgroup.Group
 		// Where the running server keeps its state, so that a test can read the
 		// database directly and check what did not reach it.
 		directory string
@@ -193,7 +196,7 @@ func (s *Suite) start(options ...option) {
 	c, err := client.New(address, clientOptions...)
 	s.Require().NoError(err)
 
-	s.client, s.cancel, s.done, s.directory = c, cancel, group, config.Data.Directory
+	s.client, s.address, s.cancel, s.done, s.directory = c, address, cancel, group, config.Data.Directory
 
 	// Run opens the database and connects to docker before it listens, so a test
 	// has to wait for the listener rather than assume it.
