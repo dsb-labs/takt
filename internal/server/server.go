@@ -271,10 +271,11 @@ func Run(ctx context.Context, config Config) error {
 	// The count of allocations is read from the repository once per scrape, so a
 	// pass never pays for it.
 	allocator := port.New(port.Config{
-		Min:           config.Workload.MinPort,
-		Max:           config.Workload.MaxPort,
-		MeterProvider: tel.MeterProvider(),
-		Allocated:     ports.Allocated,
+		Min:            config.Workload.MinPort,
+		Max:            config.Workload.MaxPort,
+		MeterProvider:  tel.MeterProvider(),
+		TracerProvider: tel.TracerProvider(),
+		Allocated:      ports.Allocated,
 	})
 
 	claimer := port.NewClaimer(port.ClaimerConfig{Allocator: allocator, Ports: ports})

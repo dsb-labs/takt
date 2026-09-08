@@ -6,7 +6,9 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // registerMetrics registers gauges describing the allocator's pool: the number of
@@ -26,7 +28,7 @@ import (
 // The allocated function is asked once per scrape rather than once per pass, so
 // its cost lands on the reader — for the repository behind it, one read of the
 // allocations it already records.
-func (a *Allocator) registerMetrics(meter metric.Meter, allocated func(ctx context.Context) (map[string][]int, error)) {
+func (a *Allocator) registerMetrics(meter metric.Meter, tracer trace.Tracer, allocated func(ctx context.Context) (map[string][]int, error)) {
 	capacity, err := meter.Int64ObservableGauge("takt.ports.capacity",
 		metric.WithDescription("The number of host ports in the configured range."),
 		metric.WithUnit("{port}"))
@@ -46,10 +48,19 @@ func (a *Allocator) registerMetrics(meter metric.Meter, allocated func(ctx conte
 	}
 
 	_, err = meter.RegisterCallback(func(ctx context.Context, observer metric.Observer) error {
+		// The reader collects on its own context, so the read below traces as a
+		// root. Named here so it reads as what it is, rather than as whatever
+		// query the repository happens to run.
+		ctx, span := tracer.Start(ctx, "ports.observe")
+		defer span.End()
+
 		observer.ObserveInt64(capacity, int64(a.max-a.min+1))
 
 		held, err := allocated(ctx)
 		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+
 			return fmt.Errorf("failed to count allocated ports: %w", err)
 		}
 

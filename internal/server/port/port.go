@@ -22,6 +22,7 @@ import (
 	"strconv"
 
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/dsb-labs/takt/internal/server/telemetry"
 )
@@ -60,6 +61,9 @@ type (
 		// it is allocated on. Read once per scrape to report how full the range is.
 		// May be nil, in which case usage is not reported.
 		Allocated func(ctx context.Context) (map[string][]int, error)
+		// The provider the usage read is traced from. May be nil, in which case
+		// nothing is traced.
+		TracerProvider trace.TracerProvider
 	}
 )
 
@@ -95,7 +99,8 @@ func New(config Config) *Allocator {
 	// A failure costs the metrics rather than the allocator, and is reported through
 	// the OpenTelemetry error handler like every other refused instrument.
 	if config.Allocated != nil {
-		allocator.registerMetrics(telemetry.Meter(config.MeterProvider, scope), config.Allocated)
+		allocator.registerMetrics(telemetry.Meter(config.MeterProvider, scope),
+			telemetry.Tracer(config.TracerProvider, scope), config.Allocated)
 	}
 
 	return allocator
