@@ -123,7 +123,10 @@ func Run(ctx context.Context, config Config) error {
 	volumes := database.NewVolumeRepository(db)
 	secrets := database.NewSecretRepository(db)
 	variables := database.NewVariableRepository(db)
-	checker := health.New(health.Config{MeterProvider: tel.MeterProvider()})
+	checker := health.New(health.Config{
+		MeterProvider:  tel.MeterProvider(),
+		TracerProvider: tel.TracerProvider(),
+	})
 
 	// A host that cannot confine an exec workload is reported here rather than when the
 	// first one is started, so an operator learns at startup instead of from a workload

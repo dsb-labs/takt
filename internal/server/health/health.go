@@ -18,7 +18,9 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/dsb-labs/takt/internal/server/telemetry"
 )
@@ -89,6 +91,8 @@ type (
 		wake chan struct{}
 		// The meters probe results are recorded into.
 		instruments instruments
+		// The tracer probes are traced from.
+		tracer trace.Tracer
 	}
 
 	// The Config type contains fields used to construct a Checker.
@@ -96,6 +100,9 @@ type (
 		// The provider the checker's instruments are created from. May be nil, in
 		// which case nothing is recorded.
 		MeterProvider metric.MeterProvider
+		// The provider probes are traced from. May be nil, in which case nothing
+		// is traced.
+		TracerProvider trace.TracerProvider
 	}
 
 	// The scheduled type is one check as handed to a probe: the specification to
@@ -139,6 +146,7 @@ type (
 func New(config Config) *Checker {
 	return &Checker{
 		instruments: newInstruments(telemetry.Meter(config.MeterProvider, scope)),
+		tracer:      telemetry.Tracer(config.TracerProvider, scope),
 		checks:      make(map[subject]*check),
 		// Buffered so that registering a check never blocks on the loop: a
 		// recomputation is already pending, which is all the signal conveys.
@@ -342,12 +350,26 @@ func (c *Checker) checkDue(ctx context.Context, probes *sync.WaitGroup) {
 			// cancelled by its check being replaced.
 			defer due.cancel()
 
+			// The instance rides on the span where the histogram below refuses
+			// it: a trace holds one value per thing, not one series per kind.
+			ctx, span := c.tracer.Start(due.ctx, "health.probe", trace.WithAttributes(
+				attribute.String("takt.workload", key.workload),
+				attribute.Int("takt.instance", key.instance),
+			))
+
 			started := time.Now()
-			err := c.probe(due.ctx, due.spec)
+
+			err := c.probe(ctx, due.spec)
+			if err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+			}
+
+			span.End()
 
 			// The workload alone: an instance label would multiply the series by
 			// the count for no question anyone asks of the aggregate.
-			c.instruments.duration.Record(due.ctx, time.Since(started).Seconds(), metric.WithAttributes(
+			c.instruments.duration.Record(ctx, time.Since(started).Seconds(), metric.WithAttributes(
 				attribute.String("workload", key.workload),
 				telemetry.OutcomeOf(err).Attribute(),
 			))

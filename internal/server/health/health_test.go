@@ -14,8 +14,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/dsb-labs/takt/internal/server/health"
 )
@@ -413,6 +417,48 @@ func TestChecker_Metrics(t *testing.T) {
 	}
 
 	assert.True(t, found, "expected a recorded probe duration for the failing workload")
+}
+
+func TestChecker_Spans(t *testing.T) {
+	t.Parallel()
+
+	spans := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
+
+	checker := health.New(health.Config{TracerProvider: provider})
+
+	done := make(chan error, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+
+	go func() { done <- checker.Run(ctx) }()
+
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, <-done)
+	})
+
+	// A probe against an address nothing listens on is refused immediately, which
+	// is the cheapest way to get an outcome on record.
+	checker.Set("example", 0, check(freeAddress(t), ""))
+	awaitStatus(t, checker, "example", health.StatusUnhealthy)
+
+	var found bool
+	for _, span := range spans.Ended() {
+		if span.Name() != "health.probe" {
+			continue
+		}
+
+		attributes := span.Attributes()
+		workload := slices.IndexFunc(attributes, func(kv attribute.KeyValue) bool {
+			return kv.Key == "takt.workload" && kv.Value.AsString() == "example"
+		})
+
+		if workload >= 0 && span.Status().Code == codes.Error {
+			found = true
+		}
+	}
+
+	assert.True(t, found, "expected an ended probe span for the failing workload")
 }
 
 // run returns a Checker whose loop is running for the duration of the test.
