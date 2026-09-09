@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS policy;
+
+DROP INDEX IF EXISTS idx_token_recovery;
+
+DROP TABLE IF EXISTS token;
