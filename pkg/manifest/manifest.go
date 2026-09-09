@@ -44,15 +44,27 @@ const (
 	reservedLabelPrefix = "takt."
 )
 
-// validateHeader reports whether a manifest's version and name are usable, which
-// every manifest kind requires the same way.
-func validateHeader(v, name string) error {
+// validateVersion reports whether a manifest's schema version is one this
+// package understands. It stands apart from validateHeader for the one manifest
+// kind that carries no name: the policy document names nothing, it is the whole
+// policy.
+func validateVersion(v string) error {
 	if v == "" {
 		return errors.New("invalid manifest: version is required")
 	}
 
 	if v != version {
 		return fmt.Errorf("invalid manifest: version must be %q", version)
+	}
+
+	return nil
+}
+
+// validateHeader reports whether a manifest's version and name are usable, which
+// every manifest kind requires the same way.
+func validateHeader(v, name string) error {
+	if err := validateVersion(v); err != nil {
+		return err
 	}
 
 	if name == "" {
