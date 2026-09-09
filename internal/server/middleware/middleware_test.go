@@ -93,7 +93,7 @@ func TestWrap(t *testing.T) {
 			resp := httptest.NewRecorder()
 			logger := slog.New(slog.NewTextHandler(t.Output(), nil))
 
-			middleware.Wrap(handler, logger, nil).ServeHTTP(resp, req)
+			middleware.Wrap(handler, logger, nil, nil).ServeHTTP(resp, req)
 
 			assert.Equal(t, tc.ExpectStatus, resp.Code)
 		})
@@ -122,7 +122,7 @@ func TestWrap_LetsAHandlerFlush(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/workloads/example/logs", nil)
 	req.Host = "127.0.0.1:7373"
 
-	middleware.Wrap(handler, logger, nil).ServeHTTP(httptest.NewRecorder(), req)
+	middleware.Wrap(handler, logger, nil, nil).ServeHTTP(httptest.NewRecorder(), req)
 
 	require.NoError(t, flushed)
 }
@@ -143,7 +143,7 @@ func TestWrap_RecoveryIsLogged(t *testing.T) {
 
 	middleware.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic("something a handler did not expect")
-	}), logger, nil).ServeHTTP(resp, req)
+	}), logger, nil, nil).ServeHTTP(resp, req)
 
 	require.Equal(t, http.StatusInternalServerError, resp.Code)
 
