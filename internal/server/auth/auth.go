@@ -57,6 +57,11 @@ const (
 )
 
 const (
+	// SessionCookie is the name of the cookie a login sets for the browser
+	// UI. The cookie's value is a client token, so a session is revocable
+	// like any other credential.
+	SessionCookie = "takt_session"
+
 	// TokenTTL is how long a token minted by a login lives. Static tokens
 	// created with `takt token create` do not expire.
 	TokenTTL = 12 * time.Hour

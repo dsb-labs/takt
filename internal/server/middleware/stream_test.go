@@ -43,7 +43,7 @@ func TestStream_LetsAHandlerClearTheWriteDeadline(t *testing.T) {
 		cleared <- http.NewResponseController(conn).SetWriteDeadline(time.Time{})
 	})
 
-	server := httptest.NewServer(middleware.Stream(middleware.Wrap(handler, logger, nil)))
+	server := httptest.NewServer(middleware.Stream(middleware.Wrap(handler, logger, nil, nil)))
 	t.Cleanup(server.Close)
 
 	resp, err := server.Client().Get(server.URL + "/api/v1/workloads/example/logs")

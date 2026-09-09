@@ -355,7 +355,7 @@ func Run(ctx context.Context, config Config) error {
 		// Outside the telemetry handler, which is the only place a handler can still
 		// reach the connection's own writer: everything below wraps it, and none of
 		// those wrappers carries a write deadline.
-		Handler: middleware.Stream(otelhttp.NewHandler(middleware.Wrap(mux, logger, config.HTTP.Hosts), "takt",
+		Handler: middleware.Stream(otelhttp.NewHandler(middleware.Wrap(mux, logger, config.HTTP.Hosts, nil), "takt",
 			otelhttp.WithMeterProvider(tel.MeterProvider()),
 			otelhttp.WithTracerProvider(tel.TracerProvider()),
 			otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(

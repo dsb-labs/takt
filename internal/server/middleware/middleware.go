@@ -19,13 +19,18 @@ import (
 // Recovery being innermost is deliberate rather than incidental. A panic that unwound
 // past Logging would leave no record of the request that caused it, and the answer to
 // "which request killed this" is the reason the log line is worth having at all.
-func Wrap(handler http.Handler, logger *slog.Logger, hosts []string) http.Handler {
+func Wrap(handler http.Handler, logger *slog.Logger, hosts []string, authenticator Authenticator) http.Handler {
 	for _, middleware := range []func(http.Handler) http.Handler{
 		Recovery(logger),
 		// Outside Recovery, so the 500 a recovered panic writes goes through
 		// the compressor the response's headers already promised.
 		Gzip,
 		Logging(logger),
+		// Directly inside Guard, so a credential is only ever read from a request
+		// that named this server. A nil authenticator means the configuration
+		// carries no [auth] block, and every request proceeds as it did before
+		// the layer existed.
+		Authenticate(authenticator),
 		// Ahead of anything that reaches a handler. Reaching this API is enough to run
 		// code on the host, and listening on loopback does not establish that the
 		// operator is who asked — a browser sends a request there on behalf of whatever
