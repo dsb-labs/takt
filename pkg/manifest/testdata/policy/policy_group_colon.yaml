@@ -1,0 +1,4 @@
+version: v1
+groups:
+  - name: "group:infra"
+    members: [ci]

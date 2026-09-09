@@ -1,0 +1,4 @@
+version: v1
+rules:
+  - principals: [prometheus]
+    role: viewer

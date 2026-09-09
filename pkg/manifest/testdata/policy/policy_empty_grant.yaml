@@ -1,0 +1,4 @@
+version: v1
+grants:
+  - principals: []
+    role: viewer

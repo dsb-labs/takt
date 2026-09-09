@@ -1,0 +1,24 @@
+# Applied with `takt acl apply policy.yaml`. The whole document replaces
+# the current policy, so a grant removed here is revoked on the next apply.
+version: v1
+
+# How an OIDC identity becomes a principal and groups. The claims are
+# read from the identity token `takt auth login` exchanges.
+oidc:
+  principalClaim: email
+  groupsClaim: groups
+
+groups:
+  - name: infra
+    members: [david@dsb.dev, ci]
+
+# A grant binds one fixed role to principals or groups.
+grants:
+  - principals: ["group:infra"]
+    role: operator
+
+  - principals: [david@dsb.dev]
+    role: admin
+
+  - principals: [prometheus]
+    role: viewer

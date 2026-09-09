@@ -1,0 +1,3 @@
+version: v1
+oidc:
+  groupsClaim: groups
