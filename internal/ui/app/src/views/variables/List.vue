@@ -6,6 +6,7 @@ import QueryInput from "../../components/QueryInput.vue";
 import { absoluteTime, pluralize, relativeTime } from "../../format";
 import { useQueryFilter } from "../../filter";
 import { useSort } from "../../sort";
+import { operator } from "../../auth";
 
 const { filter, queries } = useQueryFilter();
 const variables = useVariables(() => queries.value);
@@ -34,7 +35,11 @@ await variables.suspense().catch(() => {});
          lay out. On a wider screen everything sits on one row. -->
     <div class="flex flex-wrap items-center gap-3">
       <h1 class="text-xl font-semibold">Variables</h1>
+      <!-- Mutating controls exist only for a caller whose role covers
+           them, so a viewer sees a read-only page rather than buttons
+           that answer 403. -->
       <RouterLink
+        v-if="operator()"
         to="/variables/new"
         class="bg-pulse-600 hover:bg-pulse-700 order-2 ml-auto rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap text-white sm:order-3 sm:ml-0"
       >

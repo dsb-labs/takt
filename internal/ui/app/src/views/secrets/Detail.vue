@@ -13,6 +13,7 @@ import UsedByCard from "../../components/UsedByCard.vue";
 import ValueForm from "../../components/ValueForm.vue";
 import OverviewRow from "../../components/OverviewRow.vue";
 import { absoluteTime, relativeTime } from "../../format";
+import { operator } from "../../auth";
 
 const route = useRoute();
 const router = useRouter();
@@ -56,8 +57,12 @@ await secret.suspense().catch(() => {});
         : ''
     "
   >
+    <!-- Mutating controls exist only for a caller whose role covers
+         them, so a viewer sees a read-only page rather than buttons
+         that answer 403. -->
     <template #actions>
       <DeleteControl
+        v-if="operator()"
         :subject="`the secret ${name}`"
         :remove="(force) => deleteSecret.mutateAsync(force)"
         @deleted="router.push('/secrets')"
@@ -91,7 +96,7 @@ await secret.suspense().catch(() => {});
         <LabelsCard :labels="secret.data.value.labels" target="/secrets" />
       </div>
 
-      <div class="mt-6">
+      <div v-if="operator()" class="mt-6">
         <DetailCard title="Rotate">
           <div class="px-4 py-4">
             <ValueForm

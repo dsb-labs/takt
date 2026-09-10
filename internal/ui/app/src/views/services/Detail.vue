@@ -12,6 +12,7 @@ import OverviewRow from "../../components/OverviewRow.vue";
 import { absoluteTime, relativeTime } from "../../format";
 import { labelQuery } from "../../filter";
 import { useSort } from "../../sort";
+import { operator } from "../../auth";
 
 const route = useRoute();
 const router = useRouter();
@@ -46,8 +47,12 @@ await service.suspense().catch(() => {});
         : ''
     "
   >
+    <!-- Mutating controls exist only for a caller whose role covers
+         them, so a viewer sees a read-only page rather than buttons
+         that answer 403. -->
     <template #actions>
       <DeleteControl
+        v-if="operator()"
         :subject="`the service ${name}`"
         :remove="(force) => deleteService.mutateAsync(force)"
         @deleted="router.push('/services')"
