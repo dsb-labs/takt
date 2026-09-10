@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -27,6 +28,9 @@ var (
 	// ErrOIDCDisabled is returned when a login is asked for and the server
 	// carries no OIDC configuration.
 	ErrOIDCDisabled = errors.New("oidc is not configured")
+	// ErrInvalidRedirect is returned when a code exchange names a redirect
+	// that is not a loopback address, which only the CLI's flow uses.
+	ErrInvalidRedirect = errors.New("the redirect uri must be a loopback address")
 )
 
 // The claim a principal is read from when the policy does not name one.
@@ -53,13 +57,24 @@ type (
 		Verify(ctx context.Context, rawIDToken string) (map[string]any, error)
 	}
 
+	// The IdentityExchanger interface describes how an authorization code
+	// becomes a raw identity token, under the same testability rule as
+	// IdentityVerifier.
+	IdentityExchanger interface {
+		// Exchange should trade the authorization code for the identity
+		// token it earned, proving the given PKCE verifier against the
+		// redirect the browser was sent back to.
+		Exchange(ctx context.Context, code, verifier, redirectURI string) (string, error)
+	}
+
 	// The AuthService type resolves credentials to identities and mints the
 	// tokens a login produces.
 	AuthService struct {
-		logger   *slog.Logger
-		tokens   TokenRepository
-		policies PolicyReader
-		verifier IdentityVerifier
+		logger    *slog.Logger
+		tokens    TokenRepository
+		policies  PolicyReader
+		verifier  IdentityVerifier
+		exchanger IdentityExchanger
 	}
 
 	// The AuthServiceConfig type contains fields used to construct an
@@ -75,16 +90,21 @@ type (
 		// logins report ErrOIDCDisabled and static tokens are the only
 		// authentication.
 		Verifier IdentityVerifier
+		// The exchanger for authorization codes, under the same nil rule as
+		// Verifier. Server-side because the exchange is what needs the
+		// issuer's client secret, which must never reach the CLI.
+		Exchanger IdentityExchanger
 	}
 )
 
 // NewAuthService returns a new instance of the AuthService type.
 func NewAuthService(config AuthServiceConfig) *AuthService {
 	return &AuthService{
-		logger:   config.Logger.With("component", "service"),
-		tokens:   config.Tokens,
-		policies: config.Policies,
-		verifier: config.Verifier,
+		logger:    config.Logger.With("component", "service"),
+		tokens:    config.Tokens,
+		policies:  config.Policies,
+		verifier:  config.Verifier,
+		exchanger: config.Exchanger,
 	}
 }
 
@@ -197,6 +217,47 @@ func (s *AuthService) LoginOIDC(ctx context.Context, rawIDToken string) (Token, 
 	return s.mint(ctx, "oidc", principal, claimedGroups(claims, groupsClaim))
 }
 
+// LoginCode trades an authorization code from the CLI's loopback flow for a
+// short-lived client token, performing the code exchange here because it is
+// the exchange that needs the issuer's client secret, and the secret must
+// never reach the CLI.
+//
+// The redirect must be a loopback address: the CLI's flow is the only
+// legitimate caller, and anything else asking would be using this server as
+// an exchange oracle for codes it obtained some other way.
+func (s *AuthService) LoginCode(ctx context.Context, code, verifier, redirectURI string) (Token, string, error) {
+	if s.exchanger == nil {
+		return Token{}, "", ErrOIDCDisabled
+	}
+
+	if err := validateLoopbackRedirect(redirectURI); err != nil {
+		return Token{}, "", err
+	}
+
+	rawIDToken, err := s.exchanger.Exchange(ctx, code, verifier, redirectURI)
+	if err != nil {
+		return Token{}, "", fmt.Errorf("%w: %v", ErrInvalidCredential, err)
+	}
+
+	return s.LoginOIDC(ctx, rawIDToken)
+}
+
+// validateLoopbackRedirect reports whether a redirect names the loopback
+// address a CLI flow listens on.
+func validateLoopbackRedirect(redirectURI string) error {
+	redirect, err := url.Parse(redirectURI)
+	if err != nil || redirect.Scheme != "http" {
+		return ErrInvalidRedirect
+	}
+
+	switch redirect.Hostname() {
+	case "127.0.0.1", "::1", "localhost":
+		return nil
+	default:
+		return ErrInvalidRedirect
+	}
+}
+
 // LoginToken exchanges an existing client token for a short-lived session
 // token bound to the same principal and groups. This is how the UI holds a
 // credential that expires on its own rather than the standing one that was
@@ -296,4 +357,42 @@ func (v *oidcVerifier) Verify(ctx context.Context, rawIDToken string) (map[strin
 	}
 
 	return claims, nil
+}
+
+// The oidcExchanger type adapts the issuer's token endpoint to the
+// IdentityExchanger interface, carrying the client secret an issuer such as
+// Google requires on the exchange even from a PKCE flow.
+type oidcExchanger struct {
+	base oauth2.Config
+}
+
+// NewOIDCExchanger returns an exchanger that trades authorization codes at
+// the given endpoint, on behalf of whichever loopback redirect each exchange
+// names.
+func NewOIDCExchanger(clientID, clientSecret string, endpoint oauth2.Endpoint) IdentityExchanger {
+	return &oidcExchanger{base: oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		Endpoint:     endpoint,
+	}}
+}
+
+// Exchange trades the authorization code for the identity token it earned.
+func (e *oidcExchanger) Exchange(ctx context.Context, code, verifier, redirectURI string) (string, error) {
+	// A copy per call, because the redirect is the caller's: it must match
+	// the one the browser was sent back to, port and all.
+	flow := e.base
+	flow.RedirectURL = redirectURI
+
+	exchanged, err := flow.Exchange(ctx, code, oauth2.VerifierOption(verifier))
+	if err != nil {
+		return "", fmt.Errorf("failed to exchange the authorization code: %w", err)
+	}
+
+	rawIDToken, ok := exchanged.Extra("id_token").(string)
+	if !ok {
+		return "", errors.New("the issuer's response carries no identity token")
+	}
+
+	return rawIDToken, nil
 }
