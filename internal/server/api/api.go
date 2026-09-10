@@ -6,11 +6,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/auth"
+	"github.com/dsb-labs/takt/internal/server/middleware"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 type (
@@ -97,7 +101,7 @@ func New(config Config) *API {
 // caller's mux rather than one of its own so that the server keeps ownership of
 // routing and can wrap the whole surface in its own middleware.
 func (a *API) Register(mux *http.ServeMux) {
-	api.HandlerWithOptions(api.NewStrictHandler(a, nil), api.StdHTTPServerOptions{
+	api.HandlerWithOptions(api.NewStrictHandler(a, []api.StrictMiddlewareFunc{authorize}), api.StdHTTPServerOptions{
 		BaseRouter: mux,
 	})
 
@@ -153,4 +157,50 @@ func internalError(logger *slog.Logger, operation string, err error) string {
 	logger.With("error", err, "operation", operation).Error("failed to serve request")
 
 	return "failed to " + operation
+}
+
+// authorize refuses a request whose caller does not meet the operation's
+// declared requirement.
+//
+// The requirement is read from the request context, where the generated
+// routing put the security scopes the OpenAPI document declares for the
+// operation. The document is therefore the only copy of the requirements: an
+// operation with no declaration is anonymous, one declaring no scope needs
+// authentication but no role, and one naming a role needs a role that covers
+// it. The bearer scheme's scopes are read, and the session scheme declares
+// the same ones on every operation.
+//
+// The disabled identity passes everything, which is the network-boundary
+// model unchanged. The recovery identity passes everything by design: it
+// sits above policy, and a bad policy apply must not be able to lock the
+// operator out.
+func authorize(f api.StrictHandlerFunc, _ string) api.StrictHandlerFunc {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
+		identity := middleware.CallerIdentity(ctx)
+		if identity.Disabled || identity.Recovery {
+			return f(ctx, w, r, request)
+		}
+
+		scopes, declared := ctx.Value(api.BearerScopes).([]string)
+		if !declared {
+			return f(ctx, w, r, request)
+		}
+
+		if identity.TokenID == "" {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			writeError(w, http.StatusUnauthorized, "authentication required")
+
+			return nil, nil
+		}
+
+		for _, scope := range scopes {
+			if !auth.Allows(identity.Role, manifest.Role(scope)) {
+				writeError(w, http.StatusForbidden, "the "+scope+" role is required")
+
+				return nil, nil
+			}
+		}
+
+		return f(ctx, w, r, request)
+	}
 }
