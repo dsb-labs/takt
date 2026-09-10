@@ -10,6 +10,7 @@ import LabelsCard from "../../components/LabelsCard.vue";
 import UsedByCard from "../../components/UsedByCard.vue";
 import OverviewRow from "../../components/OverviewRow.vue";
 import { absoluteTime, relativeTime } from "../../format";
+import { operator } from "../../auth";
 
 const route = useRoute();
 const router = useRouter();
@@ -38,8 +39,12 @@ await volume.suspense().catch(() => {});
         : ''
     "
   >
+    <!-- Mutating controls exist only for a caller whose role covers
+         them, so a viewer sees a read-only page rather than buttons
+         that answer 403. -->
     <template #actions>
       <DeleteControl
+        v-if="operator()"
         :subject="`the volume ${name} and its data`"
         :remove="(force) => deleteVolume.mutateAsync(force)"
         @deleted="router.push('/volumes')"

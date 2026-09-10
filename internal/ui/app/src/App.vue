@@ -1,12 +1,27 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { version } from "../package.json";
+import { useLogout } from "./api/mutations";
 import { useReadiness } from "./api/queries";
+import { forgetIdentity, identity } from "./auth";
 
 const route = useRoute();
+const router = useRouter();
 const readiness = useReadiness();
+const logout = useLogout();
+
+// Signing out revokes the session server-side and forgets it locally, and
+// the guard then sends the navigation to the login page.
+async function signOut() {
+  try {
+    await logout.mutateAsync();
+  } finally {
+    forgetIdentity();
+    await router.push("/login");
+  }
+}
 
 // active reports whether a section owns the current page, so a detail page
 // keeps its section highlighted. Workload pages live under the root.
@@ -72,8 +87,28 @@ const chrome = computed(() => route.name !== "login");
         </RouterLink>
       </nav>
 
+      <!-- Who is signed in, with the way out. Only when authentication is
+           enabled: an anonymous admin on an open server has nothing to sign
+           out of. The recovery token authenticates as no principal, so it
+           reads by its kind. -->
       <div
-        class="mt-auto hidden items-center gap-2 px-4 py-4 text-xs text-slate-500 sm:flex dark:text-slate-400"
+        v-if="identity?.enabled"
+        class="mt-auto hidden items-center justify-between gap-2 border-t border-slate-100 px-4 py-3 text-xs text-slate-500 sm:flex dark:border-slate-800 dark:text-slate-400"
+      >
+        <span class="truncate" :title="identity.principal">
+          {{ identity.recovery ? "recovery token" : identity.principal }}
+        </span>
+        <button
+          class="shrink-0 text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200"
+          @click="signOut"
+        >
+          Sign out
+        </button>
+      </div>
+
+      <div
+        class="hidden items-center gap-2 px-4 py-4 text-xs text-slate-500 sm:flex dark:text-slate-400"
+        :class="identity?.enabled ? '' : 'mt-auto'"
         :title="readiness.data.value?.reasons?.join(', ')"
       >
         <span

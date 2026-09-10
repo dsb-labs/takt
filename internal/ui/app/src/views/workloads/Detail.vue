@@ -19,6 +19,7 @@ import OverviewRow from "../../components/OverviewRow.vue";
 import { absoluteTime, healthStyles, relativeTime } from "../../format";
 import { hostPaths, references } from "../../references";
 import { useSort } from "../../sort";
+import { operator } from "../../auth";
 
 const route = useRoute();
 // A snapshot rather than a computed: Suspense keeps this view on screen
@@ -153,8 +154,11 @@ await workload.suspense().catch(() => {});
         </span>
       </template>
     </template>
+    <!-- Mutating controls exist only for a caller whose role covers
+         them, so a viewer sees a read-only page rather than buttons
+         that answer 403. -->
     <template #actions>
-      <template v-if="workload.data.value">
+      <template v-if="workload.data.value && operator()">
         <button
           v-if="workload.data.value.suspended"
           class="bg-pulse-600 hover:bg-pulse-700 rounded-md px-3 py-1.5 font-medium text-white"
