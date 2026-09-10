@@ -32,6 +32,16 @@ allow-paths = []
 [secrets]
 keys = ""
 
+# Absent by default. Writing the block, even empty, enables authentication.
+# [auth]
+
+# [auth.oidc]
+# issuer = ""
+# client-id = ""
+# client-secret = ""
+# redirect-url = ""
+# scopes = ["openid", "email", "profile"]
+
 [telemetry]
 otlp-endpoint = ""
 
@@ -243,6 +253,38 @@ The keyring needs a backup, and the backup should not sit beside the database. A
 sealed under a key that is gone cannot be recovered, and anything that can read a key
 can read every secret sealed under it. See
 [The encryption key](secrets.md#the-encryption-key).
+
+## auth
+
+The block's presence is the setting: writing `[auth]` into the file, even with
+nothing in it, enables authentication, and deleting the block disables it. An
+absent block means the network-boundary model — anything that reaches the
+listener holds the whole API, and the [exposure guidance](operating.md#exposure)
+is the entire defence.
+
+With the block present, every request must carry a credential, except the
+health and readiness probes a supervisor needs. [Access control](acl.md) covers
+the model and the lifecycle: `takt acl init`, tokens, the policy document and
+the recovery path.
+
+## auth.oidc
+
+| Key | Default | Description |
+|---|---|---|
+| `issuer` | empty | The OIDC issuer logins verify identities against. Its presence enables OIDC. |
+| `client-id` | empty | The client identifier registered with the issuer. Required with an issuer. |
+| `client-secret` | empty | The client secret, for an issuer that treats takt as a confidential client. Empty means a public client using PKCE alone. |
+| `redirect-url` | empty | The URL browsers reach this server by, such as `https://takt.example.com`. Its presence enables the web UI's login redirect. |
+| `scopes` | `["openid", "email", "profile"]` | The scopes a login requests from the issuer. |
+
+Without this block, static tokens are the only authentication. With it, `takt
+auth login` and the web UI exchange an OIDC identity for a short-lived token.
+The issuer must permit two redirect URIs: `http://127.0.0.1:8250/oidc/callback`
+for the CLI's loopback flow, and `<redirect-url>/api/v1/auth/oidc/callback` for
+the UI's, when `redirect-url` is set.
+
+Add whatever scope the issuer needs before it includes the claim the policy's
+`groupsClaim` reads — many issuers put group names behind a `groups` scope.
 
 ## telemetry
 
