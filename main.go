@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/dsb-labs/takt/cmd/acl"
 	"github.com/dsb-labs/takt/cmd/admin"
 	"github.com/dsb-labs/takt/cmd/dev"
 	"github.com/dsb-labs/takt/cmd/secret"
@@ -113,6 +114,7 @@ func main() {
 		secret.Command(),
 		variable.Command(),
 		token.Command(),
+		acl.Command(),
 		admin.Command(),
 		dev.Command(),
 	)
