@@ -452,9 +452,13 @@ document. A separate metrics port would let a scraper reach the server while the
 control API stayed on loopback, which is a real pattern — it is rejected because
 it splits the surface in two and puts half of it outside the one document that
 describes everything takt serves. Anyone wanting the split can take it from the
-reverse proxy they already need. The endpoints carry no authentication for the
-same reason the rest of the API carries none: gating metrics behind something the
-control endpoints lack would be theatre.
+reverse proxy they already need. The health and readiness endpoints carry no
+security requirement even when authentication is enabled: a supervisor must
+probe them without credentials or it cannot manage the process, so no policy
+could ever really revoke them. Metrics and target discovery are different.
+They disclose workload names, prometheus carries a credential in an
+`authorization` block without complaint, and so with authentication enabled
+they require the viewer role like every other read.
 
 Readiness reads a cached answer rather than asking the drivers. `/api/v1/system/ready` is
 polled, and a poll must not cost a driver round-trip — so the reconciler records
@@ -466,3 +470,102 @@ The configuration is one key: where to send traces and logs over OTLP. Everythin
 finer-grained belongs to the standard `OTEL_*` environment variables the SDK
 already reads. Nothing in takt's configuration describes the consumers of the
 telemetry, because which dashboard reads a scrape is not the server's decision.
+
+## The caller is authenticated, not the network path
+
+Without an `[auth]` block in the configuration, reaching the listener is the
+whole check: the `Guard` middleware refuses unexpected hosts and browser
+origins, and the listener sits on loopback behind a reverse proxy. Any process
+that reaches the API holds all of it, and reaching the API is enough to run
+code on the host. The exec driver confines workloads with Landlock, but a
+workload that can reach the API can reconfigure its own confinement. The auth
+layer is what closes that loop: with the block present, every request resolves
+to a principal, and what the principal may do is a grant in the policy rather
+than a property of where the connection came from.
+
+A credential is a token: 32 random bytes behind a recognisable prefix, stored
+only as a hash, presented as a bearer header or carried by the session cookie
+the browser UI holds. `takt token list` therefore names every credential that
+exists, which is half of the promise that "who can touch this server" is
+answerable from the server itself. Kubernetes cannot answer that question from
+the cluster, because identity lives in whatever the authenticators assert —
+that gap is a design input here, not an accident avoided.
+
+mTLS was rejected because the reverse proxy terminates TLS and client
+certificates do not survive the hop — and because Kubernetes shows the second
+failure mode: it cannot revoke a client certificate, so a leaked one is valid
+until expiry. A persistent admin socket on the host was rejected because a
+one-shot init gives the same root of trust without a standing surface.
+
+## Policy is one document the API applies
+
+The grants live in a single document with the `version: v1` marker every
+applied manifest carries. `takt acl apply` replaces it whole, so a grant
+removed from the file in git disappears on the next apply with no prune step,
+and `takt acl get` returns the canonical current document. The document is
+meant to live in a repository beside the workload manifests and be applied by
+the same pipeline, under a principal of its own.
+
+Concurrency is an entity tag, not a field in the document. A get reports the
+tag, an apply presents it back, and a stale apply is refused rather than
+silently clobbering a concurrent one — tailscale's ACL API shape. A version
+field inside the document was rejected because it would go stale the moment
+the server accepted it, and a gitops pipeline would have to commit the bump
+back before it could apply again.
+
+Server-side named policy objects were rejected because they reintroduce the
+prune problem that whole-document replace removes. Fine-grained rules were
+rejected because Kubernetes RBAC shows the cost: object sprawl and dedicated
+escalation-prevention machinery for safety this design gets from the recovery
+token alone. Three fixed roles — viewer reads, operator drives resource
+lifecycle, admin applies policy and manages tokens — follow the `view`,
+`edit`, `admin` trio Kubernetes ships as its user-facing defaults despite
+supporting arbitrary granularity. Kubernetes' original ABAC authorizer was a
+policy file on the API server's disk, applied by restart, and was deprecated
+almost entirely because of that lifecycle — which is why the policy here is
+applied through the API rather than living beside `takt.toml`.
+
+With `operator` holding secret writes, the ACL surface is the only thing
+separating a compromised operator token from full control. That line is
+deliberate — secrets are workload material, the ACL is the security topology —
+but it makes `operator` the grant to be stingy with, not just `admin`.
+
+## The recovery token sits above policy
+
+`takt acl init` works exactly once and prints the recovery token. It bypasses
+policy entirely, so a bad policy apply cannot lock the operator out: the
+document that revoked every admin is repaired with the token the policy never
+touches. It exists for init and lockout recovery, not for daily use —
+day-to-day administration uses a client token whose principal holds `admin`,
+so ACL changes are attributed to a person and revocable like any grant.
+
+Losing the recovery token is recovered at the host: write a reset file into
+the data directory and restart, and init works again while client tokens and
+the policy survive. The schema is what makes init one-shot — a partial unique
+index permits at most one recovery row — so the property holds as a database
+fact rather than a code path.
+
+An `admin` principal can widen grants, including its own. That is inherent to
+a role that edits the ACL, and it is the trade Nomad makes. The safety valve
+is the recovery token. The token types, the one-shot init and the
+OIDC-to-short-lived-token exchange follow Nomad's ACL system.
+
+## Principals are named, never created
+
+There is no user object and no signup step. A principal name appears in two
+places, and identity is what connects them: a grant names it in the policy,
+and an authenticator asserts it — a static token bound to the name when `takt
+token create` ran, or an OIDC login whose principal claim resolves to it. A
+grant to a name nobody has authenticated as yet is valid, which is the gitops
+onboarding order: merge the grant, then the person logs in.
+
+Principals share one namespace, so the convention is that humans are emails
+(`principalClaim: email`) and machines are bare names. An IdP username then
+cannot collide with a machine's grants — the lighter form of Kubernetes' OIDC
+username prefix. OIDC never becomes a parallel authorization path: identity
+in, token out, and the policy only ever sees tokens. Kubernetes'
+`system:anonymous` principal was considered for the health and readiness
+exemption and rejected: the anonymous surface is fixed at two endpoints no
+policy could really revoke, and a grant that cannot be revoked is
+documentation pretending to be configuration. The OpenAPI document records
+the exemption instead.
