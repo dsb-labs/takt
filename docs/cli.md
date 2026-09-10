@@ -33,6 +33,18 @@ takt variable list                      List variables                       (al
 takt variable get <name>                Show a single variable
 takt variable delete <name>             Delete a variable                    (alias: rm)
 
+takt token create <principal>           Create a token for a principal
+takt token list                         List every credential the server holds (alias: ls)
+takt token delete <id>                  Revoke a token                       (alias: rm)
+
+takt acl init                           Mint the recovery token
+takt acl get                            Get the policy document
+takt acl apply <file>                   Replace the policy with a document
+
+takt auth login                         Log in with OIDC and store the minted token
+takt auth whoami                        Report who the server thinks you are
+takt auth logout                        Revoke the credential this client authenticated with
+
 takt admin health                       Check that the server is alive
 takt admin backup <destination>         Write a backup of the node to a file
 takt admin restore <archive> [config]   Restore a node from a backup archive
@@ -42,15 +54,33 @@ takt admin rekey                        Re-encrypt every secret under a new key
 Commands are grouped by what they act on, so a verb reads the same whichever noun
 precedes it.
 
-Every command takes `--address` (`-a`), the URL of the server, which defaults to
-`http://localhost:7373`. Only `serve` ignores it, since it is the server.
-
-`--ca-cert` names a PEM file holding the certificate authority the client checks
-the server's certificate against, instead of the system roots. This is how you
-talk to a server that terminates TLS with a self-signed certificate. See
-[Operating takt](operating.md#serving-tls-directly).
-
 Read commands print indented JSON, so they pipe into `jq`.
+
+## Connecting to a server
+
+Every command resolves how it connects from three places, most specific first.
+Only `serve` ignores all of them, since it is the server.
+
+1. Flags. `--address` (`-a`) is the URL of the server, defaulting to
+   `http://localhost:7373`. `--ca-cert` names a PEM file holding the
+   certificate authority the client checks the server's certificate against,
+   instead of the system roots — how you talk to a server that terminates TLS
+   with a self-signed certificate. See
+   [Operating takt](operating.md#serving-tls-directly). There is deliberately
+   no token flag: a token passed as a flag lands in shell history and process
+   listings.
+2. Environment: `TAKT_ADDRESS`, `TAKT_TOKEN` and `TAKT_CA_CERT`. This is the
+   machine path — CI injects a token in one line.
+3. A config file, TOML, holding `address`, `token` and `ca_cert`. `--config`
+   names it, `TAKT_CONFIG` does the same from the environment, and the default
+   is `.takt/config` under the home directory. `takt auth login` writes the
+   token it mints here, which is what makes a login stick for the commands
+   that follow. The file and its directory are created readable only by the
+   owner, because the file holds a credential.
+
+Each field resolves independently, so a token from the file combines with an
+address from a flag. Pointing `--config` or `TAKT_CONFIG` at another file is
+the multi-server and multi-identity answer.
 
 ## serve
 
@@ -614,6 +644,106 @@ A variable a workload reads is refused, and the workloads reading it are named.
 `--force` removes it anyway. Those workloads keep running, and fail to start once
 something replaces them. Creating the variable again recovers them. See
 [Variables](variables.md).
+
+## token create
+
+```sh
+takt token create prometheus
+takt token create you@example.com
+```
+
+Mints a static token bound to a principal and prints it once, beside its
+record. The server stores only a hash, so the credential cannot be shown
+again. Requires the `admin` role. See [Access control](acl.md#tokens).
+
+## token list
+
+```sh
+takt token list
+```
+
+Names every credential the server holds — static tokens, logins, sessions and
+the recovery token — with when each was created and last used. With `takt acl
+get`, this answers who can touch the server, completely. Requires the `admin`
+role.
+
+## token delete
+
+```sh
+takt token delete <id>
+```
+
+Revokes the token with the identifier `token list` reports. Revocation is
+immediate: the next request presenting the credential is refused. Requires the
+`admin` role.
+
+## acl init
+
+```sh
+takt acl init
+```
+
+Mints the recovery token, exactly once, and prints it. A second init is
+refused for as long as a recovery token exists. Losing the token is recovered
+at the host with the reset file. See
+[Access control](acl.md#losing-the-recovery-token).
+
+## acl get
+
+```sh
+takt acl get
+takt acl get > policy.yaml
+```
+
+Prints the canonical current policy document. The output is valid input to
+`acl apply`, so the live policy can be captured into the file a repository
+tracks. Requires the `admin` role.
+
+## acl apply
+
+```sh
+takt acl apply policy.yaml
+```
+
+Replaces the whole policy with the document in the file. A grant absent from
+the file is revoked, with no prune step, and the change applies to the very
+next request. A concurrent apply is reported as an error to re-run rather
+than silently overwritten. Requires the `admin` role or the recovery token.
+See [Access control](acl.md#the-policy-document).
+
+## auth login
+
+```sh
+takt auth login
+takt auth login --callback-port 9000 --scopes openid,email,profile,groups
+```
+
+Logs in through the server's OIDC issuer and writes the minted short-lived
+token to the config file. The command asks the server who its issuer is, so
+it needs no OIDC flags, and runs the authorization code flow against a
+loopback callback — open the printed URL in a browser. The issuer must permit
+the redirect URI `http://127.0.0.1:8250/oidc/callback`, or the one
+`--callback-port` names.
+
+## auth whoami
+
+```sh
+takt auth whoami
+```
+
+Reports the principal, role and groups the server resolves your credential
+to. It needs authentication but no role, so a principal the policy grants
+nothing yet sees exactly that state.
+
+## auth logout
+
+```sh
+takt auth logout
+```
+
+Revokes the credential this client authenticated with and removes it from the
+config file. The one refusal is the recovery token, whose revocation path is
+the reset file.
 
 ## admin health
 
