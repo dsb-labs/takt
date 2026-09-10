@@ -1,8 +1,15 @@
 import { createRouter, createWebHistory } from "vue-router";
 
+import { identity, loadIdentity } from "./auth";
+
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
+    {
+      path: "/login",
+      name: "login",
+      component: () => import("./views/login/View.vue"),
+    },
     {
       path: "/",
       name: "workloads",
@@ -71,9 +78,29 @@ export const router = createRouter({
   ],
 });
 
+// Every page needs to know who is looking at it, so the guard resolves the
+// caller before anything renders. A caller the server refuses is sent to the
+// login page with the page it wanted, and comes back to it after signing in.
+// A server with authentication disabled answers as the anonymous admin, so
+// the guard never redirects there.
+router.beforeEach(async (to) => {
+  const id = identity.value ?? (await loadIdentity());
+
+  if (to.name === "login") {
+    return id ? "/" : true;
+  }
+
+  if (!id) {
+    return { name: "login", query: { next: to.fullPath } };
+  }
+
+  return true;
+});
+
 // The tab names what the page shows, so several open tabs can be told apart.
 // A detail page names its resource and a list page names its section.
 const sections: Record<string, string> = {
+  login: "Sign in",
   workloads: "Workloads",
   graph: "Graph",
   secrets: "Secrets",

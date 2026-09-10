@@ -163,3 +163,17 @@ export function useReadiness() {
     },
   });
 }
+
+// Whether the server offers the browser OIDC flow, discovered by asking for
+// it: the route answers 404 when the configuration names no issuer, which is
+// how "sign in with SSO" knows whether to exist. Asked once, not polled.
+export function useOIDC() {
+  return useQuery({
+    queryKey: ["oidc"],
+    retry: false,
+    queryFn: async () => {
+      const { data } = await client.GET("/api/v1/auth/oidc");
+      return data ?? null;
+    },
+  });
+}
