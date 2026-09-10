@@ -456,6 +456,90 @@ func (_m *MockAuthService) EXPECT() *MockAuthService_Expecter {
 	return &MockAuthService_Expecter{mock: &_m.Mock}
 }
 
+// LoginCode provides a mock function for the type MockAuthService
+func (_mock *MockAuthService) LoginCode(ctx context.Context, code string, verifier string, redirectURI string) (service.Token, string, error) {
+	ret := _mock.Called(ctx, code, verifier, redirectURI)
+
+	if len(ret) == 0 {
+		panic("no return value specified for LoginCode")
+	}
+
+	var r0 service.Token
+	var r1 string
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) (service.Token, string, error)); ok {
+		return returnFunc(ctx, code, verifier, redirectURI)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, string) service.Token); ok {
+		r0 = returnFunc(ctx, code, verifier, redirectURI)
+	} else {
+		r0 = ret.Get(0).(service.Token)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, string) string); ok {
+		r1 = returnFunc(ctx, code, verifier, redirectURI)
+	} else {
+		r1 = ret.Get(1).(string)
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, string) error); ok {
+		r2 = returnFunc(ctx, code, verifier, redirectURI)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
+}
+
+// MockAuthService_LoginCode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoginCode'
+type MockAuthService_LoginCode_Call struct {
+	*mock.Call
+}
+
+// LoginCode is a helper method to define mock.On call
+//   - ctx context.Context
+//   - code string
+//   - verifier string
+//   - redirectURI string
+func (_e *MockAuthService_Expecter) LoginCode(ctx any, code any, verifier any, redirectURI any) *MockAuthService_LoginCode_Call {
+	return &MockAuthService_LoginCode_Call{Call: _e.mock.On("LoginCode", ctx, code, verifier, redirectURI)}
+}
+
+func (_c *MockAuthService_LoginCode_Call) Run(run func(ctx context.Context, code string, verifier string, redirectURI string)) *MockAuthService_LoginCode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockAuthService_LoginCode_Call) Return(token service.Token, s string, err error) *MockAuthService_LoginCode_Call {
+	_c.Call.Return(token, s, err)
+	return _c
+}
+
+func (_c *MockAuthService_LoginCode_Call) RunAndReturn(run func(ctx context.Context, code string, verifier string, redirectURI string) (service.Token, string, error)) *MockAuthService_LoginCode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LoginOIDC provides a mock function for the type MockAuthService
 func (_mock *MockAuthService) LoginOIDC(ctx context.Context, rawIDToken string) (service.Token, string, error) {
 	ret := _mock.Called(ctx, rawIDToken)

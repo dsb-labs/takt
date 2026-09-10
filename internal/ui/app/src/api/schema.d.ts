@@ -2164,8 +2164,9 @@ export interface components {
       recovery: boolean;
     };
     /**
-     * @description The exchange a login performs. Exactly one of `idToken` and `token`
-     *     must be present; which one it is selects the exchange.
+     * @description The exchange a login performs. Exactly one of `idToken`, `token` and
+     *     `code` must be present; which one it is selects the exchange, and
+     *     `code` brings `verifier` and `redirectUri` with it.
      */
     LoginRequest: {
       /**
@@ -2180,6 +2181,20 @@ export interface components {
        *     standing credential for one that expires on its own.
        */
       token?: string;
+      /**
+       * @description An authorization code from the CLI's loopback flow, exchanged
+       *     with the issuer by the server, because the exchange is what
+       *     needs the client secret and the secret never reaches the CLI.
+       */
+      code?: string;
+      /** @description The PKCE verifier the code exchange proves. */
+      verifier?: string;
+      /**
+       * @description The loopback redirect the browser was sent back to, which the
+       *     issuer requires to match on the exchange. Anything other than a
+       *     loopback address is refused.
+       */
+      redirectUri?: string;
       /**
        * @description Also carry the minted credential as an HttpOnly session cookie.
        *     The browser UI sets this. The CLI does not.

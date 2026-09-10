@@ -146,6 +146,37 @@ func TestAuthAPI_Login(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.Code)
 	})
 
+	t.Run("exchanges an authorization code from the cli flow", func(t *testing.T) {
+		svc := NewMockAuthService(t)
+		svc.EXPECT().LoginCode(mock.Anything, "abc", "verifier", "http://127.0.0.1:8250/oidc/callback").
+			Return(minted, "takt_c_session", nil).Once()
+
+		resp := login(t, svc, `{
+			"code": "abc",
+			"verifier": "verifier",
+			"redirectUri": "http://127.0.0.1:8250/oidc/callback"
+		}`)
+		require.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("refuses a code without its verifier and redirect", func(t *testing.T) {
+		resp := login(t, NewMockAuthService(t), `{"code": "abc"}`)
+		require.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("refuses a redirect the service will not exchange for", func(t *testing.T) {
+		svc := NewMockAuthService(t)
+		svc.EXPECT().LoginCode(mock.Anything, "abc", "verifier", "https://evil.example.com").
+			Return(service.Token{}, "", service.ErrInvalidRedirect).Once()
+
+		resp := login(t, svc, `{
+			"code": "abc",
+			"verifier": "verifier",
+			"redirectUri": "https://evil.example.com"
+		}`)
+		require.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
 	t.Run("refuses a body naming both exchanges", func(t *testing.T) {
 		resp := login(t, NewMockAuthService(t), `{"idToken": "raw", "token": "takt_c_secret"}`)
 		require.Equal(t, http.StatusBadRequest, resp.Code)
