@@ -18,6 +18,7 @@ import (
 	"github.com/dsb-labs/takt/cmd/secret"
 	"github.com/dsb-labs/takt/cmd/serve"
 	"github.com/dsb-labs/takt/cmd/service"
+	"github.com/dsb-labs/takt/cmd/token"
 	"github.com/dsb-labs/takt/cmd/variable"
 	"github.com/dsb-labs/takt/cmd/volume"
 	"github.com/dsb-labs/takt/cmd/workload"
@@ -111,6 +112,7 @@ func main() {
 		service.Command(),
 		secret.Command(),
 		variable.Command(),
+		token.Command(),
 		admin.Command(),
 		dev.Command(),
 	)
