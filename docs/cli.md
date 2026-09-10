@@ -721,8 +721,10 @@ takt auth login --callback-port 9000 --scopes openid,email,profile,groups
 Logs in through the server's OIDC issuer and writes the minted short-lived
 token to the config file. The command asks the server who its issuer is, so
 it needs no OIDC flags, and runs the authorization code flow against a
-loopback callback — open the printed URL in a browser. The issuer must permit
-the redirect URI `http://127.0.0.1:8250/oidc/callback`, or the one
+loopback callback — open the printed URL in a browser. The server performs
+the code exchange, because the exchange is what needs the issuer's client
+secret, so the secret never reaches the CLI. The issuer must permit the
+redirect URI `http://127.0.0.1:8250/oidc/callback`, or the one
 `--callback-port` names.
 
 ## auth whoami
