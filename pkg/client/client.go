@@ -7,6 +7,7 @@
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -61,6 +62,7 @@ type (
 
 	config struct {
 		caCertificate string
+		token         string
 	}
 
 	// The Client type talks to an takt server over HTTP.
@@ -93,6 +95,13 @@ func WithCACertificate(path string) Option {
 	return func(c *config) { c.caCertificate = path }
 }
 
+// WithToken makes the client present the given token as a bearer credential
+// on every request, which is what a server with authentication enabled
+// requires.
+func WithToken(token string) Option {
+	return func(c *config) { c.token = token }
+}
+
 // New returns a Client that targets the takt server at the given address.
 //
 // An invalid address or an unusable certificate authority file is rejected here
@@ -112,10 +121,21 @@ func New(address string, options ...Option) (*Client, error) {
 		return nil, err
 	}
 
-	inner, err := api.NewClientWithResponses(address, api.WithHTTPClient(&http.Client{
+	// Applied to both inner clients, so a followed log read presents the same
+	// credential every other request does.
+	var editors []api.ClientOption
+	if cfg.token != "" {
+		editors = append(editors, api.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
+			req.Header.Set("Authorization", "Bearer "+cfg.token)
+
+			return nil
+		}))
+	}
+
+	inner, err := api.NewClientWithResponses(address, append(editors, api.WithHTTPClient(&http.Client{
 		Timeout:   30 * time.Second,
 		Transport: transport,
-	}))
+	}))...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct client: %w", err)
 	}
@@ -124,9 +144,9 @@ func New(address string, options ...Option) (*Client, error) {
 	// above covers reading the body as well as sending the request. One client cannot
 	// serve both, so following gets its own and the caller's context is what ends it.
 	// Every other request keeps the timeout.
-	streaming, err := api.NewClientWithResponses(address, api.WithHTTPClient(&http.Client{
+	streaming, err := api.NewClientWithResponses(address, append(editors, api.WithHTTPClient(&http.Client{
 		Transport: transport,
-	}))
+	}))...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct client: %w", err)
 	}
@@ -193,6 +213,18 @@ func IsConflict(err error) bool {
 // the server uses when it has no host port to give a workload that needs one.
 func IsUnavailable(err error) bool {
 	return hasStatus(err, http.StatusServiceUnavailable)
+}
+
+// IsUnauthorized reports whether err is a server-side error with a 401 status,
+// which the server uses when a request presents no valid credential.
+func IsUnauthorized(err error) bool {
+	return hasStatus(err, http.StatusUnauthorized)
+}
+
+// IsForbidden reports whether err is a server-side error with a 403 status,
+// which the server uses when the caller's role does not cover the operation.
+func IsForbidden(err error) bool {
+	return hasStatus(err, http.StatusForbidden)
 }
 
 func hasStatus(err error, status int) bool {

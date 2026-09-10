@@ -44,6 +44,19 @@ func TestNew(t *testing.T) {
 		assert.Error(t, c.Health(t.Context()))
 	})
 
+	t.Run("presents a token as a bearer credential", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "Bearer takt_c_secret", r.Header.Get("Authorization"))
+			healthy(w, r)
+		}))
+		t.Cleanup(server.Close)
+
+		c, err := client.New(server.URL, client.WithToken("takt_c_secret"))
+		require.NoError(t, err)
+
+		assert.NoError(t, c.Health(t.Context()))
+	})
+
 	t.Run("refuses a missing ca certificate file", func(t *testing.T) {
 		_, err := client.New("http://localhost:7373", client.WithCACertificate(filepath.Join(t.TempDir(), "missing.pem")))
 		assert.Error(t, err)
