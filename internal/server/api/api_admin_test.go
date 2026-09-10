@@ -19,6 +19,7 @@ import (
 
 	"github.com/dsb-labs/takt/internal/server/api"
 	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/middleware"
 	secretstore "github.com/dsb-labs/takt/internal/server/secret"
 	"github.com/dsb-labs/takt/internal/server/service"
 )
@@ -181,7 +182,10 @@ func serveAdmin(t *testing.T, admin api.Admin, method, target string, body io.Re
 	}
 
 	resp := httptest.NewRecorder()
-	mux.ServeHTTP(resp, req)
+	// Served through the disabled-mode authenticate middleware, as the server
+	// does when the configuration carries no [auth] block, so the authorize
+	// layer passes every request as it did before the auth layer existed.
+	middleware.Authenticate(nil)(mux).ServeHTTP(resp, req)
 
 	return resp
 }

@@ -18,6 +18,7 @@ import (
 
 	generated "github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/middleware"
 	"github.com/dsb-labs/takt/internal/server/service"
 )
 
@@ -358,7 +359,10 @@ func doVariable(t *testing.T, svc *MockVariableService, method, target string, b
 	}
 
 	resp := httptest.NewRecorder()
-	mux.ServeHTTP(resp, req)
+	// Served through the disabled-mode authenticate middleware, as the server
+	// does when the configuration carries no [auth] block, so the authorize
+	// layer passes every request as it did before the auth layer existed.
+	middleware.Authenticate(nil)(mux).ServeHTTP(resp, req)
 
 	return resp
 }

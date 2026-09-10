@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/middleware"
 	"github.com/dsb-labs/takt/internal/server/service"
 )
 
@@ -27,7 +28,10 @@ func doToken(t *testing.T, tokens api.TokenService, req *http.Request) *httptest
 	}).Register(mux)
 
 	resp := httptest.NewRecorder()
-	mux.ServeHTTP(resp, req)
+	// Served through the disabled-mode authenticate middleware, so the
+	// authorize layer passes the request; its own refusals are tested in
+	// api_test.go.
+	middleware.Authenticate(nil)(mux).ServeHTTP(resp, req)
 
 	return resp
 }
