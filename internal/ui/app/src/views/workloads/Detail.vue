@@ -12,7 +12,7 @@ import ErrorBanner from "../../components/ErrorBanner.vue";
 import LogViewer from "../../components/LogViewer.vue";
 import ReferenceCard from "../../components/ReferenceCard.vue";
 import SortHeader from "../../components/SortHeader.vue";
-import SpecView from "../../components/SpecView.vue";
+import YamlView from "../../components/YamlView.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import Tooltip from "../../components/Tooltip.vue";
 import OverviewRow from "../../components/OverviewRow.vue";
@@ -486,7 +486,7 @@ await workload.suspense().catch(() => {});
 
       <div v-if="spec" class="mt-6">
         <DetailCard title="Specification">
-          <SpecView :spec="spec" />
+          <YamlView :document="spec" />
         </DetailCard>
       </div>
     </template>

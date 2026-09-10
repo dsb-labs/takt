@@ -177,3 +177,30 @@ export function useOIDC() {
     },
   });
 }
+
+// The applied policy document, for the access page. Polled like the lists,
+// so a gitops apply shows up without a reload.
+export function usePolicy() {
+  return useQuery({
+    queryKey: ["policy"],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/acl");
+      if (error) throw new Error(error.error);
+      return data.policy;
+    },
+  });
+}
+
+// Every credential the server holds, for the access page.
+export function useTokens() {
+  return useQuery({
+    queryKey: ["tokens"],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/tokens");
+      if (error) throw new Error(error.error);
+      return data.tokens;
+    },
+  });
+}
