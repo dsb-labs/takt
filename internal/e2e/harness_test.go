@@ -80,6 +80,32 @@ func withAllowHostPaths(prefixes ...string) option {
 	return func(c *server.Config) { c.Workload.AllowHostPaths = prefixes }
 }
 
+// withAuth modifies the server to require authentication, exactly as writing
+// an empty [auth] block into its configuration would.
+func withAuth() option {
+	return func(c *server.Config) { c.Auth = &server.AuthConfig{} }
+}
+
+// withOIDC modifies the server to verify OIDC identities against the given
+// issuer, on top of what withAuth enables.
+func withOIDC(issuer, clientID string) option {
+	return func(c *server.Config) {
+		c.Auth = &server.AuthConfig{
+			OIDC: server.OIDCConfig{Issuer: issuer, ClientID: clientID},
+		}
+	}
+}
+
+// clientWithToken returns a client for the running server that presents the
+// given credential, which is how the tests act as different principals
+// against one server.
+func (s *Suite) clientWithToken(token string) *client.Client {
+	c, err := client.New(s.address, client.WithToken(token))
+	s.Require().NoError(err)
+
+	return c
+}
+
 // withTLS modifies the server to terminate TLS with a self-signed pair generated
 // for the test. The suite's client trusts the pair through the same option an
 // operator would use.

@@ -17,11 +17,14 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +34,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-jose/go-jose/v4"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/dsb-labs/takt/internal/restore"
@@ -3683,4 +3687,293 @@ func (s *Suite) TestServiceReportsBackends() {
 
 	_, err = s.client.Get(s.ctx(), name)
 	s.Require().NoError(err, "deleting the service must leave the workload")
+}
+
+// testPolicy is the document the auth tests apply: one principal per role,
+// and a group the fake identity provider asserts.
+var testPolicy = manifest.Policy{
+	Version: "v1",
+	OIDC:    &manifest.PolicyOIDC{PrincipalClaim: "email", GroupsClaim: "groups"},
+	Grants: []manifest.PolicyGrant{
+		{Principals: []string{"scraper"}, Role: manifest.RoleViewer},
+		{Principals: []string{"operator@example.com"}, Role: manifest.RoleOperator},
+		{Principals: []string{"group:infra"}, Role: manifest.RoleAdmin},
+	},
+}
+
+// TestAuthDisabled proves that a server without an [auth] block behaves as it
+// always has: anonymous requests hold the whole API, and whoami says so.
+func (s *Suite) TestAuthDisabled() {
+	identity, err := s.client.WhoAmI(s.ctx())
+	s.Require().NoError(err)
+
+	s.False(identity.Enabled)
+	s.Equal("anonymous", identity.Principal)
+	s.Equal("admin", identity.Role)
+
+	// Anonymous writes still work: the network boundary is the whole check.
+	name := s.variableName()
+	defer s.cleanupVariable(name)
+
+	_, _, err = s.client.SetVariable(s.ctx(), name, "value", nil)
+	s.Require().NoError(err)
+}
+
+// TestAuthLifecycle walks the whole enablement journey: init once, apply the
+// first policy with the recovery token, mint per-principal tokens, and prove
+// each role holds exactly what the policy grants until revocation cuts it
+// off.
+func (s *Suite) TestAuthLifecycle() {
+	s.restart(withAuth())
+
+	// The probes carry no security requirement: a supervisor must reach them
+	// without credentials or it cannot manage the process.
+	s.Require().NoError(s.client.Health(s.ctx()))
+
+	// Everything else is refused until a credential exists.
+	_, err := s.client.List(s.ctx())
+	s.Require().True(client.IsUnauthorized(err), "expected 401, got %v", err)
+
+	recovery, err := s.client.InitACL(s.ctx())
+	s.Require().NoError(err)
+
+	_, err = s.client.InitACL(s.ctx())
+	s.Require().ErrorIs(err, client.ErrACLInitialized)
+
+	// The recovery token sits above policy, which is what lets it apply the
+	// first document to a server that grants nothing to anyone yet.
+	admin := s.clientWithToken(recovery)
+
+	_, _, err = admin.ReplacePolicy(s.ctx(), testPolicy)
+	s.Require().NoError(err)
+
+	_, viewerToken, err := admin.CreateToken(s.ctx(), "scraper")
+	s.Require().NoError(err)
+
+	_, operatorToken, err := admin.CreateToken(s.ctx(), "operator@example.com")
+	s.Require().NoError(err)
+
+	viewer := s.clientWithToken(viewerToken)
+	operator := s.clientWithToken(operatorToken)
+
+	// The viewer reads everything, including the endpoints prometheus
+	// consumes, and mutates nothing.
+	_, err = viewer.List(s.ctx())
+	s.Require().NoError(err)
+	s.Require().NoError(viewer.Metrics(s.ctx(), io.Discard))
+
+	name := s.variableName()
+	defer s.cleanupVariable(name)
+
+	_, _, err = viewer.SetVariable(s.ctx(), name, "value", nil)
+	s.Require().True(client.IsForbidden(err), "expected 403, got %v", err)
+
+	_, err = viewer.ListTokens(s.ctx())
+	s.Require().True(client.IsForbidden(err), "expected 403, got %v", err)
+
+	identity, err := viewer.WhoAmI(s.ctx())
+	s.Require().NoError(err)
+	s.True(identity.Enabled)
+	s.Equal("scraper", identity.Principal)
+	s.Equal("viewer", identity.Role)
+
+	// The operator drives resource lifecycle.
+	_, _, err = operator.SetVariable(s.ctx(), name, "value", nil)
+	s.Require().NoError(err)
+
+	// Revocation is immediate: the token list names the viewer's credential,
+	// and deleting it refuses the very next request.
+	tokens, err := admin.ListTokens(s.ctx())
+	s.Require().NoError(err)
+
+	var viewerID string
+	for _, token := range tokens {
+		if token.Principal == "scraper" {
+			viewerID = token.ID
+		}
+	}
+	s.Require().NotEmpty(viewerID)
+
+	s.Require().NoError(admin.DeleteToken(s.ctx(), viewerID))
+
+	_, err = viewer.List(s.ctx())
+	s.Require().True(client.IsUnauthorized(err), "expected 401 after revocation, got %v", err)
+
+	// Logout is self-revocation, so the operator can retire its own token.
+	s.Require().NoError(operator.Logout(s.ctx()))
+
+	_, err = operator.WhoAmI(s.ctx())
+	s.Require().True(client.IsUnauthorized(err), "expected 401 after logout, got %v", err)
+
+	// The recovery token's revocation path is deliberately host-level.
+	s.Require().ErrorIs(admin.Logout(s.ctx()), client.ErrRecoveryLogout)
+}
+
+// TestAuthPolicyConflict proves that a stale conditional apply is refused
+// rather than silently clobbering a concurrent one.
+func (s *Suite) TestAuthPolicyConflict() {
+	s.restart(withAuth())
+
+	recovery, err := s.client.InitACL(s.ctx())
+	s.Require().NoError(err)
+
+	admin := s.clientWithToken(recovery)
+
+	_, etag, err := admin.GetPolicy(s.ctx())
+	s.Require().NoError(err)
+
+	// The first apply consumes the tag the second one still holds.
+	_, _, err = admin.ApplyPolicy(s.ctx(), testPolicy, etag)
+	s.Require().NoError(err)
+
+	_, _, err = admin.ApplyPolicy(s.ctx(), testPolicy, etag)
+	s.Require().ErrorIs(err, client.ErrPolicyChanged)
+
+	// The one-step form reads the fresh tag itself, which is the re-run the
+	// error asks for.
+	applied, _, err := admin.ReplacePolicy(s.ctx(), testPolicy)
+	s.Require().NoError(err)
+	s.Equal(testPolicy, applied)
+}
+
+// TestAuthReset proves the lockout recovery: the reset file removes the
+// recovery token at startup, init works again, and everything else survives.
+func (s *Suite) TestAuthReset() {
+	directory := s.T().TempDir()
+	s.restart(withAuth(), withDataDirectory(directory))
+
+	recovery, err := s.client.InitACL(s.ctx())
+	s.Require().NoError(err)
+
+	admin := s.clientWithToken(recovery)
+
+	_, _, err = admin.ReplacePolicy(s.ctx(), testPolicy)
+	s.Require().NoError(err)
+
+	_, clientToken, err := admin.CreateToken(s.ctx(), "scraper")
+	s.Require().NoError(err)
+
+	// The operator lost the recovery token. Writing the reset file into the
+	// data directory and restarting is the whole procedure.
+	s.Require().NoError(os.WriteFile(filepath.Join(directory, "acl.reset"), nil, 0o600))
+	s.restart(withAuth(), withDataDirectory(directory))
+
+	// The old recovery token is gone, init works exactly once again, and the
+	// client tokens and policy survived.
+	_, err = s.clientWithToken(recovery).ListTokens(s.ctx())
+	s.Require().True(client.IsUnauthorized(err), "expected the old recovery token to be revoked, got %v", err)
+
+	_, err = s.client.InitACL(s.ctx())
+	s.Require().NoError(err)
+
+	identity, err := s.clientWithToken(clientToken).WhoAmI(s.ctx())
+	s.Require().NoError(err)
+	s.Equal("scraper", identity.Principal)
+	s.Equal("viewer", identity.Role)
+}
+
+// TestAuthOIDC proves the whole exchange: an identity token signed by the
+// issuer becomes a short-lived client token whose principal and groups come
+// from the claims the policy maps.
+func (s *Suite) TestAuthOIDC() {
+	issuer, sign := s.fakeIssuer()
+
+	s.restart(withOIDC(issuer, "takt"))
+
+	recovery, err := s.client.InitACL(s.ctx())
+	s.Require().NoError(err)
+
+	_, _, err = s.clientWithToken(recovery).ReplacePolicy(s.ctx(), testPolicy)
+	s.Require().NoError(err)
+
+	// The CLI's flow discovers the issuer from the server rather than from
+	// flags, so the discovery endpoint has to answer anonymously.
+	discovered, err := s.client.GetOIDC(s.ctx())
+	s.Require().NoError(err)
+	s.Equal(issuer, discovered.Issuer)
+	s.Equal("takt", discovered.ClientID)
+
+	// The infra group carries admin through the policy's group grant, so the
+	// login proves the groups claim travelled from the identity token.
+	login, err := s.client.Login(s.ctx(), sign(map[string]any{
+		"email":  "david@example.com",
+		"groups": []string{"infra"},
+	}))
+	s.Require().NoError(err)
+	s.Equal("david@example.com", login.Principal)
+	s.False(login.ExpiresAt.IsZero())
+
+	identity, err := s.clientWithToken(login.Credential).WhoAmI(s.ctx())
+	s.Require().NoError(err)
+	s.Equal("david@example.com", identity.Principal)
+	s.Equal("admin", identity.Role)
+	s.Contains(identity.Groups, "infra")
+
+	// An identity signed by somebody else is refused.
+	_, wrongSign := s.fakeIssuer()
+
+	_, err = s.client.Login(s.ctx(), wrongSign(map[string]any{"email": "forger@example.com"}))
+	s.Require().True(client.IsUnauthorized(err), "expected 401 for a foreign signature, got %v", err)
+}
+
+// fakeIssuer runs an OIDC issuer for the test: a discovery document, a JWKS,
+// and a signer that mints identity tokens the way the real one would.
+func (s *Suite) fakeIssuer() (string, func(claims map[string]any) string) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	s.Require().NoError(err)
+
+	mux := http.NewServeMux()
+	issuer := httptest.NewServer(mux)
+	s.T().Cleanup(issuer.Close)
+
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer":                                issuer.URL,
+			"authorization_endpoint":                issuer.URL + "/authorize",
+			"token_endpoint":                        issuer.URL + "/token",
+			"jwks_uri":                              issuer.URL + "/keys",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
+	})
+
+	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{
+			Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "test", Algorithm: "RS256", Use: "sig"}},
+		})
+	})
+
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: key}, &jose.SignerOptions{
+		ExtraHeaders: map[jose.HeaderKey]any{"kid": "test"},
+	})
+	s.Require().NoError(err)
+
+	sign := func(claims map[string]any) string {
+		now := time.Now()
+
+		token := map[string]any{
+			"iss": issuer.URL,
+			"aud": "takt",
+			"sub": fmt.Sprintf("subject-%d", now.UnixNano()),
+			"iat": now.Unix(),
+			"exp": now.Add(time.Hour).Unix(),
+		}
+		for name, value := range claims {
+			token[name] = value
+		}
+
+		payload, err := json.Marshal(token)
+		s.Require().NoError(err)
+
+		signed, err := signer.Sign(payload)
+		s.Require().NoError(err)
+
+		serialized, err := signed.CompactSerialize()
+		s.Require().NoError(err)
+
+		return serialized
+	}
+
+	return issuer.URL, sign
 }
