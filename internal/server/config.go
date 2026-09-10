@@ -37,6 +37,10 @@ type (
 		Workload WorkloadConfig `toml:"workload"`
 		// Secret storage settings.
 		Secrets SecretsConfig `toml:"secrets"`
+		// Authentication settings. The block's presence is what enables the
+		// auth layer — nil means the block is absent and the network-boundary
+		// model stands.
+		Auth *AuthConfig `toml:"auth"`
 		// Trace and log export settings.
 		Telemetry TelemetryConfig `toml:"telemetry"`
 		// Logging settings.
@@ -168,6 +172,39 @@ type (
 		MinPort int `toml:"min-port"`
 		// The highest host port that may be allocated.
 		MaxPort int `toml:"max-port"`
+	}
+
+	// The AuthConfig type contains configuration for authenticating API
+	// callers. It hangs off the Config as a pointer because its presence is
+	// the setting: writing [auth] turns the layer on, even with nothing in
+	// the block, and an absent block means anything reaching the listener
+	// holds the whole API, exactly as before the layer existed.
+	AuthConfig struct {
+		// OIDC settings. Absent means static tokens are the only
+		// authentication.
+		OIDC OIDCConfig `toml:"oidc"`
+	}
+
+	// The OIDCConfig type contains configuration for exchanging OIDC
+	// identities for tokens.
+	OIDCConfig struct {
+		// The issuer `takt auth login` and the UI run the authorization code
+		// flow against, as a URL. Its presence is what enables OIDC.
+		Issuer string `toml:"issuer"`
+		// The client identifier registered with the issuer.
+		ClientID string `toml:"client-id"`
+		// The client secret, when the issuer treats takt as a confidential
+		// client. Empty for a public client using PKCE alone.
+		ClientSecret string `toml:"client-secret"`
+		// The URL browsers reach this server by, such as
+		// "https://takt.example.com". Its presence is what enables the UI's
+		// login redirect, whose callback the issuer must be able to send the
+		// browser back to. The CLI's loopback flow works without it.
+		RedirectURL string `toml:"redirect-url"`
+		// The scopes a login requests. Defaults to "openid", "email" and
+		// "profile". Add whatever scope the issuer needs before it includes
+		// the claim the policy's groupsClaim reads, such as "groups".
+		Scopes []string `toml:"scopes"`
 	}
 
 	// The TelemetryConfig type contains configuration for exporting traces and
@@ -334,9 +371,20 @@ func (c *Config) Validate() error {
 		c.Workload.validate(),
 		c.Docker.validate(),
 		c.Exec.validate(),
+		c.Auth.validate(),
 		c.Telemetry.validate(),
 		c.Logging.validate(),
 	)
+}
+
+// ACLResetPath returns the file whose presence removes the recovery token at
+// startup, so `takt acl init` works again.
+//
+// Beside DatabasePath for the same reason: writing this file is a host-level
+// act, and the operator performing it has the configuration and nothing else
+// to go on.
+func (c Config) ACLResetPath() string {
+	return filepath.Join(c.Data.Directory, "acl.reset")
 }
 
 // TLSEnabled reports whether the server terminates TLS itself.
@@ -463,6 +511,58 @@ func (c ExecConfig) validate() error {
 		// each of them, and nowhere the operator meant.
 		if !filepath.IsAbs(path) {
 			return fmt.Errorf("exec allowed path must be absolute, got %q", path)
+		}
+	}
+
+	return nil
+}
+
+// validate is nil-safe because an absent [auth] block is the layer switched
+// off, and there is nothing to check about an absence.
+func (c *AuthConfig) validate() error {
+	if c == nil {
+		return nil
+	}
+
+	return c.OIDC.validate()
+}
+
+// OIDCEnabled reports whether OIDC logins are configured.
+func (c *AuthConfig) OIDCEnabled() bool {
+	return c != nil && c.OIDC.Issuer != ""
+}
+
+func (c OIDCConfig) validate() error {
+	if c.Issuer == "" && c.ClientID == "" && c.ClientSecret == "" && c.RedirectURL == "" {
+		return nil
+	}
+
+	// Parseable with a scheme and a host, and nothing more, for the reasons
+	// the telemetry endpoint is checked that way: an issuer that is down at
+	// startup is not a configuration error.
+	issuer, err := url.Parse(c.Issuer)
+	switch {
+	case err != nil || c.Issuer == "":
+		return fmt.Errorf("auth oidc issuer is not a valid url: %q", c.Issuer)
+	case issuer.Scheme != "http" && issuer.Scheme != "https":
+		return fmt.Errorf("auth oidc issuer must use http or https, got %q", c.Issuer)
+	case issuer.Host == "":
+		return fmt.Errorf("auth oidc issuer must name a host, got %q", c.Issuer)
+	}
+
+	if c.ClientID == "" {
+		return errors.New("auth oidc requires a client-id")
+	}
+
+	if c.RedirectURL != "" {
+		redirect, err := url.Parse(c.RedirectURL)
+		switch {
+		case err != nil:
+			return fmt.Errorf("auth oidc redirect-url is not a valid url: %q", c.RedirectURL)
+		case redirect.Scheme != "http" && redirect.Scheme != "https":
+			return fmt.Errorf("auth oidc redirect-url must use http or https, got %q", c.RedirectURL)
+		case redirect.Host == "":
+			return fmt.Errorf("auth oidc redirect-url must name a host, got %q", c.RedirectURL)
 		}
 	}
 

@@ -26,6 +26,14 @@ allow-paths = ["/opt/runtime", "/nix/store"]
 [secrets]
 keys = "/etc/takt/keys"
 
+[auth]
+
+[auth.oidc]
+issuer = "https://idp.example.com"
+client-id = "takt"
+client-secret = "hunter2"
+redirect-url = "https://takt.example.com"
+
 [telemetry]
 otlp-endpoint = "http://collector.example.com:4318"
 
