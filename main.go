@@ -22,6 +22,7 @@ import (
 	"github.com/dsb-labs/takt/cmd/volume"
 	"github.com/dsb-labs/takt/cmd/workload"
 	"github.com/dsb-labs/takt/internal/server/driver/exec"
+	"github.com/dsb-labs/takt/pkg/cli"
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
@@ -36,7 +37,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	var address, caCert string
+	var address, caCert, configPath string
 
 	cmd := &cobra.Command{
 		Use:          "takt",
@@ -49,13 +50,37 @@ func main() {
 		// no subcommand declares the server flags or builds a client of its
 		// own. The serve command gets one it never uses, which costs a URL
 		// parse and no connection.
+		//
+		// The connection resolves from the most specific source that supplies
+		// each setting: these flags, then the TAKT_ADDRESS, TAKT_TOKEN and
+		// TAKT_CA_CERT environment variables, then the config file `takt auth
+		// login` writes. A flag left at its default is treated as not given,
+		// so it does not shadow the environment or the file.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			var options []client.Option
-			if caCert != "" {
-				options = append(options, client.WithCACertificate(caCert))
+			if !cmd.Flags().Changed("address") {
+				address = ""
 			}
 
-			c, err := client.New(address, options...)
+			path, err := cli.Path(configPath)
+			if err != nil {
+				return err
+			}
+
+			settings, err := cli.Resolve(path, address, caCert)
+			if err != nil {
+				return err
+			}
+
+			options := []client.Option{}
+			if settings.CACert != "" {
+				options = append(options, client.WithCACertificate(settings.CACert))
+			}
+
+			if settings.Token != "" {
+				options = append(options, client.WithToken(settings.Token))
+			}
+
+			c, err := client.New(settings.Address, options...)
 			if err != nil {
 				return err
 			}
@@ -66,9 +91,14 @@ func main() {
 		},
 	}
 
+	// The default is resolved at startup so the help output names the real
+	// file, TAKT_CONFIG included. A --config value wins over both.
+	defaultConfigPath, _ := cli.Path("")
+
 	flags := cmd.PersistentFlags()
-	flags.StringVarP(&address, "address", "a", "http://localhost:7373", "URL of the takt server")
+	flags.StringVarP(&address, "address", "a", cli.DefaultAddress, "URL of the takt server")
 	flags.StringVar(&caCert, "ca-cert", "", "path to a PEM file holding the certificate authority to check the server against")
+	flags.StringVar(&configPath, "config", defaultConfigPath, "path of the client config file")
 
 	if info, ok := debug.ReadBuildInfo(); ok {
 		cmd.Version = info.Main.Version
