@@ -17,6 +17,7 @@ import (
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/propagation"
+	"golang.org/x/oauth2"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/dsb-labs/takt/internal/server/api"
@@ -123,6 +124,24 @@ func Run(ctx context.Context, config Config) error {
 	volumes := database.NewVolumeRepository(db)
 	secrets := database.NewSecretRepository(db)
 	variables := database.NewVariableRepository(db)
+	tokens := database.NewTokenRepository(db)
+
+	// Recovering from a lost recovery token is a host-level act: write the
+	// reset file into the data directory and restart. Consuming it here
+	// removes the recovery token, which is exactly the state that permits
+	// `takt acl init` to run again. Client tokens and the policy survive.
+	if _, err = os.Stat(config.ACLResetPath()); err == nil {
+		if err = tokens.DeleteRecovery(ctx); err != nil {
+			return fmt.Errorf("failed to consume the acl reset file: %w", err)
+		}
+
+		if err = os.Remove(config.ACLResetPath()); err != nil {
+			return fmt.Errorf("failed to remove the acl reset file: %w", err)
+		}
+
+		logger.Warn("acl reset consumed, init is permitted again")
+	}
+
 	checker := health.New(health.Config{
 		MeterProvider:  tel.MeterProvider(),
 		TracerProvider: tel.TracerProvider(),
@@ -273,6 +292,69 @@ func Run(ctx context.Context, config Config) error {
 		Secrets:  secretSvc,
 	})
 
+	tokenSvc := service.NewTokenService(service.TokenServiceConfig{
+		Logger: logger,
+		Tokens: tokens,
+	})
+
+	policySvc := service.NewPolicyService(service.PolicyServiceConfig{
+		Logger:   logger,
+		Policies: database.NewPolicyRepository(db),
+	})
+
+	// Both are nil without OIDC, which is how the login exchange and the
+	// browser flow answer that they are not configured.
+	var (
+		verifier     service.IdentityVerifier
+		relyingParty *api.OIDCRelyingParty
+	)
+
+	if config.Auth.OIDCEnabled() {
+		oidcVerifier, endpoint, err := service.NewOIDCVerifier(ctx, config.Auth.OIDC.Issuer, config.Auth.OIDC.ClientID)
+		if err != nil {
+			return err
+		}
+
+		verifier = oidcVerifier
+		relyingParty = &api.OIDCRelyingParty{
+			Issuer:   config.Auth.OIDC.Issuer,
+			ClientID: config.Auth.OIDC.ClientID,
+		}
+
+		// The browser flow needs somewhere the issuer can send the browser
+		// back to, so it activates on the redirect URL being named. The CLI
+		// runs its own loopback flow and needs none of this.
+		if config.Auth.OIDC.RedirectURL != "" {
+			scopes := config.Auth.OIDC.Scopes
+			if len(scopes) == 0 {
+				scopes = []string{"openid", "email", "profile"}
+			}
+
+			relyingParty.Flow = &oauth2.Config{
+				ClientID:     config.Auth.OIDC.ClientID,
+				ClientSecret: config.Auth.OIDC.ClientSecret,
+				Endpoint:     endpoint,
+				RedirectURL:  strings.TrimSuffix(config.Auth.OIDC.RedirectURL, "/") + "/api/v1/auth/oidc/callback",
+				Scopes:       scopes,
+			}
+		}
+	}
+
+	authSvc := service.NewAuthService(service.AuthServiceConfig{
+		Logger:   logger,
+		Tokens:   tokens,
+		Policies: policySvc,
+		Verifier: verifier,
+	})
+
+	// A nil authenticator is how the middleware knows the layer is off. The
+	// interface is only given a value when the [auth] block is present, so
+	// an absent block costs no lookups on any request.
+	var authenticator middleware.Authenticator
+	if config.Auth != nil {
+		authenticator = authSvc
+	}
+
 	// The count of allocations is read from the repository once per scrape, so a
 	// pass never pays for it.
 	allocator := port.New(port.Config{
@@ -334,6 +416,14 @@ func Run(ctx context.Context, config Config) error {
 			Targets:  svc,
 		}),
 		Admin: api.NewAdminAPI(api.AdminAPIConfig{Logger: logger, Admin: adminSvc}),
+		Auth: api.NewAuthAPI(api.AuthAPIConfig{
+			Logger: logger,
+			Auth:   authSvc,
+			OIDC:   relyingParty,
+			Secure: config.HTTP.TLSEnabled(),
+		}),
+		ACL:    api.NewACLAPI(api.ACLAPIConfig{Logger: logger, Policies: policySvc, Init: tokenSvc}),
+		Tokens: api.NewTokenAPI(api.TokenAPIConfig{Logger: logger, Tokens: tokenSvc}),
 	}).Register(mux)
 
 	webUI, err := ui.Handler()
@@ -355,7 +445,7 @@ func Run(ctx context.Context, config Config) error {
 		// Outside the telemetry handler, which is the only place a handler can still
 		// reach the connection's own writer: everything below wraps it, and none of
 		// those wrappers carries a write deadline.
-		Handler: middleware.Stream(otelhttp.NewHandler(middleware.Wrap(mux, logger, config.HTTP.Hosts, nil), "takt",
+		Handler: middleware.Stream(otelhttp.NewHandler(middleware.Wrap(mux, logger, config.HTTP.Hosts, authenticator), "takt",
 			otelhttp.WithMeterProvider(tel.MeterProvider()),
 			otelhttp.WithTracerProvider(tel.TracerProvider()),
 			otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(
@@ -414,6 +504,23 @@ func Run(ctx context.Context, config Config) error {
 
 	g.Go(func() error { return reconcile.Run(ctx) })
 	g.Go(func() error { return checker.Run(ctx) })
+	g.Go(func() error {
+		// An expired token already refuses to authenticate, so the sweep is
+		// hygiene for the token list rather than security — hourly is plenty.
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				if err := tokenSvc.Sweep(ctx); err != nil {
+					logger.With("error", err).Warn("failed to sweep expired tokens")
+				}
+			}
+		}
+	})
 	g.Go(func() error {
 		<-ctx.Done()
 
