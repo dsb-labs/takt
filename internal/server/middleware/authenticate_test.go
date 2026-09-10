@@ -132,6 +132,48 @@ func TestAuthenticate(t *testing.T) {
 	}
 }
 
+func TestAuthenticate_PropagatesRoute(t *testing.T) {
+	t.Parallel()
+
+	// otelhttp records http.route from r.Pattern on the request it passed
+	// down, once the handler returns. The middleware hands the router a
+	// WithContext copy, so it must copy the matched pattern back onto the
+	// request the caller holds, or the route is lost from spans and metrics.
+	resolve := authenticatorFunc(func(context.Context, string) (auth.Identity, error) {
+		return auth.Identity{Principal: "prometheus", Role: manifest.RoleViewer, TokenID: "id"}, nil
+	})
+
+	tt := []struct {
+		Name          string
+		Authenticator middleware.Authenticator
+		Header        string
+	}{
+		{Name: "disabled", Authenticator: nil},
+		{Name: "anonymous", Authenticator: resolve},
+		{Name: "authenticated", Authenticator: resolve, Header: "Bearer valid"},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			// Stand in for http.ServeMux, which records the matched pattern on
+			// the request it receives.
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Pattern = "/api/v1/workloads/{name}"
+				w.WriteHeader(http.StatusOK)
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/workloads/example", nil)
+			if tc.Header != "" {
+				req.Header.Set("Authorization", tc.Header)
+			}
+
+			middleware.Authenticate(tc.Authenticator)(handler).ServeHTTP(httptest.NewRecorder(), req)
+
+			assert.Equal(t, "/api/v1/workloads/{name}", req.Pattern)
+		})
+	}
+}
+
 func TestCallerIdentity(t *testing.T) {
 	t.Parallel()
 

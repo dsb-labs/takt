@@ -41,41 +41,64 @@ type (
 func Authenticate(authenticator Authenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if authenticator == nil {
-				next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), auth.Identity{Disabled: true})))
-
+			identity, ok := resolveIdentity(w, r, authenticator)
+			if !ok {
 				return
 			}
 
-			credential := bearerCredential(r)
-			if credential == "" {
-				if cookie, err := r.Cookie(auth.SessionCookie); err == nil {
-					credential = cookie.Value
-				}
-			}
-
-			if credential == "" {
-				next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), auth.Identity{})))
-
-				return
-			}
-
-			identity, err := authenticator.Authenticate(r.Context(), credential)
-			switch {
-			case errors.Is(err, service.ErrInvalidCredential):
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				writeError(w, http.StatusUnauthorized, "invalid credential")
-
-				return
-			case err != nil:
-				writeError(w, http.StatusInternalServerError, "failed to authenticate request")
-
-				return
-			}
-
-			next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), identity)))
+			serveIdentified(w, r, next, identity)
 		})
 	}
+}
+
+// resolveIdentity turns the request's credential into the identity it proves.
+// The second return value is false only when a refusal has already been
+// written, so the caller stops rather than serving the request.
+func resolveIdentity(w http.ResponseWriter, r *http.Request, authenticator Authenticator) (auth.Identity, bool) {
+	if authenticator == nil {
+		return auth.Identity{Disabled: true}, true
+	}
+
+	credential := bearerCredential(r)
+	if credential == "" {
+		if cookie, err := r.Cookie(auth.SessionCookie); err == nil {
+			credential = cookie.Value
+		}
+	}
+
+	if credential == "" {
+		return auth.Identity{}, true
+	}
+
+	identity, err := authenticator.Authenticate(r.Context(), credential)
+	switch {
+	case errors.Is(err, service.ErrInvalidCredential):
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		writeError(w, http.StatusUnauthorized, "invalid credential")
+
+		return auth.Identity{}, false
+	case err != nil:
+		writeError(w, http.StatusInternalServerError, "failed to authenticate request")
+
+		return auth.Identity{}, false
+	}
+
+	return identity, true
+}
+
+// serveIdentified runs next with the identity in the request context, then
+// copies the route the router matched back onto the request the caller holds.
+//
+// otelhttp records http.route from r.Pattern on the very request it passed
+// down, read once next returns. This middleware hands next a WithContext copy,
+// so http.ServeMux records the match on that copy rather than on the request
+// otelhttp holds. Copying the pattern back is what keeps http.route on the
+// server's spans and metrics. It is sound because nothing between otelhttp and
+// this middleware replaces the request, so the r here is the one otelhttp reads.
+func serveIdentified(w http.ResponseWriter, r *http.Request, next http.Handler, identity auth.Identity) {
+	identified := r.WithContext(withIdentity(r.Context(), identity))
+	next.ServeHTTP(w, identified)
+	r.Pattern = identified.Pattern
 }
 
 // CallerIdentity returns the identity Authenticate stored, or the anonymous
