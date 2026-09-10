@@ -45,10 +45,12 @@ func Command() *cobra.Command {
 		Long: "Log in through the server's OIDC issuer and store the minted token in the\n" +
 			"config file.\n\n" +
 			"The command asks the server who its issuer is, runs the authorization\n" +
-			"code flow against a loopback callback, and exchanges the identity for a\n" +
-			"short-lived client token. Open the printed URL in a browser when one\n" +
-			"does not open on its own. The issuer must permit the redirect URI\n" +
-			"http://127.0.0.1:8250/oidc/callback, or the one --callback-port names.\n\n" +
+			"code flow against a loopback callback, and hands the code to the server\n" +
+			"to exchange for a short-lived client token — the exchange is what needs\n" +
+			"the issuer's client secret, so the secret stays on the server. Open the\n" +
+			"printed URL in a browser when one does not open on its own. The issuer\n" +
+			"must permit the redirect URI http://127.0.0.1:8250/oidc/callback, or\n" +
+			"the one --callback-port names.\n\n" +
 			"The token lands in the config file rather than on stdout, because a\n" +
 			"child process cannot set an environment variable in its parent shell\n" +
 			"and every login ending in copy-paste ceremony would be the alternative.",
@@ -100,17 +102,10 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			exchanged, err := flow.Exchange(ctx, code, oauth2.VerifierOption(verifier))
-			if err != nil {
-				return fmt.Errorf("failed to exchange the authorization code: %w", err)
-			}
-
-			rawIDToken, ok := exchanged.Extra("id_token").(string)
-			if !ok {
-				return errors.New("the issuer's response carries no identity token")
-			}
-
-			login, err := c.Login(ctx, rawIDToken)
+			// The server performs the exchange, because the exchange is what
+			// needs the issuer's client secret and the secret never reaches
+			// this command.
+			login, err := c.LoginCode(ctx, code, verifier, flow.RedirectURL)
 			if err != nil {
 				return fmt.Errorf("failed to log in: %w", err)
 			}
