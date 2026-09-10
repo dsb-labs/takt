@@ -273,7 +273,7 @@ the recovery path.
 |---|---|---|
 | `issuer` | empty | The OIDC issuer logins verify identities against. Its presence enables OIDC. |
 | `client-id` | empty | The client identifier registered with the issuer. Required with an issuer. |
-| `client-secret` | empty | The client secret, for an issuer that treats takt as a confidential client. Empty means a public client using PKCE alone. |
+| `client-secret` | empty | The client secret, for an issuer that treats takt as a confidential client. The server performs every code exchange, so the CLI never needs it. |
 | `redirect-url` | empty | The URL browsers reach this server by, such as `https://takt.example.com`. Its presence enables the web UI's login redirect. |
 | `scopes` | `["openid", "email", "profile"]` | The scopes a login requests from the issuer. |
 
