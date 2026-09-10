@@ -626,6 +626,251 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/auth": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Report who the caller is
+     * @description Returns the caller's principal, role and groups. It requires
+     *     authentication but no role, so a principal holding a token with no
+     *     grants yet can see exactly that state.
+     *
+     *     When authentication is disabled the caller is reported as anonymous
+     *     with the admin role, which is the truth of that mode: anything that
+     *     reaches the listener holds the whole API.
+     */
+    get: operations["getAuth"];
+    put?: never;
+    /**
+     * Exchange an identity for a short-lived token
+     * @description Mints a short-lived client token. The exchange accepts either an OIDC
+     *     identity token, verified against the configured issuer, or an existing
+     *     client token, which is how the browser UI trades the standing
+     *     credential pasted into it for a session that expires on its own.
+     *
+     *     With `cookie` set, the response also carries the credential as an
+     *     HttpOnly session cookie, which is what the UI stores. The credential
+     *     in the body is the same one either way.
+     *
+     *     Anonymous by necessity — a login is how a caller stops being
+     *     anonymous — but nothing is minted without a verified identity.
+     */
+    post: operations["login"];
+    /**
+     * Revoke the credential that authenticated this request
+     * @description Revokes whatever authenticated the request: an OIDC-minted token, a UI
+     *     session, or a static token retiring itself. Self-revocation is always
+     *     safe, so this needs no role.
+     *
+     *     The one refusal is the recovery token, whose revocation path is
+     *     deliberately host-level: the reset file in the data directory.
+     */
+    delete: operations["logout"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/oidc": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Report how to log in with OIDC
+     * @description Returns the issuer and client identifier `takt auth login` runs the
+     *     authorization code flow against. Anonymous, because a caller reads it
+     *     precisely when it has no credential yet — and it discloses nothing a
+     *     login page would not.
+     *
+     *     Answers 404 when the server carries no OIDC configuration, which is
+     *     how the CLI and the UI discover that a pasted token is the only way
+     *     in.
+     */
+    get: operations["getOIDC"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/oidc/login": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Start the browser OIDC flow
+     * @description Redirects the browser to the issuer's authorization endpoint. The
+     *     state and code verifier travel in a short-lived HttpOnly cookie, which
+     *     the callback consumes.
+     *
+     *     This exists for the UI. The CLI runs the same flow itself against a
+     *     loopback redirect, because its callback is its own listener rather
+     *     than this server.
+     */
+    get: operations["oidcLogin"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/oidc/callback": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Complete the browser OIDC flow
+     * @description Exchanges the authorization code for an identity, verifies it, mints
+     *     the same short-lived token a login does, and sends the browser back to
+     *     the UI with the session cookie set.
+     */
+    get: operations["oidcCallback"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/acl": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read the policy document
+     * @description Returns the canonical current policy document and the entity tag a
+     *     conditional apply presents back. Before any apply, the policy is the
+     *     empty version-v1 document, which grants nothing to anyone.
+     *
+     *     With `GET /api/v1/tokens`, this answers "who can touch this server"
+     *     completely, which is why it requires the admin role rather than
+     *     viewer: the answer enumerates the security topology.
+     */
+    get: operations["getACLPolicy"];
+    /**
+     * Replace the policy document
+     * @description Replaces the whole policy atomically. A grant removed from the
+     *     document disappears on this apply, with no prune step, and applies to
+     *     the very next request.
+     *
+     *     The `If-Match` header must carry the tag of the document being
+     *     replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
+     *     than silently clobbering a concurrent apply. The document itself
+     *     carries no version field: it would go stale the moment the server
+     *     accepted it.
+     */
+    put: operations["applyACLPolicy"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/acl/init": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Mint the recovery token
+     * @description Mints the recovery token and returns it, exactly once: the response is
+     *     the only time the credential is reported, and a second init is refused
+     *     for as long as a recovery token exists.
+     *
+     *     Anonymous by design. It is permitted exactly while no recovery token
+     *     exists, which is a fresh server or one whose operator wrote the reset
+     *     file into the data directory and restarted — both host-level facts no
+     *     credential could add to.
+     */
+    post: operations["initACL"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/tokens": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List every credential
+     * @description Names every credential the server holds: static tokens, logins,
+     *     sessions and the recovery token, with when each was created and last
+     *     used. No credential itself appears, only the records of them.
+     *
+     *     With `GET /api/v1/acl`, this answers "who can touch this server"
+     *     completely.
+     */
+    get: operations["listTokens"];
+    put?: never;
+    /**
+     * Create a token for a principal
+     * @description Mints a static client token bound to the given principal and returns
+     *     the credential, this once. The principal need not be granted anything
+     *     yet: merge the grant, then hand over the token, in whichever order
+     *     onboarding runs.
+     */
+    post: operations["createToken"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/tokens/{id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The identifier of the token. */
+        id: components["parameters"]["TokenID"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Revoke a token
+     * @description Removes the token with the given identifier. Revocation is immediate:
+     *     the next request presenting the credential is refused.
+     */
+    delete: operations["deleteToken"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/system/health": {
     parameters: {
       query?: never;
@@ -639,6 +884,10 @@ export interface paths {
      *     whether the server can do its job — that is what `/api/v1/system/ready` reports —
      *     so it
      *     suits a supervisor deciding whether to restart the process.
+     *
+     *     Carries no security requirement even when authentication is enabled. A
+     *     supervisor must probe this without credentials or it cannot manage the
+     *     process, so no policy could ever really revoke it.
      */
     get: operations["getHealth"];
     put?: never;
@@ -668,6 +917,10 @@ export interface paths {
      *     fetched per request, so polling costs nothing and the answer is at most
      *     one reconcile interval plus the driver timeout old. Before the first pass
      *     completes, the server reports not ready.
+     *
+     *     Carries no security requirement even when authentication is enabled, for
+     *     the same reason the health endpoint does not: a supervisor must probe it
+     *     without credentials. These two routes are the whole anonymous surface.
      */
     get: operations["getReadiness"];
     put?: never;
@@ -690,9 +943,10 @@ export interface paths {
      * @description Returns the server's metrics in the Prometheus text format, ready to be
      *     scraped with no collector in between.
      *
-     *     Workload names appear as label values. Anything that can reach this port
-     *     can already run arbitrary workloads, so the names disclose nothing new —
-     *     but they are disclosed.
+     *     Workload names appear as label values. With authentication enabled this
+     *     requires the viewer role — prometheus carries the credential in an
+     *     `authorization` block — and without it, anything that can reach the port
+     *     reads them.
      *
      *     A scraper that addresses the server by hostname must have that hostname
      *     in the server's `hosts` configuration, or the request is refused with a
@@ -1794,6 +2048,239 @@ export interface components {
       error: string;
     };
     /**
+     * @description One of the three fixed roles. Viewer reads everything. Operator
+     *     drives workload, volume, service, variable and secret lifecycle.
+     *     Admin applies the policy and manages tokens. The roles are
+     *     hierarchical: admin covers operator, operator covers viewer.
+     * @enum {string}
+     */
+    Role: "viewer" | "operator" | "admin";
+    /**
+     * @description The access-control policy, applied whole. A grant absent from the
+     *     document is revoked on the apply, so the document in a git repository
+     *     is the complete answer to who holds access.
+     */
+    PolicySpec: {
+      /**
+       * @description The manifest schema version. Only "v1" is understood.
+       * @example v1
+       */
+      version: string;
+      oidc?: components["schemas"]["PolicyOIDC"];
+      /** @description Named collections of principals a grant references as one. */
+      groups?: components["schemas"]["PolicyGroup"][];
+      /**
+       * @description The bindings of roles to principals. An empty list grants nothing,
+       *     which is the state a fresh policy starts in.
+       */
+      grants?: components["schemas"]["PolicyGrant"][];
+    };
+    /**
+     * @description How an OIDC identity becomes a principal and groups. The claims are
+     *     read from the identity token a login exchanges.
+     */
+    PolicyOIDC: {
+      /**
+       * @description The claim whose value becomes the caller's principal name. By
+       *     convention "email", so a human principal is an email address and
+       *     cannot collide with a machine's bare name.
+       * @example email
+       */
+      principalClaim: string;
+      /**
+       * @description The claim holding the caller's group names. Omitted means the
+       *     identity carries no groups.
+       * @example groups
+       */
+      groupsClaim?: string;
+    };
+    /**
+     * @description A collection of principals defined in the policy itself, as opposed
+     *     to a group an identity provider asserts.
+     */
+    PolicyGroup: {
+      /**
+       * @description The name a grant references the group by, prefixed with "group:".
+       * @example infra
+       */
+      name: string;
+      /** @description The principals the group contains. */
+      members: string[];
+    };
+    /** @description A binding of one role to a set of principals or groups. */
+    PolicyGrant: {
+      /**
+       * @description The principals the grant applies to. An entry prefixed with
+       *     "group:" names a policy group or a group the identity provider
+       *     asserts.
+       * @example [
+       *       "david@dsb.dev",
+       *       "group:infra"
+       *     ]
+       */
+      principals: string[];
+      role: components["schemas"]["Role"];
+    };
+    /** @description The body returned when the policy document is read. */
+    GetACLPolicyResult: {
+      policy: components["schemas"]["PolicySpec"];
+    };
+    /** @description The body returned when the policy document is replaced. */
+    ApplyACLPolicyResult: {
+      policy: components["schemas"]["PolicySpec"];
+    };
+    /**
+     * @description The body sent to mint the recovery token, which has nothing in it
+     *     yet. It exists for the same reasons the rekey body does.
+     */
+    InitACLRequest: Record<string, never>;
+    /** @description The body returned by the one init that succeeds. */
+    InitACLResult: {
+      /**
+       * @description The recovery token. Shown this once and never stored, so losing
+       *     it means the reset file.
+       */
+      credential: string;
+    };
+    /** @description The body returned when the caller asks who it is. */
+    GetAuthResult: {
+      /** @description Whether authentication is enabled on this server. */
+      enabled: boolean;
+      /**
+       * @description The name the caller authenticated as. "anonymous" when
+       *     authentication is disabled, and empty for the recovery token,
+       *     which authenticates as no principal.
+       */
+      principal: string;
+      /**
+       * @description The role the policy grants the caller, empty when it grants
+       *     nothing. Admin for the recovery token and for every caller when
+       *     authentication is disabled.
+       */
+      role: string;
+      /** @description The groups asserted for the caller when its token was minted. */
+      groups: string[];
+      /** @description Whether the caller authenticated with the recovery token. */
+      recovery: boolean;
+    };
+    /**
+     * @description The exchange a login performs. Exactly one of `idToken` and `token`
+     *     must be present; which one it is selects the exchange.
+     */
+    LoginRequest: {
+      /**
+       * @description A raw OIDC identity token, verified against the configured
+       *     issuer. The principal and groups are derived from its claims as
+       *     the policy maps them.
+       */
+      idToken?: string;
+      /**
+       * @description An existing client token, exchanged for a session bound to the
+       *     same principal. This is how the browser UI trades a pasted
+       *     standing credential for one that expires on its own.
+       */
+      token?: string;
+      /**
+       * @description Also carry the minted credential as an HttpOnly session cookie.
+       *     The browser UI sets this. The CLI does not.
+       * @default false
+       */
+      cookie: boolean;
+    };
+    /** @description The body returned by a successful login. */
+    LoginResult: {
+      /** @description The minted token. Shown this once and never stored. */
+      credential: string;
+      /** @description The principal the token is bound to. */
+      principal: string;
+      /**
+       * Format: date-time
+       * @description When the token stops authenticating.
+       */
+      expiresAt: string;
+    };
+    /**
+     * @description The body returned when a credential is revoked, which has nothing in
+     *     it yet, for the same reason deleting a volume returns one.
+     */
+    LogoutResult: Record<string, never>;
+    /** @description The body returned when the OIDC configuration is read. */
+    GetOIDCResult: {
+      /** @description The issuer the authorization code flow runs against. */
+      issuer: string;
+      /** @description The client identifier registered with the issuer. */
+      clientId: string;
+    };
+    /**
+     * @description The record of a credential. The credential itself is reported once,
+     *     by the create or login that minted it, and never again.
+     */
+    Token: {
+      /** @description The identifier the server assigns, which a delete names. */
+      id: string;
+      /**
+       * @description Whether this is the recovery token or a client token.
+       * @enum {string}
+       */
+      type: "recovery" | "client";
+      /**
+       * @description What minted the token.
+       * @enum {string}
+       */
+      source: "init" | "static" | "oidc" | "session";
+      /**
+       * @description The principal the token authenticates as. Empty for the recovery
+       *     token.
+       */
+      principal: string;
+      /**
+       * Format: date-time
+       * @description When the token stops authenticating. Omitted when it does not
+       *     expire.
+       */
+      expiresAt?: string;
+      /**
+       * Format: date-time
+       * @description When the token was created.
+       */
+      createdAt: string;
+      /**
+       * Format: date-time
+       * @description When the token last authenticated a request, recorded at most
+       *     once a minute. Omitted when it never has.
+       */
+      lastUsedAt?: string;
+    };
+    /**
+     * @description The body returned when tokens are listed.
+     *
+     *     An object rather than a bare array, for the same reason listing
+     *     volumes returns one.
+     */
+    ListTokensResult: {
+      /** @description The credentials the server holds, newest first. */
+      tokens: components["schemas"]["Token"][];
+    };
+    /** @description The body a token create carries. */
+    CreateTokenRequest: {
+      /**
+       * @description The principal the token authenticates as. By convention humans
+       *     are emails and machines are bare names.
+       */
+      principal: string;
+    };
+    /** @description The body returned when a token is created. */
+    CreateTokenResult: {
+      /** @description The token itself. Shown this once and never stored. */
+      credential: string;
+      token: components["schemas"]["Token"];
+    };
+    /**
+     * @description The body returned when a token is revoked, which has nothing in it
+     *     yet, for the same reason deleting a volume returns one.
+     */
+    DeleteTokenResult: Record<string, never>;
+    /**
      * @description Key-value pairs attached to a workload, volume, service, secret or
      *     variable, which the list query filter matches against.
      *
@@ -2093,6 +2580,35 @@ export interface components {
         "application/json": components["schemas"]["ErrorResponse"];
       };
     };
+    /** @description The request presented no valid credential. */
+    Unauthorized: {
+      headers: {
+        /** @description The scheme a credential should be presented under. */
+        "WWW-Authenticate"?: string;
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description The caller's role does not cover this operation. */
+    Forbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description The policy changed since it was read. Read it again and re-apply. */
+    PreconditionFailed: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["ErrorResponse"];
+      };
+    };
   };
   parameters: {
     /** @description The name that identifies the workload. */
@@ -2105,6 +2621,16 @@ export interface components {
     SecretName: string;
     /** @description The name that identifies the variable. */
     VariableName: string;
+    /** @description The identifier of the token. */
+    TokenID: string;
+    /**
+     * @description The tag of the policy document being replaced, as read from the ETag
+     *     header of `GET /api/v1/acl`. Required despite what the schema says —
+     *     an apply without it is refused with a 400 — but declared optional so
+     *     the absence is answered in the API's own error shape rather than the
+     *     router's.
+     */
+    IfMatch: string;
   };
   requestBodies: never;
   headers: never;
@@ -3128,6 +3654,363 @@ export interface operations {
           "application/json": components["schemas"]["RekeyResult"];
         };
       };
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  getAuth: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The caller's identity. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GetAuthResult"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  login: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["LoginRequest"];
+      };
+    };
+    responses: {
+      /** @description The minted credential and the token that records it. */
+      200: {
+        headers: {
+          /** @description The session cookie, present when the request asked for one. */
+          "Set-Cookie"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LoginResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  logout: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /**
+       * @description The credential was revoked. The response clears the session cookie
+       *     when a session authenticated the request.
+       *
+       *     The body is an object with nothing in it yet, for the same reason
+       *     deleting a volume returns one.
+       */
+      200: {
+        headers: {
+          /** @description Clears the session cookie, when one authenticated. */
+          "Set-Cookie"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["LogoutResult"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      /** @description The recovery token asked to revoke itself. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  getOIDC: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The OIDC configuration a login needs. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GetOIDCResult"];
+        };
+      };
+      404: components["responses"]["NotFound"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  oidcLogin: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Sent to the issuer's authorization endpoint. */
+      302: {
+        headers: {
+          /** @description The issuer's authorization endpoint. */
+          Location?: string;
+          /** @description The state and verifier the callback checks. */
+          "Set-Cookie"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      404: components["responses"]["NotFound"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  oidcCallback: {
+    parameters: {
+      query?: {
+        /** @description The authorization code the issuer redirected back with. */
+        code?: string;
+        /** @description The state echoed back by the issuer. */
+        state?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: {
+        /**
+         * @description The state and code verifier the login redirect set, which proves
+         *     the callback answers a flow this server started.
+         */
+        takt_oidc?: string;
+      };
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Sent back to the UI, signed in. */
+      302: {
+        headers: {
+          /** @description The UI page to land on. */
+          Location?: string;
+          /** @description The session cookie. */
+          "Set-Cookie"?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthorized"];
+      404: components["responses"]["NotFound"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  getACLPolicy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The current policy document. */
+      200: {
+        headers: {
+          /**
+           * @description The tag identifying this exact document, derived from it, so a
+           *     pipeline reading twice sees a stable value.
+           */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GetACLPolicyResult"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  applyACLPolicy: {
+    parameters: {
+      query?: never;
+      header?: {
+        /**
+         * @description The tag of the policy document being replaced, as read from the ETag
+         *     header of `GET /api/v1/acl`. Required despite what the schema says —
+         *     an apply without it is refused with a 400 — but declared optional so
+         *     the absence is answered in the API's own error shape rather than the
+         *     router's.
+         */
+        "If-Match"?: components["parameters"]["IfMatch"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PolicySpec"];
+      };
+    };
+    responses: {
+      /** @description The policy was replaced. */
+      200: {
+        headers: {
+          /** @description The tag of the document as applied. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ApplyACLPolicyResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      412: components["responses"]["PreconditionFailed"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  initACL: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InitACLRequest"];
+      };
+    };
+    responses: {
+      /** @description The recovery token, shown this once. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InitACLResult"];
+        };
+      };
+      /** @description A recovery token already exists. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  listTokens: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The credentials the server holds. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ListTokensResult"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  createToken: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateTokenRequest"];
+      };
+    };
+    responses: {
+      /** @description The token was created. The credential is shown this once. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CreateTokenResult"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  deleteToken: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The identifier of the token. */
+        id: components["parameters"]["TokenID"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /**
+       * @description The token was revoked.
+       *
+       *     The body is an object with nothing in it yet, for the same reason
+       *     deleting a volume returns one.
+       */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DeleteTokenResult"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
   };

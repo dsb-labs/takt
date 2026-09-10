@@ -54,14 +54,6 @@ func NewVolumeAPI(config VolumeAPIConfig) *VolumeAPI {
 	}
 }
 
-// internalError logs why a request failed and returns the message the client is told
-// instead.
-func (a *VolumeAPI) internalError(operation string, err error) string {
-	a.logger.With("error", err, "operation", operation).Error("failed to serve request")
-
-	return "failed to " + operation
-}
-
 // ApplyVolume stores the volume the request describes, creating it when the
 // name is new and updating it when it is not, answering 201 or 200 to report
 // which happened.
@@ -85,7 +77,7 @@ func (a *VolumeAPI) ApplyVolume(ctx context.Context, request api.ApplyVolumeRequ
 		}, nil
 	case err != nil:
 		return api.ApplyVolume500JSONResponse{
-			Error: a.internalError("apply volume", err),
+			Error: internalError(a.logger, "apply volume", err),
 		}, nil
 	}
 
@@ -106,7 +98,7 @@ func (a *VolumeAPI) GetVolume(ctx context.Context, request api.GetVolumeRequestO
 		}, nil
 	case err != nil:
 		return api.GetVolume500JSONResponse{
-			Error: a.internalError("get volume", err),
+			Error: internalError(a.logger, "get volume", err),
 		}, nil
 	}
 
@@ -129,7 +121,7 @@ func (a *VolumeAPI) ListVolumes(ctx context.Context, request api.ListVolumesRequ
 		}, nil
 	case err != nil:
 		return api.ListVolumes500JSONResponse{
-			Error: a.internalError("list volumes", err),
+			Error: internalError(a.logger, "list volumes", err),
 		}, nil
 	}
 
@@ -161,7 +153,7 @@ func (a *VolumeAPI) DeleteVolume(ctx context.Context, request api.DeleteVolumeRe
 		return api.DeleteVolume409JSONResponse{Error: err.Error()}, nil
 	case err != nil:
 		return api.DeleteVolume500JSONResponse{
-			Error: a.internalError("delete volume", err),
+			Error: internalError(a.logger, "delete volume", err),
 		}, nil
 	}
 

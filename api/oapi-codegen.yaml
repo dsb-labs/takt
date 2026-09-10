@@ -8,3 +8,9 @@ generate:
   client: true
 output-options:
   name-normalizer: ToCamelCaseWithInitialisms
+# The generated handler wrappers put each operation's required scopes into the
+# request context, which is how the authorization middleware learns the role an
+# operation needs without a second copy of the OpenAPI document's security
+# declarations.
+compatibility:
+  enable-auth-scopes-on-context: true

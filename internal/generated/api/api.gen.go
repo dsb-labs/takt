@@ -20,6 +20,11 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+const (
+	BearerScopes  bearerContextKey  = "bearer.Scopes"
+	SessionScopes sessionContextKey = "session.Scopes"
+)
+
 // Defines values for ContainerSpecNetworkMode.
 const (
 	ContainerSpecNetworkModeHost ContainerSpecNetworkMode = "host"
@@ -215,6 +220,27 @@ func (e RestartPolicy) Valid() bool {
 	}
 }
 
+// Defines values for Role.
+const (
+	RoleAdmin    Role = "admin"
+	RoleOperator Role = "operator"
+	RoleViewer   Role = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the Role enum.
+func (e Role) Valid() bool {
+	switch e {
+	case RoleAdmin:
+		return true
+	case RoleOperator:
+		return true
+	case RoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Runtime.
 const (
 	Container Runtime = "container"
@@ -245,6 +271,48 @@ func (e ServiceTargetProtocol) Valid() bool {
 	case ServiceTargetProtocolTCP:
 		return true
 	case ServiceTargetProtocolUDP:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TokenSource.
+const (
+	TokenSourceInit    TokenSource = "init"
+	TokenSourceOIDC    TokenSource = "oidc"
+	TokenSourceSession TokenSource = "session"
+	TokenSourceStatic  TokenSource = "static"
+)
+
+// Valid indicates whether the value is a known member of the TokenSource enum.
+func (e TokenSource) Valid() bool {
+	switch e {
+	case TokenSourceInit:
+		return true
+	case TokenSourceOIDC:
+		return true
+	case TokenSourceSession:
+		return true
+	case TokenSourceStatic:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TokenType.
+const (
+	TokenTypeClient   TokenType = "client"
+	TokenTypeRecovery TokenType = "recovery"
+)
+
+// Valid indicates whether the value is a known member of the TokenType enum.
+func (e TokenType) Valid() bool {
+	switch e {
+	case TokenTypeClient:
+		return true
+	case TokenTypeRecovery:
 		return true
 	default:
 		return false
@@ -303,6 +371,14 @@ func (e WorkloadState) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// ApplyACLPolicyResult The body returned when the policy document is replaced.
+type ApplyACLPolicyResult struct {
+	// Policy The access-control policy, applied whole. A grant absent from the
+	// document is revoked on the apply, so the document in a git repository
+	// is the complete answer to who holds access.
+	Policy PolicySpec `json:"policy"`
 }
 
 // ApplyServiceResult The body returned when a service is applied.
@@ -438,6 +514,23 @@ type ContainerSpecNetworkMode string
 // container in a namespace of its own.
 type ContainerSpecPidMode string
 
+// CreateTokenRequest The body a token create carries.
+type CreateTokenRequest struct {
+	// Principal The principal the token authenticates as. By convention humans
+	// are emails and machines are bare names.
+	Principal string `json:"principal"`
+}
+
+// CreateTokenResult The body returned when a token is created.
+type CreateTokenResult struct {
+	// Credential The token itself. Shown this once and never stored.
+	Credential string `json:"credential"`
+
+	// Token The record of a credential. The credential itself is reported once,
+	// by the create or login that minted it, and never again.
+	Token Token `json:"token"`
+}
+
 // DeleteSecretResult The body returned when a secret is deleted, which has nothing in it yet, for
 // the same reason deleting a volume returns one.
 type DeleteSecretResult = map[string]interface{}
@@ -445,6 +538,10 @@ type DeleteSecretResult = map[string]interface{}
 // DeleteServiceResult The body returned when a service is deleted, which has nothing in it yet.
 // It exists for the reasons DeleteVolumeResult does.
 type DeleteServiceResult = map[string]interface{}
+
+// DeleteTokenResult The body returned when a token is revoked, which has nothing in it
+// yet, for the same reason deleting a volume returns one.
+type DeleteTokenResult = map[string]interface{}
 
 // DeleteVariableResult The body returned when a variable is deleted, which has nothing in it yet, for
 // the same reason deleting a secret returns one.
@@ -543,6 +640,36 @@ type ExecSpec struct {
 	Command []string `json:"command"`
 }
 
+// GetACLPolicyResult The body returned when the policy document is read.
+type GetACLPolicyResult struct {
+	// Policy The access-control policy, applied whole. A grant absent from the
+	// document is revoked on the apply, so the document in a git repository
+	// is the complete answer to who holds access.
+	Policy PolicySpec `json:"policy"`
+}
+
+// GetAuthResult The body returned when the caller asks who it is.
+type GetAuthResult struct {
+	// Enabled Whether authentication is enabled on this server.
+	Enabled bool `json:"enabled"`
+
+	// Groups The groups asserted for the caller when its token was minted.
+	Groups []string `json:"groups"`
+
+	// Principal The name the caller authenticated as. "anonymous" when
+	// authentication is disabled, and empty for the recovery token,
+	// which authenticates as no principal.
+	Principal string `json:"principal"`
+
+	// Recovery Whether the caller authenticated with the recovery token.
+	Recovery bool `json:"recovery"`
+
+	// Role The role the policy grants the caller, empty when it grants
+	// nothing. Admin for the recovery token and for every caller when
+	// authentication is disabled.
+	Role string `json:"role"`
+}
+
 // GetHealthResult The body returned when the server is alive.
 type GetHealthResult struct {
 	// Status Always "ok". The response arriving is the answer.
@@ -551,6 +678,15 @@ type GetHealthResult struct {
 
 // GetHealthResultStatus Always "ok". The response arriving is the answer.
 type GetHealthResultStatus string
+
+// GetOIDCResult The body returned when the OIDC configuration is read.
+type GetOIDCResult struct {
+	// ClientID The client identifier registered with the issuer.
+	ClientID string `json:"clientId"`
+
+	// Issuer The issuer the authorization code flow runs against.
+	Issuer string `json:"issuer"`
+}
 
 // GetReadinessResult Whether the server can do its job, with the reasons it cannot when it
 // cannot.
@@ -671,6 +807,17 @@ type HealthSpec struct {
 // unhealthy once enough consecutive checks have failed to exhaust its retries.
 type HealthStatus string
 
+// InitACLRequest The body sent to mint the recovery token, which has nothing in it
+// yet. It exists for the same reasons the rekey body does.
+type InitACLRequest = map[string]interface{}
+
+// InitACLResult The body returned by the one init that succeeds.
+type InitACLResult struct {
+	// Credential The recovery token. Shown this once and never stored, so losing
+	// it means the reset file.
+	Credential string `json:"credential"`
+}
+
 // Instance A single unit of work the driver is running for a workload.
 type Instance struct {
 	// ExitCode The exit code. Absent while the instance is still running, since it
@@ -767,6 +914,15 @@ type ListServicesResult struct {
 	Services []Service `json:"services"`
 }
 
+// ListTokensResult The body returned when tokens are listed.
+//
+// An object rather than a bare array, for the same reason listing
+// volumes returns one.
+type ListTokensResult struct {
+	// Tokens The credentials the server holds, newest first.
+	Tokens []Token `json:"tokens"`
+}
+
 // ListVariablesResult The body returned when variables are listed.
 //
 // An object rather than a bare array, for the same reason listing volumes
@@ -793,6 +949,40 @@ type ListWorkloadsResult struct {
 	// Workloads The workloads matching the request.
 	Workloads []Workload `json:"workloads"`
 }
+
+// LoginRequest The exchange a login performs. Exactly one of `idToken` and `token`
+// must be present; which one it is selects the exchange.
+type LoginRequest struct {
+	// Cookie Also carry the minted credential as an HttpOnly session cookie.
+	// The browser UI sets this. The CLI does not.
+	Cookie *bool `json:"cookie,omitempty"`
+
+	// IDToken A raw OIDC identity token, verified against the configured
+	// issuer. The principal and groups are derived from its claims as
+	// the policy maps them.
+	IDToken *string `json:"idToken,omitempty"`
+
+	// Token An existing client token, exchanged for a session bound to the
+	// same principal. This is how the browser UI trades a pasted
+	// standing credential for one that expires on its own.
+	Token *string `json:"token,omitempty"`
+}
+
+// LoginResult The body returned by a successful login.
+type LoginResult struct {
+	// Credential The minted token. Shown this once and never stored.
+	Credential string `json:"credential"`
+
+	// ExpiresAt When the token stops authenticating.
+	ExpiresAt time.Time `json:"expiresAt"`
+
+	// Principal The principal the token is bound to.
+	Principal string `json:"principal"`
+}
+
+// LogoutResult The body returned when a credential is revoked, which has nothing in
+// it yet, for the same reason deleting a volume returns one.
+type LogoutResult = map[string]interface{}
 
 // MountSignal The signal to send the workload when a mounted secret or variable changes,
 // rather than replacing its instance.
@@ -821,6 +1011,75 @@ type MountSignal string
 //
 // Either way the workload runs one instance at a time.
 type OverlapPolicy string
+
+// PolicyGrant A binding of one role to a set of principals or groups.
+type PolicyGrant struct {
+	// Principals The principals the grant applies to. An entry prefixed with
+	// "group:" names a policy group or a group the identity provider
+	// asserts.
+	//
+	//
+	// Examples: ["david@dsb.dev","group:infra"]
+	Principals []string `json:"principals"`
+
+	// Role One of the three fixed roles. Viewer reads everything. Operator
+	// drives workload, volume, service, variable and secret lifecycle.
+	// Admin applies the policy and manages tokens. The roles are
+	// hierarchical: admin covers operator, operator covers viewer.
+	Role Role `json:"role"`
+}
+
+// PolicyGroup A collection of principals defined in the policy itself, as opposed
+// to a group an identity provider asserts.
+type PolicyGroup struct {
+	// Members The principals the group contains.
+	Members []string `json:"members"`
+
+	// Name The name a grant references the group by, prefixed with "group:".
+	//
+	// Examples: infra
+	Name string `json:"name"`
+}
+
+// PolicyOIDC How an OIDC identity becomes a principal and groups. The claims are
+// read from the identity token a login exchanges.
+type PolicyOIDC struct {
+	// GroupsClaim The claim holding the caller's group names. Omitted means the
+	// identity carries no groups.
+	//
+	//
+	// Examples: groups
+	GroupsClaim *string `json:"groupsClaim,omitempty"`
+
+	// PrincipalClaim The claim whose value becomes the caller's principal name. By
+	// convention "email", so a human principal is an email address and
+	// cannot collide with a machine's bare name.
+	//
+	//
+	// Examples: email
+	PrincipalClaim string `json:"principalClaim"`
+}
+
+// PolicySpec The access-control policy, applied whole. A grant absent from the
+// document is revoked on the apply, so the document in a git repository
+// is the complete answer to who holds access.
+type PolicySpec struct {
+	// Grants The bindings of roles to principals. An empty list grants nothing,
+	// which is the state a fresh policy starts in.
+	Grants *[]PolicyGrant `json:"grants,omitempty"`
+
+	// Groups Named collections of principals a grant references as one.
+	Groups *[]PolicyGroup `json:"groups,omitempty"`
+
+	// Oidc How an OIDC identity becomes a principal and groups. The claims are
+	// read from the identity token a login exchanges.
+	Oidc *PolicyOIDC `json:"oidc,omitempty"`
+
+	// Version The manifest schema version. Only "v1" is understood.
+	//
+	// Examples: v1
+	Version string `json:"version"`
+}
 
 // PortMapping A port to publish. The `to` port is the one the workload listens on inside
 // its runtime. The `from` port is the one on the host that reaches it.
@@ -1046,6 +1305,12 @@ type RestartWorkloadResult struct {
 	// that runs it.
 	Workload Workload `json:"workload"`
 }
+
+// Role One of the three fixed roles. Viewer reads everything. Operator
+// drives workload, volume, service, variable and secret lifecycle.
+// Admin applies the policy and manages tokens. The roles are
+// hierarchical: admin covers operator, operator covers viewer.
+type Role string
 
 // Runtime Which runtime block the workload's specification names.
 type Runtime string
@@ -1324,6 +1589,40 @@ type StopWorkloadResult struct {
 	// that runs it.
 	Workload Workload `json:"workload"`
 }
+
+// Token The record of a credential. The credential itself is reported once,
+// by the create or login that minted it, and never again.
+type Token struct {
+	// CreatedAt When the token was created.
+	CreatedAt time.Time `json:"createdAt"`
+
+	// ExpiresAt When the token stops authenticating. Omitted when it does not
+	// expire.
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+
+	// ID The identifier the server assigns, which a delete names.
+	ID string `json:"id"`
+
+	// LastUsedAt When the token last authenticated a request, recorded at most
+	// once a minute. Omitted when it never has.
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+
+	// Principal The principal the token authenticates as. Empty for the recovery
+	// token.
+	Principal string `json:"principal"`
+
+	// Source What minted the token.
+	Source TokenSource `json:"source"`
+
+	// Type Whether this is the recovery token or a client token.
+	Type TokenType `json:"type"`
+}
+
+// TokenSource What minted the token.
+type TokenSource string
+
+// TokenType Whether this is the recovery token or a client token.
+type TokenType string
 
 // Variable A variable, together with its value and the workloads currently reading it.
 //
@@ -1872,11 +2171,17 @@ type WorkloadSpec struct {
 // this state still learns that part of it does not.
 type WorkloadState string
 
+// IfMatch defines model for IfMatch.
+type IfMatch = string
+
 // SecretName defines model for SecretName.
 type SecretName = string
 
 // ServiceName defines model for ServiceName.
 type ServiceName = string
+
+// TokenID defines model for TokenID.
+type TokenID = string
 
 // VariableName defines model for VariableName.
 type VariableName = string
@@ -1890,11 +2195,36 @@ type WorkloadName = string
 // BadRequest The body returned for any unsuccessful request.
 type BadRequest = ErrorResponse
 
+// Forbidden The body returned for any unsuccessful request.
+type Forbidden = ErrorResponse
+
 // InternalServerError The body returned for any unsuccessful request.
 type InternalServerError = ErrorResponse
 
 // NotFound The body returned for any unsuccessful request.
 type NotFound = ErrorResponse
+
+// PreconditionFailed The body returned for any unsuccessful request.
+type PreconditionFailed = ErrorResponse
+
+// Unauthorized The body returned for any unsuccessful request.
+type Unauthorized = ErrorResponse
+
+// bearerContextKey is the context key for bearer security scheme
+type bearerContextKey string
+
+// sessionContextKey is the context key for session security scheme
+type sessionContextKey string
+
+// ApplyACLPolicyParams defines parameters for ApplyACLPolicy.
+type ApplyACLPolicyParams struct {
+	// IfMatch The tag of the policy document being replaced, as read from the ETag
+	// header of `GET /api/v1/acl`. Required despite what the schema says —
+	// an apply without it is refused with a 400 — but declared optional so
+	// the absence is answered in the API's own error shape rather than the
+	// router's.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
+}
 
 // GetBackupParams defines parameters for GetBackup.
 type GetBackupParams struct {
@@ -1913,6 +2243,19 @@ type GetBackupParams struct {
 	// An operator who set `secrets.keys` to somewhere they already back up
 	// needs none of this. Setting it is the better answer.
 	IncludeKeys *bool `form:"includeKeys,omitempty" json:"includeKeys,omitempty"`
+}
+
+// OidcCallbackParams defines parameters for OidcCallback.
+type OidcCallbackParams struct {
+	// Code The authorization code the issuer redirected back with.
+	Code *string `form:"code,omitempty" json:"code,omitempty"`
+
+	// State The state echoed back by the issuer.
+	State *string `form:"state,omitempty" json:"state,omitempty"`
+
+	// TaktOidc The state and code verifier the login redirect set, which proves
+	// the callback answers a flow this server started.
+	TaktOidc *string `form:"takt_oidc,omitempty" json:"takt_oidc,omitempty"`
 }
 
 // ListSecretsParams defines parameters for ListSecrets.
@@ -2039,14 +2382,26 @@ type GetWorkloadLogsParams struct {
 	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
 }
 
+// ApplyACLPolicyJSONRequestBody defines body for ApplyACLPolicy for application/json ContentType.
+type ApplyACLPolicyJSONRequestBody = PolicySpec
+
+// InitACLJSONRequestBody defines body for InitACL for application/json ContentType.
+type InitACLJSONRequestBody = InitACLRequest
+
 // RekeyJSONRequestBody defines body for Rekey for application/json ContentType.
 type RekeyJSONRequestBody = RekeyRequest
+
+// LoginJSONRequestBody defines body for Login for application/json ContentType.
+type LoginJSONRequestBody = LoginRequest
 
 // SetSecretJSONRequestBody defines body for SetSecret for application/json ContentType.
 type SetSecretJSONRequestBody = SecretSpec
 
 // ApplyServiceJSONRequestBody defines body for ApplyService for application/json ContentType.
 type ApplyServiceJSONRequestBody = ServiceSpec
+
+// CreateTokenJSONRequestBody defines body for CreateToken for application/json ContentType.
+type CreateTokenJSONRequestBody = CreateTokenRequest
 
 // SetVariableJSONRequestBody defines body for SetVariable for application/json ContentType.
 type SetVariableJSONRequestBody = VariableSpec
@@ -2143,6 +2498,85 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// GetACLPolicy Read the policy document
+	//
+	// Returns the canonical current policy document and the entity tag a
+	// conditional apply presents back. Before any apply, the policy is the
+	// empty version-v1 document, which grants nothing to anyone.
+	//
+	// With `GET /api/v1/tokens`, this answers "who can touch this server"
+	// completely, which is why it requires the admin role rather than
+	// viewer: the answer enumerates the security topology.
+	//
+	// Corresponds with GET /api/v1/acl (the `GetACLPolicy` operationId).
+	GetACLPolicy(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApplyACLPolicyWithBody Replace the policy document
+	//
+	// Replaces the whole policy atomically. A grant removed from the
+	// document disappears on this apply, with no prune step, and applies to
+	// the very next request.
+	//
+	// The `If-Match` header must carry the tag of the document being
+	// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
+	// than silently clobbering a concurrent apply. The document itself
+	// carries no version field: it would go stale the moment the server
+	// accepted it.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/v1/acl (the `ApplyACLPolicy` operationId).
+	ApplyACLPolicyWithBody(ctx context.Context, params *ApplyACLPolicyParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApplyACLPolicy Replace the policy document
+	//
+	// Replaces the whole policy atomically. A grant removed from the
+	// document disappears on this apply, with no prune step, and applies to
+	// the very next request.
+	//
+	// The `If-Match` header must carry the tag of the document being
+	// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
+	// than silently clobbering a concurrent apply. The document itself
+	// carries no version field: it would go stale the moment the server
+	// accepted it.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/v1/acl (the `ApplyACLPolicy` operationId).
+	ApplyACLPolicy(ctx context.Context, params *ApplyACLPolicyParams, body ApplyACLPolicyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InitACLWithBody Mint the recovery token
+	//
+	// Mints the recovery token and returns it, exactly once: the response is
+	// the only time the credential is reported, and a second init is refused
+	// for as long as a recovery token exists.
+	//
+	// Anonymous by design. It is permitted exactly while no recovery token
+	// exists, which is a fresh server or one whose operator wrote the reset
+	// file into the data directory and restarted — both host-level facts no
+	// credential could add to.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/acl/init (the `InitACL` operationId).
+	InitACLWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// InitACL Mint the recovery token
+	//
+	// Mints the recovery token and returns it, exactly once: the response is
+	// the only time the credential is reported, and a second init is refused
+	// for as long as a recovery token exists.
+	//
+	// Anonymous by design. It is permitted exactly while no recovery token
+	// exists, which is a fresh server or one whose operator wrote the reset
+	// file into the data directory and restarted — both host-level facts no
+	// credential could add to.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/acl/init (the `InitACL` operationId).
+	InitACL(ctx context.Context, body InitACLJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetBackup Download a backup of the node
 	//
 	// Returns a zip archive holding a consistent snapshot of takt's database,
@@ -2228,6 +2662,105 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
 	Rekey(ctx context.Context, body RekeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// Logout Revoke the credential that authenticated this request
+	//
+	// Revokes whatever authenticated the request: an OIDC-minted token, a UI
+	// session, or a static token retiring itself. Self-revocation is always
+	// safe, so this needs no role.
+	//
+	// The one refusal is the recovery token, whose revocation path is
+	// deliberately host-level: the reset file in the data directory.
+	//
+	// Corresponds with DELETE /api/v1/auth (the `Logout` operationId).
+	Logout(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetAuth Report who the caller is
+	//
+	// Returns the caller's principal, role and groups. It requires
+	// authentication but no role, so a principal holding a token with no
+	// grants yet can see exactly that state.
+	//
+	// When authentication is disabled the caller is reported as anonymous
+	// with the admin role, which is the truth of that mode: anything that
+	// reaches the listener holds the whole API.
+	//
+	// Corresponds with GET /api/v1/auth (the `GetAuth` operationId).
+	GetAuth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// LoginWithBody Exchange an identity for a short-lived token
+	//
+	// Mints a short-lived client token. The exchange accepts either an OIDC
+	// identity token, verified against the configured issuer, or an existing
+	// client token, which is how the browser UI trades the standing
+	// credential pasted into it for a session that expires on its own.
+	//
+	// With `cookie` set, the response also carries the credential as an
+	// HttpOnly session cookie, which is what the UI stores. The credential
+	// in the body is the same one either way.
+	//
+	// Anonymous by necessity — a login is how a caller stops being
+	// anonymous — but nothing is minted without a verified identity.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/auth (the `Login` operationId).
+	LoginWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// Login Exchange an identity for a short-lived token
+	//
+	// Mints a short-lived client token. The exchange accepts either an OIDC
+	// identity token, verified against the configured issuer, or an existing
+	// client token, which is how the browser UI trades the standing
+	// credential pasted into it for a session that expires on its own.
+	//
+	// With `cookie` set, the response also carries the credential as an
+	// HttpOnly session cookie, which is what the UI stores. The credential
+	// in the body is the same one either way.
+	//
+	// Anonymous by necessity — a login is how a caller stops being
+	// anonymous — but nothing is minted without a verified identity.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/auth (the `Login` operationId).
+	Login(ctx context.Context, body LoginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetOIDC Report how to log in with OIDC
+	//
+	// Returns the issuer and client identifier `takt auth login` runs the
+	// authorization code flow against. Anonymous, because a caller reads it
+	// precisely when it has no credential yet — and it discloses nothing a
+	// login page would not.
+	//
+	// Answers 404 when the server carries no OIDC configuration, which is
+	// how the CLI and the UI discover that a pasted token is the only way
+	// in.
+	//
+	// Corresponds with GET /api/v1/auth/oidc (the `GetOIDC` operationId).
+	GetOIDC(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// OidcCallback Complete the browser OIDC flow
+	//
+	// Exchanges the authorization code for an identity, verifies it, mints
+	// the same short-lived token a login does, and sends the browser back to
+	// the UI with the session cookie set.
+	//
+	// Corresponds with GET /api/v1/auth/oidc/callback (the `OidcCallback` operationId).
+	OidcCallback(ctx context.Context, params *OidcCallbackParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// OidcLogin Start the browser OIDC flow
+	//
+	// Redirects the browser to the issuer's authorization endpoint. The
+	// state and code verifier travel in a short-lived HttpOnly cookie, which
+	// the callback consumes.
+	//
+	// This exists for the UI. The CLI runs the same flow itself against a
+	// loopback redirect, because its callback is its own listener rather
+	// than this server.
+	//
+	// Corresponds with GET /api/v1/auth/oidc/login (the `OidcLogin` operationId).
+	OidcLogin(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListSecrets List secrets
 	//
@@ -2378,6 +2911,10 @@ type ClientInterface interface {
 	// so it
 	// suits a supervisor deciding whether to restart the process.
 	//
+	// Carries no security requirement even when authentication is enabled. A
+	// supervisor must probe this without credentials or it cannot manage the
+	// process, so no policy could ever really revoke it.
+	//
 	// Corresponds with GET /api/v1/system/health (the `GetHealth` operationId).
 	GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -2386,9 +2923,10 @@ type ClientInterface interface {
 	// Returns the server's metrics in the Prometheus text format, ready to be
 	// scraped with no collector in between.
 	//
-	// Workload names appear as label values. Anything that can reach this port
-	// can already run arbitrary workloads, so the names disclose nothing new —
-	// but they are disclosed.
+	// Workload names appear as label values. With authentication enabled this
+	// requires the viewer role — prometheus carries the credential in an
+	// `authorization` block — and without it, anything that can reach the port
+	// reads them.
 	//
 	// A scraper that addresses the server by hostname must have that hostname
 	// in the server's `hosts` configuration, or the request is refused with a
@@ -2434,8 +2972,56 @@ type ClientInterface interface {
 	// one reconcile interval plus the driver timeout old. Before the first pass
 	// completes, the server reports not ready.
 	//
+	// Carries no security requirement even when authentication is enabled, for
+	// the same reason the health endpoint does not: a supervisor must probe it
+	// without credentials. These two routes are the whole anonymous surface.
+	//
 	// Corresponds with GET /api/v1/system/ready (the `GetReadiness` operationId).
 	GetReadiness(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListTokens List every credential
+	//
+	// Names every credential the server holds: static tokens, logins,
+	// sessions and the recovery token, with when each was created and last
+	// used. No credential itself appears, only the records of them.
+	//
+	// With `GET /api/v1/acl`, this answers "who can touch this server"
+	// completely.
+	//
+	// Corresponds with GET /api/v1/tokens (the `ListTokens` operationId).
+	ListTokens(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateTokenWithBody Create a token for a principal
+	//
+	// Mints a static client token bound to the given principal and returns
+	// the credential, this once. The principal need not be granted anything
+	// yet: merge the grant, then hand over the token, in whichever order
+	// onboarding runs.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/tokens (the `CreateToken` operationId).
+	CreateTokenWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateToken Create a token for a principal
+	//
+	// Mints a static client token bound to the given principal and returns
+	// the credential, this once. The principal need not be granted anything
+	// yet: merge the grant, then hand over the token, in whichever order
+	// onboarding runs.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/tokens (the `CreateToken` operationId).
+	CreateToken(ctx context.Context, body CreateTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteToken Revoke a token
+	//
+	// Removes the token with the given identifier. Revocation is immediate:
+	// the next request presenting the credential is refused.
+	//
+	// Corresponds with DELETE /api/v1/tokens/{id} (the `DeleteToken` operationId).
+	DeleteToken(ctx context.Context, id TokenID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListVariables List variables
 	//
@@ -2835,6 +3421,135 @@ type ClientInterface interface {
 	StopWorkload(ctx context.Context, name WorkloadName, body StopWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
+// GetACLPolicy Read the policy document
+//
+// Returns the canonical current policy document and the entity tag a
+// conditional apply presents back. Before any apply, the policy is the
+// empty version-v1 document, which grants nothing to anyone.
+//
+// With `GET /api/v1/tokens`, this answers "who can touch this server"
+// completely, which is why it requires the admin role rather than
+// viewer: the answer enumerates the security topology.
+//
+// Corresponds with GET /api/v1/acl (the `GetACLPolicy` operationId).
+func (c *Client) GetACLPolicy(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetACLPolicyRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ApplyACLPolicyWithBody Replace the policy document
+//
+// Replaces the whole policy atomically. A grant removed from the
+// document disappears on this apply, with no prune step, and applies to
+// the very next request.
+//
+// The `If-Match` header must carry the tag of the document being
+// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
+// than silently clobbering a concurrent apply. The document itself
+// carries no version field: it would go stale the moment the server
+// accepted it.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/v1/acl (the `ApplyACLPolicy` operationId).
+func (c *Client) ApplyACLPolicyWithBody(ctx context.Context, params *ApplyACLPolicyParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyACLPolicyRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ApplyACLPolicy Replace the policy document
+//
+// Replaces the whole policy atomically. A grant removed from the
+// document disappears on this apply, with no prune step, and applies to
+// the very next request.
+//
+// The `If-Match` header must carry the tag of the document being
+// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
+// than silently clobbering a concurrent apply. The document itself
+// carries no version field: it would go stale the moment the server
+// accepted it.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/v1/acl (the `ApplyACLPolicy` operationId).
+func (c *Client) ApplyACLPolicy(ctx context.Context, params *ApplyACLPolicyParams, body ApplyACLPolicyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyACLPolicyRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// InitACLWithBody Mint the recovery token
+//
+// Mints the recovery token and returns it, exactly once: the response is
+// the only time the credential is reported, and a second init is refused
+// for as long as a recovery token exists.
+//
+// Anonymous by design. It is permitted exactly while no recovery token
+// exists, which is a fresh server or one whose operator wrote the reset
+// file into the data directory and restarted — both host-level facts no
+// credential could add to.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/acl/init (the `InitACL` operationId).
+func (c *Client) InitACLWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInitACLRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// InitACL Mint the recovery token
+//
+// Mints the recovery token and returns it, exactly once: the response is
+// the only time the credential is reported, and a second init is refused
+// for as long as a recovery token exists.
+//
+// Anonymous by design. It is permitted exactly while no recovery token
+// exists, which is a fresh server or one whose operator wrote the reset
+// file into the data directory and restarted — both host-level facts no
+// credential could add to.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/acl/init (the `InitACL` operationId).
+func (c *Client) InitACL(ctx context.Context, body InitACLJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewInitACLRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetBackup Download a backup of the node
 //
 // Returns a zip archive holding a consistent snapshot of takt's database,
@@ -2941,6 +3656,175 @@ func (c *Client) RekeyWithBody(ctx context.Context, contentType string, body io.
 // Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
 func (c *Client) Rekey(ctx context.Context, body RekeyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRekeyRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// Logout Revoke the credential that authenticated this request
+//
+// Revokes whatever authenticated the request: an OIDC-minted token, a UI
+// session, or a static token retiring itself. Self-revocation is always
+// safe, so this needs no role.
+//
+// The one refusal is the recovery token, whose revocation path is
+// deliberately host-level: the reset file in the data directory.
+//
+// Corresponds with DELETE /api/v1/auth (the `Logout` operationId).
+func (c *Client) Logout(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewLogoutRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetAuth Report who the caller is
+//
+// Returns the caller's principal, role and groups. It requires
+// authentication but no role, so a principal holding a token with no
+// grants yet can see exactly that state.
+//
+// When authentication is disabled the caller is reported as anonymous
+// with the admin role, which is the truth of that mode: anything that
+// reaches the listener holds the whole API.
+//
+// Corresponds with GET /api/v1/auth (the `GetAuth` operationId).
+func (c *Client) GetAuth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetAuthRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// LoginWithBody Exchange an identity for a short-lived token
+//
+// Mints a short-lived client token. The exchange accepts either an OIDC
+// identity token, verified against the configured issuer, or an existing
+// client token, which is how the browser UI trades the standing
+// credential pasted into it for a session that expires on its own.
+//
+// With `cookie` set, the response also carries the credential as an
+// HttpOnly session cookie, which is what the UI stores. The credential
+// in the body is the same one either way.
+//
+// Anonymous by necessity — a login is how a caller stops being
+// anonymous — but nothing is minted without a verified identity.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/auth (the `Login` operationId).
+func (c *Client) LoginWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewLoginRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// Login Exchange an identity for a short-lived token
+//
+// Mints a short-lived client token. The exchange accepts either an OIDC
+// identity token, verified against the configured issuer, or an existing
+// client token, which is how the browser UI trades the standing
+// credential pasted into it for a session that expires on its own.
+//
+// With `cookie` set, the response also carries the credential as an
+// HttpOnly session cookie, which is what the UI stores. The credential
+// in the body is the same one either way.
+//
+// Anonymous by necessity — a login is how a caller stops being
+// anonymous — but nothing is minted without a verified identity.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/auth (the `Login` operationId).
+func (c *Client) Login(ctx context.Context, body LoginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewLoginRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetOIDC Report how to log in with OIDC
+//
+// Returns the issuer and client identifier `takt auth login` runs the
+// authorization code flow against. Anonymous, because a caller reads it
+// precisely when it has no credential yet — and it discloses nothing a
+// login page would not.
+//
+// Answers 404 when the server carries no OIDC configuration, which is
+// how the CLI and the UI discover that a pasted token is the only way
+// in.
+//
+// Corresponds with GET /api/v1/auth/oidc (the `GetOIDC` operationId).
+func (c *Client) GetOIDC(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetOIDCRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// OidcCallback Complete the browser OIDC flow
+//
+// Exchanges the authorization code for an identity, verifies it, mints
+// the same short-lived token a login does, and sends the browser back to
+// the UI with the session cookie set.
+//
+// Corresponds with GET /api/v1/auth/oidc/callback (the `OidcCallback` operationId).
+func (c *Client) OidcCallback(ctx context.Context, params *OidcCallbackParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewOidcCallbackRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// OidcLogin Start the browser OIDC flow
+//
+// Redirects the browser to the issuer's authorization endpoint. The
+// state and code verifier travel in a short-lived HttpOnly cookie, which
+// the callback consumes.
+//
+// This exists for the UI. The CLI runs the same flow itself against a
+// loopback redirect, because its callback is its own listener rather
+// than this server.
+//
+// Corresponds with GET /api/v1/auth/oidc/login (the `OidcLogin` operationId).
+func (c *Client) OidcLogin(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewOidcLoginRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -3200,6 +4084,10 @@ func (c *Client) ApplyService(ctx context.Context, name ServiceName, body ApplyS
 // so it
 // suits a supervisor deciding whether to restart the process.
 //
+// Carries no security requirement even when authentication is enabled. A
+// supervisor must probe this without credentials or it cannot manage the
+// process, so no policy could ever really revoke it.
+//
 // Corresponds with GET /api/v1/system/health (the `GetHealth` operationId).
 func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetHealthRequest(c.Server)
@@ -3218,9 +4106,10 @@ func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (
 // Returns the server's metrics in the Prometheus text format, ready to be
 // scraped with no collector in between.
 //
-// Workload names appear as label values. Anything that can reach this port
-// can already run arbitrary workloads, so the names disclose nothing new —
-// but they are disclosed.
+// Workload names appear as label values. With authentication enabled this
+// requires the viewer role — prometheus carries the credential in an
+// `authorization` block — and without it, anything that can reach the port
+// reads them.
 //
 // A scraper that addresses the server by hostname must have that hostname
 // in the server's `hosts` configuration, or the request is refused with a
@@ -3286,9 +4175,97 @@ func (c *Client) GetPrometheusTargets(ctx context.Context, reqEditors ...Request
 // one reconcile interval plus the driver timeout old. Before the first pass
 // completes, the server reports not ready.
 //
+// Carries no security requirement even when authentication is enabled, for
+// the same reason the health endpoint does not: a supervisor must probe it
+// without credentials. These two routes are the whole anonymous surface.
+//
 // Corresponds with GET /api/v1/system/ready (the `GetReadiness` operationId).
 func (c *Client) GetReadiness(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetReadinessRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListTokens List every credential
+//
+// Names every credential the server holds: static tokens, logins,
+// sessions and the recovery token, with when each was created and last
+// used. No credential itself appears, only the records of them.
+//
+// With `GET /api/v1/acl`, this answers "who can touch this server"
+// completely.
+//
+// Corresponds with GET /api/v1/tokens (the `ListTokens` operationId).
+func (c *Client) ListTokens(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListTokensRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateTokenWithBody Create a token for a principal
+//
+// Mints a static client token bound to the given principal and returns
+// the credential, this once. The principal need not be granted anything
+// yet: merge the grant, then hand over the token, in whichever order
+// onboarding runs.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/tokens (the `CreateToken` operationId).
+func (c *Client) CreateTokenWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateTokenRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateToken Create a token for a principal
+//
+// Mints a static client token bound to the given principal and returns
+// the credential, this once. The principal need not be granted anything
+// yet: merge the grant, then hand over the token, in whichever order
+// onboarding runs.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/tokens (the `CreateToken` operationId).
+func (c *Client) CreateToken(ctx context.Context, body CreateTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateTokenRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteToken Revoke a token
+//
+// Removes the token with the given identifier. Revocation is immediate:
+// the next request presenting the credential is refused.
+//
+// Corresponds with DELETE /api/v1/tokens/{id} (the `DeleteToken` operationId).
+func (c *Client) DeleteToken(ctx context.Context, id TokenID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteTokenRequest(c.Server, id)
 	if err != nil {
 		return nil, err
 	}
@@ -3936,6 +4913,128 @@ func (c *Client) StopWorkload(ctx context.Context, name WorkloadName, body StopW
 	return c.Client.Do(req)
 }
 
+// NewGetACLPolicyRequest constructs an http.Request for the GetACLPolicy method
+func NewGetACLPolicyRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/acl")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewApplyACLPolicyRequest calls the generic ApplyACLPolicy builder with application/json body
+func NewApplyACLPolicyRequest(server string, params *ApplyACLPolicyParams, body ApplyACLPolicyJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewApplyACLPolicyRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewApplyACLPolicyRequestWithBody constructs an http.Request for the ApplyACLPolicy method, with any body, and a specified content type
+func NewApplyACLPolicyRequestWithBody(server string, params *ApplyACLPolicyParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/acl")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.IfMatch != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "If-Match", *params.IfMatch, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("If-Match", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewInitACLRequest calls the generic InitACL builder with application/json body
+func NewInitACLRequest(server string, body InitACLJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewInitACLRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewInitACLRequestWithBody constructs an http.Request for the InitACL method, with any body, and a specified content type
+func NewInitACLRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/acl/init")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetBackupRequest constructs an http.Request for the GetBackup method
 func NewGetBackupRequest(server string, params *GetBackupParams) (*http.Request, error) {
 	var err error
@@ -4026,6 +5125,237 @@ func NewRekeyRequestWithBody(server string, contentType string, body io.Reader) 
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewLogoutRequest constructs an http.Request for the Logout method
+func NewLogoutRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/auth")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetAuthRequest constructs an http.Request for the GetAuth method
+func NewGetAuthRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/auth")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewLoginRequest calls the generic Login builder with application/json body
+func NewLoginRequest(server string, body LoginJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewLoginRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewLoginRequestWithBody constructs an http.Request for the Login method, with any body, and a specified content type
+func NewLoginRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/auth")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetOIDCRequest constructs an http.Request for the GetOIDC method
+func NewGetOIDCRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/auth/oidc")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewOidcCallbackRequest constructs an http.Request for the OidcCallback method
+func NewOidcCallbackRequest(server string, params *OidcCallbackParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/auth/oidc/callback")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Code != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "code", *params.Code, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "state", *params.State, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.TaktOidc != nil {
+			var cookieParam0 string
+
+			cookieParam0, err = runtime.StyleParamWithOptions("simple", true, "takt_oidc", *params.TaktOidc, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationCookie, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			cookie0 := &http.Cookie{
+				Name:  "takt_oidc",
+				Value: cookieParam0,
+			}
+			req.AddCookie(cookie0)
+		}
+	}
+	return req, nil
+}
+
+// NewOidcLoginRequest constructs an http.Request for the OidcLogin method
+func NewOidcLoginRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/auth/oidc/login")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -4496,6 +5826,107 @@ func NewGetReadinessRequest(server string) (*http.Request, error) {
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListTokensRequest constructs an http.Request for the ListTokens method
+func NewListTokensRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/tokens")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateTokenRequest calls the generic CreateToken builder with application/json body
+func NewCreateTokenRequest(server string, body CreateTokenJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateTokenRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewCreateTokenRequestWithBody constructs an http.Request for the CreateToken method, with any body, and a specified content type
+func NewCreateTokenRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/tokens")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteTokenRequest constructs an http.Request for the DeleteToken method
+func NewDeleteTokenRequest(server string, id TokenID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "id", id, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/tokens/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -5432,6 +6863,87 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// GetACLPolicyWithResponse Read the policy document
+	//
+	// Returns the canonical current policy document and the entity tag a
+	// conditional apply presents back. Before any apply, the policy is the
+	// empty version-v1 document, which grants nothing to anyone.
+	//
+	// With `GET /api/v1/tokens`, this answers "who can touch this server"
+	// completely, which is why it requires the admin role rather than
+	// viewer: the answer enumerates the security topology.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/acl (the `GetACLPolicy` operationId).
+	GetACLPolicyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetACLPolicyResponse, error)
+
+	// ApplyACLPolicyWithBodyWithResponse Replace the policy document
+	//
+	// Replaces the whole policy atomically. A grant removed from the
+	// document disappears on this apply, with no prune step, and applies to
+	// the very next request.
+	//
+	// The `If-Match` header must carry the tag of the document being
+	// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
+	// than silently clobbering a concurrent apply. The document itself
+	// carries no version field: it would go stale the moment the server
+	// accepted it.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/acl (the `ApplyACLPolicy` operationId).
+	ApplyACLPolicyWithBodyWithResponse(ctx context.Context, params *ApplyACLPolicyParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyACLPolicyResponse, error)
+
+	// ApplyACLPolicyWithResponse Replace the policy document
+	//
+	// Replaces the whole policy atomically. A grant removed from the
+	// document disappears on this apply, with no prune step, and applies to
+	// the very next request.
+	//
+	// The `If-Match` header must carry the tag of the document being
+	// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
+	// than silently clobbering a concurrent apply. The document itself
+	// carries no version field: it would go stale the moment the server
+	// accepted it.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/acl (the `ApplyACLPolicy` operationId).
+	ApplyACLPolicyWithResponse(ctx context.Context, params *ApplyACLPolicyParams, body ApplyACLPolicyJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyACLPolicyResponse, error)
+
+	// InitACLWithBodyWithResponse Mint the recovery token
+	//
+	// Mints the recovery token and returns it, exactly once: the response is
+	// the only time the credential is reported, and a second init is refused
+	// for as long as a recovery token exists.
+	//
+	// Anonymous by design. It is permitted exactly while no recovery token
+	// exists, which is a fresh server or one whose operator wrote the reset
+	// file into the data directory and restarted — both host-level facts no
+	// credential could add to.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/acl/init (the `InitACL` operationId).
+	InitACLWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InitACLResponse, error)
+
+	// InitACLWithResponse Mint the recovery token
+	//
+	// Mints the recovery token and returns it, exactly once: the response is
+	// the only time the credential is reported, and a second init is refused
+	// for as long as a recovery token exists.
+	//
+	// Anonymous by design. It is permitted exactly while no recovery token
+	// exists, which is a fresh server or one whose operator wrote the reset
+	// file into the data directory and restarted — both host-level facts no
+	// credential could add to.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/acl/init (the `InitACL` operationId).
+	InitACLWithResponse(ctx context.Context, body InitACLJSONRequestBody, reqEditors ...RequestEditorFn) (*InitACLResponse, error)
+
 	// GetBackupWithResponse Download a backup of the node
 	//
 	// Returns a zip archive holding a consistent snapshot of takt's database,
@@ -5519,6 +7031,115 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/admin/rekey (the `Rekey` operationId).
 	RekeyWithResponse(ctx context.Context, body RekeyJSONRequestBody, reqEditors ...RequestEditorFn) (*RekeyResponse, error)
+
+	// LogoutWithResponse Revoke the credential that authenticated this request
+	//
+	// Revokes whatever authenticated the request: an OIDC-minted token, a UI
+	// session, or a static token retiring itself. Self-revocation is always
+	// safe, so this needs no role.
+	//
+	// The one refusal is the recovery token, whose revocation path is
+	// deliberately host-level: the reset file in the data directory.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/auth (the `Logout` operationId).
+	LogoutWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*LogoutResponse, error)
+
+	// GetAuthWithResponse Report who the caller is
+	//
+	// Returns the caller's principal, role and groups. It requires
+	// authentication but no role, so a principal holding a token with no
+	// grants yet can see exactly that state.
+	//
+	// When authentication is disabled the caller is reported as anonymous
+	// with the admin role, which is the truth of that mode: anything that
+	// reaches the listener holds the whole API.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/auth (the `GetAuth` operationId).
+	GetAuthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAuthResponse, error)
+
+	// LoginWithBodyWithResponse Exchange an identity for a short-lived token
+	//
+	// Mints a short-lived client token. The exchange accepts either an OIDC
+	// identity token, verified against the configured issuer, or an existing
+	// client token, which is how the browser UI trades the standing
+	// credential pasted into it for a session that expires on its own.
+	//
+	// With `cookie` set, the response also carries the credential as an
+	// HttpOnly session cookie, which is what the UI stores. The credential
+	// in the body is the same one either way.
+	//
+	// Anonymous by necessity — a login is how a caller stops being
+	// anonymous — but nothing is minted without a verified identity.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/auth (the `Login` operationId).
+	LoginWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*LoginResponse, error)
+
+	// LoginWithResponse Exchange an identity for a short-lived token
+	//
+	// Mints a short-lived client token. The exchange accepts either an OIDC
+	// identity token, verified against the configured issuer, or an existing
+	// client token, which is how the browser UI trades the standing
+	// credential pasted into it for a session that expires on its own.
+	//
+	// With `cookie` set, the response also carries the credential as an
+	// HttpOnly session cookie, which is what the UI stores. The credential
+	// in the body is the same one either way.
+	//
+	// Anonymous by necessity — a login is how a caller stops being
+	// anonymous — but nothing is minted without a verified identity.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/auth (the `Login` operationId).
+	LoginWithResponse(ctx context.Context, body LoginJSONRequestBody, reqEditors ...RequestEditorFn) (*LoginResponse, error)
+
+	// GetOIDCWithResponse Report how to log in with OIDC
+	//
+	// Returns the issuer and client identifier `takt auth login` runs the
+	// authorization code flow against. Anonymous, because a caller reads it
+	// precisely when it has no credential yet — and it discloses nothing a
+	// login page would not.
+	//
+	// Answers 404 when the server carries no OIDC configuration, which is
+	// how the CLI and the UI discover that a pasted token is the only way
+	// in.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/auth/oidc (the `GetOIDC` operationId).
+	GetOIDCWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetOIDCResponse, error)
+
+	// OidcCallbackWithResponse Complete the browser OIDC flow
+	//
+	// Exchanges the authorization code for an identity, verifies it, mints
+	// the same short-lived token a login does, and sends the browser back to
+	// the UI with the session cookie set.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/auth/oidc/callback (the `OidcCallback` operationId).
+	OidcCallbackWithResponse(ctx context.Context, params *OidcCallbackParams, reqEditors ...RequestEditorFn) (*OidcCallbackResponse, error)
+
+	// OidcLoginWithResponse Start the browser OIDC flow
+	//
+	// Redirects the browser to the issuer's authorization endpoint. The
+	// state and code verifier travel in a short-lived HttpOnly cookie, which
+	// the callback consumes.
+	//
+	// This exists for the UI. The CLI runs the same flow itself against a
+	// loopback redirect, because its callback is its own listener rather
+	// than this server.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/auth/oidc/login (the `OidcLogin` operationId).
+	OidcLoginWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*OidcLoginResponse, error)
 
 	// ListSecretsWithResponse List secrets
 	//
@@ -5681,6 +7302,10 @@ type ClientWithResponsesInterface interface {
 	// so it
 	// suits a supervisor deciding whether to restart the process.
 	//
+	// Carries no security requirement even when authentication is enabled. A
+	// supervisor must probe this without credentials or it cannot manage the
+	// process, so no policy could ever really revoke it.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/v1/system/health (the `GetHealth` operationId).
@@ -5691,9 +7316,10 @@ type ClientWithResponsesInterface interface {
 	// Returns the server's metrics in the Prometheus text format, ready to be
 	// scraped with no collector in between.
 	//
-	// Workload names appear as label values. Anything that can reach this port
-	// can already run arbitrary workloads, so the names disclose nothing new —
-	// but they are disclosed.
+	// Workload names appear as label values. With authentication enabled this
+	// requires the viewer role — prometheus carries the credential in an
+	// `authorization` block — and without it, anything that can reach the port
+	// reads them.
 	//
 	// A scraper that addresses the server by hostname must have that hostname
 	// in the server's `hosts` configuration, or the request is refused with a
@@ -5743,10 +7369,62 @@ type ClientWithResponsesInterface interface {
 	// one reconcile interval plus the driver timeout old. Before the first pass
 	// completes, the server reports not ready.
 	//
+	// Carries no security requirement even when authentication is enabled, for
+	// the same reason the health endpoint does not: a supervisor must probe it
+	// without credentials. These two routes are the whole anonymous surface.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/v1/system/ready (the `GetReadiness` operationId).
 	GetReadinessWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetReadinessResponse, error)
+
+	// ListTokensWithResponse List every credential
+	//
+	// Names every credential the server holds: static tokens, logins,
+	// sessions and the recovery token, with when each was created and last
+	// used. No credential itself appears, only the records of them.
+	//
+	// With `GET /api/v1/acl`, this answers "who can touch this server"
+	// completely.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/tokens (the `ListTokens` operationId).
+	ListTokensWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListTokensResponse, error)
+
+	// CreateTokenWithBodyWithResponse Create a token for a principal
+	//
+	// Mints a static client token bound to the given principal and returns
+	// the credential, this once. The principal need not be granted anything
+	// yet: merge the grant, then hand over the token, in whichever order
+	// onboarding runs.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/tokens (the `CreateToken` operationId).
+	CreateTokenWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateTokenResponse, error)
+
+	// CreateTokenWithResponse Create a token for a principal
+	//
+	// Mints a static client token bound to the given principal and returns
+	// the credential, this once. The principal need not be granted anything
+	// yet: merge the grant, then hand over the token, in whichever order
+	// onboarding runs.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/tokens (the `CreateToken` operationId).
+	CreateTokenWithResponse(ctx context.Context, body CreateTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateTokenResponse, error)
+
+	// DeleteTokenWithResponse Revoke a token
+	//
+	// Removes the token with the given identifier. Revocation is immediate:
+	// the next request presenting the credential is refused.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/tokens/{id} (the `DeleteToken` operationId).
+	DeleteTokenWithResponse(ctx context.Context, id TokenID, reqEditors ...RequestEditorFn) (*DeleteTokenResponse, error)
 
 	// ListVariablesWithResponse List variables
 	//
@@ -6166,6 +7844,227 @@ type ClientWithResponsesInterface interface {
 	StopWorkloadWithResponse(ctx context.Context, name WorkloadName, body StopWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*StopWorkloadResponse, error)
 }
 
+// GetACLPolicyResponse200Headers the declared response headers of an HTTP 200 response for GetACLPolicy
+type GetACLPolicyResponse200Headers struct {
+	ETag *string
+}
+
+// GetACLPolicyResponse401Headers the declared response headers of an HTTP 401 response for GetACLPolicy
+type GetACLPolicyResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type GetACLPolicyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetACLPolicyResult
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *GetACLPolicyResponse200Headers
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *GetACLPolicyResponse401Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetACLPolicyResponse) GetJSON200() *GetACLPolicyResult {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetACLPolicyResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetACLPolicyResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetACLPolicyResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetACLPolicyResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetACLPolicyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetACLPolicyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetACLPolicyResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ApplyACLPolicyResponse200Headers the declared response headers of an HTTP 200 response for ApplyACLPolicy
+type ApplyACLPolicyResponse200Headers struct {
+	ETag *string
+}
+
+// ApplyACLPolicyResponse401Headers the declared response headers of an HTTP 401 response for ApplyACLPolicy
+type ApplyACLPolicyResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type ApplyACLPolicyResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ApplyACLPolicyResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON412 the response for an HTTP 412 `application/json` response
+	JSON412 *PreconditionFailed
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *ApplyACLPolicyResponse200Headers
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *ApplyACLPolicyResponse401Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ApplyACLPolicyResponse) GetJSON200() *ApplyACLPolicyResult {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ApplyACLPolicyResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ApplyACLPolicyResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ApplyACLPolicyResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON412 returns the response for an HTTP 412 `application/json` response
+func (r ApplyACLPolicyResponse) GetJSON412() *PreconditionFailed {
+	return r.JSON412
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ApplyACLPolicyResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ApplyACLPolicyResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ApplyACLPolicyResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ApplyACLPolicyResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ApplyACLPolicyResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type InitACLResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *InitACLResult
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r InitACLResponse) GetJSON201() *InitACLResult {
+	return r.JSON201
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r InitACLResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r InitACLResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r InitACLResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r InitACLResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r InitACLResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r InitACLResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetBackupResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -6249,6 +8148,401 @@ func (r RekeyResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RekeyResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// LogoutResponse200Headers the declared response headers of an HTTP 200 response for Logout
+type LogoutResponse200Headers struct {
+	SetCookie *string
+}
+
+// LogoutResponse401Headers the declared response headers of an HTTP 401 response for Logout
+type LogoutResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type LogoutResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *LogoutResult
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *LogoutResponse200Headers
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *LogoutResponse401Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r LogoutResponse) GetJSON200() *LogoutResult {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r LogoutResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r LogoutResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r LogoutResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r LogoutResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r LogoutResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r LogoutResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r LogoutResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetAuthResponse401Headers the declared response headers of an HTTP 401 response for GetAuth
+type GetAuthResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type GetAuthResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetAuthResult
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *GetAuthResponse401Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetAuthResponse) GetJSON200() *GetAuthResult {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetAuthResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetAuthResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetAuthResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetAuthResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetAuthResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetAuthResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// LoginResponse200Headers the declared response headers of an HTTP 200 response for Login
+type LoginResponse200Headers struct {
+	SetCookie *string
+}
+
+// LoginResponse401Headers the declared response headers of an HTTP 401 response for Login
+type LoginResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type LoginResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *LoginResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *LoginResponse200Headers
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *LoginResponse401Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r LoginResponse) GetJSON200() *LoginResult {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r LoginResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r LoginResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r LoginResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r LoginResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r LoginResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r LoginResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r LoginResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetOIDCResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetOIDCResult
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetOIDCResponse) GetJSON200() *GetOIDCResult {
+	return r.JSON200
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetOIDCResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetOIDCResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetOIDCResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetOIDCResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetOIDCResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetOIDCResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// OidcCallbackResponse302Headers the declared response headers of an HTTP 302 response for OidcCallback
+type OidcCallbackResponse302Headers struct {
+	Location  *string
+	SetCookie *string
+}
+
+// OidcCallbackResponse401Headers the declared response headers of an HTTP 401 response for OidcCallback
+type OidcCallbackResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type OidcCallbackResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers302 the parsed response headers for an HTTP 302 response
+	Headers302 *OidcCallbackResponse302Headers
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *OidcCallbackResponse401Headers
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r OidcCallbackResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r OidcCallbackResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r OidcCallbackResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r OidcCallbackResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r OidcCallbackResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r OidcCallbackResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r OidcCallbackResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// OidcLoginResponse302Headers the declared response headers of an HTTP 302 response for OidcLogin
+type OidcLoginResponse302Headers struct {
+	Location  *string
+	SetCookie *string
+}
+
+type OidcLoginResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers302 the parsed response headers for an HTTP 302 response
+	Headers302 *OidcLoginResponse302Headers
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r OidcLoginResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r OidcLoginResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r OidcLoginResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r OidcLoginResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r OidcLoginResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r OidcLoginResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6902,6 +9196,227 @@ func (r GetReadinessResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetReadinessResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// ListTokensResponse401Headers the declared response headers of an HTTP 401 response for ListTokens
+type ListTokensResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type ListTokensResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ListTokensResult
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *ListTokensResponse401Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListTokensResponse) GetJSON200() *ListTokensResult {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListTokensResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListTokensResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ListTokensResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ListTokensResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListTokensResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListTokensResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListTokensResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// CreateTokenResponse401Headers the declared response headers of an HTTP 401 response for CreateToken
+type CreateTokenResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type CreateTokenResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *CreateTokenResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *CreateTokenResponse401Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateTokenResponse) GetJSON201() *CreateTokenResult {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateTokenResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateTokenResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateTokenResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r CreateTokenResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateTokenResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateTokenResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateTokenResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateTokenResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// DeleteTokenResponse401Headers the declared response headers of an HTTP 401 response for DeleteToken
+type DeleteTokenResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type DeleteTokenResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *DeleteTokenResult
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *DeleteTokenResponse401Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DeleteTokenResponse) GetJSON200() *DeleteTokenResult {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DeleteTokenResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DeleteTokenResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeleteTokenResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r DeleteTokenResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteTokenResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteTokenResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteTokenResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteTokenResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -7941,6 +10456,117 @@ func (r StopWorkloadResponse) ContentType() string {
 	return ""
 }
 
+// GetACLPolicyWithResponse Read the policy document
+//
+// Returns the canonical current policy document and the entity tag a
+// conditional apply presents back. Before any apply, the policy is the
+// empty version-v1 document, which grants nothing to anyone.
+//
+// With `GET /api/v1/tokens`, this answers "who can touch this server"
+// completely, which is why it requires the admin role rather than
+// viewer: the answer enumerates the security topology.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/acl (the `GetACLPolicy` operationId).
+func (c *ClientWithResponses) GetACLPolicyWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetACLPolicyResponse, error) {
+	rsp, err := c.GetACLPolicy(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetACLPolicyResponse(rsp)
+}
+
+// ApplyACLPolicyWithBodyWithResponse Replace the policy document
+//
+// Replaces the whole policy atomically. A grant removed from the
+// document disappears on this apply, with no prune step, and applies to
+// the very next request.
+//
+// The `If-Match` header must carry the tag of the document being
+// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
+// than silently clobbering a concurrent apply. The document itself
+// carries no version field: it would go stale the moment the server
+// accepted it.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/acl (the `ApplyACLPolicy` operationId).
+func (c *ClientWithResponses) ApplyACLPolicyWithBodyWithResponse(ctx context.Context, params *ApplyACLPolicyParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyACLPolicyResponse, error) {
+	rsp, err := c.ApplyACLPolicyWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApplyACLPolicyResponse(rsp)
+}
+
+// ApplyACLPolicyWithResponse Replace the policy document
+//
+// Replaces the whole policy atomically. A grant removed from the
+// document disappears on this apply, with no prune step, and applies to
+// the very next request.
+//
+// The `If-Match` header must carry the tag of the document being
+// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
+// than silently clobbering a concurrent apply. The document itself
+// carries no version field: it would go stale the moment the server
+// accepted it.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/acl (the `ApplyACLPolicy` operationId).
+func (c *ClientWithResponses) ApplyACLPolicyWithResponse(ctx context.Context, params *ApplyACLPolicyParams, body ApplyACLPolicyJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyACLPolicyResponse, error) {
+	rsp, err := c.ApplyACLPolicy(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApplyACLPolicyResponse(rsp)
+}
+
+// InitACLWithBodyWithResponse Mint the recovery token
+//
+// Mints the recovery token and returns it, exactly once: the response is
+// the only time the credential is reported, and a second init is refused
+// for as long as a recovery token exists.
+//
+// Anonymous by design. It is permitted exactly while no recovery token
+// exists, which is a fresh server or one whose operator wrote the reset
+// file into the data directory and restarted — both host-level facts no
+// credential could add to.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/acl/init (the `InitACL` operationId).
+func (c *ClientWithResponses) InitACLWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*InitACLResponse, error) {
+	rsp, err := c.InitACLWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInitACLResponse(rsp)
+}
+
+// InitACLWithResponse Mint the recovery token
+//
+// Mints the recovery token and returns it, exactly once: the response is
+// the only time the credential is reported, and a second init is refused
+// for as long as a recovery token exists.
+//
+// Anonymous by design. It is permitted exactly while no recovery token
+// exists, which is a fresh server or one whose operator wrote the reset
+// file into the data directory and restarted — both host-level facts no
+// credential could add to.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/acl/init (the `InitACL` operationId).
+func (c *ClientWithResponses) InitACLWithResponse(ctx context.Context, body InitACLJSONRequestBody, reqEditors ...RequestEditorFn) (*InitACLResponse, error) {
+	rsp, err := c.InitACL(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseInitACLResponse(rsp)
+}
+
 // GetBackupWithResponse Download a backup of the node
 //
 // Returns a zip archive holding a consistent snapshot of takt's database,
@@ -8045,6 +10671,157 @@ func (c *ClientWithResponses) RekeyWithResponse(ctx context.Context, body RekeyJ
 		return nil, err
 	}
 	return ParseRekeyResponse(rsp)
+}
+
+// LogoutWithResponse Revoke the credential that authenticated this request
+//
+// Revokes whatever authenticated the request: an OIDC-minted token, a UI
+// session, or a static token retiring itself. Self-revocation is always
+// safe, so this needs no role.
+//
+// The one refusal is the recovery token, whose revocation path is
+// deliberately host-level: the reset file in the data directory.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/auth (the `Logout` operationId).
+func (c *ClientWithResponses) LogoutWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*LogoutResponse, error) {
+	rsp, err := c.Logout(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseLogoutResponse(rsp)
+}
+
+// GetAuthWithResponse Report who the caller is
+//
+// Returns the caller's principal, role and groups. It requires
+// authentication but no role, so a principal holding a token with no
+// grants yet can see exactly that state.
+//
+// When authentication is disabled the caller is reported as anonymous
+// with the admin role, which is the truth of that mode: anything that
+// reaches the listener holds the whole API.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/auth (the `GetAuth` operationId).
+func (c *ClientWithResponses) GetAuthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetAuthResponse, error) {
+	rsp, err := c.GetAuth(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetAuthResponse(rsp)
+}
+
+// LoginWithBodyWithResponse Exchange an identity for a short-lived token
+//
+// Mints a short-lived client token. The exchange accepts either an OIDC
+// identity token, verified against the configured issuer, or an existing
+// client token, which is how the browser UI trades the standing
+// credential pasted into it for a session that expires on its own.
+//
+// With `cookie` set, the response also carries the credential as an
+// HttpOnly session cookie, which is what the UI stores. The credential
+// in the body is the same one either way.
+//
+// Anonymous by necessity — a login is how a caller stops being
+// anonymous — but nothing is minted without a verified identity.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/auth (the `Login` operationId).
+func (c *ClientWithResponses) LoginWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*LoginResponse, error) {
+	rsp, err := c.LoginWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseLoginResponse(rsp)
+}
+
+// LoginWithResponse Exchange an identity for a short-lived token
+//
+// Mints a short-lived client token. The exchange accepts either an OIDC
+// identity token, verified against the configured issuer, or an existing
+// client token, which is how the browser UI trades the standing
+// credential pasted into it for a session that expires on its own.
+//
+// With `cookie` set, the response also carries the credential as an
+// HttpOnly session cookie, which is what the UI stores. The credential
+// in the body is the same one either way.
+//
+// Anonymous by necessity — a login is how a caller stops being
+// anonymous — but nothing is minted without a verified identity.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/auth (the `Login` operationId).
+func (c *ClientWithResponses) LoginWithResponse(ctx context.Context, body LoginJSONRequestBody, reqEditors ...RequestEditorFn) (*LoginResponse, error) {
+	rsp, err := c.Login(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseLoginResponse(rsp)
+}
+
+// GetOIDCWithResponse Report how to log in with OIDC
+//
+// Returns the issuer and client identifier `takt auth login` runs the
+// authorization code flow against. Anonymous, because a caller reads it
+// precisely when it has no credential yet — and it discloses nothing a
+// login page would not.
+//
+// Answers 404 when the server carries no OIDC configuration, which is
+// how the CLI and the UI discover that a pasted token is the only way
+// in.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/auth/oidc (the `GetOIDC` operationId).
+func (c *ClientWithResponses) GetOIDCWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetOIDCResponse, error) {
+	rsp, err := c.GetOIDC(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetOIDCResponse(rsp)
+}
+
+// OidcCallbackWithResponse Complete the browser OIDC flow
+//
+// Exchanges the authorization code for an identity, verifies it, mints
+// the same short-lived token a login does, and sends the browser back to
+// the UI with the session cookie set.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/auth/oidc/callback (the `OidcCallback` operationId).
+func (c *ClientWithResponses) OidcCallbackWithResponse(ctx context.Context, params *OidcCallbackParams, reqEditors ...RequestEditorFn) (*OidcCallbackResponse, error) {
+	rsp, err := c.OidcCallback(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseOidcCallbackResponse(rsp)
+}
+
+// OidcLoginWithResponse Start the browser OIDC flow
+//
+// Redirects the browser to the issuer's authorization endpoint. The
+// state and code verifier travel in a short-lived HttpOnly cookie, which
+// the callback consumes.
+//
+// This exists for the UI. The CLI runs the same flow itself against a
+// loopback redirect, because its callback is its own listener rather
+// than this server.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/auth/oidc/login (the `OidcLogin` operationId).
+func (c *ClientWithResponses) OidcLoginWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*OidcLoginResponse, error) {
+	rsp, err := c.OidcLogin(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseOidcLoginResponse(rsp)
 }
 
 // ListSecretsWithResponse List secrets
@@ -8268,6 +11045,10 @@ func (c *ClientWithResponses) ApplyServiceWithResponse(ctx context.Context, name
 // so it
 // suits a supervisor deciding whether to restart the process.
 //
+// Carries no security requirement even when authentication is enabled. A
+// supervisor must probe this without credentials or it cannot manage the
+// process, so no policy could ever really revoke it.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/v1/system/health (the `GetHealth` operationId).
@@ -8284,9 +11065,10 @@ func (c *ClientWithResponses) GetHealthWithResponse(ctx context.Context, reqEdit
 // Returns the server's metrics in the Prometheus text format, ready to be
 // scraped with no collector in between.
 //
-// Workload names appear as label values. Anything that can reach this port
-// can already run arbitrary workloads, so the names disclose nothing new —
-// but they are disclosed.
+// Workload names appear as label values. With authentication enabled this
+// requires the viewer role — prometheus carries the credential in an
+// `authorization` block — and without it, anything that can reach the port
+// reads them.
 //
 // A scraper that addresses the server by hostname must have that hostname
 // in the server's `hosts` configuration, or the request is refused with a
@@ -8348,6 +11130,10 @@ func (c *ClientWithResponses) GetPrometheusTargetsWithResponse(ctx context.Conte
 // one reconcile interval plus the driver timeout old. Before the first pass
 // completes, the server reports not ready.
 //
+// Carries no security requirement even when authentication is enabled, for
+// the same reason the health endpoint does not: a supervisor must probe it
+// without credentials. These two routes are the whole anonymous surface.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/v1/system/ready (the `GetReadiness` operationId).
@@ -8357,6 +11143,78 @@ func (c *ClientWithResponses) GetReadinessWithResponse(ctx context.Context, reqE
 		return nil, err
 	}
 	return ParseGetReadinessResponse(rsp)
+}
+
+// ListTokensWithResponse List every credential
+//
+// Names every credential the server holds: static tokens, logins,
+// sessions and the recovery token, with when each was created and last
+// used. No credential itself appears, only the records of them.
+//
+// With `GET /api/v1/acl`, this answers "who can touch this server"
+// completely.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/tokens (the `ListTokens` operationId).
+func (c *ClientWithResponses) ListTokensWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListTokensResponse, error) {
+	rsp, err := c.ListTokens(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListTokensResponse(rsp)
+}
+
+// CreateTokenWithBodyWithResponse Create a token for a principal
+//
+// Mints a static client token bound to the given principal and returns
+// the credential, this once. The principal need not be granted anything
+// yet: merge the grant, then hand over the token, in whichever order
+// onboarding runs.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/tokens (the `CreateToken` operationId).
+func (c *ClientWithResponses) CreateTokenWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateTokenResponse, error) {
+	rsp, err := c.CreateTokenWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateTokenResponse(rsp)
+}
+
+// CreateTokenWithResponse Create a token for a principal
+//
+// Mints a static client token bound to the given principal and returns
+// the credential, this once. The principal need not be granted anything
+// yet: merge the grant, then hand over the token, in whichever order
+// onboarding runs.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/tokens (the `CreateToken` operationId).
+func (c *ClientWithResponses) CreateTokenWithResponse(ctx context.Context, body CreateTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateTokenResponse, error) {
+	rsp, err := c.CreateToken(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateTokenResponse(rsp)
+}
+
+// DeleteTokenWithResponse Revoke a token
+//
+// Removes the token with the given identifier. Revocation is immediate:
+// the next request presenting the credential is refused.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/tokens/{id} (the `DeleteToken` operationId).
+func (c *ClientWithResponses) DeleteTokenWithResponse(ctx context.Context, id TokenID, reqEditors ...RequestEditorFn) (*DeleteTokenResponse, error) {
+	rsp, err := c.DeleteToken(ctx, id, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteTokenResponse(rsp)
 }
 
 // ListVariablesWithResponse List variables
@@ -8920,6 +11778,200 @@ func (c *ClientWithResponses) StopWorkloadWithResponse(ctx context.Context, name
 	return ParseStopWorkloadResponse(rsp)
 }
 
+// ParseGetACLPolicyResponse parses an HTTP response from a GetACLPolicyWithResponse call
+func ParseGetACLPolicyResponse(rsp *http.Response) (*GetACLPolicyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetACLPolicyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetACLPolicyResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers GetACLPolicyResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 401:
+		var headers GetACLPolicyResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseApplyACLPolicyResponse parses an HTTP response from a ApplyACLPolicyWithResponse call
+func ParseApplyACLPolicyResponse(rsp *http.Response) (*ApplyACLPolicyResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ApplyACLPolicyResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ApplyACLPolicyResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 412:
+		var dest PreconditionFailed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON412 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers ApplyACLPolicyResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 401:
+		var headers ApplyACLPolicyResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseInitACLResponse parses an HTTP response from a InitACLWithResponse call
+func ParseInitACLResponse(rsp *http.Response) (*InitACLResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &InitACLResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest InitACLResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetBackupResponse parses an HTTP response from a GetBackupWithResponse call
 func ParseGetBackupResponse(rsp *http.Response) (*GetBackupResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -8974,6 +12026,368 @@ func ParseRekeyResponse(rsp *http.Response) (*RekeyResponse, error) {
 		}
 		response.JSON500 = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseLogoutResponse parses an HTTP response from a LogoutWithResponse call
+func ParseLogoutResponse(rsp *http.Response) (*LogoutResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &LogoutResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LogoutResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers LogoutResponse200Headers
+		if values := rsp.Header.Values("Set-Cookie"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Set-Cookie", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.SetCookie = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 401:
+		var headers LogoutResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetAuthResponse parses an HTTP response from a GetAuthWithResponse call
+func ParseGetAuthResponse(rsp *http.Response) (*GetAuthResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetAuthResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetAuthResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 401:
+		var headers GetAuthResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseLoginResponse parses an HTTP response from a LoginWithResponse call
+func ParseLoginResponse(rsp *http.Response) (*LoginResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &LoginResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest LoginResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers LoginResponse200Headers
+		if values := rsp.Header.Values("Set-Cookie"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Set-Cookie", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.SetCookie = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 401:
+		var headers LoginResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetOIDCResponse parses an HTTP response from a GetOIDCWithResponse call
+func ParseGetOIDCResponse(rsp *http.Response) (*GetOIDCResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetOIDCResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetOIDCResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseOidcCallbackResponse parses an HTTP response from a OidcCallbackWithResponse call
+func ParseOidcCallbackResponse(rsp *http.Response) (*OidcCallbackResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &OidcCallbackResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 302:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 302:
+		var headers OidcCallbackResponse302Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		if values := rsp.Header.Values("Set-Cookie"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Set-Cookie", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.SetCookie = &value
+		}
+		response.Headers302 = &headers
+	case rsp.StatusCode == 401:
+		var headers OidcCallbackResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseOidcLoginResponse parses an HTTP response from a OidcLoginWithResponse call
+func ParseOidcLoginResponse(rsp *http.Response) (*OidcLoginResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &OidcLoginResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 302:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 302:
+		var headers OidcLoginResponse302Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		if values := rsp.Header.Values("Set-Cookie"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Set-Cookie", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.SetCookie = &value
+		}
+		response.Headers302 = &headers
 	}
 
 	return response, nil
@@ -9447,6 +12861,200 @@ func ParseGetReadinessResponse(rsp *http.Response) (*GetReadinessResponse, error
 		}
 		response.JSON503 = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseListTokensResponse parses an HTTP response from a ListTokensWithResponse call
+func ParseListTokensResponse(rsp *http.Response) (*ListTokensResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListTokensResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ListTokensResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 401:
+		var headers ListTokensResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseCreateTokenResponse parses an HTTP response from a CreateTokenWithResponse call
+func ParseCreateTokenResponse(rsp *http.Response) (*CreateTokenResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateTokenResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest CreateTokenResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 401:
+		var headers CreateTokenResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseDeleteTokenResponse parses an HTTP response from a DeleteTokenWithResponse call
+func ParseDeleteTokenResponse(rsp *http.Response) (*DeleteTokenResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteTokenResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest DeleteTokenResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 401:
+		var headers DeleteTokenResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
 	}
 
 	return response, nil
@@ -10232,12 +13840,39 @@ func ParseStopWorkloadResponse(rsp *http.Response) (*StopWorkloadResponse, error
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// GetACLPolicy Read the policy document
+	// (GET /api/v1/acl)
+	GetACLPolicy(w http.ResponseWriter, r *http.Request)
+	// ApplyACLPolicy Replace the policy document
+	// (PUT /api/v1/acl)
+	ApplyACLPolicy(w http.ResponseWriter, r *http.Request, params ApplyACLPolicyParams)
+	// InitACL Mint the recovery token
+	// (POST /api/v1/acl/init)
+	InitACL(w http.ResponseWriter, r *http.Request)
 	// GetBackup Download a backup of the node
 	// (GET /api/v1/admin/backup)
 	GetBackup(w http.ResponseWriter, r *http.Request, params GetBackupParams)
 	// Rekey Re-encrypt every secret under a new key
 	// (POST /api/v1/admin/rekey)
 	Rekey(w http.ResponseWriter, r *http.Request)
+	// Logout Revoke the credential that authenticated this request
+	// (DELETE /api/v1/auth)
+	Logout(w http.ResponseWriter, r *http.Request)
+	// GetAuth Report who the caller is
+	// (GET /api/v1/auth)
+	GetAuth(w http.ResponseWriter, r *http.Request)
+	// Login Exchange an identity for a short-lived token
+	// (POST /api/v1/auth)
+	Login(w http.ResponseWriter, r *http.Request)
+	// GetOIDC Report how to log in with OIDC
+	// (GET /api/v1/auth/oidc)
+	GetOIDC(w http.ResponseWriter, r *http.Request)
+	// OidcCallback Complete the browser OIDC flow
+	// (GET /api/v1/auth/oidc/callback)
+	OidcCallback(w http.ResponseWriter, r *http.Request, params OidcCallbackParams)
+	// OidcLogin Start the browser OIDC flow
+	// (GET /api/v1/auth/oidc/login)
+	OidcLogin(w http.ResponseWriter, r *http.Request)
 	// ListSecrets List secrets
 	// (GET /api/v1/secrets)
 	ListSecrets(w http.ResponseWriter, r *http.Request, params ListSecretsParams)
@@ -10274,6 +13909,15 @@ type ServerInterface interface {
 	// GetReadiness Report whether the server can do its job
 	// (GET /api/v1/system/ready)
 	GetReadiness(w http.ResponseWriter, r *http.Request)
+	// ListTokens List every credential
+	// (GET /api/v1/tokens)
+	ListTokens(w http.ResponseWriter, r *http.Request)
+	// CreateToken Create a token for a principal
+	// (POST /api/v1/tokens)
+	CreateToken(w http.ResponseWriter, r *http.Request)
+	// DeleteToken Revoke a token
+	// (DELETE /api/v1/tokens/{id})
+	DeleteToken(w http.ResponseWriter, r *http.Request, id TokenID)
 	// ListVariables List variables
 	// (GET /api/v1/variables)
 	ListVariables(w http.ResponseWriter, r *http.Request, params ListVariablesParams)
@@ -10336,11 +13980,104 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// GetACLPolicy operation middleware
+func (siw *ServerInterfaceWrapper) GetACLPolicy(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"admin"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"admin"})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetACLPolicy(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyACLPolicy operation middleware
+func (siw *ServerInterfaceWrapper) ApplyACLPolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"admin"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"admin"})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ApplyACLPolicyParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyACLPolicy(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// InitACL operation middleware
+func (siw *ServerInterfaceWrapper) InitACL(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.InitACL(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetBackup operation middleware
 func (siw *ServerInterfaceWrapper) GetBackup(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"admin"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"admin"})
+
+	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetBackupParams
@@ -10372,8 +14109,163 @@ func (siw *ServerInterfaceWrapper) GetBackup(w http.ResponseWriter, r *http.Requ
 // Rekey operation middleware
 func (siw *ServerInterfaceWrapper) Rekey(w http.ResponseWriter, r *http.Request) {
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"admin"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"admin"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Rekey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Logout operation middleware
+func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAuth operation middleware
+func (siw *ServerInterfaceWrapper) GetAuth(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAuth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Login operation middleware
+func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Login(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOIDC operation middleware
+func (siw *ServerInterfaceWrapper) GetOIDC(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOIDC(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// OidcCallback operation middleware
+func (siw *ServerInterfaceWrapper) OidcCallback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OidcCallbackParams
+
+	// ------------- Optional query parameter "code" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "code", r.URL.Query(), &params.Code, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "code"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "code", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "state"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		}
+		return
+	}
+
+	{
+		var cookie *http.Cookie
+
+		if cookie, err = r.Cookie("takt_oidc"); err == nil {
+			var value string
+			err = runtime.BindStyledParameterWithOptions("simple", "takt_oidc", cookie.Value, &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationCookie, Explode: true, Required: false, Type: "string", Format: ""})
+			if err != nil {
+				siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "takt_oidc", Err: err})
+				return
+			}
+			params.TaktOidc = &value
+
+		}
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OidcCallback(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// OidcLogin operation middleware
+func (siw *ServerInterfaceWrapper) OidcLogin(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OidcLogin(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10388,6 +14280,14 @@ func (siw *ServerInterfaceWrapper) ListSecrets(w http.ResponseWriter, r *http.Re
 
 	var err error
 	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListSecretsParams
@@ -10431,6 +14331,14 @@ func (siw *ServerInterfaceWrapper) DeleteSecret(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	// Parameter object where we will unmarshal all parameters from the context
 	var params DeleteSecretParams
 
@@ -10473,6 +14381,14 @@ func (siw *ServerInterfaceWrapper) GetSecret(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetSecret(w, r, name)
 	}))
@@ -10499,6 +14415,14 @@ func (siw *ServerInterfaceWrapper) SetSecret(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetSecret(w, r, name)
 	}))
@@ -10515,6 +14439,14 @@ func (siw *ServerInterfaceWrapper) ListServices(w http.ResponseWriter, r *http.R
 
 	var err error
 	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListServicesParams
@@ -10558,6 +14490,14 @@ func (siw *ServerInterfaceWrapper) DeleteService(w http.ResponseWriter, r *http.
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DeleteService(w, r, name)
 	}))
@@ -10584,6 +14524,14 @@ func (siw *ServerInterfaceWrapper) GetService(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetService(w, r, name)
 	}))
@@ -10609,6 +14557,14 @@ func (siw *ServerInterfaceWrapper) ApplyService(w http.ResponseWriter, r *http.R
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
 		return
 	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ApplyService(w, r, name)
@@ -10638,6 +14594,14 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 // GetMetrics operation middleware
 func (siw *ServerInterfaceWrapper) GetMetrics(w http.ResponseWriter, r *http.Request) {
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMetrics(w, r)
 	}))
@@ -10651,6 +14615,14 @@ func (siw *ServerInterfaceWrapper) GetMetrics(w http.ResponseWriter, r *http.Req
 
 // GetPrometheusTargets operation middleware
 func (siw *ServerInterfaceWrapper) GetPrometheusTargets(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPrometheusTargets(w, r)
@@ -10677,11 +14649,97 @@ func (siw *ServerInterfaceWrapper) GetReadiness(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ListTokens operation middleware
+func (siw *ServerInterfaceWrapper) ListTokens(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"admin"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"admin"})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTokens(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateToken operation middleware
+func (siw *ServerInterfaceWrapper) CreateToken(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"admin"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"admin"})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteToken operation middleware
+func (siw *ServerInterfaceWrapper) DeleteToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id TokenID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"admin"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"admin"})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteToken(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListVariables operation middleware
 func (siw *ServerInterfaceWrapper) ListVariables(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListVariablesParams
@@ -10725,6 +14783,14 @@ func (siw *ServerInterfaceWrapper) DeleteVariable(w http.ResponseWriter, r *http
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	// Parameter object where we will unmarshal all parameters from the context
 	var params DeleteVariableParams
 
@@ -10767,6 +14833,14 @@ func (siw *ServerInterfaceWrapper) GetVariable(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetVariable(w, r, name)
 	}))
@@ -10793,6 +14867,14 @@ func (siw *ServerInterfaceWrapper) SetVariable(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetVariable(w, r, name)
 	}))
@@ -10809,6 +14891,14 @@ func (siw *ServerInterfaceWrapper) ListVolumes(w http.ResponseWriter, r *http.Re
 
 	var err error
 	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListVolumesParams
@@ -10852,6 +14942,14 @@ func (siw *ServerInterfaceWrapper) DeleteVolume(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	// Parameter object where we will unmarshal all parameters from the context
 	var params DeleteVolumeParams
 
@@ -10894,6 +14992,14 @@ func (siw *ServerInterfaceWrapper) GetVolume(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetVolume(w, r, name)
 	}))
@@ -10920,6 +15026,14 @@ func (siw *ServerInterfaceWrapper) ApplyVolume(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ApplyVolume(w, r, name)
 	}))
@@ -10936,6 +15050,14 @@ func (siw *ServerInterfaceWrapper) ListWorkloads(w http.ResponseWriter, r *http.
 
 	var err error
 	_ = err
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListWorkloadsParams
@@ -10979,6 +15101,14 @@ func (siw *ServerInterfaceWrapper) DeleteWorkload(w http.ResponseWriter, r *http
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	// Parameter object where we will unmarshal all parameters from the context
 	var params DeleteWorkloadParams
 
@@ -11021,6 +15151,14 @@ func (siw *ServerInterfaceWrapper) GetWorkload(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetWorkload(w, r, name)
 	}))
@@ -11046,6 +15184,14 @@ func (siw *ServerInterfaceWrapper) ApplyWorkload(w http.ResponseWriter, r *http.
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
 		return
 	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ApplyWorkload(w, r, name)
@@ -11073,6 +15219,14 @@ func (siw *ServerInterfaceWrapper) DryRunWorkload(w http.ResponseWriter, r *http
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DryRunWorkload(w, r, name)
 	}))
@@ -11098,6 +15252,14 @@ func (siw *ServerInterfaceWrapper) GetWorkloadLogs(w http.ResponseWriter, r *htt
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
 		return
 	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params GetWorkloadLogsParams
@@ -11193,6 +15355,14 @@ func (siw *ServerInterfaceWrapper) RestartWorkload(w http.ResponseWriter, r *htt
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RestartWorkload(w, r, name)
 	}))
@@ -11219,6 +15389,14 @@ func (siw *ServerInterfaceWrapper) StartWorkload(w http.ResponseWriter, r *http.
 		return
 	}
 
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StartWorkload(w, r, name)
 	}))
@@ -11244,6 +15422,14 @@ func (siw *ServerInterfaceWrapper) StopWorkload(w http.ResponseWriter, r *http.R
 		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
 		return
 	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StopWorkload(w, r, name)
@@ -11403,6 +15589,18 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/variables/{name}", wrapper.SetVariable)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/admin/backup", wrapper.GetBackup)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/admin/rekey", wrapper.Rekey)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/auth", wrapper.Logout)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/auth", wrapper.GetAuth)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/auth", wrapper.Login)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/auth/oidc", wrapper.GetOIDC)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/auth/oidc/login", wrapper.OidcLogin)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/auth/oidc/callback", wrapper.OidcCallback)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/acl", wrapper.GetACLPolicy)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/acl", wrapper.ApplyACLPolicy)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/acl/init", wrapper.InitACL)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tokens", wrapper.ListTokens)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tokens", wrapper.CreateToken)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tokens/{id}", wrapper.DeleteToken)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/system/health", wrapper.GetHealth)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/system/ready", wrapper.GetReadiness)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/system/metrics", wrapper.GetMetrics)
@@ -11413,9 +15611,260 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 type BadRequestJSONResponse ErrorResponse
 
+type ForbiddenJSONResponse ErrorResponse
+
 type InternalServerErrorJSONResponse ErrorResponse
 
 type NotFoundJSONResponse ErrorResponse
+
+type PreconditionFailedJSONResponse ErrorResponse
+
+type UnauthorizedResponseHeaders struct {
+	WWWAuthenticate *string
+}
+type UnauthorizedJSONResponse struct {
+	Body ErrorResponse
+
+	Headers UnauthorizedResponseHeaders
+}
+
+type GetACLPolicyRequestObject struct {
+}
+
+type GetACLPolicyResponseObject interface {
+	VisitGetACLPolicyResponse(w http.ResponseWriter) error
+}
+
+type GetACLPolicy200ResponseHeaders struct {
+	ETag *string
+}
+
+type GetACLPolicy200JSONResponse struct {
+	Body    GetACLPolicyResult
+	Headers GetACLPolicy200ResponseHeaders
+}
+
+func (response GetACLPolicy200JSONResponse) VisitGetACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetACLPolicy401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetACLPolicy401JSONResponse) VisitGetACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetACLPolicy403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetACLPolicy403JSONResponse) VisitGetACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetACLPolicy500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetACLPolicy500JSONResponse) VisitGetACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyACLPolicyRequestObject struct {
+	Params ApplyACLPolicyParams
+	Body   *ApplyACLPolicyJSONRequestBody
+}
+
+type ApplyACLPolicyResponseObject interface {
+	VisitApplyACLPolicyResponse(w http.ResponseWriter) error
+}
+
+type ApplyACLPolicy200ResponseHeaders struct {
+	ETag *string
+}
+
+type ApplyACLPolicy200JSONResponse struct {
+	Body    ApplyACLPolicyResult
+	Headers ApplyACLPolicy200ResponseHeaders
+}
+
+func (response ApplyACLPolicy200JSONResponse) VisitApplyACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyACLPolicy400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ApplyACLPolicy400JSONResponse) VisitApplyACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyACLPolicy401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ApplyACLPolicy401JSONResponse) VisitApplyACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyACLPolicy403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ApplyACLPolicy403JSONResponse) VisitApplyACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyACLPolicy412JSONResponse struct{ PreconditionFailedJSONResponse }
+
+func (response ApplyACLPolicy412JSONResponse) VisitApplyACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyACLPolicy500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response ApplyACLPolicy500JSONResponse) VisitApplyACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InitACLRequestObject struct {
+	Body *InitACLJSONRequestBody
+}
+
+type InitACLResponseObject interface {
+	VisitInitACLResponse(w http.ResponseWriter) error
+}
+
+type InitACL201JSONResponse InitACLResult
+
+func (response InitACL201JSONResponse) VisitInitACLResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InitACL409JSONResponse ErrorResponse
+
+func (response InitACL409JSONResponse) VisitInitACLResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InitACL500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response InitACL500JSONResponse) VisitInitACLResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type GetBackupRequestObject struct {
 	Params GetBackupParams
@@ -11488,6 +15937,400 @@ type Rekey500JSONResponse struct {
 }
 
 func (response Rekey500JSONResponse) VisitRekeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LogoutRequestObject struct {
+}
+
+type LogoutResponseObject interface {
+	VisitLogoutResponse(w http.ResponseWriter) error
+}
+
+type Logout200ResponseHeaders struct {
+	SetCookie *string
+}
+
+type Logout200JSONResponse struct {
+	Body    LogoutResult
+	Headers Logout200ResponseHeaders
+}
+
+func (response Logout200JSONResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.SetCookie != nil {
+		w.Header().Set("Set-Cookie", fmt.Sprint(*response.Headers.SetCookie))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Logout401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response Logout401JSONResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Logout409JSONResponse ErrorResponse
+
+func (response Logout409JSONResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Logout500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response Logout500JSONResponse) VisitLogoutResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuthRequestObject struct {
+}
+
+type GetAuthResponseObject interface {
+	VisitGetAuthResponse(w http.ResponseWriter) error
+}
+
+type GetAuth200JSONResponse GetAuthResult
+
+func (response GetAuth200JSONResponse) VisitGetAuthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuth401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetAuth401JSONResponse) VisitGetAuthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAuth500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetAuth500JSONResponse) VisitGetAuthResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type LoginRequestObject struct {
+	Body *LoginJSONRequestBody
+}
+
+type LoginResponseObject interface {
+	VisitLoginResponse(w http.ResponseWriter) error
+}
+
+type Login200ResponseHeaders struct {
+	SetCookie *string
+}
+
+type Login200JSONResponse struct {
+	Body    LoginResult
+	Headers Login200ResponseHeaders
+}
+
+func (response Login200JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.SetCookie != nil {
+		w.Header().Set("Set-Cookie", fmt.Sprint(*response.Headers.SetCookie))
+	}
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Login400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response Login400JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Login401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response Login401JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Login500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response Login500JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOIDCRequestObject struct {
+}
+
+type GetOIDCResponseObject interface {
+	VisitGetOIDCResponse(w http.ResponseWriter) error
+}
+
+type GetOIDC200JSONResponse GetOIDCResult
+
+func (response GetOIDC200JSONResponse) VisitGetOIDCResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOIDC404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetOIDC404JSONResponse) VisitGetOIDCResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOIDC500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetOIDC500JSONResponse) VisitGetOIDCResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type OidcCallbackRequestObject struct {
+	Params OidcCallbackParams
+}
+
+type OidcCallbackResponseObject interface {
+	VisitOidcCallbackResponse(w http.ResponseWriter) error
+}
+
+type OidcCallback302ResponseHeaders struct {
+	Location  *string
+	SetCookie *string
+}
+
+type OidcCallback302Response struct {
+	Headers OidcCallback302ResponseHeaders
+}
+
+func (response OidcCallback302Response) VisitOidcCallbackResponse(w http.ResponseWriter) error {
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	if response.Headers.SetCookie != nil {
+		w.Header().Set("Set-Cookie", fmt.Sprint(*response.Headers.SetCookie))
+	}
+	w.WriteHeader(302)
+	return nil
+}
+
+type OidcCallback401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response OidcCallback401JSONResponse) VisitOidcCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type OidcCallback404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response OidcCallback404JSONResponse) VisitOidcCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type OidcCallback500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response OidcCallback500JSONResponse) VisitOidcCallbackResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type OidcLoginRequestObject struct {
+}
+
+type OidcLoginResponseObject interface {
+	VisitOidcLoginResponse(w http.ResponseWriter) error
+}
+
+type OidcLogin302ResponseHeaders struct {
+	Location  *string
+	SetCookie *string
+}
+
+type OidcLogin302Response struct {
+	Headers OidcLogin302ResponseHeaders
+}
+
+func (response OidcLogin302Response) VisitOidcLoginResponse(w http.ResponseWriter) error {
+	if response.Headers.Location != nil {
+		w.Header().Set("Location", fmt.Sprint(*response.Headers.Location))
+	}
+	if response.Headers.SetCookie != nil {
+		w.Header().Set("Set-Cookie", fmt.Sprint(*response.Headers.SetCookie))
+	}
+	w.WriteHeader(302)
+	return nil
+}
+
+type OidcLogin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response OidcLogin404JSONResponse) VisitOidcLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type OidcLogin500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response OidcLogin500JSONResponse) VisitOidcLoginResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -12115,6 +16958,240 @@ func (response GetReadiness503JSONResponse) VisitGetReadinessResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokensRequestObject struct {
+}
+
+type ListTokensResponseObject interface {
+	VisitListTokensResponse(w http.ResponseWriter) error
+}
+
+type ListTokens200JSONResponse ListTokensResult
+
+func (response ListTokens200JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokens401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListTokens401JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokens403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListTokens403JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListTokens500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response ListTokens500JSONResponse) VisitListTokensResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateTokenRequestObject struct {
+	Body *CreateTokenJSONRequestBody
+}
+
+type CreateTokenResponseObject interface {
+	VisitCreateTokenResponse(w http.ResponseWriter) error
+}
+
+type CreateToken201JSONResponse CreateTokenResult
+
+func (response CreateToken201JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateToken400JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response CreateToken401JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateToken403JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response CreateToken500JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteTokenRequestObject struct {
+	ID TokenID `json:"id"`
+}
+
+type DeleteTokenResponseObject interface {
+	VisitDeleteTokenResponse(w http.ResponseWriter) error
+}
+
+type DeleteToken200JSONResponse DeleteTokenResult
+
+func (response DeleteToken200JSONResponse) VisitDeleteTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteToken401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DeleteToken401JSONResponse) VisitDeleteTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteToken403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteToken403JSONResponse) VisitDeleteTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteToken404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteToken404JSONResponse) VisitDeleteTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteToken500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response DeleteToken500JSONResponse) VisitDeleteTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -13223,12 +18300,39 @@ func (response StopWorkload500JSONResponse) VisitStopWorkloadResponse(w http.Res
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// GetACLPolicy Read the policy document
+	// (GET /api/v1/acl)
+	GetACLPolicy(ctx context.Context, request GetACLPolicyRequestObject) (GetACLPolicyResponseObject, error)
+	// ApplyACLPolicy Replace the policy document
+	// (PUT /api/v1/acl)
+	ApplyACLPolicy(ctx context.Context, request ApplyACLPolicyRequestObject) (ApplyACLPolicyResponseObject, error)
+	// InitACL Mint the recovery token
+	// (POST /api/v1/acl/init)
+	InitACL(ctx context.Context, request InitACLRequestObject) (InitACLResponseObject, error)
 	// GetBackup Download a backup of the node
 	// (GET /api/v1/admin/backup)
 	GetBackup(ctx context.Context, request GetBackupRequestObject) (GetBackupResponseObject, error)
 	// Rekey Re-encrypt every secret under a new key
 	// (POST /api/v1/admin/rekey)
 	Rekey(ctx context.Context, request RekeyRequestObject) (RekeyResponseObject, error)
+	// Logout Revoke the credential that authenticated this request
+	// (DELETE /api/v1/auth)
+	Logout(ctx context.Context, request LogoutRequestObject) (LogoutResponseObject, error)
+	// GetAuth Report who the caller is
+	// (GET /api/v1/auth)
+	GetAuth(ctx context.Context, request GetAuthRequestObject) (GetAuthResponseObject, error)
+	// Login Exchange an identity for a short-lived token
+	// (POST /api/v1/auth)
+	Login(ctx context.Context, request LoginRequestObject) (LoginResponseObject, error)
+	// GetOIDC Report how to log in with OIDC
+	// (GET /api/v1/auth/oidc)
+	GetOIDC(ctx context.Context, request GetOIDCRequestObject) (GetOIDCResponseObject, error)
+	// OidcCallback Complete the browser OIDC flow
+	// (GET /api/v1/auth/oidc/callback)
+	OidcCallback(ctx context.Context, request OidcCallbackRequestObject) (OidcCallbackResponseObject, error)
+	// OidcLogin Start the browser OIDC flow
+	// (GET /api/v1/auth/oidc/login)
+	OidcLogin(ctx context.Context, request OidcLoginRequestObject) (OidcLoginResponseObject, error)
 	// ListSecrets List secrets
 	// (GET /api/v1/secrets)
 	ListSecrets(ctx context.Context, request ListSecretsRequestObject) (ListSecretsResponseObject, error)
@@ -13265,6 +18369,15 @@ type StrictServerInterface interface {
 	// GetReadiness Report whether the server can do its job
 	// (GET /api/v1/system/ready)
 	GetReadiness(ctx context.Context, request GetReadinessRequestObject) (GetReadinessResponseObject, error)
+	// ListTokens List every credential
+	// (GET /api/v1/tokens)
+	ListTokens(ctx context.Context, request ListTokensRequestObject) (ListTokensResponseObject, error)
+	// CreateToken Create a token for a principal
+	// (POST /api/v1/tokens)
+	CreateToken(ctx context.Context, request CreateTokenRequestObject) (CreateTokenResponseObject, error)
+	// DeleteToken Revoke a token
+	// (DELETE /api/v1/tokens/{id})
+	DeleteToken(ctx context.Context, request DeleteTokenRequestObject) (DeleteTokenResponseObject, error)
 	// ListVariables List variables
 	// (GET /api/v1/variables)
 	ListVariables(ctx context.Context, request ListVariablesRequestObject) (ListVariablesResponseObject, error)
@@ -13357,6 +18470,94 @@ type strictHandler struct {
 	options     StrictHTTPServerOptions
 }
 
+// GetACLPolicy operation middleware
+func (sh *strictHandler) GetACLPolicy(w http.ResponseWriter, r *http.Request) {
+	var request GetACLPolicyRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetACLPolicy(ctx, request.(GetACLPolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetACLPolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetACLPolicyResponseObject); ok {
+		if err := validResponse.VisitGetACLPolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ApplyACLPolicy operation middleware
+func (sh *strictHandler) ApplyACLPolicy(w http.ResponseWriter, r *http.Request, params ApplyACLPolicyParams) {
+	var request ApplyACLPolicyRequestObject
+
+	request.Params = params
+
+	var body ApplyACLPolicyJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ApplyACLPolicy(ctx, request.(ApplyACLPolicyRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ApplyACLPolicy")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ApplyACLPolicyResponseObject); ok {
+		if err := validResponse.VisitApplyACLPolicyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// InitACL operation middleware
+func (sh *strictHandler) InitACL(w http.ResponseWriter, r *http.Request) {
+	var request InitACLRequestObject
+
+	var body InitACLJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.InitACL(ctx, request.(InitACLRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "InitACL")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(InitACLResponseObject); ok {
+		if err := validResponse.VisitInitACLResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // GetBackup operation middleware
 func (sh *strictHandler) GetBackup(w http.ResponseWriter, r *http.Request, params GetBackupParams) {
 	var request GetBackupRequestObject
@@ -13407,6 +18608,159 @@ func (sh *strictHandler) Rekey(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RekeyResponseObject); ok {
 		if err := validResponse.VisitRekeyResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Logout operation middleware
+func (sh *strictHandler) Logout(w http.ResponseWriter, r *http.Request) {
+	var request LogoutRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Logout(ctx, request.(LogoutRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Logout")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LogoutResponseObject); ok {
+		if err := validResponse.VisitLogoutResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAuth operation middleware
+func (sh *strictHandler) GetAuth(w http.ResponseWriter, r *http.Request) {
+	var request GetAuthRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAuth(ctx, request.(GetAuthRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAuth")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAuthResponseObject); ok {
+		if err := validResponse.VisitGetAuthResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// Login operation middleware
+func (sh *strictHandler) Login(w http.ResponseWriter, r *http.Request) {
+	var request LoginRequestObject
+
+	var body LoginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.Login(ctx, request.(LoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "Login")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(LoginResponseObject); ok {
+		if err := validResponse.VisitLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOIDC operation middleware
+func (sh *strictHandler) GetOIDC(w http.ResponseWriter, r *http.Request) {
+	var request GetOIDCRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOIDC(ctx, request.(GetOIDCRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOIDC")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOIDCResponseObject); ok {
+		if err := validResponse.VisitGetOIDCResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// OidcCallback operation middleware
+func (sh *strictHandler) OidcCallback(w http.ResponseWriter, r *http.Request, params OidcCallbackParams) {
+	var request OidcCallbackRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.OidcCallback(ctx, request.(OidcCallbackRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "OidcCallback")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(OidcCallbackResponseObject); ok {
+		if err := validResponse.VisitOidcCallbackResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// OidcLogin operation middleware
+func (sh *strictHandler) OidcLogin(w http.ResponseWriter, r *http.Request) {
+	var request OidcLoginRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.OidcLogin(ctx, request.(OidcLoginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "OidcLogin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(OidcLoginResponseObject); ok {
+		if err := validResponse.VisitOidcLoginResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -13726,6 +19080,87 @@ func (sh *strictHandler) GetReadiness(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetReadinessResponseObject); ok {
 		if err := validResponse.VisitGetReadinessResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListTokens operation middleware
+func (sh *strictHandler) ListTokens(w http.ResponseWriter, r *http.Request) {
+	var request ListTokensRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListTokens(ctx, request.(ListTokensRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListTokens")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListTokensResponseObject); ok {
+		if err := validResponse.VisitListTokensResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateToken operation middleware
+func (sh *strictHandler) CreateToken(w http.ResponseWriter, r *http.Request) {
+	var request CreateTokenRequestObject
+
+	var body CreateTokenJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateToken(ctx, request.(CreateTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateTokenResponseObject); ok {
+		if err := validResponse.VisitCreateTokenResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteToken operation middleware
+func (sh *strictHandler) DeleteToken(w http.ResponseWriter, r *http.Request, id TokenID) {
+	var request DeleteTokenRequestObject
+
+	request.ID = id
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteToken(ctx, request.(DeleteTokenRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteToken")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteTokenResponseObject); ok {
+		if err := validResponse.VisitDeleteTokenResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

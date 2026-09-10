@@ -7,6 +7,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
@@ -39,6 +40,9 @@ type (
 		*VariableAPI
 		*SystemAPI
 		*AdminAPI
+		*AuthAPI
+		*ACLAPI
+		*TokenAPI
 	}
 
 	// The Config type contains fields used to construct an API.
@@ -57,6 +61,12 @@ type (
 		System *SystemAPI
 		// The endpoints acting on the node itself.
 		Admin *AdminAPI
+		// The endpoints serving the caller's own authentication.
+		Auth *AuthAPI
+		// The endpoints serving the policy document.
+		ACL *ACLAPI
+		// The endpoints managing tokens.
+		Tokens *TokenAPI
 	}
 )
 
@@ -75,6 +85,9 @@ func New(config Config) *API {
 		VariableAPI: config.Variables,
 		SystemAPI:   config.System,
 		AdminAPI:    config.Admin,
+		AuthAPI:     config.Auth,
+		ACLAPI:      config.ACL,
+		TokenAPI:    config.Tokens,
 	}
 }
 
@@ -132,4 +145,12 @@ func wireLabels(labels map[string]string) *api.Labels {
 	wire := api.Labels(labels)
 
 	return &wire
+}
+
+// internalError logs why a request failed and returns the message the client is told
+// instead.
+func internalError(logger *slog.Logger, operation string, err error) string {
+	logger.With("error", err, "operation", operation).Error("failed to serve request")
+
+	return "failed to " + operation
 }
