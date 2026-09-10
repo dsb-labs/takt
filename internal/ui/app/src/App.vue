@@ -5,7 +5,7 @@ import { useRoute, useRouter } from "vue-router";
 import { version } from "../package.json";
 import { useLogout } from "./api/mutations";
 import { useReadiness } from "./api/queries";
-import { forgetIdentity, identity } from "./auth";
+import { admin, forgetIdentity, identity } from "./auth";
 
 const route = useRoute();
 const router = useRouter();
@@ -36,14 +36,18 @@ function active(to: string): boolean {
 // the repository still carries the placeholder, which reads better as "dev".
 const displayVersion = version === "0.0.0" ? "dev" : `v${version}`;
 
-const navigation = [
+// The access section exists only for a caller who may read the policy,
+// which is what its endpoints require, so nobody is offered a page that
+// answers 403.
+const navigation = computed(() => [
   { name: "Workloads", to: "/" },
   { name: "Secrets", to: "/secrets" },
   { name: "Variables", to: "/variables" },
   { name: "Volumes", to: "/volumes" },
   { name: "Services", to: "/services" },
   { name: "Graph", to: "/graph" },
-];
+  ...(admin() ? [{ name: "Access", to: "/acl" }] : []),
+]);
 
 // The login page stands alone: a caller the server refused has no business
 // seeing the sections it cannot open, and the readiness banner reads from a

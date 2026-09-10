@@ -4,19 +4,19 @@ import yamlLanguage from "highlight.js/lib/languages/yaml";
 import { computed } from "vue";
 import { stringify } from "yaml";
 
-import type { WorkloadSpec } from "../api/types";
-
 // Only the one language is registered, so the bundle carries the highlighter
 // core and the yaml grammar rather than every language it knows.
 hljs.registerLanguage("yaml", yamlLanguage);
 
-const props = defineProps<{ spec: WorkloadSpec }>();
+// Any JSON document reads here: a workload specification, the policy
+// document, whatever else earns a YAML rendering later.
+const props = defineProps<{ document: object }>();
 
 // The API returns the specification as JSON. Rendering it as YAML shows it
 // the way the manifest was written. The highlighter escapes the content, so
 // the output is safe to render as HTML.
 const highlighted = computed(
-  () => hljs.highlight(stringify(props.spec), { language: "yaml" }).value,
+  () => hljs.highlight(stringify(props.document), { language: "yaml" }).value,
 );
 </script>
 

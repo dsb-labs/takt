@@ -75,6 +75,11 @@ export const router = createRouter({
       name: "volume",
       component: () => import("./views/volumes/Detail.vue"),
     },
+    {
+      path: "/acl",
+      name: "acl",
+      component: () => import("./views/acl/View.vue"),
+    },
   ],
 });
 
@@ -109,6 +114,7 @@ const sections: Record<string, string> = {
   "variable-new": "New variable",
   volumes: "Volumes",
   services: "Services",
+  acl: "Access",
 };
 
 router.afterEach((to) => {
