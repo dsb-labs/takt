@@ -222,6 +222,83 @@ func TestAuthService_LoginOIDC(t *testing.T) {
 	})
 }
 
+func TestAuthService_LoginCode(t *testing.T) {
+	t.Parallel()
+
+	policy := manifest.Policy{
+		Version: "v1",
+		OIDC:    &manifest.PolicyOIDC{PrincipalClaim: "email"},
+	}
+
+	// newTestAuthService has no exchanger parameter because only these tests
+	// pass one; everything else runs without OIDC at all.
+	withExchanger := func(t *testing.T, tokens service.TokenRepository, policies service.PolicyReader, verifier service.IdentityVerifier, exchanger service.IdentityExchanger) *service.AuthService {
+		t.Helper()
+
+		return service.NewAuthService(service.AuthServiceConfig{
+			Logger:    newTestLogger(t),
+			Tokens:    tokens,
+			Policies:  policies,
+			Verifier:  verifier,
+			Exchanger: exchanger,
+		})
+	}
+
+	t.Run("exchanges a code for a token through the issuer", func(t *testing.T) {
+		exchanger := NewMockIdentityExchanger(t)
+		exchanger.EXPECT().Exchange(mock.Anything, "abc", "verifier", "http://127.0.0.1:8250/oidc/callback").
+			Return("raw", nil).Once()
+
+		verifier := NewMockIdentityVerifier(t)
+		verifier.EXPECT().Verify(mock.Anything, "raw").
+			Return(map[string]any{"email": "david@dsb.dev"}, nil).Once()
+
+		policies := NewMockPolicyReader(t)
+		policies.EXPECT().Get(mock.Anything).Return(policy, "tag", nil).Once()
+
+		tokens := NewMockTokenRepository(t)
+		tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(token database.Token) bool {
+			return token.Source == "oidc" && token.Principal == "david@dsb.dev"
+		})).Return(database.Token{ID: "id", Principal: "david@dsb.dev"}, nil).Once()
+
+		minted, credential, err := withExchanger(t, tokens, policies, verifier, exchanger).
+			LoginCode(t.Context(), "abc", "verifier", "http://127.0.0.1:8250/oidc/callback")
+		require.NoError(t, err)
+		assert.Equal(t, "david@dsb.dev", minted.Principal)
+		assert.NotEmpty(t, credential)
+	})
+
+	t.Run("refuses a redirect that is not loopback", func(t *testing.T) {
+		// The mock asserts no Exchange, since it was never told to expect
+		// one: a foreign redirect would make this server an exchange oracle
+		// for codes obtained some other way.
+		svc := withExchanger(t, NewMockTokenRepository(t), NewMockPolicyReader(t),
+			NewMockIdentityVerifier(t), NewMockIdentityExchanger(t))
+
+		_, _, err := svc.LoginCode(t.Context(), "abc", "verifier", "https://evil.example.com/callback")
+		assert.ErrorIs(t, err, service.ErrInvalidRedirect)
+	})
+
+	t.Run("refuses a code the issuer rejects", func(t *testing.T) {
+		exchanger := NewMockIdentityExchanger(t)
+		exchanger.EXPECT().Exchange(mock.Anything, "abc", "verifier", mock.Anything).
+			Return("", assert.AnError).Once()
+
+		svc := withExchanger(t, NewMockTokenRepository(t), NewMockPolicyReader(t),
+			NewMockIdentityVerifier(t), exchanger)
+
+		_, _, err := svc.LoginCode(t.Context(), "abc", "verifier", "http://localhost:8250/oidc/callback")
+		assert.ErrorIs(t, err, service.ErrInvalidCredential)
+	})
+
+	t.Run("reports oidc is not configured", func(t *testing.T) {
+		svc := newTestAuthService(t, NewMockTokenRepository(t), NewMockPolicyReader(t), nil)
+
+		_, _, err := svc.LoginCode(t.Context(), "abc", "verifier", "http://127.0.0.1:8250/oidc/callback")
+		assert.ErrorIs(t, err, service.ErrOIDCDisabled)
+	})
+}
+
 func TestAuthService_LoginToken(t *testing.T) {
 	t.Parallel()
 
