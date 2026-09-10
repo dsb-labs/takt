@@ -30,6 +30,10 @@ type (
 		// LoginToken should exchange an existing client token for a
 		// short-lived session token bound to the same principal.
 		LoginToken(ctx context.Context, credential string) (service.Token, string, error)
+		// LoginCode should trade an authorization code from the CLI's
+		// loopback flow for a short-lived client token, exchanging it with
+		// the issuer server-side.
+		LoginCode(ctx context.Context, code, verifier, redirectURI string) (service.Token, string, error)
 		// Logout should revoke the credential behind the given identity.
 		Logout(ctx context.Context, identity auth.Identity) error
 	}
@@ -130,18 +134,33 @@ func (a *AuthAPI) Login(ctx context.Context, request api.LoginRequestObject) (ap
 		err        error
 	)
 
+	// Each case asserts the other forms are absent, so a body naming two
+	// exchanges falls through to the refusal rather than silently picking
+	// one.
 	switch {
-	case request.Body.IDToken != nil && request.Body.Token == nil:
+	case request.Body.IDToken != nil && request.Body.Token == nil && request.Body.Code == nil:
 		token, credential, err = a.svc.LoginOIDC(ctx, *request.Body.IDToken)
-	case request.Body.Token != nil && request.Body.IDToken == nil:
+	case request.Body.Token != nil && request.Body.IDToken == nil && request.Body.Code == nil:
 		token, credential, err = a.svc.LoginToken(ctx, *request.Body.Token)
+	case request.Body.Code != nil && request.Body.IDToken == nil && request.Body.Token == nil:
+		if request.Body.Verifier == nil || request.Body.RedirectURI == nil {
+			return api.Login400JSONResponse{
+				Error: "a code exchange requires verifier and redirectUri",
+			}, nil
+		}
+
+		token, credential, err = a.svc.LoginCode(ctx, *request.Body.Code, *request.Body.Verifier, *request.Body.RedirectURI)
 	default:
 		return api.Login400JSONResponse{
-			Error: "exactly one of idToken and token is required",
+			Error: "exactly one of idToken, token and code is required",
 		}, nil
 	}
 
 	switch {
+	case errors.Is(err, service.ErrInvalidRedirect):
+		return api.Login400JSONResponse{
+			Error: err.Error(),
+		}, nil
 	case errors.Is(err, service.ErrOIDCDisabled):
 		return api.Login400JSONResponse{
 			Error: "oidc is not configured",

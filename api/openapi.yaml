@@ -3367,8 +3367,9 @@ components:
     LoginRequest:
       type: object
       description: |
-        The exchange a login performs. Exactly one of `idToken` and `token`
-        must be present; which one it is selects the exchange.
+        The exchange a login performs. Exactly one of `idToken`, `token` and
+        `code` must be present; which one it is selects the exchange, and
+        `code` brings `verifier` and `redirectUri` with it.
       properties:
         idToken:
           type: string
@@ -3382,6 +3383,21 @@ components:
             An existing client token, exchanged for a session bound to the
             same principal. This is how the browser UI trades a pasted
             standing credential for one that expires on its own.
+        code:
+          type: string
+          description: |
+            An authorization code from the CLI's loopback flow, exchanged
+            with the issuer by the server, because the exchange is what
+            needs the client secret and the secret never reaches the CLI.
+        verifier:
+          type: string
+          description: The PKCE verifier the code exchange proves.
+        redirectUri:
+          type: string
+          description: |
+            The loopback redirect the browser was sent back to, which the
+            issuer requires to match on the exchange. Anything other than a
+            loopback address is refused.
         cookie:
           type: boolean
           description: |

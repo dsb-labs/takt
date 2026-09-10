@@ -302,10 +302,11 @@ func Run(ctx context.Context, config Config) error {
 		Policies: database.NewPolicyRepository(db),
 	})
 
-	// Both are nil without OIDC, which is how the login exchange and the
+	// All are nil without OIDC, which is how the login exchanges and the
 	// browser flow answer that they are not configured.
 	var (
 		verifier     service.IdentityVerifier
+		exchanger    service.IdentityExchanger
 		relyingParty *api.OIDCRelyingParty
 	)
 
@@ -316,6 +317,9 @@ func Run(ctx context.Context, config Config) error {
 		}
 
 		verifier = oidcVerifier
+		// The CLI's loopback flow hands its authorization code to the server,
+		// because the exchange is what needs the client secret.
+		exchanger = service.NewOIDCExchanger(config.Auth.OIDC.ClientID, config.Auth.OIDC.ClientSecret, endpoint)
 		relyingParty = &api.OIDCRelyingParty{
 			Issuer:   config.Auth.OIDC.Issuer,
 			ClientID: config.Auth.OIDC.ClientID,
@@ -341,10 +345,11 @@ func Run(ctx context.Context, config Config) error {
 	}
 
 	authSvc := service.NewAuthService(service.AuthServiceConfig{
-		Logger:   logger,
-		Tokens:   tokens,
-		Policies: policySvc,
-		Verifier: verifier,
+		Logger:    logger,
+		Tokens:    tokens,
+		Policies:  policySvc,
+		Verifier:  verifier,
+		Exchanger: exchanger,
 	})
 
 	// A nil authenticator is how the middleware knows the layer is off. The

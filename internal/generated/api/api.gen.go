@@ -950,9 +950,15 @@ type ListWorkloadsResult struct {
 	Workloads []Workload `json:"workloads"`
 }
 
-// LoginRequest The exchange a login performs. Exactly one of `idToken` and `token`
-// must be present; which one it is selects the exchange.
+// LoginRequest The exchange a login performs. Exactly one of `idToken`, `token` and
+// `code` must be present; which one it is selects the exchange, and
+// `code` brings `verifier` and `redirectUri` with it.
 type LoginRequest struct {
+	// Code An authorization code from the CLI's loopback flow, exchanged
+	// with the issuer by the server, because the exchange is what
+	// needs the client secret and the secret never reaches the CLI.
+	Code *string `json:"code,omitempty"`
+
 	// Cookie Also carry the minted credential as an HttpOnly session cookie.
 	// The browser UI sets this. The CLI does not.
 	Cookie *bool `json:"cookie,omitempty"`
@@ -962,10 +968,18 @@ type LoginRequest struct {
 	// the policy maps them.
 	IDToken *string `json:"idToken,omitempty"`
 
+	// RedirectURI The loopback redirect the browser was sent back to, which the
+	// issuer requires to match on the exchange. Anything other than a
+	// loopback address is refused.
+	RedirectURI *string `json:"redirectUri,omitempty"`
+
 	// Token An existing client token, exchanged for a session bound to the
 	// same principal. This is how the browser UI trades a pasted
 	// standing credential for one that expires on its own.
 	Token *string `json:"token,omitempty"`
+
+	// Verifier The PKCE verifier the code exchange proves.
+	Verifier *string `json:"verifier,omitempty"`
 }
 
 // LoginResult The body returned by a successful login.
