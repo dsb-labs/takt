@@ -54,6 +54,24 @@ var (
 	// ErrInvalidVariableName is returned when a name is not usable as a single
 	// segment of a request path.
 	ErrInvalidVariableName = errors.New("invalid variable name")
+	// ErrTokenNotFound is returned when no token exists with the given
+	// identifier.
+	ErrTokenNotFound = errors.New("token not found")
+	// ErrInvalidTokenID is returned when an identifier is not usable as a
+	// single segment of a request path.
+	ErrInvalidTokenID = errors.New("invalid token id")
+	// ErrACLInitialized is returned when init is asked for and a recovery
+	// token already exists.
+	ErrACLInitialized = errors.New("acl already initialized")
+	// ErrPolicyChanged is returned when the policy an apply was conditioned
+	// on is no longer the policy the server holds.
+	ErrPolicyChanged = errors.New("policy changed since it was read")
+	// ErrRecoveryLogout is returned when the recovery token asks to revoke
+	// itself, which only the reset file does.
+	ErrRecoveryLogout = errors.New("the recovery token is revoked by the reset file")
+	// ErrOIDCNotConfigured is returned when a login is asked for and the
+	// server carries no OIDC configuration.
+	ErrOIDCNotConfigured = errors.New("oidc is not configured")
 )
 
 type (
