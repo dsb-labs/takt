@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
 
 	"github.com/dsb-labs/takt/internal/server/auth"
 	"github.com/dsb-labs/takt/internal/server/database"
@@ -269,14 +270,16 @@ type oidcVerifier struct {
 }
 
 // NewOIDCVerifier discovers the issuer's keys and returns a verifier for
-// identity tokens minted for the given client.
-func NewOIDCVerifier(ctx context.Context, issuer, clientID string) (IdentityVerifier, error) {
+// identity tokens minted for the given client, along with the issuer's
+// endpoints for whoever runs the authorization code flow. Discovery happens
+// once here, so the verifier and the flow cannot disagree about the issuer.
+func NewOIDCVerifier(ctx context.Context, issuer, clientID string) (IdentityVerifier, oauth2.Endpoint, error) {
 	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
-		return nil, fmt.Errorf("failed to discover the oidc issuer: %w", err)
+		return nil, oauth2.Endpoint{}, fmt.Errorf("failed to discover the oidc issuer: %w", err)
 	}
 
-	return &oidcVerifier{verifier: provider.Verifier(&oidc.Config{ClientID: clientID})}, nil
+	return &oidcVerifier{verifier: provider.Verifier(&oidc.Config{ClientID: clientID})}, provider.Endpoint(), nil
 }
 
 // Verify checks the raw identity token against the issuer and returns its
