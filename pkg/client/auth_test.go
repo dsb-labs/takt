@@ -138,6 +138,43 @@ func TestClient_Login(t *testing.T) {
 	}
 }
 
+func TestClient_LoginCode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sends the code exchange", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodPost, r.Method)
+			assert.Equal(t, "/api/v1/auth", r.URL.Path)
+
+			var body api.LoginRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			require.NotNil(t, body.Code)
+			require.NotNil(t, body.Verifier)
+			require.NotNil(t, body.RedirectURI)
+			assert.Equal(t, "abc", *body.Code)
+			assert.Nil(t, body.IDToken)
+
+			writeJSON(t, w, http.StatusOK, api.LoginResult{
+				Credential: "takt_c_secret",
+				Principal:  "david@dsb.dev",
+			})
+		})
+
+		login, err := c.LoginCode(t.Context(), "abc", "verifier", "http://127.0.0.1:8250/oidc/callback")
+		require.NoError(t, err)
+		assert.Equal(t, "takt_c_secret", login.Credential)
+	})
+
+	t.Run("reports a refused exchange", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusUnauthorized, api.ErrorResponse{Error: "invalid credential"})
+		})
+
+		_, err := c.LoginCode(t.Context(), "abc", "verifier", "http://127.0.0.1:8250/oidc/callback")
+		assert.True(t, client.IsUnauthorized(err))
+	})
+}
+
 func TestClient_Logout(t *testing.T) {
 	t.Parallel()
 

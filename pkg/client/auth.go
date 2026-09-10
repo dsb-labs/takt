@@ -100,6 +100,38 @@ func (c *Client) Login(ctx context.Context, idToken string) (Login, error) {
 	}
 }
 
+// LoginCode trades an authorization code from a loopback flow for a
+// short-lived client token. The server performs the exchange with the
+// issuer, because the exchange is what needs the client secret and the
+// secret never reaches a client.
+func (c *Client) LoginCode(ctx context.Context, code, verifier, redirectURI string) (Login, error) {
+	resp, err := c.api.LoginWithResponse(ctx, api.LoginRequest{
+		Code:        new(code),
+		Verifier:    new(verifier),
+		RedirectURI: new(redirectURI),
+	})
+	if err != nil {
+		return Login{}, fmt.Errorf("failed to send the request: %w", err)
+	}
+
+	switch {
+	case resp.JSON200 != nil:
+		return Login{
+			Credential: resp.JSON200.Credential,
+			Principal:  resp.JSON200.Principal,
+			ExpiresAt:  resp.JSON200.ExpiresAt,
+		}, nil
+	case resp.JSON400 != nil:
+		return Login{}, newError(http.StatusBadRequest, resp.JSON400)
+	case resp.JSON401 != nil:
+		return Login{}, newError(http.StatusUnauthorized, resp.JSON401)
+	case resp.JSON500 != nil:
+		return Login{}, newError(http.StatusInternalServerError, resp.JSON500)
+	default:
+		return Login{}, newError(resp.StatusCode(), nil)
+	}
+}
+
 // Logout revokes the credential this client authenticated with, whatever its
 // kind. The one refusal is the recovery token, reported as
 // ErrRecoveryLogout: its revocation path is the reset file, not this call.
