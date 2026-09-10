@@ -3914,6 +3914,18 @@ func (s *Suite) TestAuthOIDC() {
 
 	_, err = s.client.Login(s.ctx(), wrongSign(map[string]any{"email": "forger@example.com"}))
 	s.Require().True(client.IsUnauthorized(err), "expected 401 for a foreign signature, got %v", err)
+
+	// The CLI's flow ends at the authorization code: the server performs the
+	// exchange, because the exchange is what needs the client secret. The
+	// fake issuer's token endpoint answers any code with a signed identity.
+	codeLogin, err := s.client.LoginCode(s.ctx(), "any-code", "any-verifier", "http://127.0.0.1:8250/oidc/callback")
+	s.Require().NoError(err)
+	s.Equal("operator@example.com", codeLogin.Principal)
+
+	// A redirect that is not loopback would make the server an exchange
+	// oracle for codes obtained some other way, so it is refused.
+	_, err = s.client.LoginCode(s.ctx(), "any-code", "any-verifier", "https://evil.example.com/callback")
+	s.Require().True(client.IsBadRequest(err), "expected 400 for a foreign redirect, got %v", err)
 }
 
 // fakeIssuer runs an OIDC issuer for the test: a discovery document, a JWKS,
@@ -3974,6 +3986,18 @@ func (s *Suite) fakeIssuer() (string, func(claims map[string]any) string) {
 
 		return serialized
 	}
+
+	// The token endpoint answers any authorization code with a signed
+	// identity, standing in for the exchange the server performs on the
+	// CLI's behalf.
+	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "access",
+			"token_type":   "bearer",
+			"id_token":     sign(map[string]any{"email": "operator@example.com"}),
+		})
+	})
 
 	return issuer.URL, sign
 }
