@@ -15,6 +15,7 @@ import (
 
 	"github.com/dsb-labs/takt/cmd/acl"
 	"github.com/dsb-labs/takt/cmd/admin"
+	"github.com/dsb-labs/takt/cmd/auth"
 	"github.com/dsb-labs/takt/cmd/dev"
 	"github.com/dsb-labs/takt/cmd/secret"
 	"github.com/dsb-labs/takt/cmd/serve"
@@ -115,6 +116,7 @@ func main() {
 		variable.Command(),
 		token.Command(),
 		acl.Command(),
+		auth.Command(),
 		admin.Command(),
 		dev.Command(),
 	)
