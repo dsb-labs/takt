@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { useRoute } from "vue-router";
 
 import { version } from "../package.json";
@@ -28,6 +29,11 @@ const navigation = [
   { name: "Services", to: "/services" },
   { name: "Graph", to: "/graph" },
 ];
+
+// The login page stands alone: a caller the server refused has no business
+// seeing the sections it cannot open, and the readiness banner reads from a
+// query that would itself be refused.
+const chrome = computed(() => route.name !== "login");
 </script>
 
 <template>
@@ -35,6 +41,7 @@ const navigation = [
     class="flex min-h-screen flex-col bg-slate-50 text-slate-900 sm:flex-row dark:bg-slate-950 dark:text-slate-100"
   >
     <aside
+      v-if="chrome"
       class="flex shrink-0 flex-col border-b border-slate-200 bg-white sm:min-h-screen sm:w-56 sm:border-r sm:border-b-0 dark:border-slate-800 dark:bg-slate-900"
     >
       <RouterLink to="/" class="flex items-center gap-2.5 px-4 py-4">
@@ -79,11 +86,11 @@ const navigation = [
       </div>
     </aside>
 
-    <main class="min-w-0 flex-1 p-4 sm:p-8">
+    <main class="min-w-0 flex-1" :class="chrome ? 'p-4 sm:p-8' : ''">
       <!-- Visible rather than only the sidebar dot: a server that cannot do
            its job is the context for everything else on the page. -->
       <div
-        v-if="readiness.data.value && !readiness.data.value.ready"
+        v-if="chrome && readiness.data.value && !readiness.data.value.ready"
         class="mb-6 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300"
       >
         <p class="font-medium">The server is not ready.</p>

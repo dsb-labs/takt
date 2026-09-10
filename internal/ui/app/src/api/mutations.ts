@@ -131,3 +131,28 @@ export function useDeleteVolume(name: () => string) {
     onSuccess: () => queries.invalidateQueries({ queryKey: ["volumes"] }),
   });
 }
+
+// useLogin exchanges a pasted token for a session rather than storing it:
+// the session cookie is HttpOnly and expires on its own, so the standing
+// credential never lives in the browser.
+export function useLogin() {
+  return useMutation({
+    mutationFn: async (token: string) => {
+      const { error } = await client.POST("/api/v1/auth", {
+        body: { token, cookie: true },
+      });
+      if (error) throw new Error(error.error);
+    },
+  });
+}
+
+// useLogout revokes the session server-side, so signing out is a revocation
+// rather than only a forgotten cookie.
+export function useLogout() {
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await client.DELETE("/api/v1/auth");
+      if (error) throw new Error(error.error);
+    },
+  });
+}
