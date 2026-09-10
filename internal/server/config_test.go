@@ -47,6 +47,12 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, []string{"/mnt/media", "/var/run/docker.sock"}, config.Workload.AllowHostPaths)
 				assert.Equal(t, "http://collector.example.com:4318", config.Telemetry.OTLPEndpoint)
 				assert.Equal(t, "debug", config.Logging.Level)
+				require.NotNil(t, config.Auth)
+				assert.True(t, config.Auth.OIDCEnabled())
+				assert.Equal(t, "https://idp.example.com", config.Auth.OIDC.Issuer)
+				assert.Equal(t, "takt", config.Auth.OIDC.ClientID)
+				assert.Equal(t, "hunter2", config.Auth.OIDC.ClientSecret)
+				assert.Equal(t, "https://takt.example.com", config.Auth.OIDC.RedirectURL)
 			},
 		},
 		{
@@ -60,6 +66,9 @@ func TestLoadConfig(t *testing.T) {
 				defaults := server.DefaultConfig()
 				assert.Equal(t, defaults.HTTP.Address, config.HTTP.Address)
 				assert.Equal(t, defaults.Reconcile.Interval, config.Reconcile.Interval)
+				// The auth layer is enabled by the [auth] block's presence,
+				// and this file carries none.
+				assert.Nil(t, config.Auth)
 				require.NoError(t, config.Validate())
 			},
 		},
@@ -309,6 +318,51 @@ func TestConfig_Validate(t *testing.T) {
 			// never match one.
 			Name:         "a relative prefix for path mounts",
 			Mutate:       func(c *server.Config) { c.Workload.AllowHostPaths = []string{"media"} },
+			ExpectsError: true,
+		},
+		{
+			// Writing [auth] with nothing in it is the smallest way to turn
+			// the layer on, so an empty block must be valid.
+			Name:   "an empty auth block",
+			Mutate: func(c *server.Config) { c.Auth = &server.AuthConfig{} },
+		},
+		{
+			Name: "an oidc configuration",
+			Mutate: func(c *server.Config) {
+				c.Auth = &server.AuthConfig{
+					OIDC: server.OIDCConfig{Issuer: "https://idp.example.com", ClientID: "takt"},
+				}
+			},
+		},
+		{
+			Name: "an oidc issuer that is not a url",
+			Mutate: func(c *server.Config) {
+				c.Auth = &server.AuthConfig{
+					OIDC: server.OIDCConfig{Issuer: "idp.example.com", ClientID: "takt"},
+				}
+			},
+			ExpectsError: true,
+		},
+		{
+			Name: "an oidc issuer without a client id",
+			Mutate: func(c *server.Config) {
+				c.Auth = &server.AuthConfig{
+					OIDC: server.OIDCConfig{Issuer: "https://idp.example.com"},
+				}
+			},
+			ExpectsError: true,
+		},
+		{
+			Name: "an oidc redirect url that is not a url",
+			Mutate: func(c *server.Config) {
+				c.Auth = &server.AuthConfig{
+					OIDC: server.OIDCConfig{
+						Issuer:      "https://idp.example.com",
+						ClientID:    "takt",
+						RedirectURL: "takt.example.com",
+					},
+				}
+			},
 			ExpectsError: true,
 		},
 	}
