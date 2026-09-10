@@ -90,19 +90,6 @@ func NewWorkloadAPI(config WorkloadAPIConfig) *WorkloadAPI {
 	}
 }
 
-// internalError logs why a request failed and returns the message the client is told
-// instead.
-//
-// An unexpected failure is described to the operator, not to the caller: the error
-// carries whatever context it was wrapped with on the way up — a filesystem path, the
-// text of a query, a docker endpoint — and none of that is the caller's business or
-// safe to hand them.
-func (a *WorkloadAPI) internalError(operation string, err error) string {
-	a.logger.With("error", err, "operation", operation).Error("failed to serve request")
-
-	return "failed to " + operation
-}
-
 // submitted returns the specification a request body describes, holding it to the
 // name in the request path.
 //
@@ -178,7 +165,7 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		}, nil
 	case err != nil:
 		return api.ApplyWorkload500JSONResponse{
-			Error: a.internalError("apply workload", err),
+			Error: internalError(a.logger, "apply workload", err),
 		}, nil
 	}
 
@@ -224,7 +211,7 @@ func (a *WorkloadAPI) DryRunWorkload(ctx context.Context, request api.DryRunWork
 		}, nil
 	case err != nil:
 		return api.DryRunWorkload500JSONResponse{
-			Error: a.internalError("dry run workload", err),
+			Error: internalError(a.logger, "dry run workload", err),
 		}, nil
 	}
 
@@ -262,7 +249,7 @@ func (a *WorkloadAPI) GetWorkload(ctx context.Context, request api.GetWorkloadRe
 		}, nil
 	case err != nil:
 		return api.GetWorkload500JSONResponse{
-			Error: a.internalError("get workload", err),
+			Error: internalError(a.logger, "get workload", err),
 		}, nil
 	}
 
@@ -285,7 +272,7 @@ func (a *WorkloadAPI) ListWorkloads(ctx context.Context, request api.ListWorkloa
 		}, nil
 	case err != nil:
 		return api.ListWorkloads500JSONResponse{
-			Error: a.internalError("list workloads", err),
+			Error: internalError(a.logger, "list workloads", err),
 		}, nil
 	}
 
@@ -317,7 +304,7 @@ func (a *WorkloadAPI) DeleteWorkload(ctx context.Context, request api.DeleteWork
 		return api.DeleteWorkload409JSONResponse{Error: err.Error()}, nil
 	case err != nil:
 		return api.DeleteWorkload500JSONResponse{
-			Error: a.internalError("delete workload", err),
+			Error: internalError(a.logger, "delete workload", err),
 		}, nil
 	}
 
@@ -342,7 +329,7 @@ func (a *WorkloadAPI) StopWorkload(ctx context.Context, request api.StopWorkload
 		}, nil
 	case err != nil:
 		return api.StopWorkload500JSONResponse{
-			Error: a.internalError("stop workload", err),
+			Error: internalError(a.logger, "stop workload", err),
 		}, nil
 	}
 
@@ -366,7 +353,7 @@ func (a *WorkloadAPI) StartWorkload(ctx context.Context, request api.StartWorklo
 		}, nil
 	case err != nil:
 		return api.StartWorkload500JSONResponse{
-			Error: a.internalError("start workload", err),
+			Error: internalError(a.logger, "start workload", err),
 		}, nil
 	}
 
@@ -394,7 +381,7 @@ func (a *WorkloadAPI) RestartWorkload(ctx context.Context, request api.RestartWo
 		}, nil
 	case err != nil:
 		return api.RestartWorkload500JSONResponse{
-			Error: a.internalError("restart workload", err),
+			Error: internalError(a.logger, "restart workload", err),
 		}, nil
 	}
 
@@ -447,7 +434,7 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 			}, nil
 		default:
 			return api.GetWorkloadLogs500JSONResponse{
-				Error: a.internalError("read workload logs", err),
+				Error: internalError(a.logger, "read workload logs", err),
 			}, nil
 		}
 	}

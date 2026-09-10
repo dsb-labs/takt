@@ -79,14 +79,6 @@ func NewSystemAPI(config SystemAPIConfig) *SystemAPI {
 	}
 }
 
-// internalError logs why a request failed and returns the message the client is told
-// instead.
-func (a *SystemAPI) internalError(operation string, err error) string {
-	a.logger.With("error", err, "operation", operation).Error("failed to serve request")
-
-	return "failed to " + operation
-}
-
 // GetHealth reports that the server is alive. Handling the request is the answer,
 // so there is nothing to check.
 func (a *SystemAPI) GetHealth(_ context.Context, _ api.GetHealthRequestObject) (api.GetHealthResponseObject, error) {
@@ -133,7 +125,7 @@ func (a *SystemAPI) GetMetrics(_ context.Context, _ api.GetMetricsRequestObject)
 	families, err := a.metrics.Gather()
 	if err != nil {
 		return api.GetMetrics500JSONResponse{
-			Error: a.internalError("gather metrics", err),
+			Error: internalError(a.logger, "gather metrics", err),
 		}, nil
 	}
 
@@ -172,7 +164,7 @@ func (a *SystemAPI) GetPrometheusTargets(ctx context.Context, _ api.GetPrometheu
 	groups, err := a.targets.ScrapeTargets(ctx)
 	if err != nil {
 		return api.GetPrometheusTargets500JSONResponse{
-			Error: a.internalError("discover scrape targets", err),
+			Error: internalError(a.logger, "discover scrape targets", err),
 		}, nil
 	}
 

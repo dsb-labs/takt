@@ -49,14 +49,6 @@ func NewAdminAPI(config AdminAPIConfig) *AdminAPI {
 	}
 }
 
-// internalError logs why a request failed and returns the message the client is told
-// instead.
-func (a *AdminAPI) internalError(operation string, err error) string {
-	a.logger.With("error", err, "operation", operation).Error("failed to serve request")
-
-	return "failed to " + operation
-}
-
 // GetBackup returns a zip archive holding a consistent snapshot of the database, and
 // the keyring when the request asks for it.
 func (a *AdminAPI) GetBackup(ctx context.Context, request api.GetBackupRequestObject) (api.GetBackupResponseObject, error) {
@@ -72,7 +64,7 @@ func (a *AdminAPI) GetBackup(ctx context.Context, request api.GetBackupRequestOb
 	backup, err := a.admin.PrepareBackup(ctx, options)
 	if err != nil {
 		return api.GetBackup500JSONResponse{
-			Error: a.internalError("prepare backup", err),
+			Error: internalError(a.logger, "prepare backup", err),
 		}, nil
 	}
 
@@ -141,7 +133,7 @@ func (a *AdminAPI) Rekey(ctx context.Context, _ api.RekeyRequestObject) (api.Rek
 	rekey, err := a.admin.Rekey(ctx)
 	if err != nil {
 		return api.Rekey500JSONResponse{
-			Error: a.internalError("rekey the node", err),
+			Error: internalError(a.logger, "rekey the node", err),
 		}, nil
 	}
 

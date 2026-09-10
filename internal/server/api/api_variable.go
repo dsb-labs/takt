@@ -52,18 +52,6 @@ func NewVariableAPI(config VariableAPIConfig) *VariableAPI {
 	}
 }
 
-// internalError logs why a request failed and returns the message the client is told
-// instead.
-//
-// A variable's value is not worth hiding, but the reason a request failed still is:
-// a database path or a driver's own error text describes the server rather than the
-// request.
-func (a *VariableAPI) internalError(operation string, err error) string {
-	a.logger.With("error", err, "operation", operation).Error("failed to serve request")
-
-	return "failed to " + operation
-}
-
 // SetVariable stores the given value as the named variable.
 func (a *VariableAPI) SetVariable(ctx context.Context, request api.SetVariableRequestObject) (api.SetVariableResponseObject, error) {
 	if request.Body == nil {
@@ -80,7 +68,7 @@ func (a *VariableAPI) SetVariable(ctx context.Context, request api.SetVariableRe
 		}, nil
 	case err != nil:
 		return api.SetVariable500JSONResponse{
-			Error: a.internalError("set variable", err),
+			Error: internalError(a.logger, "set variable", err),
 		}, nil
 	}
 
@@ -104,7 +92,7 @@ func (a *VariableAPI) GetVariable(ctx context.Context, request api.GetVariableRe
 		}, nil
 	case err != nil:
 		return api.GetVariable500JSONResponse{
-			Error: a.internalError("get variable", err),
+			Error: internalError(a.logger, "get variable", err),
 		}, nil
 	}
 
@@ -127,7 +115,7 @@ func (a *VariableAPI) ListVariables(ctx context.Context, request api.ListVariabl
 		}, nil
 	case err != nil:
 		return api.ListVariables500JSONResponse{
-			Error: a.internalError("list variables", err),
+			Error: internalError(a.logger, "list variables", err),
 		}, nil
 	}
 
@@ -158,7 +146,7 @@ func (a *VariableAPI) DeleteVariable(ctx context.Context, request api.DeleteVari
 		return api.DeleteVariable409JSONResponse{Error: err.Error()}, nil
 	case err != nil:
 		return api.DeleteVariable500JSONResponse{
-			Error: a.internalError("delete variable", err),
+			Error: internalError(a.logger, "delete variable", err),
 		}, nil
 	}
 

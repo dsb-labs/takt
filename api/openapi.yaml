@@ -36,12 +36,21 @@ tags:
     description: Liveness, readiness and metrics for the server itself.
   - name: admin
     description: Operations against the node itself rather than the workloads on it.
+  - name: auth
+    description: The caller's own authentication.
+  - name: acl
+    description: The policy document that binds roles to principals.
+  - name: tokens
+    description: The credentials that authenticate API callers.
 
 paths:
   /api/v1/workloads:
     get:
       operationId: listWorkloads
       tags: [workloads]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: List workloads
       description: |
         Returns the workloads known to the server, with the observed state of each
@@ -85,6 +94,9 @@ paths:
     get:
       operationId: getWorkload
       tags: [workloads]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: Get a single workload
       description: |
         Returns the workload with the given name, with the observed state of its
@@ -104,6 +116,9 @@ paths:
     put:
       operationId: applyWorkload
       tags: [workloads]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Create or update a workload
       description: |
         Applies the given specification as the desired state for the named workload.
@@ -169,6 +184,9 @@ paths:
     delete:
       operationId: deleteWorkload
       tags: [workloads]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Delete a workload
       description: |
         Marks the workload for deletion and returns it as it now stands.
@@ -218,6 +236,9 @@ paths:
     get:
       operationId: getWorkloadLogs
       tags: [workloads]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: Read a workload's logs
       description: |
         Returns the combined output of the workload's instances as plain text, most
@@ -320,6 +341,9 @@ paths:
     post:
       operationId: stopWorkload
       tags: [workloads]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Stop a workload
       description: |
         Marks the workload as suspended and returns it as it now stands.
@@ -365,6 +389,9 @@ paths:
     post:
       operationId: startWorkload
       tags: [workloads]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Start a stopped workload
       description: |
         Clears the workload's suspension and returns it as it now stands.
@@ -407,6 +434,9 @@ paths:
     post:
       operationId: restartWorkload
       tags: [workloads]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Restart a workload
       description: |
         Asks the reconciler to replace the workload's running instances, and
@@ -451,6 +481,9 @@ paths:
     post:
       operationId: dryRunWorkload
       tags: [workloads]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Report what applying a workload would do
       description: |
         Resolves the given specification exactly as an apply resolves it, reports
@@ -508,6 +541,9 @@ paths:
     get:
       operationId: listVolumes
       tags: [volumes]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: List volumes
       description: |
         Returns the volumes the server holds, each with the workloads currently
@@ -547,6 +583,9 @@ paths:
     get:
       operationId: getVolume
       tags: [volumes]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: Get a single volume
       description: |
         Returns the volume with the given name, including the workloads mounting it.
@@ -565,6 +604,9 @@ paths:
     put:
       operationId: applyVolume
       tags: [volumes]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Create or update a volume
       description: |
         Stores the volume the manifest describes, creating it when the name is
@@ -607,6 +649,9 @@ paths:
     delete:
       operationId: deleteVolume
       tags: [volumes]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Delete a volume and the data it holds
       description: |
         Removes the volume and everything stored in it.
@@ -656,6 +701,9 @@ paths:
     get:
       operationId: listServices
       tags: [services]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: List services
       description: |
         Returns the services the server holds, each with its backends resolved at
@@ -696,6 +744,9 @@ paths:
     get:
       operationId: getService
       tags: [services]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: Get a single service
       description: |
         Returns the service with the given name, with its backends resolved at the
@@ -715,6 +766,9 @@ paths:
     put:
       operationId: applyService
       tags: [services]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Create or update a service
       description: |
         Applies the given specification as the desired state for the named service.
@@ -753,6 +807,9 @@ paths:
     delete:
       operationId: deleteService
       tags: [services]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Delete a service
       description: |
         Removes the service.
@@ -782,6 +839,9 @@ paths:
     get:
       operationId: listSecrets
       tags: [secrets]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: List secrets
       description: |
         Returns the secrets the server holds, each with the workloads currently
@@ -825,6 +885,9 @@ paths:
     get:
       operationId: getSecret
       tags: [secrets]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: Get a single secret
       description: |
         Returns the secret with the given name, including the workloads reading it.
@@ -847,6 +910,9 @@ paths:
     put:
       operationId: setSecret
       tags: [secrets]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Set a secret's value
       description: |
         Stores the given value as the named secret, encrypted.
@@ -886,6 +952,9 @@ paths:
     delete:
       operationId: deleteSecret
       tags: [secrets]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Delete a secret
       description: |
         Removes the secret with the given name.
@@ -934,6 +1003,9 @@ paths:
     get:
       operationId: listVariables
       tags: [variables]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: List variables
       description: |
         Returns the variables the server holds, each with its value and the workloads
@@ -977,6 +1049,9 @@ paths:
     get:
       operationId: getVariable
       tags: [variables]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: Get a single variable
       description: |
         Returns the variable with the given name, including its value and the
@@ -996,6 +1071,9 @@ paths:
     put:
       operationId: setVariable
       tags: [variables]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Set a variable's value
       description: |
         Stores the given value as the named variable.
@@ -1035,6 +1113,9 @@ paths:
     delete:
       operationId: deleteVariable
       tags: [variables]
+      security:
+        - bearer: [operator]
+        - session: [operator]
       summary: Delete a variable
       description: |
         Removes the variable with the given name.
@@ -1083,6 +1164,9 @@ paths:
     get:
       operationId: getBackup
       tags: [admin]
+      security:
+        - bearer: [admin]
+        - session: [admin]
       summary: Download a backup of the node
       description: |
         Returns a zip archive holding a consistent snapshot of takt's database,
@@ -1140,6 +1224,9 @@ paths:
     post:
       operationId: rekey
       tags: [admin]
+      security:
+        - bearer: [admin]
+        - session: [admin]
       summary: Re-encrypt every secret under a new key
       description: |
         Generates a new encryption key and re-seals every secret under it, then
@@ -1181,16 +1268,461 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v1/auth:
+    get:
+      operationId: getAuth
+      tags: [auth]
+      security:
+        - bearer: []
+        - session: []
+      summary: Report who the caller is
+      description: |
+        Returns the caller's principal, role and groups. It requires
+        authentication but no role, so a principal holding a token with no
+        grants yet can see exactly that state.
+
+        When authentication is disabled the caller is reported as anonymous
+        with the admin role, which is the truth of that mode: anything that
+        reaches the listener holds the whole API.
+      responses:
+        "200":
+          description: The caller's identity.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetAuthResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      operationId: login
+      tags: [auth]
+      security: []
+      summary: Exchange an identity for a short-lived token
+      description: |
+        Mints a short-lived client token. The exchange accepts either an OIDC
+        identity token, verified against the configured issuer, or an existing
+        client token, which is how the browser UI trades the standing
+        credential pasted into it for a session that expires on its own.
+
+        With `cookie` set, the response also carries the credential as an
+        HttpOnly session cookie, which is what the UI stores. The credential
+        in the body is the same one either way.
+
+        Anonymous by necessity — a login is how a caller stops being
+        anonymous — but nothing is minted without a verified identity.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: The minted credential and the token that records it.
+          headers:
+            Set-Cookie:
+              description: |
+                The session cookie, present when the request asked for one.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      operationId: logout
+      tags: [auth]
+      security:
+        - bearer: []
+        - session: []
+      summary: Revoke the credential that authenticated this request
+      description: |
+        Revokes whatever authenticated the request: an OIDC-minted token, a UI
+        session, or a static token retiring itself. Self-revocation is always
+        safe, so this needs no role.
+
+        The one refusal is the recovery token, whose revocation path is
+        deliberately host-level: the reset file in the data directory.
+      responses:
+        "200":
+          description: |
+            The credential was revoked. The response clears the session cookie
+            when a session authenticated the request.
+
+            The body is an object with nothing in it yet, for the same reason
+            deleting a volume returns one.
+          headers:
+            Set-Cookie:
+              description: Clears the session cookie, when one authenticated.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The recovery token asked to revoke itself.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/auth/oidc:
+    get:
+      operationId: getOIDC
+      tags: [auth]
+      security: []
+      summary: Report how to log in with OIDC
+      description: |
+        Returns the issuer and client identifier `takt auth login` runs the
+        authorization code flow against. Anonymous, because a caller reads it
+        precisely when it has no credential yet — and it discloses nothing a
+        login page would not.
+
+        Answers 404 when the server carries no OIDC configuration, which is
+        how the CLI and the UI discover that a pasted token is the only way
+        in.
+      responses:
+        "200":
+          description: The OIDC configuration a login needs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetOIDCResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/auth/oidc/login:
+    get:
+      operationId: oidcLogin
+      tags: [auth]
+      security: []
+      summary: Start the browser OIDC flow
+      description: |
+        Redirects the browser to the issuer's authorization endpoint. The
+        state and code verifier travel in a short-lived HttpOnly cookie, which
+        the callback consumes.
+
+        This exists for the UI. The CLI runs the same flow itself against a
+        loopback redirect, because its callback is its own listener rather
+        than this server.
+      responses:
+        "302":
+          description: Sent to the issuer's authorization endpoint.
+          headers:
+            Location:
+              description: The issuer's authorization endpoint.
+              schema:
+                type: string
+            Set-Cookie:
+              description: The state and verifier the callback checks.
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/auth/oidc/callback:
+    get:
+      operationId: oidcCallback
+      tags: [auth]
+      security: []
+      summary: Complete the browser OIDC flow
+      description: |
+        Exchanges the authorization code for an identity, verifies it, mints
+        the same short-lived token a login does, and sends the browser back to
+        the UI with the session cookie set.
+      parameters:
+        - name: code
+          in: query
+          required: false
+          description: The authorization code the issuer redirected back with.
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          description: The state echoed back by the issuer.
+          schema:
+            type: string
+        - name: takt_oidc
+          in: cookie
+          required: false
+          description: |
+            The state and code verifier the login redirect set, which proves
+            the callback answers a flow this server started.
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Sent back to the UI, signed in.
+          headers:
+            Location:
+              description: The UI page to land on.
+              schema:
+                type: string
+            Set-Cookie:
+              description: The session cookie.
+              schema:
+                type: string
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/acl:
+    get:
+      operationId: getACLPolicy
+      tags: [acl]
+      security:
+        - bearer: [admin]
+        - session: [admin]
+      summary: Read the policy document
+      description: |
+        Returns the canonical current policy document and the entity tag a
+        conditional apply presents back. Before any apply, the policy is the
+        empty version-v1 document, which grants nothing to anyone.
+
+        With `GET /api/v1/tokens`, this answers "who can touch this server"
+        completely, which is why it requires the admin role rather than
+        viewer: the answer enumerates the security topology.
+      responses:
+        "200":
+          description: The current policy document.
+          headers:
+            ETag:
+              description: |
+                The tag identifying this exact document, derived from it, so a
+                pipeline reading twice sees a stable value.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetACLPolicyResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    put:
+      operationId: applyACLPolicy
+      tags: [acl]
+      security:
+        - bearer: [admin]
+        - session: [admin]
+      summary: Replace the policy document
+      description: |
+        Replaces the whole policy atomically. A grant removed from the
+        document disappears on this apply, with no prune step, and applies to
+        the very next request.
+
+        The `If-Match` header must carry the tag of the document being
+        replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
+        than silently clobbering a concurrent apply. The document itself
+        carries no version field: it would go stale the moment the server
+        accepted it.
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicySpec"
+      responses:
+        "200":
+          description: The policy was replaced.
+          headers:
+            ETag:
+              description: The tag of the document as applied.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyACLPolicyResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/acl/init:
+    post:
+      operationId: initACL
+      tags: [acl]
+      security: []
+      summary: Mint the recovery token
+      description: |
+        Mints the recovery token and returns it, exactly once: the response is
+        the only time the credential is reported, and a second init is refused
+        for as long as a recovery token exists.
+
+        Anonymous by design. It is permitted exactly while no recovery token
+        exists, which is a fresh server or one whose operator wrote the reset
+        file into the data directory and restarted — both host-level facts no
+        credential could add to.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitACLRequest"
+      responses:
+        "201":
+          description: The recovery token, shown this once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitACLResult"
+        "409":
+          description: A recovery token already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/tokens:
+    get:
+      operationId: listTokens
+      tags: [tokens]
+      security:
+        - bearer: [admin]
+        - session: [admin]
+      summary: List every credential
+      description: |
+        Names every credential the server holds: static tokens, logins,
+        sessions and the recovery token, with when each was created and last
+        used. No credential itself appears, only the records of them.
+
+        With `GET /api/v1/acl`, this answers "who can touch this server"
+        completely.
+      responses:
+        "200":
+          description: The credentials the server holds.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListTokensResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      operationId: createToken
+      tags: [tokens]
+      security:
+        - bearer: [admin]
+        - session: [admin]
+      summary: Create a token for a principal
+      description: |
+        Mints a static client token bound to the given principal and returns
+        the credential, this once. The principal need not be granted anything
+        yet: merge the grant, then hand over the token, in whichever order
+        onboarding runs.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTokenRequest"
+      responses:
+        "201":
+          description: The token was created. The credential is shown this once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateTokenResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/tokens/{id}:
+    parameters:
+      - $ref: "#/components/parameters/TokenID"
+
+    delete:
+      operationId: deleteToken
+      tags: [tokens]
+      security:
+        - bearer: [admin]
+        - session: [admin]
+      summary: Revoke a token
+      description: |
+        Removes the token with the given identifier. Revocation is immediate:
+        the next request presenting the credential is refused.
+      responses:
+        "200":
+          description: |
+            The token was revoked.
+
+            The body is an object with nothing in it yet, for the same reason
+            deleting a volume returns one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeleteTokenResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /api/v1/system/health:
     get:
       operationId: getHealth
       tags: [system]
+      security: []
       summary: Report that the server is alive
       description: |
         Answers as long as the process is serving requests. It says nothing about
         whether the server can do its job — that is what `/api/v1/system/ready` reports —
         so it
         suits a supervisor deciding whether to restart the process.
+
+        Carries no security requirement even when authentication is enabled. A
+        supervisor must probe this without credentials or it cannot manage the
+        process, so no policy could ever really revoke it.
       responses:
         "200":
           description: The server is alive.
@@ -1205,6 +1737,7 @@ paths:
     get:
       operationId: getReadiness
       tags: [system]
+      security: []
       summary: Report whether the server can do its job
       description: |
         Reports whether the database answers and every configured driver answered
@@ -1217,6 +1750,10 @@ paths:
         fetched per request, so polling costs nothing and the answer is at most
         one reconcile interval plus the driver timeout old. Before the first pass
         completes, the server reports not ready.
+
+        Carries no security requirement even when authentication is enabled, for
+        the same reason the health endpoint does not: a supervisor must probe it
+        without credentials. These two routes are the whole anonymous surface.
       responses:
         "200":
           description: The server is ready.
@@ -1237,14 +1774,18 @@ paths:
     get:
       operationId: getMetrics
       tags: [system]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: Read the server's metrics
       description: |
         Returns the server's metrics in the Prometheus text format, ready to be
         scraped with no collector in between.
 
-        Workload names appear as label values. Anything that can reach this port
-        can already run arbitrary workloads, so the names disclose nothing new —
-        but they are disclosed.
+        Workload names appear as label values. With authentication enabled this
+        requires the viewer role — prometheus carries the credential in an
+        `authorization` block — and without it, anything that can reach the port
+        reads them.
 
         A scraper that addresses the server by hostname must have that hostname
         in the server's `hosts` configuration, or the request is refused with a
@@ -1263,6 +1804,9 @@ paths:
     get:
       operationId: getPrometheusTargets
       tags: [system]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
       summary: Discover scrape targets for prometheus
       description: |
         Returns the workloads that opted into scraping as target groups in the
@@ -1296,6 +1840,31 @@ paths:
           $ref: "#/components/responses/InternalServerError"
 
 components:
+  securitySchemes:
+    # The scopes on an operation's security requirement name the role it
+    # needs: viewer, operator or admin. The roles are hierarchical, so a
+    # caller holding admin passes an operator requirement. An operation whose
+    # requirement carries no scope needs authentication but no role. An
+    # operation with `security: []` is anonymous, and the two probe routes
+    # under /api/v1/system are the whole anonymous surface an operator has to
+    # reason about.
+    #
+    # None of this is enforced when the server's configuration carries no
+    # [auth] block, in which case reaching the listener is the whole check.
+    bearer:
+      type: http
+      scheme: bearer
+      description: |
+        A token created by `takt token create`, printed by `takt acl init`,
+        or minted by a login.
+    session:
+      type: apiKey
+      in: cookie
+      name: takt_session
+      description: |
+        The session cookie a login sets for the browser UI. It names a
+        short-lived token, so it is revocable like any other credential.
+
   parameters:
     WorkloadName:
       name: name
@@ -1347,6 +1916,30 @@ components:
         minLength: 1
         maxLength: 63
 
+    TokenID:
+      name: id
+      in: path
+      required: true
+      description: The identifier of the token.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 63
+
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: |
+        The tag of the policy document being replaced, as read from the ETag
+        header of `GET /api/v1/acl`. Required despite what the schema says —
+        an apply without it is refused with a 400 — but declared optional so
+        the absence is answered in the API's own error shape rather than the
+        router's.
+      schema:
+        type: string
+        minLength: 1
+
   responses:
     BadRequest:
       description: The request was malformed or failed validation.
@@ -1364,6 +1957,32 @@ components:
 
     InternalServerError:
       description: The server failed to handle the request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: The request presented no valid credential.
+      headers:
+        WWW-Authenticate:
+          description: The scheme a credential should be presented under.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Forbidden:
+      description: The caller's role does not cover this operation.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    PreconditionFailed:
+      description: The policy changed since it was read. Read it again and re-apply.
       content:
         application/json:
           schema:
@@ -2590,6 +3209,306 @@ components:
         error:
           type: string
           description: A human-readable description of what went wrong.
+
+    Role:
+      type: string
+      description: |
+        One of the three fixed roles. Viewer reads everything. Operator
+        drives workload, volume, service, variable and secret lifecycle.
+        Admin applies the policy and manages tokens. The roles are
+        hierarchical: admin covers operator, operator covers viewer.
+      enum: [viewer, operator, admin]
+      x-enum-varnames: [RoleViewer, RoleOperator, RoleAdmin]
+
+    PolicySpec:
+      type: object
+      description: |
+        The access-control policy, applied whole. A grant absent from the
+        document is revoked on the apply, so the document in a git repository
+        is the complete answer to who holds access.
+      required: [version]
+      properties:
+        version:
+          type: string
+          description: The manifest schema version. Only "v1" is understood.
+          examples: ["v1"]
+        oidc:
+          $ref: "#/components/schemas/PolicyOIDC"
+        groups:
+          type: array
+          description: Named collections of principals a grant references as one.
+          items:
+            $ref: "#/components/schemas/PolicyGroup"
+        grants:
+          type: array
+          description: |
+            The bindings of roles to principals. An empty list grants nothing,
+            which is the state a fresh policy starts in.
+          items:
+            $ref: "#/components/schemas/PolicyGrant"
+
+    PolicyOIDC:
+      type: object
+      description: |
+        How an OIDC identity becomes a principal and groups. The claims are
+        read from the identity token a login exchanges.
+      required: [principalClaim]
+      properties:
+        principalClaim:
+          type: string
+          description: |
+            The claim whose value becomes the caller's principal name. By
+            convention "email", so a human principal is an email address and
+            cannot collide with a machine's bare name.
+          examples: ["email"]
+        groupsClaim:
+          type: string
+          description: |
+            The claim holding the caller's group names. Omitted means the
+            identity carries no groups.
+          examples: ["groups"]
+
+    PolicyGroup:
+      type: object
+      description: |
+        A collection of principals defined in the policy itself, as opposed
+        to a group an identity provider asserts.
+      required: [name, members]
+      properties:
+        name:
+          type: string
+          description: The name a grant references the group by, prefixed with "group:".
+          examples: ["infra"]
+        members:
+          type: array
+          description: The principals the group contains.
+          items:
+            type: string
+
+    PolicyGrant:
+      type: object
+      description: A binding of one role to a set of principals or groups.
+      required: [principals, role]
+      properties:
+        principals:
+          type: array
+          description: |
+            The principals the grant applies to. An entry prefixed with
+            "group:" names a policy group or a group the identity provider
+            asserts.
+          items:
+            type: string
+          examples: [["david@dsb.dev", "group:infra"]]
+        role:
+          $ref: "#/components/schemas/Role"
+
+    GetACLPolicyResult:
+      type: object
+      description: The body returned when the policy document is read.
+      required: [policy]
+      properties:
+        policy:
+          $ref: "#/components/schemas/PolicySpec"
+
+    ApplyACLPolicyResult:
+      type: object
+      description: The body returned when the policy document is replaced.
+      required: [policy]
+      properties:
+        policy:
+          $ref: "#/components/schemas/PolicySpec"
+
+    InitACLRequest:
+      type: object
+      description: |
+        The body sent to mint the recovery token, which has nothing in it
+        yet. It exists for the same reasons the rekey body does.
+
+    InitACLResult:
+      type: object
+      description: The body returned by the one init that succeeds.
+      required: [credential]
+      properties:
+        credential:
+          type: string
+          description: |
+            The recovery token. Shown this once and never stored, so losing
+            it means the reset file.
+
+    GetAuthResult:
+      type: object
+      description: The body returned when the caller asks who it is.
+      required: [enabled, principal, role, groups, recovery]
+      properties:
+        enabled:
+          type: boolean
+          description: Whether authentication is enabled on this server.
+        principal:
+          type: string
+          description: |
+            The name the caller authenticated as. "anonymous" when
+            authentication is disabled, and empty for the recovery token,
+            which authenticates as no principal.
+        role:
+          type: string
+          description: |
+            The role the policy grants the caller, empty when it grants
+            nothing. Admin for the recovery token and for every caller when
+            authentication is disabled.
+        groups:
+          type: array
+          description: The groups asserted for the caller when its token was minted.
+          items:
+            type: string
+        recovery:
+          type: boolean
+          description: Whether the caller authenticated with the recovery token.
+
+    LoginRequest:
+      type: object
+      description: |
+        The exchange a login performs. Exactly one of `idToken` and `token`
+        must be present; which one it is selects the exchange.
+      properties:
+        idToken:
+          type: string
+          description: |
+            A raw OIDC identity token, verified against the configured
+            issuer. The principal and groups are derived from its claims as
+            the policy maps them.
+        token:
+          type: string
+          description: |
+            An existing client token, exchanged for a session bound to the
+            same principal. This is how the browser UI trades a pasted
+            standing credential for one that expires on its own.
+        cookie:
+          type: boolean
+          description: |
+            Also carry the minted credential as an HttpOnly session cookie.
+            The browser UI sets this. The CLI does not.
+          default: false
+
+    LoginResult:
+      type: object
+      description: The body returned by a successful login.
+      required: [credential, principal, expiresAt]
+      properties:
+        credential:
+          type: string
+          description: The minted token. Shown this once and never stored.
+        principal:
+          type: string
+          description: The principal the token is bound to.
+        expiresAt:
+          type: string
+          format: date-time
+          description: When the token stops authenticating.
+
+    LogoutResult:
+      type: object
+      description: |
+        The body returned when a credential is revoked, which has nothing in
+        it yet, for the same reason deleting a volume returns one.
+
+    GetOIDCResult:
+      type: object
+      description: The body returned when the OIDC configuration is read.
+      required: [issuer, clientId]
+      properties:
+        issuer:
+          type: string
+          description: The issuer the authorization code flow runs against.
+        clientId:
+          type: string
+          description: The client identifier registered with the issuer.
+
+    Token:
+      type: object
+      description: |
+        The record of a credential. The credential itself is reported once,
+        by the create or login that minted it, and never again.
+      required: [id, type, source, principal, createdAt]
+      properties:
+        id:
+          type: string
+          description: The identifier the server assigns, which a delete names.
+        type:
+          type: string
+          description: Whether this is the recovery token or a client token.
+          enum: [recovery, client]
+          x-enum-varnames: [TokenTypeRecovery, TokenTypeClient]
+        source:
+          type: string
+          description: What minted the token.
+          enum: [init, static, oidc, session]
+          x-enum-varnames: [TokenSourceInit, TokenSourceStatic, TokenSourceOIDC, TokenSourceSession]
+        principal:
+          type: string
+          description: |
+            The principal the token authenticates as. Empty for the recovery
+            token.
+        expiresAt:
+          type: string
+          format: date-time
+          description: |
+            When the token stops authenticating. Omitted when it does not
+            expire.
+        createdAt:
+          type: string
+          format: date-time
+          description: When the token was created.
+        lastUsedAt:
+          type: string
+          format: date-time
+          description: |
+            When the token last authenticated a request, recorded at most
+            once a minute. Omitted when it never has.
+
+    ListTokensResult:
+      type: object
+      description: |
+        The body returned when tokens are listed.
+
+        An object rather than a bare array, for the same reason listing
+        volumes returns one.
+      required: [tokens]
+      properties:
+        tokens:
+          type: array
+          description: The credentials the server holds, newest first.
+          items:
+            $ref: "#/components/schemas/Token"
+
+    CreateTokenRequest:
+      type: object
+      description: The body a token create carries.
+      required: [principal]
+      properties:
+        principal:
+          type: string
+          description: |
+            The principal the token authenticates as. By convention humans
+            are emails and machines are bare names.
+          minLength: 1
+          maxLength: 256
+
+    CreateTokenResult:
+      type: object
+      description: The body returned when a token is created.
+      required: [credential, token]
+      properties:
+        credential:
+          type: string
+          description: The token itself. Shown this once and never stored.
+        token:
+          $ref: "#/components/schemas/Token"
+
+    DeleteTokenResult:
+      type: object
+      description: |
+        The body returned when a token is revoked, which has nothing in it
+        yet, for the same reason deleting a volume returns one.
 
     Labels:
       type: object

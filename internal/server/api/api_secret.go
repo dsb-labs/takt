@@ -55,18 +55,6 @@ func NewSecretAPI(config SecretAPIConfig) *SecretAPI {
 	}
 }
 
-// internalError logs why a request failed and returns the message the client is told
-// instead.
-//
-// The error is never returned to the caller, which matters more here than elsewhere:
-// a failure while encrypting or storing a secret could otherwise quote the value it
-// was handling.
-func (a *SecretAPI) internalError(operation string, err error) string {
-	a.logger.With("error", err, "operation", operation).Error("failed to serve request")
-
-	return "failed to " + operation
-}
-
 // SetSecret stores the given value as the named secret.
 func (a *SecretAPI) SetSecret(ctx context.Context, request api.SetSecretRequestObject) (api.SetSecretResponseObject, error) {
 	if request.Body == nil {
@@ -83,7 +71,7 @@ func (a *SecretAPI) SetSecret(ctx context.Context, request api.SetSecretRequestO
 		}, nil
 	case err != nil:
 		return api.SetSecret500JSONResponse{
-			Error: a.internalError("set secret", err),
+			Error: internalError(a.logger, "set secret", err),
 		}, nil
 	}
 
@@ -107,7 +95,7 @@ func (a *SecretAPI) GetSecret(ctx context.Context, request api.GetSecretRequestO
 		}, nil
 	case err != nil:
 		return api.GetSecret500JSONResponse{
-			Error: a.internalError("get secret", err),
+			Error: internalError(a.logger, "get secret", err),
 		}, nil
 	}
 
@@ -130,7 +118,7 @@ func (a *SecretAPI) ListSecrets(ctx context.Context, request api.ListSecretsRequ
 		}, nil
 	case err != nil:
 		return api.ListSecrets500JSONResponse{
-			Error: a.internalError("list secrets", err),
+			Error: internalError(a.logger, "list secrets", err),
 		}, nil
 	}
 
@@ -161,7 +149,7 @@ func (a *SecretAPI) DeleteSecret(ctx context.Context, request api.DeleteSecretRe
 		return api.DeleteSecret409JSONResponse{Error: err.Error()}, nil
 	case err != nil:
 		return api.DeleteSecret500JSONResponse{
-			Error: a.internalError("delete secret", err),
+			Error: internalError(a.logger, "delete secret", err),
 		}, nil
 	}
 

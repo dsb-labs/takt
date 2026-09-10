@@ -55,14 +55,6 @@ func NewServiceAPI(config ServiceAPIConfig) *ServiceAPI {
 	}
 }
 
-// internalError logs why a request failed and returns the message the client is told
-// instead.
-func (a *ServiceAPI) internalError(operation string, err error) string {
-	a.logger.With("error", err, "operation", operation).Error("failed to serve request")
-
-	return "failed to " + operation
-}
-
 // ApplyService records the submitted specification as the desired state for the
 // named service.
 func (a *ServiceAPI) ApplyService(ctx context.Context, request api.ApplyServiceRequestObject) (api.ApplyServiceResponseObject, error) {
@@ -88,7 +80,7 @@ func (a *ServiceAPI) ApplyService(ctx context.Context, request api.ApplyServiceR
 		}, nil
 	case err != nil:
 		return api.ApplyService500JSONResponse{
-			Error: a.internalError("apply service", err),
+			Error: internalError(a.logger, "apply service", err),
 		}, nil
 	}
 
@@ -109,7 +101,7 @@ func (a *ServiceAPI) GetService(ctx context.Context, request api.GetServiceReque
 		}, nil
 	case err != nil:
 		return api.GetService500JSONResponse{
-			Error: a.internalError("get service", err),
+			Error: internalError(a.logger, "get service", err),
 		}, nil
 	}
 
@@ -132,7 +124,7 @@ func (a *ServiceAPI) ListServices(ctx context.Context, request api.ListServicesR
 		}, nil
 	case err != nil:
 		return api.ListServices500JSONResponse{
-			Error: a.internalError("list services", err),
+			Error: internalError(a.logger, "list services", err),
 		}, nil
 	}
 
@@ -158,7 +150,7 @@ func (a *ServiceAPI) DeleteService(ctx context.Context, request api.DeleteServic
 		}, nil
 	case err != nil:
 		return api.DeleteService500JSONResponse{
-			Error: a.internalError("delete service", err),
+			Error: internalError(a.logger, "delete service", err),
 		}, nil
 	}
 
