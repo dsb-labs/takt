@@ -5,10 +5,17 @@
 Applying a workload runs code, with whatever access the Docker socket grants. Treat
 takt's port as equivalent to that socket, because in practice it is.
 
+By default nothing but the network limits who holds it. Enable
+[authentication](acl.md) to require a credential and a granted role on every
+request, which is what turns the port from "the whole API" into "what the
+policy says". The network guidance below still applies with it enabled —
+defence in depth — and is the entire defence without it.
+
 The default address is loopback for that reason. Restrict who can reach it before
 binding it to a network:
 
-- A reverse proxy that requires a credential.
+- Takt's own [authentication](acl.md), or a reverse proxy that requires a
+  credential of its own.
 - A WireGuard or Tailscale interface, so the port is only reachable inside it.
 - An SSH tunnel, for occasional access from one machine.
 
@@ -24,10 +31,12 @@ Variables are not protected at all. Anything that can reach the API can read eve
 variable and its value, which is what they are for. Put anything that would be
 damaging to report in a secret instead. See [Variables](variables.md).
 
-The `/api/v1/system/metrics` endpoint reports workload names as label values. Anything that can
-reach the port can already run arbitrary workloads, so the names disclose nothing
-new — but they are disclosed, and a scraper is one more thing with reach to
-account for.
+The `/api/v1/system/metrics` endpoint reports workload names as label values. Without
+authentication, anything that can reach the port can already run arbitrary
+workloads, so the names disclose nothing new — but they are disclosed, and a
+scraper is one more thing with reach to account for. With authentication
+enabled, the scrape requires the `viewer` role like every other read. See
+[Scraping](#scraping).
 
 ### Serving TLS directly
 
@@ -576,11 +585,14 @@ secrets, variables, volumes and workloads its specification names. It reads logs
 with a live follow for one instance. It can stop, start, restart and delete a
 workload, rotate a secret, and set a variable.
 
-The UI is a consumer of the JSON API and nothing more. It has no login, so the
-exposure stance above applies to it exactly as it applies to the API: anyone who
+The UI is a consumer of the JSON API and nothing more, so what a browser may do
+is exactly what the API allows. Without [authentication](acl.md), anyone who
 can reach the port can restart workloads and rotate secrets from a browser, as
-they already can with curl. The UI never shows a secret's value, because the API
-never returns one.
+they already can with curl. With it, the UI asks for a credential: an OIDC
+sign-in when the server has an issuer, or a pasted token exchanged for a
+session cookie that expires on its own. A `viewer` sees read-only pages, and an
+`admin` gains an Access section showing the policy and every credential. The UI
+never shows a secret's value, because the API never returns one.
 
 Applying a specification stays in the CLI, where the manifest lives. The UI acts
 on what is already applied.
@@ -617,6 +629,24 @@ always passes the host check. One that names it by hostname must have that
 hostname in `hosts`, or every scrape fails with a 421. See
 [Configuration](configuration.md#http).
 
+With [authentication](acl.md) enabled, the scrape requires the `viewer` role.
+Create a token for the scraper and carry it in the scrape configuration's
+`authorization` block:
+
+```sh
+takt token create prometheus
+```
+
+```yaml
+scrape_configs:
+  - job_name: takt-server
+    metrics_path: /api/v1/system/metrics
+    authorization:
+      credentials: takt_c_...
+    static_configs:
+      - targets: ["127.0.0.1:7373"]
+```
+
 The metrics to alert on first:
 
 - `takt_reconcile_passes_total` stops increasing when the reconciler has stopped
@@ -647,7 +677,13 @@ scrape_configs:
   - job_name: takt
     http_sd_configs:
       - url: http://127.0.0.1:7373/api/v1/system/prometheus-sd
+        authorization:
+          credentials: takt_c_...
 ```
+
+The `authorization` block is needed only with [authentication](acl.md)
+enabled, where discovery requires the `viewer` role the same way the scrape
+does. Leave it out otherwise.
 
 A workload opts in with labels:
 
