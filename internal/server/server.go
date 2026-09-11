@@ -214,6 +214,13 @@ func Run(ctx context.Context, config Config) error {
 		Rehash:    rehash,
 	})
 
+	// Constructed before the mounter, which mints the tokens workloads mount
+	// through it.
+	tokenSvc := service.NewTokenService(service.TokenServiceConfig{
+		Logger: logger,
+		Tokens: tokens,
+	})
+
 	// The services rather than the repositories, because materialising a mounted value
 	// means reading the value itself — which for a secret is decryption, and lives
 	// behind the secret service.
@@ -221,6 +228,7 @@ func Run(ctx context.Context, config Config) error {
 		Logger:    logger,
 		Secrets:   secretSvc,
 		Variables: variableSvc,
+		Tokens:    tokenSvc,
 		Directory: config.Data.Directory,
 	})
 
@@ -290,11 +298,6 @@ func Run(ctx context.Context, config Config) error {
 		Database: config.DatabasePath(),
 		Keys:     keys,
 		Secrets:  secretSvc,
-	})
-
-	tokenSvc := service.NewTokenService(service.TokenServiceConfig{
-		Logger: logger,
-		Tokens: tokens,
 	})
 
 	policySvc := service.NewPolicyService(service.PolicyServiceConfig{

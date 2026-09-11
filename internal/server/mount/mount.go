@@ -1,5 +1,5 @@
-// Package mount materialises the secrets and variables a workload mounts as
-// files on the host, and owns the directories holding them.
+// Package mount materialises the secrets, variables and tokens a workload
+// mounts as files on the host, and owns the directories holding them.
 package mount
 
 import (
@@ -55,6 +55,22 @@ type (
 		Value(ctx context.Context, name string) (string, error)
 	}
 
+	// The Tokens interface describes how the mounter obtains the credential a
+	// token mount names.
+	//
+	// Minting rather than reading: unlike a secret or a variable there is nothing
+	// stored to look up, and only the mint ever sees the credential itself.
+	Tokens interface {
+		// MintWorkloadToken should mint the shared token for the workload
+		// version and principal, replacing whatever an earlier mint for the
+		// same binding left, and return the credential.
+		MintWorkloadToken(ctx context.Context, principal, workloadID string, version int, expires bool) (string, error)
+		// RefreshWorkloadToken should re-mint the shared token when it is
+		// missing or near its expiry, returning the fresh credential and
+		// whether one was minted.
+		RefreshWorkloadToken(ctx context.Context, principal, workloadID string, version int, expires bool) (string, bool, error)
+	}
+
 	// The Mounter type materialises the secrets and variables a workload mounts as
 	// files on the host, and owns the directories holding them.
 	//
@@ -70,6 +86,7 @@ type (
 		logger    *slog.Logger
 		secrets   ValueStore
 		variables ValueStore
+		tokens    Tokens
 		files     string
 		state     string
 	}
@@ -84,6 +101,9 @@ type (
 		// Where the variables a workload mounts are read from. May be nil, in which
 		// case a workload mounting a variable fails to start.
 		Variables ValueStore
+		// What mints the token a token mount names. May be nil, in which case a
+		// workload mounting one fails to start.
+		Tokens Tokens
 		// The directory takt keeps its state in. Mounted values live in a
 		// subdirectory of it.
 		Directory string
@@ -119,6 +139,7 @@ func New(config Config) *Mounter {
 		logger:    config.Logger.With("component", "mount"),
 		secrets:   config.Secrets,
 		variables: config.Variables,
+		tokens:    config.Tokens,
 		// Two trees rather than one, for the reason the exec driver has two: a
 		// workload reaches the files mounted into it, so what takt records about
 		// having written them is kept where the workload has no path to it.
@@ -127,8 +148,8 @@ func New(config Config) *Mounter {
 	}
 }
 
-// Deliver writes a file for every secret and variable the specification mounts, and
-// returns them as mounts the driver can honour.
+// Deliver writes a file for every secret, variable and token the specification
+// mounts, and returns them as mounts the driver can honour.
 //
 // Called as a workload starts, so a value's plaintext is written as late as it can be
 // and the workload always starts against what takt holds now. A workload mounting
@@ -157,28 +178,42 @@ func (m *Mounter) Deliver(ctx context.Context, id string, version int, spec mani
 		return nil, fmt.Errorf("failed to create mount directory: %w", pathless(err))
 	}
 
+	// What an earlier delivery of this version wrote, which is what makes a
+	// second instance's start reuse the token the first one minted rather than
+	// replacing it under the file both read.
+	previous, err := m.delivered(id, version)
+	if err != nil {
+		return nil, err
+	}
+
 	record := delivered{Digests: make(map[string]string, len(mounts))}
 
 	volumes := make([]driver.Volume, 0, len(mounts))
 	for _, mount := range mounts {
 		reference, _ := mount.Reference()
-
-		value, err := m.value(ctx, reference)
-		if err != nil {
-			return nil, err
-		}
-
 		name := fileName(reference)
+		path := filepath.Join(dir, name)
 
-		if err = write(filepath.Join(dir, name), value); err != nil {
-			return nil, err
+		if reference.Kind == manifest.KindToken {
+			if err = m.deliverToken(ctx, path, id, version, mount, reference, previous, &record); err != nil {
+				return nil, err
+			}
+		} else {
+			value, err := m.value(ctx, reference)
+			if err != nil {
+				return nil, err
+			}
+
+			if err = write(path, value); err != nil {
+				return nil, err
+			}
+
+			record.Digests[name] = digest(value)
 		}
-
-		record.Digests[name] = digest(value)
 
 		volumes = append(volumes, driver.Volume{
 			Name:     reference.Name,
-			Host:     filepath.Join(dir, name),
+			Host:     path,
 			Target:   mount.To,
 			ReadOnly: mount.ReadOnly,
 		})
@@ -231,26 +266,53 @@ func (m *Mounter) Refresh(ctx context.Context, name, id string, version int, spe
 
 	for _, mount := range mounts {
 		reference, _ := mount.Reference()
+		file := fileName(reference)
 
-		value, err := m.value(ctx, reference)
-		if err != nil {
-			return nil, err
+		if _, ok := record.Digests[file]; !ok {
+			// Never delivered for this version, so there is no file of ours to
+			// rewrite. Delivery is what writes the first one.
+			continue
 		}
 
-		file := fileName(reference)
-		current := digest(value)
+		var value string
 
-		if previous, ok := record.Digests[file]; !ok || current == previous {
-			// Unchanged, or never delivered for this version. Either way there is
-			// nothing to tell the workload about.
-			continue
+		if reference.Kind == manifest.KindToken {
+			if m.tokens == nil {
+				return nil, fmt.Errorf("%w: %s: the server mints no tokens", ErrInvalidMount, reference.Name)
+			}
+
+			// Time-driven rather than change-driven: nothing stores a token to
+			// compare against, so the mint itself decides whether enough of the
+			// credential's life remains.
+			credential, minted, err := m.tokens.RefreshWorkloadToken(ctx, reference.Name, id, version, true)
+			if err != nil {
+				return nil, err
+			}
+
+			if !minted {
+				continue
+			}
+
+			value = credential
+		} else {
+			read, err := m.value(ctx, reference)
+			if err != nil {
+				return nil, err
+			}
+
+			if digest(read) == record.Digests[file] {
+				// Unchanged, so there is nothing to tell the workload about.
+				continue
+			}
+
+			value = read
 		}
 
 		if err = write(filepath.Join(dir, file), value); err != nil {
 			return nil, err
 		}
 
-		record.Digests[file] = current
+		record.Digests[file] = digest(value)
 
 		refreshed = append(refreshed, Refresh{Reference: reference, Signal: mount.Signal})
 	}
@@ -408,6 +470,66 @@ func (m *Mounter) Prune(keep []string) error {
 			m.logger.With("workload", entry.Name()).Debug("removed the mounted values of a workload that no longer exists")
 		}
 	}
+
+	return nil
+}
+
+// deliverToken puts the credential a token mount names in the file at path,
+// carrying its digest into record.
+//
+// Delivery runs as every instance starts, and the file is shared by every
+// instance of the version, so a delivery that finds the file already written
+// keeps it rather than minting again: replacing the token under the instances
+// already reading it would revoke a credential they may have read. The refresh
+// answers whether the token behind the file still exists and has life left,
+// which is what brings a token revoked by hand back.
+func (m *Mounter) deliverToken(ctx context.Context, path, id string, version int, mount manifest.VolumeMount, reference manifest.Reference, previous delivered, record *delivered) error {
+	if m.tokens == nil {
+		return fmt.Errorf("%w: %s: the server mints no tokens", ErrInvalidMount, reference.Name)
+	}
+
+	// Only a token that can be rewritten in place may expire. One in a file the
+	// workload reads once lives until it is revoked, exactly as one fixed in an
+	// environment does.
+	expires := mount.Signal != ""
+
+	name := fileName(reference)
+
+	// Written before, and still on the disk. A record without the file means a
+	// crash between writing the two, and minting again is the recovery.
+	if _, ok := previous.Digests[name]; ok {
+		if _, err := os.Stat(path); err == nil {
+			credential, refreshed, err := m.tokens.RefreshWorkloadToken(ctx, reference.Name, id, version, expires)
+			if err != nil {
+				return err
+			}
+
+			if !refreshed {
+				record.Digests[name] = previous.Digests[name]
+
+				return nil
+			}
+
+			if err = write(path, credential); err != nil {
+				return err
+			}
+
+			record.Digests[name] = digest(credential)
+
+			return nil
+		}
+	}
+
+	credential, err := m.tokens.MintWorkloadToken(ctx, reference.Name, id, version, expires)
+	if err != nil {
+		return err
+	}
+
+	if err = write(path, credential); err != nil {
+		return err
+	}
+
+	record.Digests[name] = digest(credential)
 
 	return nil
 }
