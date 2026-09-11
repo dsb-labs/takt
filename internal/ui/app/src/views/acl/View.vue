@@ -19,12 +19,6 @@ await Promise.all([
 <template>
   <div>
     <h1 class="text-xl font-semibold">Access</h1>
-    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">
-      The policy and the credentials together answer who can touch this server.
-      The policy is applied with
-      <code class="font-mono">takt acl apply</code>, whole, so what is shown
-      here is exactly what the file in a repository says.
-    </p>
 
     <ErrorBanner
       v-if="policy.isError.value"
