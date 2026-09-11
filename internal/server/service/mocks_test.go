@@ -2105,6 +2105,201 @@ func (_c *MockTokenRepository_DeleteExpired_Call) RunAndReturn(run func(ctx cont
 	return _c
 }
 
+// DeleteForInstance provides a mock function for the type MockTokenRepository
+func (_mock *MockTokenRepository) DeleteForInstance(ctx context.Context, workloadID string, instance int) error {
+	ret := _mock.Called(ctx, workloadID, instance)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteForInstance")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int) error); ok {
+		r0 = returnFunc(ctx, workloadID, instance)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockTokenRepository_DeleteForInstance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteForInstance'
+type MockTokenRepository_DeleteForInstance_Call struct {
+	*mock.Call
+}
+
+// DeleteForInstance is a helper method to define mock.On call
+//   - ctx context.Context
+//   - workloadID string
+//   - instance int
+func (_e *MockTokenRepository_Expecter) DeleteForInstance(ctx any, workloadID any, instance any) *MockTokenRepository_DeleteForInstance_Call {
+	return &MockTokenRepository_DeleteForInstance_Call{Call: _e.mock.On("DeleteForInstance", ctx, workloadID, instance)}
+}
+
+func (_c *MockTokenRepository_DeleteForInstance_Call) Run(run func(ctx context.Context, workloadID string, instance int)) *MockTokenRepository_DeleteForInstance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTokenRepository_DeleteForInstance_Call) Return(err error) *MockTokenRepository_DeleteForInstance_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockTokenRepository_DeleteForInstance_Call) RunAndReturn(run func(ctx context.Context, workloadID string, instance int) error) *MockTokenRepository_DeleteForInstance_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteForWorkload provides a mock function for the type MockTokenRepository
+func (_mock *MockTokenRepository) DeleteForWorkload(ctx context.Context, workloadID string) error {
+	ret := _mock.Called(ctx, workloadID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteForWorkload")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = returnFunc(ctx, workloadID)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockTokenRepository_DeleteForWorkload_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteForWorkload'
+type MockTokenRepository_DeleteForWorkload_Call struct {
+	*mock.Call
+}
+
+// DeleteForWorkload is a helper method to define mock.On call
+//   - ctx context.Context
+//   - workloadID string
+func (_e *MockTokenRepository_Expecter) DeleteForWorkload(ctx any, workloadID any) *MockTokenRepository_DeleteForWorkload_Call {
+	return &MockTokenRepository_DeleteForWorkload_Call{Call: _e.mock.On("DeleteForWorkload", ctx, workloadID)}
+}
+
+func (_c *MockTokenRepository_DeleteForWorkload_Call) Run(run func(ctx context.Context, workloadID string)) *MockTokenRepository_DeleteForWorkload_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTokenRepository_DeleteForWorkload_Call) Return(err error) *MockTokenRepository_DeleteForWorkload_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockTokenRepository_DeleteForWorkload_Call) RunAndReturn(run func(ctx context.Context, workloadID string) error) *MockTokenRepository_DeleteForWorkload_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteMinted provides a mock function for the type MockTokenRepository
+func (_mock *MockTokenRepository) DeleteMinted(ctx context.Context, workloadID string, principal string, instance *int, version *int) error {
+	ret := _mock.Called(ctx, workloadID, principal, instance, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteMinted")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, *int, *int) error); ok {
+		r0 = returnFunc(ctx, workloadID, principal, instance, version)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockTokenRepository_DeleteMinted_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteMinted'
+type MockTokenRepository_DeleteMinted_Call struct {
+	*mock.Call
+}
+
+// DeleteMinted is a helper method to define mock.On call
+//   - ctx context.Context
+//   - workloadID string
+//   - principal string
+//   - instance *int
+//   - version *int
+func (_e *MockTokenRepository_Expecter) DeleteMinted(ctx any, workloadID any, principal any, instance any, version any) *MockTokenRepository_DeleteMinted_Call {
+	return &MockTokenRepository_DeleteMinted_Call{Call: _e.mock.On("DeleteMinted", ctx, workloadID, principal, instance, version)}
+}
+
+func (_c *MockTokenRepository_DeleteMinted_Call) Run(run func(ctx context.Context, workloadID string, principal string, instance *int, version *int)) *MockTokenRepository_DeleteMinted_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 *int
+		if args[3] != nil {
+			arg3 = args[3].(*int)
+		}
+		var arg4 *int
+		if args[4] != nil {
+			arg4 = args[4].(*int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTokenRepository_DeleteMinted_Call) Return(err error) *MockTokenRepository_DeleteMinted_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockTokenRepository_DeleteMinted_Call) RunAndReturn(run func(ctx context.Context, workloadID string, principal string, instance *int, version *int) error) *MockTokenRepository_DeleteMinted_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DeleteRecovery provides a mock function for the type MockTokenRepository
 func (_mock *MockTokenRepository) DeleteRecovery(ctx context.Context) error {
 	ret := _mock.Called(ctx)
@@ -2152,6 +2347,78 @@ func (_c *MockTokenRepository_DeleteRecovery_Call) Return(err error) *MockTokenR
 }
 
 func (_c *MockTokenRepository_DeleteRecovery_Call) RunAndReturn(run func(ctx context.Context) error) *MockTokenRepository_DeleteRecovery_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DeleteSuperseded provides a mock function for the type MockTokenRepository
+func (_mock *MockTokenRepository) DeleteSuperseded(ctx context.Context, workloadID string, version int) (int64, error) {
+	ret := _mock.Called(ctx, workloadID, version)
+
+	if len(ret) == 0 {
+		panic("no return value specified for DeleteSuperseded")
+	}
+
+	var r0 int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int) (int64, error)); ok {
+		return returnFunc(ctx, workloadID, version)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int) int64); ok {
+		r0 = returnFunc(ctx, workloadID, version)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int) error); ok {
+		r1 = returnFunc(ctx, workloadID, version)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockTokenRepository_DeleteSuperseded_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DeleteSuperseded'
+type MockTokenRepository_DeleteSuperseded_Call struct {
+	*mock.Call
+}
+
+// DeleteSuperseded is a helper method to define mock.On call
+//   - ctx context.Context
+//   - workloadID string
+//   - version int
+func (_e *MockTokenRepository_Expecter) DeleteSuperseded(ctx any, workloadID any, version any) *MockTokenRepository_DeleteSuperseded_Call {
+	return &MockTokenRepository_DeleteSuperseded_Call{Call: _e.mock.On("DeleteSuperseded", ctx, workloadID, version)}
+}
+
+func (_c *MockTokenRepository_DeleteSuperseded_Call) Run(run func(ctx context.Context, workloadID string, version int)) *MockTokenRepository_DeleteSuperseded_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTokenRepository_DeleteSuperseded_Call) Return(n int64, err error) *MockTokenRepository_DeleteSuperseded_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockTokenRepository_DeleteSuperseded_Call) RunAndReturn(run func(ctx context.Context, workloadID string, version int) (int64, error)) *MockTokenRepository_DeleteSuperseded_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2218,6 +2485,84 @@ func (_c *MockTokenRepository_GetByHash_Call) Return(token database.Token, err e
 }
 
 func (_c *MockTokenRepository_GetByHash_Call) RunAndReturn(run func(ctx context.Context, hash string) (database.Token, error)) *MockTokenRepository_GetByHash_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetForWorkload provides a mock function for the type MockTokenRepository
+func (_mock *MockTokenRepository) GetForWorkload(ctx context.Context, workloadID string, version int, principal string) (database.Token, error) {
+	ret := _mock.Called(ctx, workloadID, version, principal)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetForWorkload")
+	}
+
+	var r0 database.Token
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, string) (database.Token, error)); ok {
+		return returnFunc(ctx, workloadID, version, principal)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, string) database.Token); ok {
+		r0 = returnFunc(ctx, workloadID, version, principal)
+	} else {
+		r0 = ret.Get(0).(database.Token)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int, string) error); ok {
+		r1 = returnFunc(ctx, workloadID, version, principal)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockTokenRepository_GetForWorkload_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetForWorkload'
+type MockTokenRepository_GetForWorkload_Call struct {
+	*mock.Call
+}
+
+// GetForWorkload is a helper method to define mock.On call
+//   - ctx context.Context
+//   - workloadID string
+//   - version int
+//   - principal string
+func (_e *MockTokenRepository_Expecter) GetForWorkload(ctx any, workloadID any, version any, principal any) *MockTokenRepository_GetForWorkload_Call {
+	return &MockTokenRepository_GetForWorkload_Call{Call: _e.mock.On("GetForWorkload", ctx, workloadID, version, principal)}
+}
+
+func (_c *MockTokenRepository_GetForWorkload_Call) Run(run func(ctx context.Context, workloadID string, version int, principal string)) *MockTokenRepository_GetForWorkload_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockTokenRepository_GetForWorkload_Call) Return(token database.Token, err error) *MockTokenRepository_GetForWorkload_Call {
+	_c.Call.Return(token, err)
+	return _c
+}
+
+func (_c *MockTokenRepository_GetForWorkload_Call) RunAndReturn(run func(ctx context.Context, workloadID string, version int, principal string) (database.Token, error)) *MockTokenRepository_GetForWorkload_Call {
 	_c.Call.Return(run)
 	return _c
 }
