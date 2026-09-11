@@ -158,6 +158,11 @@ takt then rewrites the file and signals the workload, which keeps running. This 
 a server holding open connections wants from a certificate rotation. See
 [When a mounted value changes](manifest.md#when-a-mounted-value-changes).
 
+A takt API token is the one credential that should not be stored as a secret and
+mounted this way. A workload that needs one names a principal instead, and the
+server mints, rotates and revokes the credential itself. See
+[Mounting a token](manifest.md#mounting-a-token).
+
 ## Deleting
 
 A secret a workload reads is refused, and the message names the workloads:

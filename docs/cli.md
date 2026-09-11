@@ -662,10 +662,12 @@ again. Requires the `admin` role. See [Access control](acl.md#tokens).
 takt token list
 ```
 
-Names every credential the server holds — static tokens, logins, sessions and
-the recovery token — with when each was created and last used. With `takt acl
-get`, this answers who can touch the server, completely. Requires the `admin`
-role.
+Names every credential the server holds — static tokens, logins, sessions,
+workload tokens and the recovery token — with when each was created and last
+used. With `takt acl get`, this answers who can touch the server, completely.
+A workload token carries the `workload` source, which is how a credential the
+server minted for a manifest is told from one an operator created. Requires
+the `admin` role.
 
 ## token delete
 

@@ -54,8 +54,8 @@ container:
 | `count` | no | How many instances to run. One when omitted. See [Count](#count). |
 | `labels` | no | Key-value pairs attached to the workload. See [Labels](#labels). |
 | `ports` | no | The ports the workload publishes. |
-| `env` | no | Environment variables set for the workload. A value may reference a secret or a variable. |
-| `volumes` | no | What the workload mounts — a volume, a secret, a variable or a host path — and where it finds each one. |
+| `env` | no | Environment variables set for the workload. A value may reference a secret, a variable or a token. |
+| `volumes` | no | What the workload mounts — a volume, a secret, a variable, a token or a host path — and where it finds each one. |
 | `restart` | no | What happens when the workload ends. |
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
 | `health` | no | How takt decides the workload is working. |
@@ -388,6 +388,7 @@ Anything else after an unescaped `$` is an error rather than literal text:
 | `$${secret:name}` | The literal `${secret:name}` |
 | `${secret:db-password` | Rejected: not closed by `}` |
 | `${workload:postgres:pg}` | The address `postgres` publishes `pg` at |
+| `${token:ci}` | A token minted for the principal `ci` |
 | `${env:HOME}` | Rejected: `env` is not a reference type |
 | `${secret:db-password:pg}` | Rejected: only a workload reference names a port |
 | `${secret:DB_PASSWORD}` | Rejected: not a name a secret may have |
@@ -437,6 +438,37 @@ name two different things and one is never substituted for the other.
 The difference between the two is whether the value is readable back. A variable's is
 returned by the API. A secret's is not. See [Variables](variables.md) and
 [Secrets](secrets.md).
+
+### Reading a token
+
+An `env` value can ask for a credential rather than a stored value, with
+`${token:principal}`:
+
+```yaml
+env:
+  TAKT_TOKEN: ${token:ci}
+```
+
+The server mints a client token bound to the principal `ci` as the instance starts,
+and the value is the credential itself. The takt CLI reads `TAKT_TOKEN`, so this is
+the form for an automation workload that drives takt — it needs no wrapper to lift
+a file into its environment.
+
+Nothing has to exist first. A principal is a name the policy grants roles to, never
+an object an operator creates, so the reference asserts an identity and the
+[policy](acl.md#workload-identity) alone decides what it may do. A token for a
+principal the policy grants nothing authenticates and holds no role.
+
+The credential's life is the instance's life. It is minted at start and revoked when
+the instance is replaced, suspended or deleted, so an ordinary rolling replacement
+rotates it and the token list never accumulates. An environment is fixed once a
+process has started, so an env-referenced token cannot rotate in place. Prefer
+[mounting one](#mounting-a-token) wherever the consumer can reread a file.
+
+The escaping, the rejections and the `env`-values-only scope apply unchanged. The
+principal is written under the reference grammar — lowercase alphanumeric,
+optionally separated by dashes — so a principal that is an email cannot be named
+from a manifest.
 
 ### Reaching another workload
 
@@ -513,6 +545,8 @@ volumes:
     to: /var/secret.json
   - var: variable-name
     to: /var/example.json
+  - token: prometheus
+    to: /etc/prometheus/takt-token
   - path: /mnt/media
     to: /media
     readOnly: true
@@ -526,14 +560,16 @@ path:
 | `name` | A volume, which is a directory that outlives the workload. |
 | `secret` | A file holding the secret's value. |
 | `var` | A file holding the variable's value. |
+| `token` | A file holding a client token minted for that principal. |
 | `path` | A host file or directory that takt does not manage. |
 
 Naming none, or naming two, is an error. It is one list rather than two, because what
 a workload finds in its filesystem is one question however the contents are produced.
 
-`to` is where the workload finds it, and works the same way for all four. The rest of
-this section is about mounting a volume. [Mounting a host path](#mounting-a-host-path)
-and [Mounting a value](#mounting-a-value) cover the others.
+`to` is where the workload finds it, and works the same way for all five. The rest of
+this section is about mounting a volume. [Mounting a host path](#mounting-a-host-path),
+[Mounting a value](#mounting-a-value) and [Mounting a token](#mounting-a-token) cover
+the others.
 
 Any entry may also say `readOnly: true`, whatever its source. The workload can then
 read what is mounted and cannot change it, which is what a workload sharing a volume
@@ -704,8 +740,8 @@ Anything else is rejected, including `SIGTERM` and `SIGKILL`. Whether a workload
 is takt's decision to make through the [restart policy](#restart), so a manifest that
 could stop one would be taking it.
 
-Only a mounted secret or variable may name a signal. A volume holds whatever the
-workload puts there, so there is no change takt could report.
+Only a mounted secret, variable or token may name a signal. A volume holds whatever
+the workload puts there, so there is no change takt could report.
 
 The file is rewritten rather than replaced. A mount follows the file it was given, so a
 replacement would leave the workload reading the old contents.
@@ -713,6 +749,43 @@ replacement would leave the workload reading the old contents.
 A value read from `env` as well as from a signalling mount still replaces the workload.
 An environment variable is fixed once a process has started, so there is no way to
 change one without a restart.
+
+## Mounting a token
+
+A mount can name a principal, and the workload then finds a file holding a client
+token the server minted for it:
+
+```yaml
+volumes:
+  - token: prometheus
+    to: /etc/prometheus/takt-token
+    signal: SIGHUP
+```
+
+This is workload identity: the manifest declares who the workload acts as, and the
+credential's life follows the instance. The token is minted as the instance starts
+and revoked when the instance is replaced, suspended or deleted, so the token list
+never accumulates credentials for workloads that are gone. The identity itself is
+asserted rather than checked — nothing has to exist before a mount names a
+principal, and the [policy](acl.md#workload-identity) alone decides what it may do.
+
+With a `signal`, the token also rotates in place. It is minted with the lifetime a
+login's token carries, and once less than half of that remains the server rewrites
+the file with a fresh one and sends the signal — so a consumer that rereads the
+file, such as prometheus through `credentials_file`, picks up the rotation without
+a restart. Without a signal the token does not expire, because nothing could
+deliver a renewal to a file the workload reads once, and revocation with the
+instance is what ends its life.
+
+The instances of one workload version share the file and the token behind it.
+During a rolling replacement the old version's instances keep their credential
+until the replacement is running, and the superseded token is revoked once nothing
+reads it.
+
+The file behaves as a mounted secret's does: written as the instance starts,
+readable through the private mount directory, removed and revoked together. The
+principal is written under the reference grammar — lowercase alphanumeric,
+optionally separated by dashes.
 
 ## Restart
 
