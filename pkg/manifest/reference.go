@@ -22,6 +22,9 @@ var (
 	// ErrUnknownWorkload is returned when expanding a value that references a
 	// workload the caller could not resolve.
 	ErrUnknownWorkload = errors.New("unknown workload")
+	// ErrUnknownToken is returned when expanding a value that references a token
+	// the caller could not mint.
+	ErrUnknownToken = errors.New("unknown token")
 )
 
 const (
@@ -44,7 +47,8 @@ type (
 	Reference struct {
 		// What the reference resolves against.
 		Kind ReferenceKind
-		// The name of the secret, variable or workload being referenced.
+		// The name of the secret, variable or workload being referenced, or the
+		// principal a token is minted for.
 		Name string
 		// Which of the referenced workload's ports is wanted, which resolves the
 		// reference to an address rather than to a host. Empty for a reference of
@@ -66,6 +70,14 @@ const (
 	// something an operator stored, which is what lets a workload be written down as
 	// the dependency of another without either naming a port takt chose.
 	KindWorkload ReferenceKind = "workload"
+	// KindToken is a reference to a client token the server mints for the workload,
+	// bound to the named principal.
+	//
+	// Unlike every other kind it resolves against nothing stored: the value is
+	// minted as the instance starts. The name is a principal, which need not exist
+	// anywhere before the reference names it — identity is asserted here, and the
+	// policy decides what the principal may do.
+	KindToken ReferenceKind = "token"
 )
 
 // Every kind a reference may name.
@@ -73,7 +85,7 @@ const (
 // A slice rather than a set so that the error naming the accepted forms lists them
 // the same way each time. No kind's opening is a prefix of another's, so the order
 // does not affect what matches.
-var referenceKinds = []ReferenceKind{KindSecret, KindVariable, KindWorkload}
+var referenceKinds = []ReferenceKind{KindSecret, KindVariable, KindWorkload, KindToken}
 
 // opening returns the text that opens a reference of this kind.
 //
@@ -86,7 +98,8 @@ func (k ReferenceKind) opening() string {
 // without repeats.
 //
 // The grammar is whole. A reference is "${secret:name}", "${var:name}",
-// "${workload:name}" or "${workload:name:port}", and "$$" is a literal dollar sign.
+// "${workload:name}", "${workload:name:port}" or "${token:principal}", and "$$" is a
+// literal dollar sign.
 // Anything else following an unescaped dollar sign is reported rather than passed
 // through, so a manifest that meant to reference something is never quietly handed
 // the text it wrote. This is deliberately not a template language: there is nothing
@@ -140,8 +153,9 @@ func ParseReferences(value string) ([]Reference, error) {
 // Expand replaces every reference in value with what resolve returns for it, and
 // unescapes each "$$" to a single dollar sign.
 //
-// Returns ErrUnknownSecret, ErrUnknownVariable or ErrUnknownWorkload naming the
-// reference when resolve reports it holds nothing for one. Leaving the reference text
+// Returns ErrUnknownSecret, ErrUnknownVariable, ErrUnknownWorkload or
+// ErrUnknownToken naming the reference when resolve reports it holds nothing for
+// one. Leaving the reference text
 // in place would hand a workload the reference as though it were the value, which it
 // would then use.
 func Expand(value string, resolve func(reference Reference) (string, bool)) (string, error) {
@@ -195,9 +209,9 @@ func Expand(value string, resolve func(reference Reference) (string, bool)) (str
 // order that depended on map iteration would make an unchanged workload hash
 // differently each time it was applied.
 //
-// A mounted secret or variable is included whatever its delivery mode. This is what
-// records that the workload reads it, so deleting one still reports the workloads
-// holding it. Whether a change replaces the instance or refreshes the file is a
+// A mounted secret, variable or token is included whatever its delivery mode. This
+// is what records that the workload reads it, so deleting one still reports the
+// workloads holding it. Whether a change replaces the instance or refreshes the file is a
 // separate question, which Refreshed answers.
 func References(spec Spec) ([]Reference, error) {
 	var references []Reference
@@ -429,6 +443,8 @@ func unknown(kind ReferenceKind) error {
 		return ErrUnknownVariable
 	case KindWorkload:
 		return ErrUnknownWorkload
+	case KindToken:
+		return ErrUnknownToken
 	default:
 		return ErrUnknownSecret
 	}

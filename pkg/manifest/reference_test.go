@@ -24,6 +24,10 @@ func TestParseReferences(t *testing.T) {
 		return manifest.Reference{Kind: manifest.KindWorkload, Name: name, Port: port}
 	}
 
+	token := func(name string) manifest.Reference {
+		return manifest.Reference{Kind: manifest.KindToken, Name: name}
+	}
+
 	tt := []struct {
 		Name      string
 		Value     string
@@ -111,8 +115,38 @@ func TestParseReferences(t *testing.T) {
 			},
 		},
 		{
+			Name:     "a whole value referencing a token",
+			Value:    "${token:ci}",
+			Expected: []manifest.Reference{token("ci")},
+		},
+		{
+			Name:  "a token beside a secret",
+			Value: "${secret:db-password} ${token:prometheus}",
+			Expected: []manifest.Reference{
+				secret("db-password"),
+				token("prometheus"),
+			},
+		},
+		{
 			Name:      "a secret naming a port",
 			Value:     "${secret:db-password:pg}",
+			ExpectErr: manifest.ErrInvalidReference,
+		},
+		{
+			Name:      "a token naming a port",
+			Value:     "${token:ci:http}",
+			ExpectErr: manifest.ErrInvalidReference,
+		},
+		{
+			Name: "a principal that is not a reference name",
+			// A principal created by hand may be an email, but a reference name may
+			// not: the manifest grammar is one grammar for every kind.
+			Value:     "${token:alice@example.com}",
+			ExpectErr: manifest.ErrInvalidReference,
+		},
+		{
+			Name:      "an empty principal",
+			Value:     "${token:}",
 			ExpectErr: manifest.ErrInvalidReference,
 		},
 		{
@@ -251,6 +285,7 @@ func TestParseReferences_NamesBothFormsInAnError(t *testing.T) {
 	assert.Contains(t, err.Error(), "${secret:name}")
 	assert.Contains(t, err.Error(), "${var:name}")
 	assert.Contains(t, err.Error(), "${workload:name}")
+	assert.Contains(t, err.Error(), "${token:name}")
 }
 
 func TestExpand(t *testing.T) {
@@ -273,6 +308,10 @@ func TestExpand(t *testing.T) {
 		"postgres:pg": "10.0.0.5:20432",
 	}
 
+	tokens := map[string]string{
+		"ci": "takt_c_credential",
+	}
+
 	resolve := func(reference manifest.Reference) (string, bool) {
 		switch reference.Kind {
 		case manifest.KindVariable:
@@ -281,6 +320,10 @@ func TestExpand(t *testing.T) {
 			return value, ok
 		case manifest.KindWorkload:
 			value, ok := workloads[reference.String()]
+
+			return value, ok
+		case manifest.KindToken:
+			value, ok := tokens[reference.Name]
 
 			return value, ok
 		}
@@ -320,6 +363,16 @@ func TestExpand(t *testing.T) {
 			Name:      "a workload nothing holds",
 			Value:     "${workload:missing:http}",
 			ExpectErr: manifest.ErrUnknownWorkload,
+		},
+		{
+			Name:     "a whole value referencing a token",
+			Value:    "${token:ci}",
+			Expected: "takt_c_credential",
+		},
+		{
+			Name:      "a token nothing minted",
+			Value:     "${token:missing}",
+			ExpectErr: manifest.ErrUnknownToken,
 		},
 		{
 			Name:     "inside a larger string",
@@ -569,6 +622,20 @@ func TestReferences(t *testing.T) {
 		assert.Equal(t, []manifest.Reference{secret("tls-cert"), variable("app-config")}, references)
 	})
 
+	t.Run("names the principal a token is minted for", func(t *testing.T) {
+		references, err := manifest.References(manifest.Spec{
+			Env: map[string]string{"TAKT_TOKEN": "${token:ci}"},
+			Volumes: []manifest.VolumeMount{
+				{Token: "prometheus", To: "/etc/prometheus/takt-token"},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{
+			{Kind: manifest.KindToken, Name: "ci"},
+			{Kind: manifest.KindToken, Name: "prometheus"},
+		}, references)
+	})
+
 	t.Run("names what a mount reads whatever its delivery mode", func(t *testing.T) {
 		// Naming a signal changes how a change is delivered, not whether the workload
 		// reads the value.
@@ -613,6 +680,31 @@ func TestRefreshed(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, []manifest.Reference{secret("tls-cert"), variable("app-config")}, refreshed)
+	})
+
+	t.Run("names a token only a signalling mount reads", func(t *testing.T) {
+		// A signalled token mount is how a rotated token reaches a workload without
+		// replacing it, so it is classified as a signalled secret is.
+		refreshed, err := manifest.Refreshed(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Token: "prometheus", To: "/etc/prometheus/takt-token", Signal: manifest.SignalHUP},
+			},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{
+			{Kind: manifest.KindToken, Name: "prometheus"},
+		}, refreshed)
+	})
+
+	t.Run("ignores a token the environment also reads", func(t *testing.T) {
+		refreshed, err := manifest.Refreshed(manifest.Spec{
+			Env: map[string]string{"TAKT_TOKEN": "${token:prometheus}"},
+			Volumes: []manifest.VolumeMount{
+				{Token: "prometheus", To: "/etc/prometheus/takt-token", Signal: manifest.SignalHUP},
+			},
+		})
+		require.NoError(t, err)
+		assert.Empty(t, refreshed)
 	})
 
 	t.Run("ignores a mount that asked to be replaced", func(t *testing.T) {
@@ -685,6 +777,11 @@ func TestKindOf(t *testing.T) {
 			Expected: manifest.MountVariable,
 		},
 		{
+			Name:     "a mounted token",
+			Mount:    manifest.VolumeMount{Token: "prometheus", To: "/etc/prometheus/takt-token"},
+			Expected: manifest.MountToken,
+		},
+		{
 			Name:      "no source at all",
 			Mount:     manifest.VolumeMount{To: "/etc/tls/cert.pem"},
 			ExpectErr: manifest.ErrNoMountSource,
@@ -692,6 +789,11 @@ func TestKindOf(t *testing.T) {
 		{
 			Name:      "two sources",
 			Mount:     manifest.VolumeMount{Secret: "tls-cert", Var: "app-config", To: "/etc/tls/cert.pem"},
+			ExpectErr: manifest.ErrAmbiguousMountSource,
+		},
+		{
+			Name:      "a token beside a secret",
+			Mount:     manifest.VolumeMount{Secret: "tls-cert", Token: "ci", To: "/etc/tls/cert.pem"},
 			ExpectErr: manifest.ErrAmbiguousMountSource,
 		},
 		{
@@ -735,6 +837,12 @@ func TestVolumeMount_Reference(t *testing.T) {
 		reference, ok := manifest.VolumeMount{Var: "app-config"}.Reference()
 		require.True(t, ok)
 		assert.Equal(t, manifest.Reference{Kind: manifest.KindVariable, Name: "app-config"}, reference)
+	})
+
+	t.Run("reports what a mounted token reads", func(t *testing.T) {
+		reference, ok := manifest.VolumeMount{Token: "prometheus"}.Reference()
+		require.True(t, ok)
+		assert.Equal(t, manifest.Reference{Kind: manifest.KindToken, Name: "prometheus"}, reference)
 	})
 
 	t.Run("reports that a mounted volume reads nothing", func(t *testing.T) {

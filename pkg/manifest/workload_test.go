@@ -509,6 +509,32 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
+			// A token mount in both delivery modes, and a token reference in the
+			// environment. The principal is not a thing that exists yet, so parsing
+			// has nothing to check beyond the name's grammar.
+			Name: "mounts tokens",
+			File: "mounts_token.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, "${token:ci}", spec.Env["TAKT_TOKEN"])
+				assert.Equal(t, []manifest.VolumeMount{
+					{Token: "prometheus", To: "/etc/prometheus/takt-token", Signal: manifest.SignalHUP},
+					{Token: "deploy-runner", To: "/var/run/takt/token"},
+				}, spec.Volumes)
+			},
+		},
+		{
+			// A principal created by hand may be an email, but a mount names one
+			// through the reference grammar, which is one grammar for every kind.
+			Name:         "rejects a token principal that is not a reference name",
+			File:         "mounts_token_bad_name.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects the same token mounted twice",
+			File:         "mounts_duplicate_token.yaml",
+			ExpectsError: true,
+		},
+		{
 			// A host path beside a volume, which is the shape the media stack
 			// wants: shared data on its own mount point next to storage takt
 			// manages.

@@ -1,0 +1,15 @@
+version: v1
+name: example
+
+env:
+  TAKT_TOKEN: ${token:ci}
+
+volumes:
+  - token: prometheus
+    to: /etc/prometheus/takt-token
+    signal: SIGHUP
+  - token: deploy-runner
+    to: /var/run/takt/token
+
+container:
+  image: example/example:latest
