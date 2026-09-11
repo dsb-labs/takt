@@ -81,7 +81,9 @@ export function buildGraph(
       // A host path is not a resource, so the graph has nothing to draw for
       // one. references() never yields the kind today, but the type allows it
       // and the guard keeps the exclusion deliberate rather than accidental.
-      if (ref.kind === "path") continue;
+      // A token names a principal rather than a resource, so it stays out for
+      // the same reason.
+      if (ref.kind === "path" || ref.kind === "token") continue;
 
       const target = resource(ref.kind, ref.name);
       const id = `${source}->${target}`;
