@@ -279,10 +279,11 @@ func (e ServiceTargetProtocol) Valid() bool {
 
 // Defines values for TokenSource.
 const (
-	TokenSourceInit    TokenSource = "init"
-	TokenSourceOIDC    TokenSource = "oidc"
-	TokenSourceSession TokenSource = "session"
-	TokenSourceStatic  TokenSource = "static"
+	TokenSourceInit     TokenSource = "init"
+	TokenSourceOIDC     TokenSource = "oidc"
+	TokenSourceSession  TokenSource = "session"
+	TokenSourceStatic   TokenSource = "static"
+	TokenSourceWorkload TokenSource = "workload"
 )
 
 // Valid indicates whether the value is a known member of the TokenSource enum.
@@ -295,6 +296,8 @@ func (e TokenSource) Valid() bool {
 	case TokenSourceSession:
 		return true
 	case TokenSourceStatic:
+		return true
+	case TokenSourceWorkload:
 		return true
 	default:
 		return false
@@ -998,7 +1001,7 @@ type LoginResult struct {
 // it yet, for the same reason deleting a volume returns one.
 type LogoutResult = map[string]interface{}
 
-// MountSignal The signal to send the workload when a mounted secret or variable changes,
+// MountSignal The signal to send the workload when a mounted secret, variable or token changes,
 // rather than replacing its instance.
 //
 // Without one, a change is delivered the way a change to a referenced secret is:
@@ -1011,8 +1014,9 @@ type LogoutResult = map[string]interface{}
 // workload is refused, because whether a workload runs is the server's decision
 // to make through the restart policy.
 //
-// Only a mounted secret or variable may name one. A volume holds whatever the
-// workload puts there, so there is no change the server could report.
+// Only a mounted secret, variable or token may name one. A volume holds
+// whatever the workload puts there, so there is no change the server could
+// report.
 type MountSignal string
 
 // OverlapPolicy What the server does when an occurrence comes due and the previous run has not
@@ -1625,14 +1629,18 @@ type Token struct {
 	// token.
 	Principal string `json:"principal"`
 
-	// Source What minted the token.
+	// Source What minted the token: init, an operator's create, an OIDC login, a
+	// browser session, or the server itself for a workload whose manifest
+	// names a principal.
 	Source TokenSource `json:"source"`
 
 	// Type Whether this is the recovery token or a client token.
 	Type TokenType `json:"type"`
 }
 
-// TokenSource What minted the token.
+// TokenSource What minted the token: init, an operator's create, an OIDC login, a
+// browser session, or the server itself for a workload whose manifest
+// names a principal.
 type TokenSource string
 
 // TokenType Whether this is the recovery token or a client token.
@@ -1757,13 +1765,15 @@ type Volume struct {
 
 // VolumeMount Something to mount, and the path at which the workload finds it.
 //
-// Exactly one of `name`, `secret`, `var` or `path` must be present, and which
-// one it is decides what appears at the path. `name` mounts a volume, which is
-// a directory that outlives the workload. `secret` and `var` mount a file
-// holding what the server holds under that name, so a value an operator keeps
-// in takt can be read by a workload that wants a file rather than an
-// environment variable. `path` mounts a host file or directory the server does
-// not manage, and only a path the server's configuration allows is accepted.
+// Exactly one of `name`, `secret`, `var`, `token` or `path` must be present,
+// and which one it is decides what appears at the path. `name` mounts a
+// volume, which is a directory that outlives the workload. `secret` and `var`
+// mount a file holding what the server holds under that name, so a value an
+// operator keeps in takt can be read by a workload that wants a file rather
+// than an environment variable. `token` mounts a file holding a client token
+// the server mints for the named principal as the instance starts. `path`
+// mounts a host file or directory the server does not manage, and only a path
+// the server's configuration allows is accepted.
 //
 // The source is derived from the field that is present rather than from a
 // discriminator, as a specification's runtime is.
@@ -1853,7 +1863,7 @@ type VolumeMount struct {
 	// Examples: tls-cert
 	Secret *string `json:"secret,omitempty"`
 
-	// Signal The signal to send the workload when a mounted secret or variable changes,
+	// Signal The signal to send the workload when a mounted secret, variable or token changes,
 	// rather than replacing its instance.
 	//
 	// Without one, a change is delivered the way a change to a referenced secret is:
@@ -1866,8 +1876,9 @@ type VolumeMount struct {
 	// workload is refused, because whether a workload runs is the server's decision
 	// to make through the restart policy.
 	//
-	// Only a mounted secret or variable may name one. A volume holds whatever the
-	// workload puts there, so there is no change the server could report.
+	// Only a mounted secret, variable or token may name one. A volume holds
+	// whatever the workload puts there, so there is no change the server could
+	// report.
 	Signal *MountSignal `json:"signal,omitempty"`
 
 	// To Where the workload finds what is mounted. Must be an absolute path, and
@@ -1876,6 +1887,20 @@ type VolumeMount struct {
 	//
 	// Examples: /var/lib/example
 	To string `json:"to"`
+
+	// Token The principal to mint a client token for and mount as a file. The file
+	// holds the credential and nothing else, and is rewritten in place when
+	// the token rotates.
+	//
+	// Nothing has to exist before the mount names one: the principal is
+	// asserted here, and the policy decides what it may do. The token is
+	// minted as the instance starts and revoked when the instance is
+	// replaced, suspended or deleted, so the credential's life follows the
+	// instance and the token list never accumulates.
+	//
+	//
+	// Examples: prometheus
+	Token *string `json:"token,omitempty"`
 
 	// Var The variable to mount as a file, which must already exist. The file holds
 	// the variable's value and nothing else.

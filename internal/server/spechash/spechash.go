@@ -162,13 +162,14 @@ func (i Inputs) hashed() (map[string]string, map[string]string) {
 	values := maps.Clone(i.Values)
 
 	for _, reference := range i.Refreshed {
-		if reference.Kind == manifest.KindVariable {
+		// By kind, so a refreshed token — which contributes nothing to the hash —
+		// cannot delete the revision of a secret sharing its principal's name.
+		switch reference.Kind {
+		case manifest.KindVariable:
 			delete(values, reference.Name)
-
-			continue
+		case manifest.KindSecret:
+			delete(revisions, reference.Name)
 		}
-
-		delete(revisions, reference.Name)
 	}
 
 	if len(revisions) == 0 {

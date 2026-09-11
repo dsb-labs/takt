@@ -114,6 +114,7 @@ func TestFromSpec(t *testing.T) {
 				{Name: "example-data", To: "/var/lib/example", ReadOnly: true},
 				{Path: "/mnt/media", To: "/media", ReadOnly: true, Propagation: "rslave"},
 				{Secret: "tls-cert", To: "/etc/tls/cert.pem", Signal: manifest.SignalHUP},
+				{Token: "prometheus", To: "/etc/prometheus/takt-token", Signal: manifest.SignalHUP},
 			},
 			Container: &manifest.Container{
 				Image:    "example/example:latest",

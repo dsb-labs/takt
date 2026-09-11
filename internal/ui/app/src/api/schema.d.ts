@@ -1438,13 +1438,15 @@ export interface components {
     /**
      * @description Something to mount, and the path at which the workload finds it.
      *
-     *     Exactly one of `name`, `secret`, `var` or `path` must be present, and which
-     *     one it is decides what appears at the path. `name` mounts a volume, which is
-     *     a directory that outlives the workload. `secret` and `var` mount a file
-     *     holding what the server holds under that name, so a value an operator keeps
-     *     in takt can be read by a workload that wants a file rather than an
-     *     environment variable. `path` mounts a host file or directory the server does
-     *     not manage, and only a path the server's configuration allows is accepted.
+     *     Exactly one of `name`, `secret`, `var`, `token` or `path` must be present,
+     *     and which one it is decides what appears at the path. `name` mounts a
+     *     volume, which is a directory that outlives the workload. `secret` and `var`
+     *     mount a file holding what the server holds under that name, so a value an
+     *     operator keeps in takt can be read by a workload that wants a file rather
+     *     than an environment variable. `token` mounts a file holding a client token
+     *     the server mints for the named principal as the instance starts. `path`
+     *     mounts a host file or directory the server does not manage, and only a path
+     *     the server's configuration allows is accepted.
      *
      *     The source is derived from the field that is present rather than from a
      *     discriminator, as a specification's runtime is.
@@ -1490,6 +1492,19 @@ export interface components {
        * @example app-config
        */
       var?: string;
+      /**
+       * @description The principal to mint a client token for and mount as a file. The file
+       *     holds the credential and nothing else, and is rewritten in place when
+       *     the token rotates.
+       *
+       *     Nothing has to exist before the mount names one: the principal is
+       *     asserted here, and the policy decides what it may do. The token is
+       *     minted as the instance starts and revoked when the instance is
+       *     replaced, suspended or deleted, so the credential's life follows the
+       *     instance and the token list never accumulates.
+       * @example prometheus
+       */
+      token?: string;
       /**
        * @description The host file or directory to mount, written as an absolute path. This
        *     is how a workload reaches data the server does not manage: a media
@@ -1549,7 +1564,7 @@ export interface components {
       readonly from?: string;
     };
     /**
-     * @description The signal to send the workload when a mounted secret or variable changes,
+     * @description The signal to send the workload when a mounted secret, variable or token changes,
      *     rather than replacing its instance.
      *
      *     Without one, a change is delivered the way a change to a referenced secret is:
@@ -1562,8 +1577,9 @@ export interface components {
      *     workload is refused, because whether a workload runs is the server's decision
      *     to make through the restart policy.
      *
-     *     Only a mounted secret or variable may name one. A volume holds whatever the
-     *     workload puts there, so there is no change the server could report.
+     *     Only a mounted secret, variable or token may name one. A volume holds
+     *     whatever the workload puts there, so there is no change the server could
+     *     report.
      * @enum {string}
      */
     MountSignal: "SIGHUP" | "SIGUSR1" | "SIGUSR2";
@@ -2239,10 +2255,12 @@ export interface components {
        */
       type: "recovery" | "client";
       /**
-       * @description What minted the token.
+       * @description What minted the token: init, an operator's create, an OIDC login, a
+       *     browser session, or the server itself for a workload whose manifest
+       *     names a principal.
        * @enum {string}
        */
-      source: "init" | "static" | "oidc" | "session";
+      source: "init" | "static" | "oidc" | "session" | "workload";
       /**
        * @description The principal the token authenticates as. Empty for the recovery
        *     token.
