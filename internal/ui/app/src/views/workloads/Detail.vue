@@ -56,6 +56,7 @@ const refsOf = (kind: string) =>
 const volumeRefs = refsOf("volume");
 const secretRefs = refsOf("secret");
 const variableRefs = refsOf("variable");
+const tokenRefs = refsOf("token");
 const workloadRefs = refsOf("workload");
 
 // Host paths get a card of their own rather than a reference card: a path
@@ -240,6 +241,7 @@ await workload.suspense().catch(() => {});
         <ReferenceCard title="Volumes" :refs="volumeRefs" />
         <ReferenceCard title="Secrets" :refs="secretRefs" />
         <ReferenceCard title="Variables" :refs="variableRefs" />
+        <ReferenceCard title="Tokens" :refs="tokenRefs" />
         <ReferenceCard title="Workloads" :refs="workloadRefs" />
 
         <ReferenceCard title="Host paths" :refs="pathMounts" />

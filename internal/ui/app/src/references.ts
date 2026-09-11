@@ -1,23 +1,33 @@
 import type { VolumeMount, WorkloadSpec } from "./api/types";
 
 // A Reference is something a workload's specification names: a secret,
-// variable or another workload expanded into its environment, or a volume,
-// secret or variable mounted as a file. A host path is the one kind that is
-// not an takt resource, so it renders without a link and joins no graph.
+// variable, token or another workload expanded into its environment, or a
+// volume, secret, variable or token mounted as a file. A host path names no
+// takt resource, so it renders without a link and joins no graph; a token
+// names a principal rather than a resource, so it links to the credentials
+// view and joins no graph either.
 export type Reference = {
-  kind: "secret" | "variable" | "volume" | "workload" | "service" | "path";
+  kind:
+    | "secret"
+    | "variable"
+    | "volume"
+    | "workload"
+    | "service"
+    | "path"
+    | "token";
   name: string;
   via: string;
 };
 
-// The env expansion syntax: ${secret:name}, ${var:name} and
-// ${workload:name:port}, where anything after the name is ignored here.
-const pattern = /\$\{(secret|var|workload):([^}:]+)[^}]*\}/g;
+// The env expansion syntax: ${secret:name}, ${var:name}, ${token:principal}
+// and ${workload:name:port}, where anything after the name is ignored here.
+const pattern = /\$\{(secret|var|workload|token):([^}:]+)[^}]*\}/g;
 
 const kinds = {
   secret: "secret",
   var: "variable",
   workload: "workload",
+  token: "token",
 } as const;
 
 // references lists everything the given specification refers to, in the order
@@ -40,6 +50,7 @@ export function references(spec: WorkloadSpec): Reference[] {
     if (mount.name) refs.push({ kind: "volume", name: mount.name, via });
     if (mount.secret) refs.push({ kind: "secret", name: mount.secret, via });
     if (mount.var) refs.push({ kind: "variable", name: mount.var, via });
+    if (mount.token) refs.push({ kind: "token", name: mount.token, via });
   }
 
   return refs;
@@ -84,6 +95,10 @@ export function referenceTarget(ref: Reference): string {
       return `/volumes/${ref.name}`;
     case "service":
       return `/services/${ref.name}`;
+    case "token":
+      // A token names a principal rather than a resource of its own, so the
+      // credentials view is where it is seen.
+      return "/acl";
     case "path":
       // A host path is not an takt resource, so there is nowhere to go.
       return "";
