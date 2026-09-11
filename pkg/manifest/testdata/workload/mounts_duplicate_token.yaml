@@ -1,0 +1,11 @@
+version: v1
+name: example
+
+volumes:
+  - token: prometheus
+    to: /etc/prometheus/takt-token
+  - token: prometheus
+    to: /var/run/takt/token
+
+container:
+  image: example/example:latest

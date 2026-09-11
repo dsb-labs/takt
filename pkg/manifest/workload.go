@@ -269,13 +269,14 @@ type (
 	//
 	// Exactly one source must be named, and which one it is decides what appears at
 	// the path: a volume is a directory that outlives the workload, a secret or
-	// a variable is a file holding what takt holds under that name, and a path is a
+	// a variable is a file holding what takt holds under that name, a token is a
+	// file holding a credential minted for the named principal, and a path is a
 	// file or directory on the host that takt does not manage. The source is
 	// derived from the field that is present rather than from a discriminator, as a
 	// specification's runtime is.
 	VolumeMount struct {
 		// Where the volume's data is on the host, resolved by the server from the
-		// named volume. Empty for a mounted secret or variable.
+		// named volume. Empty for a mounted secret, variable or token.
 		//
 		// Tagged out of the YAML encoding because it is not the operator's to write:
 		// a manifest naming a path here is rejected as an unknown field. It is part
@@ -295,6 +296,11 @@ type (
 		Secret string `json:"secret,omitempty"`
 		// The variable to mount as a file, which must already exist.
 		Var string `json:"var,omitempty"`
+		// The principal to mint a client token for and mount as a file. The token
+		// is minted as the instance starts and revoked when the instance goes, so
+		// unlike a secret or a variable there is nothing that must already exist:
+		// the principal is asserted here, and the policy decides what it may do.
+		Token string `json:"token,omitempty"`
 		// The host file or directory to mount, written as an absolute path.
 		//
 		// This is how a workload reaches data takt does not manage: a media
@@ -318,8 +324,8 @@ type (
 		// replacing its instance. Empty replaces the instance, which is what a
 		// workload that reads a file once wants.
 		//
-		// Only a mounted secret or variable may name one. A volume holds whatever the
-		// workload puts there, so there is no change takt could report.
+		// Only a mounted secret, variable or token may name one. A volume holds
+		// whatever the workload puts there, so there is no change takt could report.
 		Signal Signal `json:"signal,omitempty"`
 		// Whether the workload may only read what is mounted. Applies to any
 		// source, so a shared volume can be handed to a workload that should not
@@ -413,6 +419,8 @@ const (
 	MountSecret MountKind = "secret"
 	// MountVariable mounts a variable's value as a file.
 	MountVariable MountKind = "var"
+	// MountToken mounts a minted client token as a file.
+	MountToken MountKind = "token"
 	// MountPath mounts a file or directory on the host that takt does not manage.
 	MountPath MountKind = "path"
 )
@@ -473,7 +481,7 @@ func (p *PortRef) UnmarshalYAML(node *yaml.Node) error {
 // Returns ErrNoMountSource when no source is named, or ErrAmbiguousMountSource when
 // more than one is.
 func KindOf(mount VolumeMount) (MountKind, error) {
-	named := make([]MountKind, 0, 4)
+	named := make([]MountKind, 0, 5)
 
 	if mount.Name != "" {
 		named = append(named, MountVolume)
@@ -485,6 +493,10 @@ func KindOf(mount VolumeMount) (MountKind, error) {
 
 	if mount.Var != "" {
 		named = append(named, MountVariable)
+	}
+
+	if mount.Token != "" {
+		named = append(named, MountToken)
 	}
 
 	if mount.Path != "" {
@@ -512,6 +524,8 @@ func (m VolumeMount) Source() string {
 		return m.Secret
 	case m.Var != "":
 		return m.Var
+	case m.Token != "":
+		return m.Token
 	case m.Path != "":
 		return m.Path
 	default:
@@ -522,15 +536,17 @@ func (m VolumeMount) Source() string {
 // Reference returns what the mount reads, reporting false for a mount of a volume
 // or a host path.
 //
-// A mounted secret or variable is the same thing an env value references, so it
-// resolves through the same identity rather than through a second notion of what a
-// workload reads.
+// A mounted secret, variable or token is the same thing an env value references, so
+// it resolves through the same identity rather than through a second notion of what
+// a workload reads.
 func (m VolumeMount) Reference() (Reference, bool) {
 	switch {
 	case m.Secret != "":
 		return Reference{Kind: KindSecret, Name: m.Secret}, true
 	case m.Var != "":
 		return Reference{Kind: KindVariable, Name: m.Var}, true
+	case m.Token != "":
+		return Reference{Kind: KindToken, Name: m.Token}, true
 	default:
 		return Reference{}, false
 	}

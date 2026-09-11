@@ -1,0 +1,9 @@
+version: v1
+name: example
+
+volumes:
+  - token: alice@example.com
+    to: /var/run/takt/token
+
+container:
+  image: example/example:latest

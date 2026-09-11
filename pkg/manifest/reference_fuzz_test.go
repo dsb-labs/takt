@@ -19,7 +19,7 @@ var fuzzedName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 // FuzzParseReferences checks the properties the reference grammar promises, against
 // inputs nobody thought to write down.
 //
-// The grammar is hand-parsed and now has three kinds, one of which takes a second
+// The grammar is hand-parsed and now has four kinds, one of which takes a second
 // segment, so the value here is in the invariants rather than in any particular
 // input: whatever the fuzzer finds, what comes back is either an error or a set of
 // references that expansion can act on.
@@ -44,6 +44,12 @@ func FuzzParseReferences(f *testing.F) {
 		"${workload:postgres:pg:extra}",
 		"${secret:db-password:pg}",
 		"${var:db-host:pg}",
+		"${token:ci}",
+		"${token:prometheus} ${secret:prometheus}",
+		"${token:ci:http}",
+		"${token:alice@example.com}",
+		"${token:}",
+		"${token}",
 		"$$notasecret",
 		"$${secret:token}",
 		"$$${secret:token}",
@@ -86,6 +92,7 @@ func FuzzParseReferences(f *testing.F) {
 				manifest.KindSecret,
 				manifest.KindVariable,
 				manifest.KindWorkload,
+				manifest.KindToken,
 			}, reference.Kind)
 
 			// A name that reaches a caller is used to look a value up and to name a
