@@ -110,8 +110,9 @@ type (
 	// the reconciler persists holds one.
 	Resolver interface {
 		// Resolve should return env with every reference replaced by the value it
-		// names, reporting an error when one cannot be resolved.
-		Resolve(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error)
+		// names, reporting an error when one cannot be resolved. The reader's
+		// identifier is what a token minted for the instance is bound to.
+		Resolve(ctx context.Context, env map[string]string, readerID, reader string, readerInstance int) (map[string]string, error)
 		// Addresses should return the resolved address of every workload
 		// reference in env, keyed by the reference as written. This is what an
 		// instance's expected hash covers: each instance may resolve a reference
@@ -1848,7 +1849,7 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 	// the operator cannot see. Returning here instead leaves the backoff to pace the
 	// retries, so a workload waiting on a secret does not fill the log.
 	if r.env != nil {
-		if w.Env, err = r.env.Resolve(startCtx, w.Env, w.Name, w.Instance); err != nil {
+		if w.Env, err = r.env.Resolve(startCtx, w.Env, row.ID, w.Name, w.Instance); err != nil {
 			return fmt.Errorf("failed to resolve environment for workload: %w", err)
 		}
 	}

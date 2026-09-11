@@ -967,8 +967,8 @@ func (_c *MockResolver_Addresses_Call) RunAndReturn(run func(ctx context.Context
 }
 
 // Resolve provides a mock function for the type MockResolver
-func (_mock *MockResolver) Resolve(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error) {
-	ret := _mock.Called(ctx, env, reader, readerInstance)
+func (_mock *MockResolver) Resolve(ctx context.Context, env map[string]string, readerID string, reader string, readerInstance int) (map[string]string, error) {
+	ret := _mock.Called(ctx, env, readerID, reader, readerInstance)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Resolve")
@@ -976,18 +976,18 @@ func (_mock *MockResolver) Resolve(ctx context.Context, env map[string]string, r
 
 	var r0 map[string]string
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, map[string]string, string, int) (map[string]string, error)); ok {
-		return returnFunc(ctx, env, reader, readerInstance)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, map[string]string, string, string, int) (map[string]string, error)); ok {
+		return returnFunc(ctx, env, readerID, reader, readerInstance)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, map[string]string, string, int) map[string]string); ok {
-		r0 = returnFunc(ctx, env, reader, readerInstance)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, map[string]string, string, string, int) map[string]string); ok {
+		r0 = returnFunc(ctx, env, readerID, reader, readerInstance)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[string]string)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, map[string]string, string, int) error); ok {
-		r1 = returnFunc(ctx, env, reader, readerInstance)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, map[string]string, string, string, int) error); ok {
+		r1 = returnFunc(ctx, env, readerID, reader, readerInstance)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1002,13 +1002,14 @@ type MockResolver_Resolve_Call struct {
 // Resolve is a helper method to define mock.On call
 //   - ctx context.Context
 //   - env map[string]string
+//   - readerID string
 //   - reader string
 //   - readerInstance int
-func (_e *MockResolver_Expecter) Resolve(ctx any, env any, reader any, readerInstance any) *MockResolver_Resolve_Call {
-	return &MockResolver_Resolve_Call{Call: _e.mock.On("Resolve", ctx, env, reader, readerInstance)}
+func (_e *MockResolver_Expecter) Resolve(ctx any, env any, readerID any, reader any, readerInstance any) *MockResolver_Resolve_Call {
+	return &MockResolver_Resolve_Call{Call: _e.mock.On("Resolve", ctx, env, readerID, reader, readerInstance)}
 }
 
-func (_c *MockResolver_Resolve_Call) Run(run func(ctx context.Context, env map[string]string, reader string, readerInstance int)) *MockResolver_Resolve_Call {
+func (_c *MockResolver_Resolve_Call) Run(run func(ctx context.Context, env map[string]string, readerID string, reader string, readerInstance int)) *MockResolver_Resolve_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1022,15 +1023,20 @@ func (_c *MockResolver_Resolve_Call) Run(run func(ctx context.Context, env map[s
 		if args[2] != nil {
 			arg2 = args[2].(string)
 		}
-		var arg3 int
+		var arg3 string
 		if args[3] != nil {
-			arg3 = args[3].(int)
+			arg3 = args[3].(string)
+		}
+		var arg4 int
+		if args[4] != nil {
+			arg4 = args[4].(int)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
+			arg4,
 		)
 	})
 	return _c
@@ -1041,7 +1047,7 @@ func (_c *MockResolver_Resolve_Call) Return(stringToString map[string]string, er
 	return _c
 }
 
-func (_c *MockResolver_Resolve_Call) RunAndReturn(run func(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error)) *MockResolver_Resolve_Call {
+func (_c *MockResolver_Resolve_Call) RunAndReturn(run func(ctx context.Context, env map[string]string, readerID string, reader string, readerInstance int) (map[string]string, error)) *MockResolver_Resolve_Call {
 	_c.Call.Return(run)
 	return _c
 }

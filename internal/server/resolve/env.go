@@ -24,6 +24,18 @@ type (
 		Value(ctx context.Context, name string) (string, error)
 	}
 
+	// The TokenMinter interface describes how the resolver obtains the credential a
+	// token reference names.
+	//
+	// Minting rather than reading: unlike a secret or a variable there is nothing
+	// stored to look up, and only the mint ever sees the credential itself.
+	TokenMinter interface {
+		// MintInstanceToken should mint the token one instance of a workload
+		// reads from its environment, replacing whatever an earlier start of the
+		// same slot minted, and return the credential.
+		MintInstanceToken(ctx context.Context, principal, workloadID string, instance int) (string, error)
+	}
+
 	// The EnvResolver type turns the references in a workload's environment into the
 	// values it is started with.
 	//
@@ -36,6 +48,7 @@ type (
 		logger    *slog.Logger
 		secrets   ValueStore
 		variables ValueStore
+		tokens    TokenMinter
 		workloads *AddressResolver
 	}
 
@@ -49,6 +62,9 @@ type (
 		// Where the variables a workload reads are read from. May be nil, in which
 		// case a workload referencing a variable fails to start.
 		Variables ValueStore
+		// What mints the token a token reference names. May be nil, in which case
+		// a workload referencing one fails to start.
+		Tokens TokenMinter
 		// Where the address of a referenced workload is resolved. May be nil, in
 		// which case a workload referencing another fails to start.
 		Workloads *AddressResolver
@@ -61,6 +77,7 @@ func NewEnvResolver(config EnvResolverConfig) *EnvResolver {
 		logger:    config.Logger.With("component", "resolve"),
 		secrets:   config.Secrets,
 		variables: config.Variables,
+		tokens:    config.Tokens,
 		workloads: config.Workloads,
 	}
 }
@@ -71,12 +88,15 @@ func NewEnvResolver(config EnvResolverConfig) *EnvResolver {
 // This is the only thing that produces a secret's plaintext outside the secret
 // service, and it exists for the reconciler to call as a workload starts. The reader
 // identity is what a reference to another workload resolves against: each of the
-// reader's instances may land on a different instance of the target.
+// reader's instances may land on a different instance of the target. The reader's
+// identifier is what a token reference binds its mint to, so that revoking what an
+// instance holds can name it.
 //
-// Returns manifest.ErrUnknownSecret or manifest.ErrUnknownVariable naming both the
-// environment variable and what it could not read. Handing the workload the reference
-// text would have it use that as the value.
-func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error) {
+// Returns manifest.ErrUnknownSecret, manifest.ErrUnknownVariable or
+// manifest.ErrUnknownToken naming both the environment variable and what it could
+// not read. Handing the workload the reference text would have it use that as the
+// value.
+func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string, readerID, reader string, readerInstance int) (map[string]string, error) {
 	if len(env) == 0 {
 		return env, nil
 	}
@@ -100,7 +120,7 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string, reader
 				return value, true
 			}
 
-			value, found, err := r.value(ctx, reference, reader, readerInstance)
+			value, found, err := r.value(ctx, reference, readerID, reader, readerInstance)
 			switch {
 			case err != nil:
 				failed = err
@@ -119,7 +139,8 @@ func (r *EnvResolver) Resolve(ctx context.Context, env map[string]string, reader
 			return nil, failed
 		case errors.Is(err, manifest.ErrUnknownSecret),
 			errors.Is(err, manifest.ErrUnknownVariable),
-			errors.Is(err, manifest.ErrUnknownWorkload):
+			errors.Is(err, manifest.ErrUnknownWorkload),
+			errors.Is(err, manifest.ErrUnknownToken):
 			// Naming the environment variable as well as what it reads, so that an
 			// operator has both ends of the reference that could not be resolved.
 			return nil, fmt.Errorf("%s reads %w", key, err)
@@ -174,9 +195,15 @@ func (r *EnvResolver) Addresses(ctx context.Context, env map[string]string, read
 // Nothing held under the name is a false rather than an error, so that expansion is
 // what reports it. That keeps one description of an unresolved reference, whichever
 // kind it named and wherever expansion was called from.
-func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, bool, error) {
+func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference, readerID, reader string, readerInstance int) (string, bool, error) {
 	if reference.Kind == manifest.KindWorkload {
 		return r.address(ctx, reference, reader, readerInstance)
+	}
+
+	// Before the store lookup, because a token resolves against nothing stored:
+	// the value is minted for the reading instance as it starts.
+	if reference.Kind == manifest.KindToken {
+		return r.token(ctx, reference, readerID, readerInstance)
 	}
 
 	store, missing := StoreFor(r.secrets, r.variables, reference.Kind)
@@ -196,6 +223,26 @@ func (r *EnvResolver) value(ctx context.Context, reference manifest.Reference, r
 	}
 
 	return value, true, nil
+}
+
+// token mints the credential a token reference names, bound to the reading
+// instance so that its life follows the instance's own.
+//
+// A server minting no tokens holds nothing under the name, which expansion
+// reports the way it reports a secret nobody created. A mint that fails is an
+// error instead: the principal is right there in the manifest, and being told
+// the token is unknown would send an operator looking for the wrong thing.
+func (r *EnvResolver) token(ctx context.Context, reference manifest.Reference, readerID string, readerInstance int) (string, bool, error) {
+	if r.tokens == nil {
+		return "", false, nil
+	}
+
+	credential, err := r.tokens.MintInstanceToken(ctx, reference.Name, readerID, readerInstance)
+	if err != nil {
+		return "", false, err
+	}
+
+	return credential, true, nil
 }
 
 // address resolves a reference to another workload into the address that workload is
