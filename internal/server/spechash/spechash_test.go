@@ -159,6 +159,37 @@ func TestCompute_SignallingMountIsNotASpecificationChange(t *testing.T) {
 	assert.Equal(t, unread, signalled)
 }
 
+// TestCompute_RefreshedTokenLeavesTheOtherKindsAlone pins the rule that a token
+// contributes nothing to the hash: refreshing one must not delete the revision
+// of a secret that happens to share its principal's name.
+func TestCompute_RefreshedTokenLeavesTheOtherKindsAlone(t *testing.T) {
+	t.Parallel()
+
+	spec := readSpec(t, "signalled_mount.json")
+
+	inputs := spechash.Inputs{
+		Revisions: map[string]string{"prometheus": "rev-one"},
+	}
+
+	_, plain, err := spechash.Compute(spec, inputs)
+	require.NoError(t, err)
+
+	inputs.Refreshed = []manifest.Reference{{Kind: manifest.KindToken, Name: "prometheus"}}
+
+	_, refreshed, err := spechash.Compute(spec, inputs)
+	require.NoError(t, err)
+	assert.Equal(t, plain, refreshed)
+
+	inputs.Revisions = map[string]string{"prometheus": "rev-two"}
+
+	_, rotated, err := spechash.Compute(spec, inputs)
+	require.NoError(t, err)
+
+	// The secret still moves the hash: only a refreshed reference of its own
+	// kind may take it out.
+	assert.NotEqual(t, plain, rotated)
+}
+
 // goldenFor names the golden file holding the hash of the given fixture.
 func goldenFor(file string) string {
 	return strings.TrimSuffix(file, ".json") + ".golden"

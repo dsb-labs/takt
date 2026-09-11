@@ -153,6 +153,9 @@ func ToVolumeMount(mount api.VolumeMount) manifest.VolumeMount {
 	if mount.Var != nil {
 		out.Var = *mount.Var
 	}
+	if mount.Token != nil {
+		out.Token = *mount.Token
+	}
 	if mount.Path != nil {
 		out.Path = *mount.Path
 	}
@@ -425,6 +428,9 @@ func FromVolumeMount(mount manifest.VolumeMount) api.VolumeMount {
 	}
 	if mount.Var != "" {
 		out.Var = new(mount.Var)
+	}
+	if mount.Token != "" {
+		out.Token = new(mount.Token)
 	}
 	if mount.Path != "" {
 		out.Path = new(mount.Path)
