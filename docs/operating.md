@@ -630,8 +630,32 @@ hostname in `hosts`, or every scrape fails with a 421. See
 [Configuration](configuration.md#http).
 
 With [authentication](acl.md) enabled, the scrape requires the `viewer` role.
-Create a token for the scraper and carry it in the scrape configuration's
-`authorization` block:
+
+A prometheus that runs as a takt workload declares its own identity: mount a
+token in its manifest and point the scrape configuration at the file. The
+server mints the credential as the instance starts, rotates it in place, and
+revokes it with the instance — nothing is created or cleaned up by hand. See
+[Workload identity](acl.md#workload-identity).
+
+```yaml
+volumes:
+  - token: prometheus
+    to: /etc/prometheus/takt-token
+    signal: SIGHUP
+```
+
+```yaml
+scrape_configs:
+  - job_name: takt-server
+    metrics_path: /api/v1/system/metrics
+    authorization:
+      credentials_file: /etc/prometheus/takt-token
+    static_configs:
+      - targets: ["127.0.0.1:7373"]
+```
+
+A prometheus that runs elsewhere keeps a static token instead. Create one for
+the scraper and carry it in the `authorization` block:
 
 ```sh
 takt token create prometheus

@@ -569,3 +569,34 @@ exemption and rejected: the anonymous surface is fixed at two endpoints no
 policy could really revoke, and a grant that cannot be revoked is
 documentation pretending to be configuration. The OpenAPI document records
 the exemption instead.
+
+## A workload's token is projected, never fetched
+
+A workload that needs an API token names a principal in its manifest, and
+the server mints the credential as the instance starts — into a mounted
+file, or into the environment through `${token:principal}`. The alternative,
+a workload that fetches a token over the API at start, was rejected because
+fetching one needs a credential already: that is the bootstrap problem a
+projected token exists to avoid. Kubernetes projects a ServiceAccount token
+into a pod and Nomad mints one per allocation, and both reached the same
+shape for the same reason.
+
+The credential's life is the instance's life. It is revoked when the
+instance is replaced, suspended or deleted, which removes the wart the
+hand-managed static token had: nothing revoked it, and the token list
+accumulated credentials for workloads that were gone. Only the form that
+can be rewritten in place — a mounted file naming a signal — carries an
+expiry, because a credential fixed in an environment or in a file read
+once cannot be renewed under a running process, and a token that expired
+under one would be an outage the operator did not ask for.
+
+The principal is deliberately unrestricted, `admin` included. Capping it at
+`viewer` would forbid the legitimate admin-automation case — a runner that
+applies the policy from a git repository — for a guard the apply role and
+manifest review already provide, and it would put authority in a second
+place beside the policy. Applying a workload is already the powerful act:
+it runs code the server confines and can mount secrets to read their
+values. Naming the principal a workload's token binds to is a smaller step
+than the apply takes, so the control is the review the manifest passes, and
+takt's part is to keep the identity visible in the token list and the
+manifest rather than to forbid it.

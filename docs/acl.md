@@ -132,14 +132,55 @@ A token is the credential a caller presents, as a bearer header or through
 the web UI's session cookie.
 
 - `takt token create <principal>` mints a static token bound to a principal
-  and prints it once. Machine consumers — CI, prometheus, the traefik
-  provider plugin — keep static tokens. Only humans log in.
+  and prints it once. This is the form for a machine consumer that runs
+  outside takt, such as CI.
+- A workload names a principal in its manifest and is handed a token the
+  server mints and revokes with its instances. See
+  [Workload identity](#workload-identity).
 - `takt auth login` exchanges an OIDC identity for a token that expires on
   its own, and writes it to the [config file](cli.md#connecting-to-a-server).
-- `takt token list` names every credential, including sessions and the
-  recovery token, with when each was created and last used.
+- `takt token list` names every credential, including sessions, workload
+  tokens and the recovery token, with when each was created and last used.
 - `takt token delete <id>` revokes one. `takt auth logout` revokes whatever
   credential made the call.
+
+## Workload identity
+
+A workload declares who it acts as in its manifest, with a `token` volume or
+a `${token:principal}` environment reference:
+
+```yaml
+volumes:
+  - token: prometheus
+    to: /etc/prometheus/takt-token
+    signal: SIGHUP
+```
+
+The server mints a client token bound to that principal as the instance
+starts. The identity is asserted, and authority is granted: the principal
+need not exist anywhere first, and the policy alone decides what it may do.
+A token for a principal the policy grants nothing authenticates and holds no
+role, exactly the state a static token for an ungranted principal has.
+
+The credential's life is the instance's life. It is revoked when the
+instance is replaced, suspended or deleted, so a rolling replacement rotates
+it and the token list never fills with credentials for workloads that are
+gone. A mounted token naming a signal also rotates in place before its
+lifetime elapses. The syntax and the rotation rules are in the
+[manifest reference](manifest.md#mounting-a-token).
+
+The principal is not restricted, `admin` included. A workload automating an
+admin task — a runner applying the policy from a git repository — needs an
+admin identity, and takt does not decide a workload may not have one. The
+role that may apply such a workload can therefore reach that principal's
+authority through it. That is deliberate: applying a workload is already
+the powerful act, and naming the principal its token binds to is a smaller
+step than the apply takes. takt's part is visibility — the token appears in
+`takt token list` under the `workload` source, and the manifest that asks
+for it is reviewable where it lives.
+
+For the workloads that hold no token, nothing changes: identity is opt-in,
+and a workload without a reference holds no credential at all.
 
 ## Losing the recovery token
 
@@ -157,6 +198,8 @@ from a lost recovery token, not to start over.
 ## The scrapers
 
 With authentication enabled, `/api/v1/system/metrics` and
-`/api/v1/system/prometheus-sd` require the `viewer` role. Prometheus carries
-the credential in an `authorization` block — the exact configuration is in
+`/api/v1/system/prometheus-sd` require the `viewer` role. A prometheus that
+runs as a takt workload mounts its own credential through
+[workload identity](#workload-identity). One that runs elsewhere carries a
+static token in an `authorization` block — the exact configuration is in
 [Operating](operating.md#observability).
