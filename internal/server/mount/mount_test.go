@@ -129,6 +129,95 @@ func TestMounter_Deliver(t *testing.T) {
 		assert.Equal(t, "first", string(contents))
 	})
 
+	t.Run("mints and writes a mounted token", func(t *testing.T) {
+		tokens := NewMockTokens(t)
+
+		// A signal is what makes rotation deliverable, so only a signalled mount
+		// asks for a token that expires.
+		tokens.EXPECT().MintWorkloadToken(mock.Anything, "prometheus", testVolumeID, 1, true).
+			Return("takt_c_rotating", nil).Once()
+		tokens.EXPECT().MintWorkloadToken(mock.Anything, "deploy-runner", testVolumeID, 1, false).
+			Return("takt_c_standing", nil).Once()
+
+		svc, _ := newTokenMounter(t, tokens)
+
+		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
+			manifest.VolumeMount{Token: "prometheus", To: "/etc/prometheus/takt-token", Signal: manifest.SignalHUP},
+			manifest.VolumeMount{Token: "deploy-runner", To: "/var/run/takt/token"},
+		))
+		require.NoError(t, err)
+		require.Len(t, mounts, 2)
+
+		contents, err := os.ReadFile(mounts[0].Host)
+		require.NoError(t, err)
+		assert.Equal(t, "takt_c_rotating", string(contents))
+
+		contents, err = os.ReadFile(mounts[1].Host)
+		require.NoError(t, err)
+		assert.Equal(t, "takt_c_standing", string(contents))
+	})
+
+	t.Run("keeps the token an earlier delivery minted", func(t *testing.T) {
+		// Delivery runs as every instance starts. Minting again would revoke the
+		// credential the first instance already read, so a second start keeps
+		// the file, and the refresh only answers whether the token behind it
+		// still lives.
+		tokens := NewMockTokens(t)
+		tokens.EXPECT().MintWorkloadToken(mock.Anything, "prometheus", testVolumeID, 1, true).
+			Return("takt_c_first", nil).Once()
+		tokens.EXPECT().RefreshWorkloadToken(mock.Anything, "prometheus", testVolumeID, 1, true).
+			Return("", false, nil).Once()
+
+		svc, _ := newTokenMounter(t, tokens)
+
+		spec := mountSpec(manifest.VolumeMount{Token: "prometheus", To: "/etc/prometheus/takt-token", Signal: manifest.SignalHUP})
+
+		_, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
+		require.NoError(t, err)
+
+		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
+		require.NoError(t, err)
+		require.Len(t, mounts, 1)
+
+		contents, err := os.ReadFile(mounts[0].Host)
+		require.NoError(t, err)
+		assert.Equal(t, "takt_c_first", string(contents))
+	})
+
+	t.Run("rewrites a token the refresh re-minted", func(t *testing.T) {
+		// A token revoked by hand is gone from the database while its file
+		// remains, and the next delivery brings it back: the manifest asks for
+		// a state, not an action.
+		tokens := NewMockTokens(t)
+		tokens.EXPECT().MintWorkloadToken(mock.Anything, "prometheus", testVolumeID, 1, true).
+			Return("takt_c_first", nil).Once()
+		tokens.EXPECT().RefreshWorkloadToken(mock.Anything, "prometheus", testVolumeID, 1, true).
+			Return("takt_c_second", true, nil).Once()
+
+		svc, _ := newTokenMounter(t, tokens)
+
+		spec := mountSpec(manifest.VolumeMount{Token: "prometheus", To: "/etc/prometheus/takt-token", Signal: manifest.SignalHUP})
+
+		_, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
+		require.NoError(t, err)
+
+		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
+		require.NoError(t, err)
+
+		contents, err := os.ReadFile(mounts[0].Host)
+		require.NoError(t, err)
+		assert.Equal(t, "takt_c_second", string(contents))
+	})
+
+	t.Run("refuses a token mount on a server that mints none", func(t *testing.T) {
+		svc, _ := newMounter(t, nil, nil)
+
+		_, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(
+			manifest.VolumeMount{Token: "prometheus", To: "/etc/prometheus/takt-token"},
+		))
+		assert.ErrorIs(t, err, mount.ErrInvalidMount)
+	})
+
 	t.Run("ignores a mounted volume", func(t *testing.T) {
 		svc, root := newMounter(t, nil, nil)
 
@@ -256,6 +345,54 @@ func TestMounter_Refresh(t *testing.T) {
 		info, err := os.Stat(mounts[0].Host)
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0o444), info.Mode().Perm())
+	})
+
+	t.Run("rewrites a rotated token and reports the signal", func(t *testing.T) {
+		tokens := NewMockTokens(t)
+		tokens.EXPECT().MintWorkloadToken(mock.Anything, "prometheus", testVolumeID, 1, true).
+			Return("takt_c_first", nil).Once()
+		tokens.EXPECT().RefreshWorkloadToken(mock.Anything, "prometheus", testVolumeID, 1, true).
+			Return("takt_c_rotated", true, nil).Once()
+
+		svc, _ := newTokenMounter(t, tokens)
+
+		spec := mountSpec(manifest.VolumeMount{Token: "prometheus", To: "/etc/prometheus/takt-token", Signal: manifest.SignalHUP})
+
+		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
+		require.NoError(t, err)
+
+		refreshed, err := svc.Refresh(t.Context(), "example", testVolumeID, 1, spec)
+		require.NoError(t, err)
+		require.Len(t, refreshed, 1)
+		assert.Equal(t, manifest.Reference{Kind: manifest.KindToken, Name: "prometheus"}, refreshed[0].Reference)
+		assert.Equal(t, manifest.SignalHUP, refreshed[0].Signal)
+
+		contents, err := os.ReadFile(mounts[0].Host)
+		require.NoError(t, err)
+		assert.Equal(t, "takt_c_rotated", string(contents))
+	})
+
+	t.Run("reports nothing while the token keeps its life", func(t *testing.T) {
+		tokens := NewMockTokens(t)
+		tokens.EXPECT().MintWorkloadToken(mock.Anything, "prometheus", testVolumeID, 1, true).
+			Return("takt_c_first", nil).Once()
+		tokens.EXPECT().RefreshWorkloadToken(mock.Anything, "prometheus", testVolumeID, 1, true).
+			Return("", false, nil).Once()
+
+		svc, _ := newTokenMounter(t, tokens)
+
+		spec := mountSpec(manifest.VolumeMount{Token: "prometheus", To: "/etc/prometheus/takt-token", Signal: manifest.SignalHUP})
+
+		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
+		require.NoError(t, err)
+
+		refreshed, err := svc.Refresh(t.Context(), "example", testVolumeID, 1, spec)
+		require.NoError(t, err)
+		assert.Empty(t, refreshed)
+
+		contents, err := os.ReadFile(mounts[0].Host)
+		require.NoError(t, err)
+		assert.Equal(t, "takt_c_first", string(contents))
 	})
 
 	t.Run("ignores a mount that asked to be replaced", func(t *testing.T) {
@@ -508,6 +645,20 @@ func newMounter(t *testing.T, secrets, variables mount.ValueStore) (*mount.Mount
 	}
 
 	return mount.New(config), root
+}
+
+// newTokenMounter returns a mounter that mints through the given mock and
+// holds no value stores, alongside its data directory.
+func newTokenMounter(t *testing.T, tokens mount.Tokens) (*mount.Mounter, string) {
+	t.Helper()
+
+	root := t.TempDir()
+
+	return mount.New(mount.Config{
+		Logger:    newTestLogger(t),
+		Tokens:    tokens,
+		Directory: root,
+	}), root
 }
 
 // The identifiers takt assigns are xid values: twenty lowercase alphanumeric
