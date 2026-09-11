@@ -49,6 +49,18 @@ type (
 		// The time the token last authenticated a request. Zero when it never
 		// has.
 		LastUsedAt time.Time
+		// The workload the token was minted for. Empty for every token that
+		// was not minted for one.
+		WorkloadID string
+		// The instance the token was minted for. Nil for a token every
+		// instance of the workload shares, and for a token not minted for a
+		// workload at all.
+		WorkloadInstance *int
+		// The workload version the token was minted for. Set for a shared
+		// token, whose file is kept per version, so a rolling replacement
+		// leaves the old version's instances a valid credential until the
+		// version is reclaimed. Nil for an instance-bound token.
+		WorkloadVersion *int
 	}
 
 	// The TokenRepository type provides persistence operations for the token
@@ -67,8 +79,8 @@ func NewTokenRepository(db *sql.DB) *TokenRepository {
 // ExpiresAt, LastUsedAt and ID fields of the input are ignored.
 func (r *TokenRepository) Create(ctx context.Context, token Token) (Token, error) {
 	const q = `
-		INSERT INTO token (id, hash, type, source, principal, asserted_groups, expires_at, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO token (id, hash, type, source, principal, asserted_groups, expires_at, created_at, workload_id, workload_instance, workload_version)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
 	`
 
 	groups, err := marshalGroups(token.Groups)
@@ -86,7 +98,7 @@ func (r *TokenRepository) Create(ctx context.Context, token Token) (Token, error
 
 	_, err = r.db.ExecContext(ctx, q,
 		token.ID, token.Hash, token.Type, token.Source, token.Principal,
-		groups, expiresAt, formatTime(token.CreatedAt))
+		groups, expiresAt, formatTime(token.CreatedAt), token.WorkloadID, token.WorkloadInstance, token.WorkloadVersion)
 	switch {
 	case IsUniqueError(err):
 		return Token{}, ErrTokenAlreadyExists
@@ -101,7 +113,8 @@ func (r *TokenRepository) Create(ctx context.Context, token Token) (Token, error
 // ErrTokenNotFound when the database holds no such token.
 func (r *TokenRepository) GetByHash(ctx context.Context, hash string) (Token, error) {
 	const q = `
-		SELECT id, hash, type, source, principal, asserted_groups, expires_at, created_at, last_used_at
+		SELECT id, hash, type, source, principal, asserted_groups, expires_at, created_at, last_used_at,
+			COALESCE(workload_id, ''), workload_instance, workload_version
 		FROM token
 		WHERE hash = ?
 	`
@@ -122,7 +135,8 @@ func (r *TokenRepository) GetByHash(ctx context.Context, hash string) (Token, er
 // the server.
 func (r *TokenRepository) List(ctx context.Context) ([]Token, error) {
 	const q = `
-		SELECT id, hash, type, source, principal, asserted_groups, expires_at, created_at, last_used_at
+		SELECT id, hash, type, source, principal, asserted_groups, expires_at, created_at, last_used_at,
+			COALESCE(workload_id, ''), workload_instance, workload_version
 		FROM token
 		ORDER BY created_at DESC
 	`
@@ -182,6 +196,94 @@ func (r *TokenRepository) DeleteRecovery(ctx context.Context) error {
 	return nil
 }
 
+// GetForWorkload returns the token minted for the workload, version and
+// principal that every instance shares, reporting ErrTokenNotFound when none
+// exists. This is what the rotation check reads the expiry from.
+func (r *TokenRepository) GetForWorkload(ctx context.Context, workloadID string, version int, principal string) (Token, error) {
+	const q = `
+		SELECT id, hash, type, source, principal, asserted_groups, expires_at, created_at, last_used_at,
+			COALESCE(workload_id, ''), workload_instance, workload_version
+		FROM token
+		WHERE workload_id = ? AND workload_version = ? AND principal = ? AND workload_instance IS NULL
+	`
+
+	token, err := scanToken(r.db.QueryRowContext(ctx, q, workloadID, version, principal))
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return Token{}, ErrTokenNotFound
+	case err != nil:
+		return Token{}, fmt.Errorf("failed to load workload token: %w", err)
+	}
+
+	return token, nil
+}
+
+// DeleteMinted removes the token previously minted for the workload,
+// principal, instance and version, if one exists. Deleting when none exists is
+// not an error: a mint replaces whatever its predecessor was, including
+// nothing.
+func (r *TokenRepository) DeleteMinted(ctx context.Context, workloadID, principal string, instance, version *int) error {
+	const q = `
+		DELETE FROM token
+		WHERE workload_id = ? AND principal = ? AND workload_instance IS ? AND workload_version IS ?
+	`
+
+	if _, err := r.db.ExecContext(ctx, q, workloadID, principal, instance, version); err != nil {
+		return fmt.Errorf("failed to delete minted token: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteSuperseded removes every shared token minted for a version of the
+// workload other than the given one, returning how many were removed. This is
+// how a rolling replacement retires the credentials of the versions it
+// replaced, once nothing that reads them remains.
+func (r *TokenRepository) DeleteSuperseded(ctx context.Context, workloadID string, version int) (int64, error) {
+	const q = `
+		DELETE FROM token
+		WHERE workload_id = ? AND workload_version IS NOT NULL AND workload_version != ?
+	`
+
+	result, err := r.db.ExecContext(ctx, q, workloadID, version)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete superseded tokens: %w", err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to count deleted tokens: %w", err)
+	}
+
+	return affected, nil
+}
+
+// DeleteForWorkload removes every token minted for the workload. Deleting when
+// none exists is not an error: revocation asks for a state, not an action, and
+// the reconciler asks again on every pass until the workload is gone.
+func (r *TokenRepository) DeleteForWorkload(ctx context.Context, workloadID string) error {
+	const q = `DELETE FROM token WHERE workload_id = ?`
+
+	if _, err := r.db.ExecContext(ctx, q, workloadID); err != nil {
+		return fmt.Errorf("failed to delete workload tokens: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteForInstance removes every token minted for one instance of the
+// workload, leaving the tokens its instances share alone. Deleting when none
+// exists is not an error, as it is not for DeleteForWorkload.
+func (r *TokenRepository) DeleteForInstance(ctx context.Context, workloadID string, instance int) error {
+	const q = `DELETE FROM token WHERE workload_id = ? AND workload_instance = ?`
+
+	if _, err := r.db.ExecContext(ctx, q, workloadID, instance); err != nil {
+		return fmt.Errorf("failed to delete instance tokens: %w", err)
+	}
+
+	return nil
+}
+
 // Touch records that the token authenticated a request at the given time.
 func (r *TokenRepository) Touch(ctx context.Context, id string, at time.Time) error {
 	const q = `UPDATE token SET last_used_at = ? WHERE id = ?`
@@ -220,12 +322,22 @@ func scanToken(row interface{ Scan(...any) error }) (Token, error) {
 		expiresAt  string
 		createdAt  string
 		lastUsedAt string
+		instance   sql.NullInt64
+		version    sql.NullInt64
 	)
 
 	err := row.Scan(&token.ID, &token.Hash, &token.Type, &token.Source, &token.Principal,
-		&groups, &expiresAt, &createdAt, &lastUsedAt)
+		&groups, &expiresAt, &createdAt, &lastUsedAt, &token.WorkloadID, &instance, &version)
 	if err != nil {
 		return Token{}, err
+	}
+
+	if instance.Valid {
+		token.WorkloadInstance = new(int(instance.Int64))
+	}
+
+	if version.Valid {
+		token.WorkloadVersion = new(int(version.Int64))
 	}
 
 	if token.Groups, err = unmarshalGroups(groups); err != nil {
