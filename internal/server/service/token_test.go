@@ -135,3 +135,165 @@ func TestTokenService_Sweep(t *testing.T) {
 
 	assert.NoError(t, newTestTokenService(t, tokens).Sweep(t.Context()))
 }
+
+func TestTokenService_MintWorkloadToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("mints an expiring shared token, replacing its predecessor", func(t *testing.T) {
+		tokens := NewMockTokenRepository(t)
+
+		tokens.EXPECT().DeleteMinted(mock.Anything, "workload-id", "prometheus", (*int)(nil),
+			mock.MatchedBy(func(version *int) bool { return version != nil && *version == 3 })).
+			Return(nil).Once()
+		tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(token database.Token) bool {
+			return token.Type == "client" && token.Source == "workload" &&
+				token.Principal == "prometheus" && token.WorkloadID == "workload-id" &&
+				token.WorkloadInstance == nil &&
+				token.WorkloadVersion != nil && *token.WorkloadVersion == 3 &&
+				time.Until(token.ExpiresAt) > 0
+		})).Return(database.Token{ID: "id"}, nil).Once()
+
+		credential, err := newTestTokenService(t, tokens).
+			MintWorkloadToken(t.Context(), "prometheus", "workload-id", 3, true)
+		require.NoError(t, err)
+
+		kind, ok := auth.KindOf(credential)
+		assert.True(t, ok)
+		assert.Equal(t, auth.KindClient, kind)
+	})
+
+	t.Run("mints without an expiry when nothing can rotate it", func(t *testing.T) {
+		tokens := NewMockTokenRepository(t)
+
+		tokens.EXPECT().DeleteMinted(mock.Anything, "workload-id", "prometheus", (*int)(nil), mock.Anything).
+			Return(nil).Once()
+		tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(token database.Token) bool {
+			return token.ExpiresAt.IsZero()
+		})).Return(database.Token{ID: "id"}, nil).Once()
+
+		_, err := newTestTokenService(t, tokens).
+			MintWorkloadToken(t.Context(), "prometheus", "workload-id", 3, false)
+		require.NoError(t, err)
+	})
+
+	t.Run("refuses a principal takt will not accept", func(t *testing.T) {
+		_, err := newTestTokenService(t, NewMockTokenRepository(t)).
+			MintWorkloadToken(t.Context(), "two words", "workload-id", 1, true)
+		assert.ErrorIs(t, err, service.ErrInvalidPrincipal)
+	})
+}
+
+func TestTokenService_MintInstanceToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("mints a token bound to the instance, replacing its predecessor", func(t *testing.T) {
+		tokens := NewMockTokenRepository(t)
+
+		tokens.EXPECT().DeleteMinted(mock.Anything, "workload-id", "ci",
+			mock.MatchedBy(func(instance *int) bool { return instance != nil && *instance == 1 }),
+			(*int)(nil)).
+			Return(nil).Once()
+		tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(token database.Token) bool {
+			return token.Type == "client" && token.Source == "workload" &&
+				token.Principal == "ci" && token.WorkloadID == "workload-id" &&
+				token.WorkloadInstance != nil && *token.WorkloadInstance == 1 &&
+				token.WorkloadVersion == nil &&
+				// The environment is fixed at process start, so nothing could
+				// deliver a renewal and the token must not expire under the
+				// instance.
+				token.ExpiresAt.IsZero()
+		})).Return(database.Token{ID: "id"}, nil).Once()
+
+		credential, err := newTestTokenService(t, tokens).
+			MintInstanceToken(t.Context(), "ci", "workload-id", 1)
+		require.NoError(t, err)
+
+		kind, ok := auth.KindOf(credential)
+		assert.True(t, ok)
+		assert.Equal(t, auth.KindClient, kind)
+	})
+
+	t.Run("refuses a principal takt will not accept", func(t *testing.T) {
+		_, err := newTestTokenService(t, NewMockTokenRepository(t)).
+			MintInstanceToken(t.Context(), "", "workload-id", 0)
+		assert.ErrorIs(t, err, service.ErrInvalidPrincipal)
+	})
+}
+
+func TestTokenService_RefreshWorkloadToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("leaves a token with most of its life alone", func(t *testing.T) {
+		tokens := NewMockTokenRepository(t)
+
+		tokens.EXPECT().GetForWorkload(mock.Anything, "workload-id", 3, "prometheus").
+			Return(database.Token{ExpiresAt: time.Now().UTC().Add(11 * time.Hour)}, nil).Once()
+
+		credential, refreshed, err := newTestTokenService(t, tokens).
+			RefreshWorkloadToken(t.Context(), "prometheus", "workload-id", 3, true)
+		require.NoError(t, err)
+		assert.False(t, refreshed)
+		assert.Empty(t, credential)
+	})
+
+	t.Run("re-mints a token inside the margin", func(t *testing.T) {
+		tokens := NewMockTokenRepository(t)
+
+		tokens.EXPECT().GetForWorkload(mock.Anything, "workload-id", 3, "prometheus").
+			Return(database.Token{ExpiresAt: time.Now().UTC().Add(time.Hour)}, nil).Once()
+		tokens.EXPECT().DeleteMinted(mock.Anything, "workload-id", "prometheus", (*int)(nil), mock.Anything).
+			Return(nil).Once()
+		tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(token database.Token) bool {
+			return token.Source == "workload" && !token.ExpiresAt.IsZero()
+		})).Return(database.Token{ID: "id"}, nil).Once()
+
+		credential, refreshed, err := newTestTokenService(t, tokens).
+			RefreshWorkloadToken(t.Context(), "prometheus", "workload-id", 3, true)
+		require.NoError(t, err)
+		assert.True(t, refreshed)
+		assert.NotEmpty(t, credential)
+	})
+
+	t.Run("re-mints a token that is gone", func(t *testing.T) {
+		// A token revoked by hand comes back on the next pass: the manifest
+		// asks for a state, and the reconciler re-asserts it.
+		tokens := NewMockTokenRepository(t)
+
+		tokens.EXPECT().GetForWorkload(mock.Anything, "workload-id", 3, "prometheus").
+			Return(database.Token{}, database.ErrTokenNotFound).Once()
+		tokens.EXPECT().DeleteMinted(mock.Anything, "workload-id", "prometheus", (*int)(nil), mock.Anything).
+			Return(nil).Once()
+		tokens.EXPECT().Create(mock.Anything, mock.Anything).
+			Return(database.Token{ID: "id"}, nil).Once()
+
+		_, refreshed, err := newTestTokenService(t, tokens).
+			RefreshWorkloadToken(t.Context(), "prometheus", "workload-id", 3, true)
+		require.NoError(t, err)
+		assert.True(t, refreshed)
+	})
+}
+
+func TestTokenService_Revoke(t *testing.T) {
+	t.Parallel()
+
+	t.Run("revokes everything a workload holds", func(t *testing.T) {
+		tokens := NewMockTokenRepository(t)
+		tokens.EXPECT().DeleteForWorkload(mock.Anything, "workload-id").Return(nil).Once()
+
+		assert.NoError(t, newTestTokenService(t, tokens).RevokeForWorkload(t.Context(), "workload-id"))
+	})
+
+	t.Run("revokes what one instance holds", func(t *testing.T) {
+		tokens := NewMockTokenRepository(t)
+		tokens.EXPECT().DeleteForInstance(mock.Anything, "workload-id", 2).Return(nil).Once()
+
+		assert.NoError(t, newTestTokenService(t, tokens).RevokeForInstance(t.Context(), "workload-id", 2))
+	})
+
+	t.Run("retires the versions a replacement superseded", func(t *testing.T) {
+		tokens := NewMockTokenRepository(t)
+		tokens.EXPECT().DeleteSuperseded(mock.Anything, "workload-id", 4).Return(1, nil).Once()
+
+		assert.NoError(t, newTestTokenService(t, tokens).RevokeSuperseded(t.Context(), "workload-id", 4))
+	})
+}
