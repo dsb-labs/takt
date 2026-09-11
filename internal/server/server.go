@@ -275,7 +275,10 @@ func Run(ctx context.Context, config Config) error {
 		}),
 		// Written as a workload starts and removed when it stops, so a mounted value's
 		// plaintext is on the disk for no longer than the workload reading it.
-		Mounts:  mounter,
+		Mounts: mounter,
+		// Revoked as instances go, so a workload's credential lives no longer
+		// than what it was minted for.
+		Tokens:  tokenSvc,
 		Checker: checker,
 		// A check goes to where the workload's ports are published, which is not
 		// loopback for a server told to publish somewhere specific.
