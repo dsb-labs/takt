@@ -142,6 +142,23 @@ type (
 		Prune(keep []string) error
 	}
 
+	// The Tokens interface describes how the reconciler revokes the tokens minted
+	// for a workload as what they were minted for goes away.
+	//
+	// Only revocation lives here. Minting happens where the credential is used —
+	// the resolver for an environment, the mounter for a file — but what ends a
+	// credential's life is the instance lifecycle, which is the reconciler's.
+	Tokens interface {
+		// RevokeForWorkload should revoke every token minted for the workload.
+		RevokeForWorkload(ctx context.Context, workloadID string) error
+		// RevokeForInstance should revoke every token minted for one instance
+		// of the workload, leaving the tokens its instances share alone.
+		RevokeForInstance(ctx context.Context, workloadID string, instance int) error
+		// RevokeSuperseded should revoke the shared tokens of every workload
+		// version but the given one.
+		RevokeSuperseded(ctx context.Context, workloadID string, version int) error
+	}
+
 	// The Checker interface describes how the reconciler registers and reads what
 	// takt established about a workload's health.
 	Checker interface {
@@ -174,6 +191,7 @@ type (
 		ports       PortRepository
 		env         Resolver
 		mounts      Mounts
+		tokens      Tokens
 		checker     Checker
 		bind        string
 		reallocate  func(ctx context.Context, workload string, instance int) (bool, error)
@@ -240,6 +258,10 @@ type (
 		// for — so one is only ever nil where no workload can mount anything, as in
 		// tests.
 		Mounts Mounts
+		// Revokes the tokens minted for a workload as its instances go. May be
+		// nil, in which case nothing is revoked — so one is only ever nil where
+		// no workload holds a token, as in tests.
+		Tokens Tokens
 		// Reports what takt's own health checks established. May be nil, in which
 		// case only the state the driver reports is acted on.
 		Checker Checker
@@ -372,6 +394,7 @@ func New(config Config) *Reconciler {
 		ports:        config.Ports,
 		env:          config.Env,
 		mounts:       config.Mounts,
+		tokens:       config.Tokens,
 		checker:      config.Checker,
 		bind:         config.Bind,
 		reallocate:   config.Reallocate,
@@ -1559,6 +1582,16 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 		}
 	}
 
+	// The tokens minted for the workload have no holder left either. Revoked
+	// before the row goes for the reason the files are removed before it: the
+	// identifier is what finds them, though deleting the row would take them
+	// with it anyway.
+	if r.tokens != nil {
+		if err := r.tokens.RevokeForWorkload(ctx, row.ID); err != nil {
+			return fmt.Errorf("failed to revoke workload tokens: %w", err)
+		}
+	}
+
 	if err := r.workloads.Delete(ctx, row.Name); err != nil {
 		return fmt.Errorf("failed to delete workload: %w", err)
 	}
@@ -1612,6 +1645,15 @@ func (r *Reconciler) suspend(ctx context.Context, row database.Workload, instanc
 	if r.mounts != nil {
 		if err := r.mounts.Forget(row.ID); err != nil {
 			return fmt.Errorf("failed to remove mounted values: %w", err)
+		}
+	}
+
+	// The tokens go with the files: a suspended workload holds no credential, and
+	// a resume mints fresh ones as its instances start. Revocation is idempotent,
+	// as forgetting is.
+	if r.tokens != nil {
+		if err := r.tokens.RevokeForWorkload(ctx, row.ID); err != nil {
+			return fmt.Errorf("failed to revoke workload tokens: %w", err)
 		}
 	}
 
@@ -1912,6 +1954,17 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 		}
 	}
 
+	// The shared tokens of the versions this start superseded go the way their
+	// files just did, and a failure is a warning for the reason the reclaim's
+	// is: the next start sweeps everything but the current version again, and
+	// the teardown revokes whatever remains.
+	if r.tokens != nil {
+		if err = r.tokens.RevokeSuperseded(ctx, row.ID, row.Version); err != nil {
+			r.logger.With("workload", row.Name, "error", err).
+				Warn("failed to revoke superseded workload tokens")
+		}
+	}
+
 	return nil
 }
 
@@ -2089,6 +2142,15 @@ func (r *Reconciler) stopInstance(ctx context.Context, row database.Workload, in
 		return fmt.Errorf("failed to stop instance on the %s runtime: %w", d.Name(), err)
 	}
 
+	// The instance's own tokens die with it. A replacement of the same slot
+	// mints fresh ones as it starts, so revoking here is what makes a rolling
+	// replacement rotate an env-form credential.
+	if r.tokens != nil {
+		if err := r.tokens.RevokeForInstance(ctx, row.ID, index); err != nil {
+			return fmt.Errorf("failed to revoke instance tokens: %w", err)
+		}
+	}
+
 	if r.checker != nil {
 		r.checker.ForgetInstance(row.Name, index)
 	}
@@ -2109,6 +2171,14 @@ func (r *Reconciler) discardInstance(ctx context.Context, row database.Workload,
 
 	if err := d.DiscardInstance(ctx, row.ID, row.Name, index); err != nil {
 		return fmt.Errorf("failed to discard instance on the %s runtime: %w", d.Name(), err)
+	}
+
+	// An instance the count no longer asks for is not replaced, so its tokens
+	// are revoked here or never.
+	if r.tokens != nil {
+		if err := r.tokens.RevokeForInstance(ctx, row.ID, index); err != nil {
+			return fmt.Errorf("failed to revoke instance tokens: %w", err)
+		}
 	}
 
 	r.mux.Lock()

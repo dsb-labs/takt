@@ -2837,6 +2837,221 @@ func TestReconciler_Run_RemovesMountedValuesWhenSuspended(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_RevokesWorkloadTokens(t *testing.T) {
+	t.Parallel()
+
+	t.Run("revokes everything once the workload is gone", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		tokens := NewMockTokens(t)
+		// Swept after every start, including the ones that changed nothing.
+		tokens.EXPECT().RevokeSuperseded(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+		row.DeletedAt = time.Now()
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		d.EXPECT().Discard(mock.Anything, mock.Anything, "example").Return(nil)
+
+		revoked := make(chan string, 1)
+		tokens.EXPECT().RevokeForWorkload(mock.Anything, "workload-id").
+			RunAndReturn(func(_ context.Context, id string) error {
+				select {
+				case revoked <- id:
+				default:
+				}
+
+				return nil
+			})
+
+		repo.EXPECT().Delete(mock.Anything, "example").Return(nil)
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Tokens:    tokens,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		// Revoked before the row goes, so the identifier that finds the tokens
+		// still exists when they are asked for.
+		id := <-revoked
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Equal(t, "workload-id", id)
+	})
+
+	t.Run("revokes everything while the workload is suspended", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		tokens := NewMockTokens(t)
+		tokens.EXPECT().RevokeSuperseded(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+		row.SuspendedAt = time.Now().UTC()
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+		// A suspended workload holds no credential: nothing of it runs, and a
+		// resume mints fresh ones as its instances start.
+		revoked := make(chan struct{}, 1)
+		tokens.EXPECT().RevokeForWorkload(mock.Anything, "workload-id").
+			RunAndReturn(func(context.Context, string) error {
+				select {
+				case revoked <- struct{}{}:
+				default:
+				}
+
+				return nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Tokens:    tokens,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		<-revoked
+
+		cancel()
+		require.NoError(t, <-done)
+	})
+
+	t.Run("revokes an instance's tokens when it is replaced", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+		tokens := NewMockTokens(t)
+		tokens.EXPECT().RevokeSuperseded(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-one"
+		row.Spec = specWithHealth("example")
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+		ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+			"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+		}, nil)
+
+		checker.EXPECT().Set("example", 0, mock.Anything).Return().Maybe()
+		checker.EXPECT().Result("example", 0).
+			Return(health.Result{Status: health.StatusUnhealthy, Failures: 2}, true)
+		checker.EXPECT().Forget("example").Return().Maybe()
+		checker.EXPECT().ForgetInstance("example", 0).Return().Maybe()
+
+		d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil).Once()
+		d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil).Once()
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{{
+			ID:       "container-one",
+			Workload: "example",
+			SpecHash: "hash-one",
+			State:    driver.StateRunning,
+		}}, nil)
+
+		// The departed instance's tokens die with it, and the replacement mints
+		// its own as it starts. This is what rotates an env-form credential.
+		revoked := make(chan int, 1)
+		tokens.EXPECT().RevokeForInstance(mock.Anything, "workload-one", 0).
+			RunAndReturn(func(_ context.Context, _ string, instance int) error {
+				select {
+				case revoked <- instance:
+				default:
+				}
+
+				return nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Checker:   checker,
+			Tokens:    tokens,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		instance := <-revoked
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Zero(t, instance)
+	})
+
+	t.Run("retires superseded shared tokens once a start succeeds", func(t *testing.T) {
+		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+		tokens := NewMockTokens(t)
+
+		row := storedWorkload("example", "hash-one")
+		row.ID = "workload-id"
+		row.Version = 2
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-one", nil).Once()
+
+		// After the start, as the files are reclaimed after it: the versions the
+		// start superseded had readers until the replacement was running.
+		retired := make(chan int, 1)
+		tokens.EXPECT().RevokeSuperseded(mock.Anything, "workload-id", 2).
+			RunAndReturn(func(_ context.Context, _ string, version int) error {
+				select {
+				case retired <- version:
+				default:
+				}
+
+				return nil
+			})
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Tokens:    tokens,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		version := <-retired
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Equal(t, 2, version)
+	})
+}
+
 func TestReconciler_Run_RefreshesMountedValues(t *testing.T) {
 	t.Parallel()
 
