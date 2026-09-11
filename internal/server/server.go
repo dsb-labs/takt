@@ -270,6 +270,7 @@ func Run(ctx context.Context, config Config) error {
 			Logger:    logger,
 			Secrets:   secretSvc,
 			Variables: variableSvc,
+			Tokens:    tokenSvc,
 			Workloads: addresses,
 		}),
 		// Written as a workload starts and removed when it stops, so a mounted value's
