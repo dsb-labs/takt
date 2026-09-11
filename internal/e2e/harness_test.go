@@ -419,6 +419,17 @@ func (s *Suite) awaitInstance(name string) string {
 	return instance
 }
 
+// awaitRunningAs waits for the named workload to be running, read through the
+// given client rather than the suite's own — which is how a test on a server
+// with auth enabled waits, since the suite's client holds no credential.
+func (s *Suite) awaitRunningAs(c *client.Client, name string) {
+	s.Require().Eventuallyf(func() bool {
+		workload, err := c.Get(s.ctx(), name)
+
+		return err == nil && workload.State == client.WorkloadStateRunning
+	}, convergeTimeout, 500*time.Millisecond, "workload %q never ran", name)
+}
+
 // awaitInstanceOtherThan waits for the named workload to be running an instance that
 // isn't the given one, which is how a replacement is distinguished from the instance
 // it replaced.
@@ -663,6 +674,23 @@ func (s *Suite) mountedFile(workload, path string) string {
 	}
 
 	return string(out)
+}
+
+// containerEnv reads one environment variable from inside the container the named
+// workload is running, which is how a test checks what an env reference resolved
+// to. Returns empty when there is no container or no such variable.
+func (s *Suite) containerEnv(workload, variable string) string {
+	containers := s.containers(workload)
+	if len(containers) == 0 {
+		return ""
+	}
+
+	out, err := exec.Command("docker", "exec", containers[0], "printenv", variable).Output()
+	if err != nil {
+		return ""
+	}
+
+	return strings.TrimSuffix(string(out), "\n")
 }
 
 // mountsHold reports whether any file the server wrote for a mounted value contains
