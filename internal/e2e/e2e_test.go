@@ -3809,6 +3809,198 @@ func (s *Suite) TestAuthLifecycle() {
 	s.Require().ErrorIs(admin.Logout(s.ctx()), client.ErrRecoveryLogout)
 }
 
+// TestWorkloadTokenMountAuthenticates covers the file form of
+// workload identity: the manifest names a principal, the server mints and
+// mounts a credential as the instance starts, and the policy alone decides
+// what that principal may do — a granted one holds its role, an ungranted one
+// authenticates and holds nothing.
+func (s *Suite) TestWorkloadTokenMountAuthenticates() {
+	s.restart(withAuth())
+
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	recovery, err := s.client.InitACL(s.ctx())
+	s.Require().NoError(err)
+
+	admin := s.clientWithToken(recovery)
+
+	_, _, err = admin.ReplacePolicy(s.ctx(), testPolicy)
+	s.Require().NoError(err)
+
+	spec := s.containerSpec(name)
+	spec.Volumes = []manifest.VolumeMount{
+		{Token: "scraper", To: "/var/run/takt/token", Signal: manifest.SignalHUP},
+		// A principal the policy grants nothing. Nothing has to exist before a
+		// manifest names one: identity is asserted, authority is granted.
+		{Token: "nobody", To: "/var/run/takt/other"},
+	}
+
+	_, _, err = admin.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitRunningAs(admin, name)
+
+	// The file holds the credential and nothing else, and it authenticates as
+	// the principal the manifest named.
+	credential := s.mountedFile(name, "/var/run/takt/token")
+	s.Require().NotEmpty(credential, "the token was never mounted")
+
+	scraper := s.clientWithToken(credential)
+
+	identity, err := scraper.WhoAmI(s.ctx())
+	s.Require().NoError(err)
+	s.Equal("scraper", identity.Principal)
+	s.Equal("viewer", identity.Role)
+
+	_, err = scraper.List(s.ctx())
+	s.Require().NoError(err)
+
+	// The ungranted principal authenticates and holds no role, exactly the
+	// state a static token for one has. The policy stays the one description
+	// of who may do what.
+	other := s.clientWithToken(s.mountedFile(name, "/var/run/takt/other"))
+
+	identity, err = other.WhoAmI(s.ctx())
+	s.Require().NoError(err)
+	s.Equal("nobody", identity.Principal)
+	s.Empty(identity.Role)
+
+	_, err = other.List(s.ctx())
+	s.Require().True(client.IsForbidden(err), "expected 403 for an ungranted principal, got %v", err)
+
+	// Both credentials are auditable: the token list names them with the
+	// workload source, so an operator can tell a projected credential from a
+	// static one.
+	tokens, err := admin.ListTokens(s.ctx())
+	s.Require().NoError(err)
+
+	minted := make(map[string]string, 2)
+	for _, token := range tokens {
+		if token.Source == "workload" {
+			minted[token.Principal] = token.ID
+		}
+	}
+	s.Contains(minted, "scraper")
+	s.Contains(minted, "nobody")
+}
+
+// TestWorkloadEnvTokenRotatesWithTheInstance covers the env form: the
+// credential is fixed at process start, so it lives for the instance and a
+// replacement both mints a fresh one and revokes its predecessor.
+func (s *Suite) TestWorkloadEnvTokenRotatesWithTheInstance() {
+	s.restart(withAuth())
+
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	recovery, err := s.client.InitACL(s.ctx())
+	s.Require().NoError(err)
+
+	admin := s.clientWithToken(recovery)
+
+	_, _, err = admin.ReplacePolicy(s.ctx(), testPolicy)
+	s.Require().NoError(err)
+
+	spec := s.containerSpec(name)
+	spec.Env = map[string]string{"TAKT_TOKEN": "${token:scraper}"}
+
+	_, _, err = admin.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitRunningAs(admin, name)
+
+	credential := s.containerEnv(name, "TAKT_TOKEN")
+	s.Require().NotEmpty(credential, "the token never reached the environment")
+
+	identity, err := s.clientWithToken(credential).WhoAmI(s.ctx())
+	s.Require().NoError(err)
+	s.Equal("scraper", identity.Principal)
+
+	original := s.containers(name)
+	s.Require().NotEmpty(original)
+
+	_, err = admin.Restart(s.ctx(), name)
+	s.Require().NoError(err)
+
+	// A replaced instance gets a fresh credential. This is the whole rotation
+	// story for the env form: an environment cannot change under a running
+	// process, so rotation happens by replacement.
+	var replacement string
+	s.Require().Eventuallyf(func() bool {
+		containers := s.containers(name)
+		if len(containers) == 0 || containers[0] == original[0] {
+			return false
+		}
+
+		replacement = s.containerEnv(name, "TAKT_TOKEN")
+
+		return replacement != "" && replacement != credential
+	}, convergeTimeout, 500*time.Millisecond, "the replacement never held a fresh token")
+
+	_, err = s.clientWithToken(replacement).WhoAmI(s.ctx())
+	s.Require().NoError(err)
+
+	// And the predecessor died with its instance: the fresh mint replaced it,
+	// so the token list never accumulates.
+	s.Require().Eventuallyf(func() bool {
+		_, err = s.clientWithToken(credential).WhoAmI(s.ctx())
+
+		return client.IsUnauthorized(err)
+	}, convergeTimeout, 500*time.Millisecond, "the replaced instance's token still authenticates")
+}
+
+// TestDeletingAWorkloadRevokesItsTokens covers the credential's life ending
+// with the workload's, which is the wart the hand-managed static token had:
+// nothing revoked it, and the token list accumulated credentials for
+// workloads that were gone.
+func (s *Suite) TestDeletingAWorkloadRevokesItsTokens() {
+	s.restart(withAuth())
+
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	recovery, err := s.client.InitACL(s.ctx())
+	s.Require().NoError(err)
+
+	admin := s.clientWithToken(recovery)
+
+	_, _, err = admin.ReplacePolicy(s.ctx(), testPolicy)
+	s.Require().NoError(err)
+
+	spec := s.containerSpec(name)
+	spec.Volumes = []manifest.VolumeMount{{Token: "scraper", To: "/var/run/takt/token"}}
+
+	_, _, err = admin.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitRunningAs(admin, name)
+
+	credential := s.mountedFile(name, "/var/run/takt/token")
+	s.Require().NotEmpty(credential, "the token was never mounted")
+
+	_, err = s.clientWithToken(credential).WhoAmI(s.ctx())
+	s.Require().NoError(err)
+
+	_, err = admin.Delete(s.ctx(), name, client.WithWait())
+	s.Require().NoError(err)
+
+	// Revocation is immediate once the teardown lands: the very next request
+	// presenting the credential finds nothing to hash to.
+	s.Require().Eventuallyf(func() bool {
+		_, err = s.clientWithToken(credential).WhoAmI(s.ctx())
+
+		return client.IsUnauthorized(err)
+	}, convergeTimeout, 500*time.Millisecond, "the deleted workload's token still authenticates")
+
+	tokens, err := admin.ListTokens(s.ctx())
+	s.Require().NoError(err)
+
+	for _, token := range tokens {
+		s.NotEqual("workload", token.Source, "a workload-minted token outlived its workload")
+	}
+}
+
 // TestAuthPolicyConflict proves that a stale conditional apply is refused
 // rather than silently clobbering a concurrent one.
 func (s *Suite) TestAuthPolicyConflict() {
