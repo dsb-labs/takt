@@ -59,7 +59,24 @@ func Command() *cobra.Command {
 			ctx, cancel := context.WithTimeout(cmd.Context(), loginTimeout)
 			defer cancel()
 
-			c := client.FromContext(ctx)
+			// A client of this command's own, without the stored credential the
+			// shared client presents. This flow exists to replace that credential
+			// and its endpoints require none, but the server refuses any
+			// credential that does not authenticate — so a login that presented
+			// an expired token would fail with the very token it exists to
+			// replace, and nothing short of editing the config file would
+			// recover.
+			settings := cli.FromContext(ctx)
+
+			options := []client.Option{}
+			if settings.CACert != "" {
+				options = append(options, client.WithCACertificate(settings.CACert))
+			}
+
+			c, err := client.New(settings.Address, options...)
+			if err != nil {
+				return err
+			}
 
 			discovered, err := c.GetOIDC(ctx)
 			if err != nil {
