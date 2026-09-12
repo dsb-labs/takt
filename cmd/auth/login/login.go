@@ -43,7 +43,7 @@ func Command() *cobra.Command {
 		Use:   "login",
 		Short: "Log in with OIDC and store the minted token",
 		Long: "Log in through the server's OIDC issuer and store the minted token in the\n" +
-			"config file.\n\n" +
+			"config file, beside the address of the server that minted it.\n\n" +
 			"The command asks the server who its issuer is, runs the authorization\n" +
 			"code flow against a loopback callback, and hands the code to the server\n" +
 			"to exchange for a short-lived client token — the exchange is what needs\n" +
@@ -132,7 +132,7 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			if err = storeCredential(configFlag, login.Credential); err != nil {
+			if err = storeCredential(settings, configFlag, login.Credential); err != nil {
 				return err
 			}
 
@@ -207,15 +207,19 @@ func waitForCode(ctx context.Context, listener net.Listener, state string) (stri
 	return code, nil
 }
 
-// storeCredential writes the minted token into the config file, keeping the
-// settings already there.
-func storeCredential(configFlag, credential string) error {
+// storeCredential writes the minted token into the config file, beside the
+// address and certificate authority the login ran against.
+//
+// The address is saved because the token means something only at the server
+// that minted it: a login against one server followed by a bare command would
+// otherwise present the token to the default address. The certificate
+// authority follows for the same reason — without it the next command may not
+// even reach the server the token is for.
+//
+// The settings resolved from the file's own values first, so writing them
+// back loses nothing that was already there.
+func storeCredential(settings cli.Config, configFlag, credential string) error {
 	path, err := cli.Path(configFlag)
-	if err != nil {
-		return err
-	}
-
-	settings, err := cli.Load(path)
 	if err != nil {
 		return err
 	}
