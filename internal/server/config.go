@@ -119,10 +119,10 @@ type (
 		// language installed under a home directory, or a nix store. Name those here.
 		//
 		// Read-only, so this opens what a workload may read rather than what it may
-		// change. It is host configuration rather than a manifest field on purpose: the
-		// API has no authentication, so a workload able to widen its own confinement
-		// would undo it. Which paths are opened is a decision the operator who
-		// administers the host makes.
+		// change. It is host configuration rather than a manifest field on purpose: a
+		// manifest arrives from anything holding a write grant, so a workload able to
+		// widen its own confinement would undo it. Which paths are opened is a
+		// decision the operator who administers the host makes.
 		//
 		// Every path must be absolute. A path that is not there is ignored, so a list
 		// covering several hosts does not have to match each one exactly.
@@ -163,10 +163,10 @@ type (
 		// Empty refuses every path mount, which is the default: a path mount
 		// reaches outside takt-managed state, so it is a sandbox escape by
 		// design. It is host configuration rather than a manifest field for the
-		// reason the exec allow-paths list is: the API has no authentication,
-		// so a workload able to widen its own reach would undo the gate. Which
-		// paths are opened is a decision the operator who administers the host
-		// makes.
+		// reason the exec allow-paths list is: a manifest arrives from anything
+		// holding a write grant, so a workload able to widen its own reach
+		// would undo the gate. Which paths are opened is a decision the
+		// operator who administers the host makes.
 		AllowHostPaths []string `toml:"allow-host-paths"`
 		// The lowest host port that may be allocated.
 		MinPort int `toml:"min-port"`
@@ -249,9 +249,10 @@ const (
 func DefaultConfig() Config {
 	return Config{
 		HTTP: HTTPConfig{
-			// Loopback rather than every interface. The API has no authentication,
-			// and it can start containers — so reaching the port is enough to run
-			// code on the host. Binding it to the network is a decision an operator
+			// Loopback rather than every interface. The API runs without
+			// authentication unless the configuration enables it, and it can start
+			// containers — so reaching the port can be enough to run code on the
+			// host. Binding it to the network is a decision an operator
 			// should have to make, not one a default makes for them.
 			Address: "127.0.0.1:7373",
 		},
