@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -50,6 +51,90 @@ type state struct {
 	Ended bool `json:"ended"`
 	// The exit code, meaningful only when Ended.
 	ExitCode int `json:"exitCode"`
+}
+
+type (
+	// The stateCache type remembers decoded records, so that an observation does
+	// not re-read and re-decode a state file that has not changed since it was
+	// last asked about — which at rest is every one of them, on every pass.
+	//
+	// An entry is trusted only after a stat of the file agrees with the identity
+	// the entry recorded. writeState renames a fresh file into place, so any
+	// rewrite moves the inode as well as the size and modification time, and the
+	// stat is what notices. A stale answer therefore cannot outlive the file that
+	// gave it, however cheaply the rewrite happened.
+	stateCache struct {
+		mux     sync.Mutex
+		entries map[string]stateEntry
+	}
+
+	// The stateEntry type is one remembered record, carrying the identity of the
+	// file it was decoded from.
+	stateEntry struct {
+		recorded state
+		modTime  time.Time
+		size     int64
+		inode    uint64
+	}
+)
+
+// newStateCache returns an empty stateCache.
+func newStateCache() *stateCache {
+	return &stateCache{entries: make(map[string]stateEntry)}
+}
+
+// read returns the record at path, decoding the file only when it is not the one
+// already remembered.
+func (c *stateCache) read(path string) (state, error) {
+	info, err := os.Stat(filepath.Join(path, stateFile))
+	if err != nil {
+		// Gone, or unreadable. The entry goes with it, and readState is left to
+		// report the failure the way every caller already understands.
+		c.forget(path)
+
+		return readState(path)
+	}
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return readState(path)
+	}
+
+	c.mux.Lock()
+	entry, ok := c.entries[path]
+	c.mux.Unlock()
+
+	if ok && entry.inode == stat.Ino && entry.size == info.Size() && entry.modTime.Equal(info.ModTime()) {
+		return entry.recorded, nil
+	}
+
+	// The file may be replaced between the stat above and this read. That is
+	// safe in the only direction it can happen: the content read here is never
+	// older than the identity recorded beside it, so a mismatch on the next pass
+	// costs a re-read rather than a stale answer.
+	recorded, err := readState(path)
+	if err != nil {
+		return state{}, err
+	}
+
+	c.mux.Lock()
+	c.entries[path] = stateEntry{
+		recorded: recorded,
+		modTime:  info.ModTime(),
+		size:     info.Size(),
+		inode:    stat.Ino,
+	}
+	c.mux.Unlock()
+
+	return recorded, nil
+}
+
+// forget drops whatever is remembered for path, for a record that has been
+// removed and will never be asked about again.
+func (c *stateCache) forget(path string) {
+	c.mux.Lock()
+	delete(c.entries, path)
+	c.mux.Unlock()
 }
 
 // readState reads the record for one instance.
