@@ -1040,6 +1040,38 @@ func TestDriver_ObserveWorkload(t *testing.T) {
 		assert.Contains(t, asked.Filters.Get("label"), docker.LabelWorkload+"=example")
 	})
 
+	t.Run("inspects a running health-checked container for its verdict", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:     "container-one",
+				State:  dockercontainer.StateRunning,
+				Status: "Up 6 seconds (healthy)",
+				Labels: map[string]string{docker.LabelWorkload: "example"},
+			},
+		}, nil).Once()
+
+		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				State: &dockercontainer.State{
+					Status: dockercontainer.StateRunning,
+					Health: &dockercontainer.Health{Status: "healthy"},
+				},
+			},
+		}, nil).Once()
+
+		d := testDriver(t, client)
+
+		instances, err := d.ObserveWorkload(t.Context(), "cvhs0dq0kqj4c9r8m1a0", "example")
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+
+		// This is the path whose caller renders the image's own verdict, so it is
+		// the one that pays the inspect for it.
+		assert.Equal(t, "healthy", instances[0].RuntimeHealth)
+	})
+
 	// Retention is decided within whatever was listed. supersededBy groups by
 	// workload before choosing, so narrowing the listing to one workload has to reach
 	// the same answer for it that a listing of the host would.
@@ -1112,6 +1144,31 @@ func TestDriver_Observe(t *testing.T) {
 		assert.Equal(t, "hash-one", instances[0].SpecHash)
 		assert.Equal(t, 3, instances[0].Version)
 		assert.Equal(t, driver.StateRunning, instances[0].State)
+	})
+
+	t.Run("leaves a running health-checked container uninspected", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		// No ContainerInspect expectation: the mock fails the test if one happens.
+		// The reconciler is this method's steady caller and never reads the verdict,
+		// so a full observation must not pay an inspect per healthy container for it.
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:     "container-one",
+				State:  dockercontainer.StateRunning,
+				Status: "Up 6 seconds (healthy)",
+				Labels: map[string]string{docker.LabelWorkload: "example"},
+			},
+		}, nil).Once()
+
+		d := testDriver(t, client)
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+
+		assert.Equal(t, driver.StateRunning, instances[0].State)
+		assert.Empty(t, instances[0].RuntimeHealth)
 	})
 
 	t.Run("inspects stopped containers for their exit code", func(t *testing.T) {
