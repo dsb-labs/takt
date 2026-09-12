@@ -14,15 +14,15 @@ tool (
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/XSAM/otelsql v0.43.0
+	github.com/XSAM/otelsql v0.44.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/distribution/reference v0.6.0
 	github.com/docker/cli v29.8.0+incompatible
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.8.1
 	github.com/docker/go-units v0.5.0
-	github.com/go-jose/go-jose/v4 v4.1.4
-	github.com/golang-migrate/migrate/v4 v4.19.1
+	github.com/go-jose/go-jose/v4 v4.1.5
+	github.com/golang-migrate/migrate/v4 v4.20.1
 	github.com/landlock-lsm/go-landlock v0.10.0
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/opencontainers/image-spec v1.1.1
