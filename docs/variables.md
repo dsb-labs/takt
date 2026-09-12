@@ -36,7 +36,7 @@ The two work the same way. The difference is whether the value is readable back:
 |---|---|---|
 | Stored | as given | encrypted |
 | Returned by the API | yes | never |
-| Reported by `list` | with its value | name and revision only |
+| Reported by `list` | with its value | everything but the value |
 | Set from an argument | yes | no |
 | Changing it redeploys readers | yes | yes |
 | Mountable as a file | yes | yes, at a documented cost |
