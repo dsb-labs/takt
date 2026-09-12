@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/pkg/cli"
 )
 
 var (
@@ -118,6 +119,32 @@ func WithCACertificate(path string) Option {
 // requires.
 func WithToken(token string) Option {
 	return func(c *config) { c.token = token }
+}
+
+// WithoutCredential makes the client present no credential, whatever the
+// settings it was built from hold. The login command is the reason it
+// exists: logging in mints a replacement for the stored token, and a server
+// refuses any credential that does not authenticate — so presenting an
+// expired token would fail the very login meant to replace it.
+func WithoutCredential() Option {
+	return func(c *config) { c.token = "" }
+}
+
+// FromConfig returns a Client connecting with the resolved settings: the
+// address, the certificate authority when the settings name one, and the
+// token as a bearer credential when they hold one. Options apply after the
+// settings, so a caller can override what the settings supply.
+func FromConfig(settings cli.Config, options ...Option) (*Client, error) {
+	base := make([]Option, 0, len(options)+2)
+	if settings.CACert != "" {
+		base = append(base, WithCACertificate(settings.CACert))
+	}
+
+	if settings.Token != "" {
+		base = append(base, WithToken(settings.Token))
+	}
+
+	return New(settings.Address, append(base, options...)...)
 }
 
 // New returns a Client that targets the takt server at the given address.

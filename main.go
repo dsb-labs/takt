@@ -57,33 +57,14 @@ func main() {
 		// The connection resolves from the most specific source that supplies
 		// each setting: these flags, then the TAKT_ADDRESS, TAKT_TOKEN and
 		// TAKT_CA_CERT environment variables, then the config file `takt auth
-		// login` writes. A flag left at its default is treated as not given,
-		// so it does not shadow the environment or the file.
+		// login` writes.
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			if !cmd.Flags().Changed("address") {
-				address = ""
-			}
-
-			path, err := cli.Path(configPath)
+			settings, err := cli.Resolve(cli.Sources{ConfigPath: configPath, Address: address, CACert: caCert})
 			if err != nil {
 				return err
 			}
 
-			settings, err := cli.Resolve(path, address, caCert)
-			if err != nil {
-				return err
-			}
-
-			options := []client.Option{}
-			if settings.CACert != "" {
-				options = append(options, client.WithCACertificate(settings.CACert))
-			}
-
-			if settings.Token != "" {
-				options = append(options, client.WithToken(settings.Token))
-			}
-
-			c, err := client.New(settings.Address, options...)
+			c, err := client.FromConfig(settings)
 			if err != nil {
 				return err
 			}
@@ -102,10 +83,14 @@ func main() {
 	// file, TAKT_CONFIG included. A --config value wins over both.
 	defaultConfigPath, _ := cli.Path("")
 
+	// The address flag defaults to empty rather than to the default address,
+	// because resolution has to tell "not given" from "given the default": a
+	// flag pre-filled with an address would shadow the environment and the
+	// file on every run. The help text carries the default instead.
 	flags := cmd.PersistentFlags()
-	flags.StringVarP(&address, "address", "a", cli.DefaultAddress, "URL of the takt server")
-	flags.StringVar(&caCert, "ca-cert", "", "path to a PEM file holding the certificate authority to check the server against")
-	flags.StringVar(&configPath, "config", defaultConfigPath, "path of the client config file")
+	flags.StringVarP(&address, "address", "a", "", "URL of the takt server (env TAKT_ADDRESS, default "+cli.DefaultAddress+")")
+	flags.StringVar(&caCert, "ca-cert", "", "path to a PEM file holding the certificate authority to check the server against (env TAKT_CA_CERT)")
+	flags.StringVar(&configPath, "config", defaultConfigPath, "path of the client config file (env TAKT_CONFIG)")
 
 	if info, ok := debug.ReadBuildInfo(); ok {
 		cmd.Version = info.Main.Version

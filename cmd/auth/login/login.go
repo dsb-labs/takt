@@ -60,20 +60,11 @@ func Command() *cobra.Command {
 			defer cancel()
 
 			// A client of this command's own, without the stored credential the
-			// shared client presents. This flow exists to replace that credential
-			// and its endpoints require none, but the server refuses any
-			// credential that does not authenticate — so a login that presented
-			// an expired token would fail with the very token it exists to
-			// replace, and nothing short of editing the config file would
-			// recover.
+			// shared client presents: an expired token would fail the very
+			// login that exists to replace it.
 			settings := cli.FromContext(ctx)
 
-			options := []client.Option{}
-			if settings.CACert != "" {
-				options = append(options, client.WithCACertificate(settings.CACert))
-			}
-
-			c, err := client.New(settings.Address, options...)
+			c, err := client.FromConfig(settings, client.WithoutCredential())
 			if err != nil {
 				return err
 			}
@@ -127,12 +118,7 @@ func Command() *cobra.Command {
 				return fmt.Errorf("failed to log in: %w", err)
 			}
 
-			configFlag, err := cmd.Flags().GetString("config")
-			if err != nil {
-				return err
-			}
-
-			if err = storeCredential(settings, configFlag, login.Credential); err != nil {
+			if err = storeCredential(settings, login.Credential); err != nil {
 				return err
 			}
 
@@ -218,13 +204,8 @@ func waitForCode(ctx context.Context, listener net.Listener, state string) (stri
 //
 // The settings resolved from the file's own values first, so writing them
 // back loses nothing that was already there.
-func storeCredential(settings cli.Config, configFlag, credential string) error {
-	path, err := cli.Path(configFlag)
-	if err != nil {
-		return err
-	}
-
+func storeCredential(settings cli.Config, credential string) error {
 	settings.Token = credential
 
-	return cli.Write(path, settings)
+	return settings.Save()
 }

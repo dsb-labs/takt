@@ -18,20 +18,39 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// The Config type contains the settings a client connects with.
-//
-// There is no flag for the token, deliberately: a token passed as a flag
-// lands in shell history and process listings for no benefit the other
-// sources lack.
-type Config struct {
-	// The address of the takt server, as a URL.
-	Address string `toml:"address"`
-	// The token presented as a bearer credential. Empty sends no credential.
-	Token string `toml:"token"`
-	// The path of a PEM certificate authority file to check the server's
-	// certificate against instead of the system roots.
-	CACert string `toml:"ca_cert"`
-}
+type (
+	// The Config type contains the settings a client connects with.
+	//
+	// There is no flag for the token, deliberately: a token passed as a flag
+	// lands in shell history and process listings for no benefit the other
+	// sources lack.
+	Config struct {
+		// The address of the takt server, as a URL.
+		Address string `toml:"address"`
+		// The token presented as a bearer credential. Empty sends no credential.
+		Token string `toml:"token"`
+		// The path of a PEM certificate authority file to check the server's
+		// certificate against instead of the system roots.
+		CACert string `toml:"ca_cert"`
+		// The file the settings were read from, and where Save writes them
+		// back. Not a setting itself: Load records it, and it never appears
+		// in the file.
+		File string `toml:"-"`
+	}
+
+	// The Sources type names the flag values Resolve folds in. An empty field
+	// means the flag was not given, so the environment and the file stay
+	// visible behind it.
+	Sources struct {
+		// The --config flag value, naming the config file. Empty resolves
+		// the file the way Path does.
+		ConfigPath string
+		// The --address flag value.
+		Address string
+		// The --ca-cert flag value.
+		CACert string
+	}
+)
 
 // DefaultAddress is where a client connects when nothing names a server.
 const DefaultAddress = "http://localhost:7373"
@@ -65,16 +84,20 @@ func Path(flag string) (string, error) {
 }
 
 // Load reads the config file at the given path, reporting an absent file as
-// the zero Config: a client that never logged in simply has no file yet.
+// a Config with no settings: a client that never logged in simply has no
+// file yet. Either way the result records the path, so Save knows where the
+// settings belong.
 func Load(path string) (Config, error) {
 	var config Config
 	if _, err := toml.DecodeFile(path, &config); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return Config{}, nil
+			return Config{File: path}, nil
 		}
 
 		return Config{}, fmt.Errorf("failed to decode config file: %w", err)
 	}
+
+	config.File = path
 
 	return config, nil
 }
@@ -101,14 +124,18 @@ func Write(path string, config Config) error {
 }
 
 // Resolve returns the settings a client should connect with, taking each
-// field from the most specific source that supplies it: the given flag
-// values, then the TAKT_ADDRESS, TAKT_TOKEN and TAKT_CA_CERT environment
-// variables, then the config file at the given path. An empty flag value
-// means the flag was not given.
+// field from the most specific source that supplies it: the flag values in
+// sources, then the TAKT_ADDRESS, TAKT_TOKEN and TAKT_CA_CERT environment
+// variables, then the config file the sources name.
 //
 // The address falls back to DefaultAddress when nothing supplies one, so a
 // client on the same host as its server needs no configuration at all.
-func Resolve(path, address, caCert string) (Config, error) {
+func Resolve(sources Sources) (Config, error) {
+	path, err := Path(sources.ConfigPath)
+	if err != nil {
+		return Config{}, err
+	}
+
 	config, err := Load(path)
 	if err != nil {
 		return Config{}, err
@@ -124,11 +151,11 @@ func Resolve(path, address, caCert string) (Config, error) {
 		config.CACert = value
 	}
 
-	if address != "" {
-		config.Address = address
+	if sources.Address != "" {
+		config.Address = sources.Address
 	}
-	if caCert != "" {
-		config.CACert = caCert
+	if sources.CACert != "" {
+		config.CACert = sources.CACert
 	}
 
 	if config.Address == "" {
@@ -136,4 +163,16 @@ func Resolve(path, address, caCert string) (Config, error) {
 	}
 
 	return config, nil
+}
+
+// Save writes the settings back to the file they were read from, creating it
+// for a client that has never logged in. It refuses settings that record no
+// file, which is what a Config built by hand rather than by Load or Resolve
+// carries.
+func (c Config) Save() error {
+	if c.File == "" {
+		return errors.New("the settings record no file to save to")
+	}
+
+	return Write(c.File, c)
 }
