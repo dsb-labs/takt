@@ -6,7 +6,7 @@
 go build -o takt .
 ```
 
-Go 1.26 or later. The `exec` runtime reads `/proc`, so takt runs on Linux.
+Go 1.27 or later. The `exec` runtime reads `/proc`, so takt runs on Linux.
 
 ## The API is generated
 
@@ -70,8 +70,9 @@ make e2e
 ```
 
 Each test starts a real server inside the test process and drives it through the
-public client. `-run` narrows the suite to one test in the usual way, and `-v` raises
-the server's log level to debug.
+public client. The make target runs the whole suite. To narrow it to one test, or
+to raise the server's log level to debug with `-v`, invoke `go test` on
+`./internal/e2e/...` directly through `scripts/delegated.sh`.
 
 Every test writes a debug bundle to `internal/e2e/artifacts/<test name>/`: the
 server's spans in `trace.json`, its logs in `logs.json`, and a final metrics scrape
@@ -127,6 +128,7 @@ The scenarios live in `scenarios/`:
 | `secrets.toml` | rotation, which redeploys every workload reading the value |
 | `failures.toml` | restart backoff and giving up |
 | `references.toml` | workloads reading each other's addresses, applied in two waves |
+| `services.toml` | services resolving backends across a fleet while restarts move them |
 | `stampede.toml` | a thousand workloads with every feature at once, churned hard |
 
 Add one by adding a file. The package's tests parse every scenario in the directory
@@ -193,7 +195,7 @@ in `internal/ui/app` — CI fails on drift the same way it does for the Go code.
 ## The capability the dev loop wants
 
 Deleting a volume a container wrote as another user needs `CAP_DAC_OVERRIDE` — see
-[Deleting a volume a container wrote](docs/operating.md#deleting-a-volume-a-container-wrote).
+[Deleting a volume a container wrote](docs/volumes.md#deleting-a-volume-a-container-wrote).
 A production server gets it from its systemd unit. A dev server started with `go run`
 has no unit, so give your own sessions the capability once through `pam_cap`:
 
@@ -240,11 +242,13 @@ internal/e2e/             the end-to-end suite
 internal/loadtest/        the load test scenarios are run from here
 pkg/manifest/             the canonical specification, and parsing one
 pkg/client/               the Go client
+pkg/cli/                  the connection settings a client resolves
 docs/                     documentation
 ```
 
-`pkg/` holds the packages something outside takt would import: the manifest parser and
-the client. Everything else is `internal/`.
+`pkg/` holds the packages something outside takt would import: the manifest parser,
+the client, and the connection settings a client resolves. Everything else is
+`internal/`.
 
 ## The wire format stops at the API
 
