@@ -34,9 +34,9 @@ takt token create prometheus
 Enabling is three steps: add the block, restart, init.
 
 1. Add `[auth]` to the server's configuration and restart it. Every request
-   now requires a credential, except `/api/v1/system/health` and
-   `/api/v1/system/ready` — a supervisor must probe those without credentials
-   or it cannot manage the process, and they are the whole anonymous surface.
+   now requires a credential, except the operations that exist before anyone
+   holds one: the health and readiness probes a supervisor needs, the login
+   and OIDC endpoints, and `acl init` itself before any token exists.
 2. Run `takt acl init`. It works exactly once and prints the recovery token,
    which is the root of trust: store it somewhere safe.
 3. Apply the first policy with the recovery token, then work with a client
@@ -98,9 +98,9 @@ Three fixed roles, hierarchical: `admin` covers `operator`, `operator` covers
 
 | Role | Holds |
 |---|---|
-| `viewer` | Every read, including logs, metrics and target discovery. |
+| `viewer` | Reads of the resources themselves, including logs, metrics and target discovery. |
 | `operator` | Workload, volume, service, variable and secret lifecycle. |
-| `admin` | Applying the policy and managing tokens. |
+| `admin` | Applying the policy, managing tokens, and the node-level operations: reading the policy, listing tokens, backup and rekey. |
 
 Writing a secret is routine operation, not administration, which is why
 `operator` holds it — and why `operator` is the grant to be stingy with, not
@@ -142,7 +142,8 @@ the web UI's session cookie.
 - `takt token list` names every credential, including sessions, workload
   tokens and the recovery token, with when each was created and last used.
 - `takt token delete <id>` revokes one. `takt auth logout` revokes whatever
-  credential made the call.
+  credential made the call, with one refusal: the recovery token, whose only
+  revocation path is the [reset file](#losing-the-recovery-token).
 
 ## Workload identity
 
