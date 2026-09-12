@@ -23,9 +23,11 @@ sudo apt-get install takt
 ```
 
 The package installs the binary, the systemd unit, the `takt` system user and
-`/etc/takt/config.toml`. From then on `apt-get upgrade` carries takt along with
-everything else, and [Upgrading](upgrading.md) says what a new binary means for
-what is running.
+`/etc/takt/config.toml`. The user is created through `systemd-sysusers`, so a
+host without it needs the user made by hand as the [by hand](#by-hand) path
+describes. From then on `apt-get upgrade` carries takt along with everything
+else. The upgrade replaces the binary only — [Upgrading](upgrading.md) says
+who restarts the service, and what a new binary means for what is running.
 
 The service is installed but not started. The server cannot start until it can
 reach the Docker socket, and that grant is root-equivalent — anything in the
@@ -51,6 +53,20 @@ sudo dnf install ./takt_<version>_linux_amd64.rpm
 ```
 
 The grant-and-enable step above applies unchanged.
+
+## Removing
+
+Stop and disable the service before the package goes, because removal does
+neither:
+
+```sh
+sudo systemctl disable --now takt
+sudo apt-get remove takt
+```
+
+Removal keeps `/etc/takt/config.toml` and the data directory. A host that
+should keep nothing deletes those itself, and
+[State on disk](operating.md#state-on-disk) says what they hold.
 
 ## By hand
 
@@ -102,6 +118,16 @@ you.
    notification, workloads surviving a restart, delegated resource limits, the
    capabilities volume ownership needs — that
    [Running under systemd](operating.md#running-under-systemd) documents.
+
+   Two adjustments the package would have made for you. The unit's
+   `ExecStart` names `/usr/bin/takt`, where the package puts the binary, so
+   change that path to the one step 1 chose. And systemd has to be told the
+   unit exists:
+
+   ```sh
+   sudo cp packaging/takt.service /etc/systemd/system/takt.service
+   sudo systemctl daemon-reload
+   ```
 
 7. **Enable and start.** `sudo systemctl enable --now takt`.
 
