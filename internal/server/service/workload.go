@@ -1991,7 +1991,8 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 }
 
 // nextRun reports when a scheduled workload runs again, or the zero time when it runs
-// continuously or has not run yet.
+// continuously. Before the first run the occurrence is counted from when the workload
+// was applied, so a schedule reports its next run as soon as it exists.
 //
 // Derived on read rather than stored, like every other observed value: the occurrence
 // is a function of the expression and the last run, both of which are already known.
