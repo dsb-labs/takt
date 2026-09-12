@@ -2,7 +2,8 @@
 
 The server reads a TOML file, given as the argument to `takt serve`. Every value has a
 default, so the server runs with no file at all and a file only has to describe what it
-changes.
+changes. A path that names a missing file is a startup failure rather than a run on
+defaults, so a typo in the path cannot silently drop the configuration.
 
 ```toml
 [http]
@@ -22,9 +23,10 @@ config-file = ""
 interval = "10s"
 
 [workload]
-bind = "127.0.0.1"
+bind = "0.0.0.0"
 min-port = 20000
 max-port = 32000
+allow-host-paths = []
 
 [exec]
 allow-paths = []
@@ -71,8 +73,10 @@ address = "127.0.0.1:7373"
 hosts = ["takt.example.com"]
 ```
 
-A request naming anything else is refused with `421`. That check is what stops a page
-in the operator's browser from reaching a loopback-bound API — see
+A request naming anything else is refused with `421`. The same list covers the
+`Origin` header a browser sends: a page from an origin naming anything else is
+refused with `403`. Together the two checks are what stop a page in the operator's
+browser from reaching a loopback-bound API — see
 [Operating takt](operating.md#exposure).
 
 Set `tls-cert` and `tls-key` together, or not at all, and give both as absolute
@@ -86,7 +90,8 @@ a reverse proxy.
 A request body is read up to 1 MiB and no further. There is no key for it: a manifest
 is a document an operator wrote by hand, and anything past a megabyte is a mistake or
 an attempt to see how much the server will hold in memory. A body over the limit is
-refused with `400` and `request body too large`.
+refused with `400`. The refusal is plain text rather than the JSON shape other
+failures use, because the read fails inside the request decoder.
 
 ## data
 
@@ -95,7 +100,8 @@ refused with `400` and `request body too large`.
 | `directory` | `~/.local/share/takt` | Where takt keeps its state. |
 
 Holds the SQLite database and the directories the `exec` runtime gives each workload.
-takt creates it readable only by the user running the server.
+takt creates it readable only by the user running the server. A directory that
+already exists keeps its mode — takt sets the mode only on what it creates.
 
 ## docker
 
@@ -224,9 +230,10 @@ Each path is granted read-only, so this widens what a workload may read and neve
 it may change. Each path must be absolute. A path that is not on the host is ignored,
 so one list can cover several hosts.
 
-There is no manifest equivalent, and that is deliberate. The API has no
-authentication, so a workload able to name its own paths could grant itself the data
-directory. Which paths are opened is the operator's decision.
+There is no manifest equivalent, and that is deliberate. A manifest arrives from
+anything holding a write grant, so a workload able to name its own paths could
+grant itself the data directory. Which paths are opened is the operator's
+decision, made in the file only the operator writes.
 
 ## secrets
 
@@ -263,9 +270,10 @@ listener holds the whole API, and the [exposure guidance](operating.md#exposure)
 is the entire defence.
 
 With the block present, every request must carry a credential, except the
-health and readiness probes a supervisor needs. [Access control](acl.md) covers
-the model and the lifecycle: `takt acl init`, tokens, the policy document and
-the recovery path.
+operations that exist before anyone holds one: the login and OIDC endpoints,
+`acl init` before any token exists, and the health and readiness probes a
+supervisor needs. [Access control](acl.md) covers the model and the lifecycle:
+`takt acl init`, tokens, the policy document and the recovery path.
 
 ## auth.oidc
 
@@ -275,7 +283,7 @@ the recovery path.
 | `client-id` | empty | The client identifier registered with the issuer. Required with an issuer. |
 | `client-secret` | empty | The client secret, for an issuer that treats takt as a confidential client. The server performs every code exchange, so the CLI never needs it. |
 | `redirect-url` | empty | The URL browsers reach this server by, such as `https://takt.example.com`. Its presence enables the web UI's login redirect. |
-| `scopes` | `["openid", "email", "profile"]` | The scopes a login requests from the issuer. |
+| `scopes` | `["openid", "email", "profile"]` | The scopes the web UI's login requests from the issuer. Read only when `redirect-url` is set. |
 
 Without this block, static tokens are the only authentication. With it, `takt
 auth login` and the web UI exchange an OIDC identity for a short-lived token.
@@ -285,6 +293,8 @@ the UI's, when `redirect-url` is set.
 
 Add whatever scope the issuer needs before it includes the claim the policy's
 `groupsClaim` reads — many issuers put group names behind a `groups` scope.
+`scopes` here covers the web UI's flow only. The CLI's loopback flow requests
+its own, so pass the extra scope to `takt auth login --scopes` as well.
 
 ## telemetry
 
@@ -312,9 +322,10 @@ for extra resource attributes, rather than looking for keys here.
 |---|---|---|
 | `level` | `info` | One of `debug`, `info`, `warn`, `error`. |
 
-At `info` the server is quiet unless something is wrong. `debug` reports each
-reconciliation decision, which is what to turn on when a workload is not behaving as
-the manifest says it should.
+At `info` the server reports what changed — a workload started or deleted, an
+image pulled, a secret set — and problems. `debug` adds each reconciliation
+decision, which is what to turn on when a workload is not behaving as the
+manifest says it should.
 
 The level applies to what reaches stderr. A log exporter configured under
 [telemetry](#telemetry) receives every record regardless, so a quiet terminal does
