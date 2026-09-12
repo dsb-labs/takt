@@ -462,8 +462,14 @@ func (d *Driver) Signal(ctx context.Context, _, workload, signal string) error {
 //
 // A container something has already replaced is reported as retained, so that a caller
 // deciding what to run leaves it out while one sweeping up orphans still finds it.
+//
+// RuntimeHealth is left empty here. Filling it costs an inspect per health-checked
+// container on every pass, and the reconciler — the caller that pays that cost every
+// few seconds — never reads the field. A workload list served from this observation
+// forgoes an image's own verdict rather than paying an inspect per container for a
+// column; the detail view is served by ObserveWorkload, which still fills it.
 func (d *Driver) Observe(ctx context.Context) ([]driver.Instance, error) {
-	return d.observe(ctx, "")
+	return d.observe(ctx, "", false)
 }
 
 // ObserveWorkload reports every instance the driver is currently running for one
@@ -477,17 +483,24 @@ func (d *Driver) Observe(ctx context.Context) ([]driver.Instance, error) {
 // The identifier is unused here: a container records the workload's name in its
 // labels, and that is what the filter matches. It is part of the signature because
 // the exec driver keys its state on the identifier, and one interface serves both.
+//
+// This is the one path that fills RuntimeHealth, because it is the one whose caller
+// renders it: the workload detail view. The inspect that answers it is paid per
+// health-checked container of a single workload, on a request someone made, rather
+// than for the whole host on every reconcile pass.
 func (d *Driver) ObserveWorkload(ctx context.Context, _, name string) ([]driver.Instance, error) {
-	return d.observe(ctx, name)
+	return d.observe(ctx, name, true)
 }
 
 // observe reports the instances of one workload, or of every workload when the name
-// is empty.
+// is empty. When health is true a running container whose image declares a check of
+// its own is inspected for its verdict, which is the expensive part of observing a
+// healthy fleet.
 //
 // Retention is decided within whatever was listed, which is correct either way:
 // supersededBy groups by instance before choosing, so a listing narrowed to one
 // workload reaches the same answer for it as a listing of the host would.
-func (d *Driver) observe(ctx context.Context, name string) ([]driver.Instance, error) {
+func (d *Driver) observe(ctx context.Context, name string, health bool) ([]driver.Instance, error) {
 	containers, err := d.containers(ctx, name)
 	if err != nil {
 		return nil, err
@@ -519,11 +532,12 @@ func (d *Driver) observe(ctx context.Context, name string) ([]driver.Instance, e
 
 		// The summary carries no exit code or start time, so anything that has
 		// stopped needs an inspect to find out how it ended. A running container is
-		// inspected only when it reports a health check of its own, which the summary
-		// mentions in its status text — the typed result lives on the inspection, and
-		// the text is not a contract worth parsing. A container without a check stays
-		// on the single-call path.
-		if instance.State == driver.StateExited || instance.State == driver.StateFailed || hasHealthCheck(c.Status) {
+		// inspected only when the caller asked for health and it reports a check of
+		// its own, which the summary mentions in its status text — the typed result
+		// lives on the inspection, and the text is not a contract worth parsing. A
+		// container without a check stays on the single-call path.
+		if instance.State == driver.StateExited || instance.State == driver.StateFailed ||
+			(health && hasHealthCheck(c.Status)) {
 			d.inspect(ctx, &instance)
 		}
 
