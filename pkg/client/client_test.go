@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/pkg/cli"
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
@@ -68,6 +69,42 @@ func TestNew(t *testing.T) {
 
 		_, err := client.New("http://localhost:7373", client.WithCACertificate(path))
 		assert.Error(t, err)
+	})
+}
+
+func TestFromConfig(t *testing.T) {
+	t.Parallel()
+
+	healthy := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(api.GetHealthResult{Status: api.Ok})
+	}
+
+	t.Run("presents the settings' token", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "Bearer takt_c_secret", r.Header.Get("Authorization"))
+			healthy(w, r)
+		}))
+		t.Cleanup(server.Close)
+
+		c, err := client.FromConfig(cli.Config{Address: server.URL, Token: "takt_c_secret"})
+		require.NoError(t, err)
+
+		assert.NoError(t, c.Health(t.Context()))
+	})
+
+	t.Run("presents nothing without the credential", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Empty(t, r.Header.Get("Authorization"))
+			healthy(w, r)
+		}))
+		t.Cleanup(server.Close)
+
+		c, err := client.FromConfig(cli.Config{Address: server.URL, Token: "takt_c_secret"},
+			client.WithoutCredential())
+		require.NoError(t, err)
+
+		assert.NoError(t, c.Health(t.Context()))
 	})
 }
 

@@ -31,9 +31,9 @@ func TestResolve(t *testing.T) {
 	t.Run("defaults with nothing configured", func(t *testing.T) {
 		path := pointConfigAt(t)
 
-		config, err := cli.Resolve(path, "", "")
+		config, err := cli.Resolve(cli.Sources{ConfigPath: path})
 		require.NoError(t, err)
-		assert.Equal(t, cli.Config{Address: cli.DefaultAddress}, config)
+		assert.Equal(t, cli.Config{Address: cli.DefaultAddress, File: path}, config)
 	})
 
 	t.Run("reads the config file", func(t *testing.T) {
@@ -44,12 +44,13 @@ func TestResolve(t *testing.T) {
 			CACert:  "/etc/takt/ca.pem",
 		}))
 
-		config, err := cli.Resolve(path, "", "")
+		config, err := cli.Resolve(cli.Sources{ConfigPath: path})
 		require.NoError(t, err)
 		assert.Equal(t, cli.Config{
 			Address: "https://takt.example.com",
 			Token:   "takt_c_file",
 			CACert:  "/etc/takt/ca.pem",
+			File:    path,
 		}, config)
 	})
 
@@ -61,12 +62,13 @@ func TestResolve(t *testing.T) {
 		t.Setenv("TAKT_TOKEN", "takt_c_env")
 		t.Setenv("TAKT_CA_CERT", "/etc/takt/env-ca.pem")
 
-		config, err := cli.Resolve(path, "", "")
+		config, err := cli.Resolve(cli.Sources{ConfigPath: path})
 		require.NoError(t, err)
 		assert.Equal(t, cli.Config{
 			Address: "https://env.example.com",
 			Token:   "takt_c_env",
 			CACert:  "/etc/takt/env-ca.pem",
+			File:    path,
 		}, config)
 	})
 
@@ -76,7 +78,7 @@ func TestResolve(t *testing.T) {
 		t.Setenv("TAKT_TOKEN", "takt_c_env")
 		t.Setenv("TAKT_CA_CERT", "/etc/takt/env-ca.pem")
 
-		config, err := cli.Resolve(path, "https://flag.example.com", "/etc/takt/flag-ca.pem")
+		config, err := cli.Resolve(cli.Sources{ConfigPath: path, Address: "https://flag.example.com", CACert: "/etc/takt/flag-ca.pem"})
 		require.NoError(t, err)
 		// There is no token flag, so the token keeps coming from the
 		// environment even when everything else was given on the command
@@ -85,6 +87,7 @@ func TestResolve(t *testing.T) {
 			Address: "https://flag.example.com",
 			Token:   "takt_c_env",
 			CACert:  "/etc/takt/flag-ca.pem",
+			File:    path,
 		}, config)
 	})
 
@@ -94,12 +97,13 @@ func TestResolve(t *testing.T) {
 
 		t.Setenv("TAKT_CA_CERT", "/etc/takt/env-ca.pem")
 
-		config, err := cli.Resolve(path, "https://flag.example.com", "")
+		config, err := cli.Resolve(cli.Sources{ConfigPath: path, Address: "https://flag.example.com"})
 		require.NoError(t, err)
 		assert.Equal(t, cli.Config{
 			Address: "https://flag.example.com",
 			Token:   "takt_c_file",
 			CACert:  "/etc/takt/env-ca.pem",
+			File:    path,
 		}, config)
 	})
 
@@ -107,7 +111,7 @@ func TestResolve(t *testing.T) {
 		path := pointConfigAt(t)
 		require.NoError(t, os.WriteFile(path, []byte("not toml = ="), 0o600))
 
-		_, err := cli.Resolve(path, "", "")
+		_, err := cli.Resolve(cli.Sources{ConfigPath: path})
 		assert.Error(t, err)
 	})
 }
@@ -135,6 +139,8 @@ func TestWrite(t *testing.T) {
 
 		loaded, err := cli.Load(path)
 		require.NoError(t, err)
+
+		expected.File = path
 		assert.Equal(t, expected, loaded)
 	})
 
@@ -147,6 +153,27 @@ func TestWrite(t *testing.T) {
 		loaded, err := cli.Load(path)
 		require.NoError(t, err)
 		assert.Equal(t, "takt_c_new", loaded.Token)
+	})
+}
+
+func TestConfig_Save(t *testing.T) {
+	t.Run("writes back to the file the settings were read from", func(t *testing.T) {
+		path := pointConfigAt(t)
+
+		settings, err := cli.Load(path)
+		require.NoError(t, err)
+
+		settings.Address = "https://takt.example.com"
+		settings.Token = "takt_c_secret"
+		require.NoError(t, settings.Save())
+
+		loaded, err := cli.Load(path)
+		require.NoError(t, err)
+		assert.Equal(t, settings, loaded)
+	})
+
+	t.Run("refuses settings that record no file", func(t *testing.T) {
+		assert.Error(t, cli.Config{Address: cli.DefaultAddress}.Save())
 	})
 }
 

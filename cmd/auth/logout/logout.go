@@ -29,29 +29,22 @@ func Command() *cobra.Command {
 			}
 
 			// The server-side revocation happened either way; a token left in
-			// the file would only earn the next command a 401.
-			configFlag, err := cmd.Flags().GetString("config")
+			// the file would only earn the next command a 401. The file is
+			// read afresh rather than taken from the resolved settings, so a
+			// token that came from the environment does not have the rest of
+			// the resolution written into the file on its way out.
+			stored, err := cli.Load(cli.FromContext(cmd.Context()).File)
 			if err != nil {
 				return err
 			}
 
-			path, err := cli.Path(configFlag)
-			if err != nil {
-				return err
-			}
-
-			settings, err := cli.Load(path)
-			if err != nil {
-				return err
-			}
-
-			if settings.Token == "" {
+			if stored.Token == "" {
 				return nil
 			}
 
-			settings.Token = ""
+			stored.Token = ""
 
-			return cli.Write(path, settings)
+			return stored.Save()
 		},
 	}
 }
