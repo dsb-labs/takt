@@ -2,6 +2,7 @@
 package backup
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,9 @@ type Result struct {
 	Bytes int64
 }
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "admin backup" command used to write a backup of the node.
 func Command() *cobra.Command {
 	var includeKeys bool
@@ -27,18 +31,8 @@ func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "backup <destination>",
 		Short: "Write a backup of the node to a file",
-		Long: "Write a backup of the node to a file.\n\n" +
-			"The server takes a consistent snapshot of its database while it keeps\n" +
-			"running, and writes it to the destination as a zip archive. Copying\n" +
-			"state.db by hand does not do this: the database runs in write-ahead\n" +
-			"logging mode, so what is committed at any moment is spread across three\n" +
-			"files and a copy of one of them is stale or torn.\n\n" +
-			"Volume data is not in the archive. Run \"takt volume list\" for the path\n" +
-			"of each volume on the host and back those up separately.\n\n" +
-			"The keyring is not in the archive either, unless --include-keys is\n" +
-			"passed. A database without its keys decrypts nothing, which is what makes\n" +
-			"a copy of it safe to keep somewhere a key would not be.",
-		Args: cobra.ExactArgs(1),
+		Long:  usage,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

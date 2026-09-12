@@ -1,0 +1,6 @@
+Delete a variable.
+
+A variable a workload reads is refused, and the workloads reading it are
+named; pass --force to remove it anyway. Those workloads keep running until
+something replaces them, and then cannot start until the variable exists
+again.

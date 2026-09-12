@@ -1,0 +1,4 @@
+Revoke the credential this client authenticated with, whatever its kind,
+and remove it from the config file. Self-revocation is always safe, so
+this needs no role. The one refusal is the recovery token, whose
+revocation path is the reset file in the server's data directory.

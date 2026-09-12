@@ -1,0 +1,10 @@
+List services.
+
+Each service reports its target and the backends it currently selects.
+
+Repeat --query to narrow the result. A service has to match all of them.
+A query is a JSON path into the service's labels and the value it must
+hold:
+
+  takt service list --query '$.labels.app=web'
+  takt service list -q '$.labels.app=web' -q '$.labels.env=prod'

@@ -4,6 +4,7 @@ package login
 import (
 	"context"
 	"crypto/rand"
+	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,9 @@ type Result struct {
 // How long the browser has to complete the flow before the command gives up.
 const loginTimeout = 5 * time.Minute
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "auth login" command used to exchange an OIDC identity
 // for a short-lived token.
 func Command() *cobra.Command {
@@ -42,19 +46,8 @@ func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Log in with OIDC and store the minted token",
-		Long: "Log in through the server's OIDC issuer and store the minted token in the\n" +
-			"config file, beside the address of the server that minted it.\n\n" +
-			"The command asks the server who its issuer is, runs the authorization\n" +
-			"code flow against a loopback callback, and hands the code to the server\n" +
-			"to exchange for a short-lived client token — the exchange is what needs\n" +
-			"the issuer's client secret, so the secret stays on the server. Open the\n" +
-			"printed URL in a browser when one does not open on its own. The issuer\n" +
-			"must permit the redirect URI http://127.0.0.1:8250/oidc/callback, or\n" +
-			"the one --callback-port names.\n\n" +
-			"The token lands in the config file rather than on stdout, because a\n" +
-			"child process cannot set an environment variable in its parent shell\n" +
-			"and every login ending in copy-paste ceremony would be the alternative.",
-		Args: cobra.NoArgs,
+		Long:  usage,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx, cancel := context.WithTimeout(cmd.Context(), loginTimeout)
 			defer cancel()

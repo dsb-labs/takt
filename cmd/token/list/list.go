@@ -2,6 +2,7 @@
 package list
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -10,6 +11,9 @@ import (
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "token list" command used to name every credential the
 // server holds.
 func Command() *cobra.Command {
@@ -17,12 +21,8 @@ func Command() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List every credential the server holds",
-		Long: "List every credential the server holds.\n\n" +
-			"Static tokens, logins, sessions and the recovery token all appear, with\n" +
-			"when each was created and last used. No credential itself is reported,\n" +
-			"only the records of them. With \"takt acl get\", this answers who can\n" +
-			"touch this server, completely.",
-		Args: cobra.NoArgs,
+		Long:    usage,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())
 

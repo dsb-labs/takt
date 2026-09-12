@@ -1,0 +1,11 @@
+Replace the whole policy with the document in the given file.
+
+The apply is atomic and complete: a grant absent from the file is
+revoked, with no prune step, and the change applies to the very next
+request. The document is read, then applied on the condition that the
+policy did not change in between, so two concurrent applies produce one
+winner and one error to re-run rather than a silent overwrite.
+
+Requires the admin role or the recovery token, which is what makes a
+bad apply recoverable: the recovery token sits above the policy it
+fixes.

@@ -1,0 +1,9 @@
+Create a token for a principal.
+
+The principal is the name the policy grants roles to. By convention humans
+are emails and machines are bare names, so an identity provider's username
+cannot collide with a machine's grants.
+
+The credential is printed once and never stored. The principal need not be
+granted anything yet: merge the grant, then hand over the token, in
+whichever order onboarding runs.

@@ -1,0 +1,13 @@
+List workloads.
+
+Repeat --query to narrow the result. A workload has to match all of them.
+A query is a JSON path into the workload's specification and the value it
+must hold:
+
+  takt workload list --query '$.labels.app=web'
+  takt workload list -q '$.labels.app=web' -q '$.labels.env=prod'
+  takt workload list -q '$.container.image=nginx:1.27-alpine'
+
+Values are compared as text, so a number is matched by its digits
+($.ports[0].to=80). A boolean is stored as 1 or 0 and has to be
+written that way.

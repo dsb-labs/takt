@@ -1,0 +1,6 @@
+Initialize and manage the access-control policy.
+
+The policy is one document binding the three fixed roles — viewer,
+operator and admin — to principals and groups. It is applied whole, so a
+grant removed from the document is revoked on the next apply, and the
+file in a git repository is the complete answer to who holds access.

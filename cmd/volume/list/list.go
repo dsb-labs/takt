@@ -2,6 +2,7 @@
 package list
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -9,6 +10,9 @@ import (
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "volume list" command used to list the volumes the takt server
 // holds.
@@ -19,15 +23,8 @@ func Command() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List volumes",
-		Long: "List volumes.\n\n" +
-			"Each volume reports where its data is and which workloads mount it. A\n" +
-			"volume nothing mounts is one that can be deleted without forcing.\n\n" +
-			"Repeat --query to narrow the result. A volume has to match all of them.\n" +
-			"A query is a JSON path into the volume's labels and the value it must\n" +
-			"hold:\n\n" +
-			"  takt volume list --query '$.labels.app=web'\n" +
-			"  takt volume list -q '$.labels.app=web' -q '$.labels.env=prod'",
-		Args: cobra.NoArgs,
+		Long:    usage,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())
 

@@ -2,6 +2,7 @@
 package delete
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -9,16 +10,17 @@ import (
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "service delete" command used to remove a service.
 func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete <name>",
 		Aliases: []string{"rm"},
 		Short:   "Delete a service",
-		Long: "Delete a service.\n\n" +
-			"The workloads the service selected keep running. What stops is the\n" +
-			"service reporting their addresses.",
-		Args: cobra.ExactArgs(1),
+		Long:    usage,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

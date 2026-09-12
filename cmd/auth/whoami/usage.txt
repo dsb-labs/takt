@@ -1,0 +1,4 @@
+Report the principal, role and groups the server resolves your credential
+to. It needs authentication but no role, so a principal the policy grants
+nothing yet sees exactly that state — which is what onboarding looks like
+from the inside.

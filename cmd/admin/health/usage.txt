@@ -1,0 +1,9 @@
+Check that the server is alive.
+
+The command asks the server's health endpoint and exits zero when it
+answers. It prints nothing on success: the exit code is the signal,
+which is what a script conditions on.
+
+With --wait, the endpoint is asked once a second until it answers or
+the duration runs out. This is for the moment after starting a server,
+when the next step needs it listening.

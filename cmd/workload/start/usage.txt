@@ -1,0 +1,7 @@
+Start a stopped workload.
+
+Starting is asynchronous: the suspension is cleared and the server starts the
+workload's instances on its next pass, from whatever specification is stored.
+A scheduled workload waits for its next occurrence rather than running the
+ones it missed. Starting a workload that is not stopped changes nothing.
+Pass --wait to block until the workload has left pending.

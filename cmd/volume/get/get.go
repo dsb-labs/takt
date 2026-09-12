@@ -2,6 +2,7 @@
 package get
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -10,16 +11,17 @@ import (
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "volume get" command used to show a single volume.
 func Command() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "get <name>",
 		Short: "Show a single volume",
-		Long: "Show a single volume.\n\n" +
-			"Reports where the volume's data is on the host running the server, and the\n" +
-			"workloads currently mounting it.",
-		Args: cobra.ExactArgs(1),
+		Long:  usage,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

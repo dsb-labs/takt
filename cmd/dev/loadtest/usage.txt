@@ -1,0 +1,18 @@
+Drive a server through a load test scenario.
+
+A scenario describes the shape of a fleet — how many workloads, and what
+proportion of them publish ports, mount secrets, fail, or are checked.
+The workloads themselves are this command's own and do as little as
+possible, so a run measures takt rather than what it was asked to run.
+
+The report is JSON on standard output, and the command says nothing
+else. A run that found problems says so through its exit status, and
+what it found is in the report.
+
+Exits non-zero when a request failed, a workload never ran, or something
+was left behind. Latency is reported rather than judged: how fast a
+machine is says nothing about whether the code is right.
+
+Everything the run creates is named after --prefix and removed at the
+end, so two runs on one server neither collide nor tear down each
+other's work.

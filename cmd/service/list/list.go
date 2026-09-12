@@ -2,6 +2,7 @@
 package list
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -9,6 +10,9 @@ import (
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "service list" command used to list the services the takt
 // server holds.
@@ -19,14 +23,8 @@ func Command() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List services",
-		Long: "List services.\n\n" +
-			"Each service reports its target and the backends it currently selects.\n\n" +
-			"Repeat --query to narrow the result. A service has to match all of them.\n" +
-			"A query is a JSON path into the service's labels and the value it must\n" +
-			"hold:\n\n" +
-			"  takt service list --query '$.labels.app=web'\n" +
-			"  takt service list -q '$.labels.app=web' -q '$.labels.env=prod'",
-		Args: cobra.NoArgs,
+		Long:    usage,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())
 

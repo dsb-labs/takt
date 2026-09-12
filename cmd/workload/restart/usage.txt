@@ -1,0 +1,6 @@
+Replace a workload's running instances.
+
+The restart happens on the server's next pass, from the unchanged
+specification, so the version does not move. A stopped workload is refused,
+since nothing would start until it is started again. Pass --wait to block
+until a replacement instance has appeared.

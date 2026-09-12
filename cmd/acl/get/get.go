@@ -2,6 +2,7 @@
 package get
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -10,17 +11,16 @@ import (
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "acl get" command used to read the policy document.
 func Command() *cobra.Command {
 	return &cobra.Command{
 		Use:   "get",
 		Short: "Get the policy document",
-		Long: "Get the canonical current policy document.\n\n" +
-			"Before any apply, the policy is the empty version-v1 document, which\n" +
-			"grants nothing to anyone. The output is valid input to \"acl apply\",\n" +
-			"since YAML reads JSON, so the current policy can be captured into the\n" +
-			"file a git repository tracks.",
-		Args: cobra.NoArgs,
+		Long:  usage,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())
 

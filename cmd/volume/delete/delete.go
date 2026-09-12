@@ -2,12 +2,16 @@
 package delete
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "volume delete" command used to remove a volume and everything
 // stored in it.
@@ -18,12 +22,8 @@ func Command() *cobra.Command {
 		Use:     "delete <name>",
 		Aliases: []string{"rm"},
 		Short:   "Delete a volume and the data it holds",
-		Long: "Delete a volume and the data it holds.\n\n" +
-			"This is the only thing in takt that destroys stored data. A volume a\n" +
-			"workload mounts is refused, and the workloads holding it are named; pass\n" +
-			"--force to remove it anyway, which leaves those workloads running with a\n" +
-			"mount that no longer resolves.",
-		Args: cobra.ExactArgs(1),
+		Long:    usage,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

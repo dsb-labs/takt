@@ -2,12 +2,16 @@
 package restart
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "workload restart" command used to replace a workload's
 // running instances.
@@ -17,12 +21,8 @@ func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "restart <name>",
 		Short: "Replace a workload's running instances",
-		Long: "Replace a workload's running instances.\n\n" +
-			"The restart happens on the server's next pass, from the unchanged\n" +
-			"specification, so the version does not move. A stopped workload is refused,\n" +
-			"since nothing would start until it is started again. Pass --wait to block\n" +
-			"until a replacement instance has appeared.",
-		Args: cobra.ExactArgs(1),
+		Long:  usage,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

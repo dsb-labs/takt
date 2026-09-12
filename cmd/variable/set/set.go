@@ -2,6 +2,7 @@
 package set
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +20,9 @@ import (
 // wrong file is told so rather than filling memory.
 const maxValue = 1 << 20
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "variable set" command used to store a variable's value.
 func Command() *cobra.Command {
 	var file string
@@ -27,26 +31,8 @@ func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <name> [value]",
 		Short: "Set a variable's value",
-		Long: "Set a variable's value, given as an argument, read from a file, or read\n" +
-			"from standard input.\n\n" +
-			"The value may be an argument here, where a secret's may not. Arguments are\n" +
-			"visible to anything that can list processes on the host and they land in\n" +
-			"shell history, which is exactly what a secret has to avoid and what a\n" +
-			"variable has no reason to.\n\n" +
-			"Setting a variable to the value it already holds does nothing, so a script\n" +
-			"that sets every variable on every run does not restart the workloads reading\n" +
-			"them. A value that did change replaces those workloads, and reaches them as\n" +
-			"they start.\n\n" +
-			"A value read from a file or from standard input is taken exactly as given,\n" +
-			"including any trailing newline:\n\n" +
-			"  takt variable set log-level debug\n" +
-			"  takt variable set motd --from-file ./motd.txt\n" +
-			"  printf %s debug | takt variable set log-level\n\n" +
-			"Labels are replaced, not merged, the way a workload manifest replaces a\n" +
-			"workload's. Setting a value without --label removes the labels the variable\n" +
-			"had. Labelling one replaces no workload: what redeploys a reader is the\n" +
-			"value it reads.",
-		Args: cobra.RangeArgs(1, 2),
+		Long:  usage,
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			value, err := read(cmd, args, file)
 			if err != nil {

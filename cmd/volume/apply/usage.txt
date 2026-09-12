@@ -1,0 +1,10 @@
+Create or update a volume from a manifest file.
+
+The stored volume becomes what the manifest says, however many times it
+is applied. A volume has to exist before a workload can mount it, so that
+a mistyped name is reported rather than becoming a second empty volume.
+
+The directory keeps its path across an apply, so nothing mounting the
+volume is redeployed, and the owner and mode are reapplied to it. An
+owner or a mode the manifest leaves empty stops being enforced rather
+than being reverted.

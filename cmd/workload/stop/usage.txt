@@ -1,0 +1,7 @@
+Stop a workload and hold it down.
+
+Stopping is asynchronous: the workload is marked as suspended and the server
+stops its instances afterwards. Suspension survives a server restart and holds
+until "workload start" clears it. The specification and its version are
+untouched, so starting the workload resumes it rather than replacing it.
+Pass --wait to block until nothing is running for it.

@@ -3,10 +3,14 @@
 package dev
 
 import (
+	_ "embed"
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/cmd/dev/loadtest"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "dev" command, which does nothing on its own and holds the
 // commands used while working on takt.
@@ -19,10 +23,7 @@ func Command() *cobra.Command {
 		Use:    "dev",
 		Short:  "Commands for developing takt",
 		Hidden: true,
-		Long: "Commands for developing takt.\n\n" +
-			"These act on a server the way a developer does rather than the way an\n" +
-			"operator does, and they are documented in CONTRIBUTING.md rather than in\n" +
-			"the command line reference.",
+		Long:   usage,
 	}
 
 	cmd.AddCommand(

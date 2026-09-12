@@ -1,0 +1,9 @@
+Set, inspect and delete variables.
+
+A variable is a value both a workload and an operator can read. It is
+stored as given, referenced from a manifest as ${var:name}, and reported by
+every command here. Changing one replaces the workloads reading it.
+
+Use a variable for a hostname, a log level, or anything else you would want
+to read back later. Use a secret for anything that would be damaging to
+report, since these values are returned to whoever can reach the server.

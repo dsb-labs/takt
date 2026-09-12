@@ -1,0 +1,5 @@
+Commands for developing takt.
+
+These act on a server the way a developer does rather than the way an
+operator does, and they are documented in CONTRIBUTING.md rather than in
+the command line reference.

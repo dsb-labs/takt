@@ -4,6 +4,7 @@
 package restore
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -19,30 +20,17 @@ import (
 // loopback address to answer and short enough that a restore is not held up by one.
 const dialTimeout = 2 * time.Second
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "admin restore" command used to put a node back from a backup
 // archive.
 func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "restore <archive> [config-file]",
 		Short: "Put a node back from a backup archive",
-		Long: "Put a node back from a backup archive.\n\n" +
-			"Run this with the server stopped. Unlike the other commands here this\n" +
-			"one talks to no server at all: it reads the same configuration file\n" +
-			"\"takt serve\" does, works over the data directory directly, and refuses\n" +
-			"to run while something is listening on the configured address.\n\n" +
-			"The database is written into the data directory and the keyring into\n" +
-			"wherever the configuration puts it, along with removing any stale\n" +
-			"write-ahead log. Nothing else in the data directory is touched. Neither\n" +
-			"the mounted secret files nor the recorded exec processes are restored:\n" +
-			"both describe a host that no longer exists, and the first pass after\n" +
-			"startup re-derives them.\n\n" +
-			"A database already in the data directory is refused rather than\n" +
-			"replaced. Move it aside first, deliberately.\n\n" +
-			"Volume data is not in a backup, so it is not restored here. What the\n" +
-			"report names is what a restored node still needs: the volumes whose\n" +
-			"data has to be copied back under the identifier they are found by, and\n" +
-			"the keys the secrets are sealed under that the keyring does not hold.",
-		Args: cobra.RangeArgs(1, 2),
+		Long:  usage,
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config := server.DefaultConfig()
 

@@ -1,0 +1,14 @@
+Write a backup of the node to a file.
+
+The server takes a consistent snapshot of its database while it keeps
+running, and writes it to the destination as a zip archive. Copying
+state.db by hand does not do this: the database runs in write-ahead
+logging mode, so what is committed at any moment is spread across three
+files and a copy of one of them is stale or torn.
+
+Volume data is not in the archive. Run "takt volume list" for the path
+of each volume on the host and back those up separately.
+
+The keyring is not in the archive either, unless --include-keys is
+passed. A database without its keys decrypts nothing, which is what makes
+a copy of it safe to keep somewhere a key would not be.

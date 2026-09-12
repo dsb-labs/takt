@@ -2,12 +2,16 @@
 package delete
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "workload delete" command used to remove a workload and stop
 // everything running for it.
@@ -19,14 +23,8 @@ func Command() *cobra.Command {
 		Use:     "delete <name>",
 		Aliases: []string{"rm"},
 		Short:   "Delete a workload and stop its work",
-		Long: "Delete a workload and stop its work.\n\n" +
-			"Deletion is asynchronous: the workload is reported as terminating while its\n" +
-			"instances are stopped, and disappears once nothing is left running for it.\n" +
-			"Pass --wait to block until the teardown has finished.\n\n" +
-			"A workload another one references is refused, and the error names the workloads\n" +
-			"reading its address. Pass --force to delete it anyway. Those workloads are then\n" +
-			"redeployed and report the reference they can no longer resolve.",
-		Args: cobra.ExactArgs(1),
+		Long:    usage,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

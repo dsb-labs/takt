@@ -2,12 +2,16 @@
 package start
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "workload start" command used to resume a stopped workload.
 func Command() *cobra.Command {
@@ -16,13 +20,8 @@ func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start <name>",
 		Short: "Start a stopped workload",
-		Long: "Start a stopped workload.\n\n" +
-			"Starting is asynchronous: the suspension is cleared and the server starts the\n" +
-			"workload's instances on its next pass, from whatever specification is stored.\n" +
-			"A scheduled workload waits for its next occurrence rather than running the\n" +
-			"ones it missed. Starting a workload that is not stopped changes nothing.\n" +
-			"Pass --wait to block until the workload has left pending.",
-		Args: cobra.ExactArgs(1),
+		Long:  usage,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

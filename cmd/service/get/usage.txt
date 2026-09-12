@@ -1,0 +1,5 @@
+Show a single service.
+
+Reports the service's target and the backends it selects: the address of
+every selected instance that is running, passing its check when the
+workload declares one, and not being torn down.
