@@ -162,8 +162,12 @@ keeps trying, which is what a long-running service wants.
 Why a start failed is kept in memory as the workload's `lastError`, reported by
 `takt workload get` until a pass over the workload succeeds. A failed start also
 abandons the host ports takt chose for that instance — the port may be what the
-start is failing on, and the next attempt tries different ones. Pinned ports are
-left alone: they were asked for.
+start is failing on, and the next attempt tries different ones. For the first
+instance that reaches further than the instance: its ports are the workload's
+advertised address and live in the stored specification, so moving them is a
+specification change that replaces every instance and redeploys everything
+reading the address. A later instance's ports move alone. Pinned ports are
+left alone either way: they were asked for.
 
 ## The life of a workload
 
