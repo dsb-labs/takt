@@ -565,8 +565,9 @@ cannot collide with a machine's grants — the lighter form of Kubernetes' OIDC
 username prefix. OIDC never becomes a parallel authorization path: identity
 in, token out, and the policy only ever sees tokens. Kubernetes'
 `system:anonymous` principal was considered for the health and readiness
-exemption and rejected: the anonymous surface is fixed at two endpoints no
-policy could really revoke, and a grant that cannot be revoked is
+exemption and rejected: the anonymous surface is fixed at the handful of
+operations no policy could really revoke — the two probes, the login and
+OIDC endpoints, and `acl init` — and a grant that cannot be revoked is
 documentation pretending to be configuration. The OpenAPI document records
 the exemption instead.
 
@@ -581,8 +582,10 @@ projected token exists to avoid. Kubernetes projects a ServiceAccount token
 into a pod and Nomad mints one per allocation, and both reached the same
 shape for the same reason.
 
-The credential's life is the instance's life. It is revoked when the
-instance is replaced, suspended or deleted, which removes the wart the
+The credential's life follows its form. The environment form is minted per
+instance and revoked with it. The mounted form is minted per workload
+version, shared by the version's instances, and revoked when the version is
+replaced or the workload is suspended or deleted. Both remove the wart the
 hand-managed static token had: nothing revoked it, and the token list
 accumulated credentials for workloads that were gone. Only the form that
 can be rewritten in place — a mounted file naming a signal — carries an
