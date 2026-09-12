@@ -12,6 +12,21 @@ backup rather than a downgrade.
    package — your `/etc/takt/config.toml` is kept.
 3. Start the server.
 
+A package upgrade performs only step 2. The package replaces the binary on
+disk and does not touch the running service, so the server keeps executing
+the old binary until something restarts it. On Ubuntu that something is
+usually there already: `needrestart` hooks into apt and restarts services
+whose binaries an upgrade replaced. A host without it needs the restart run
+by hand:
+
+```sh
+sudo apt-get upgrade
+sudo systemctl restart takt
+```
+
+A restart too many is harmless, so restart when you are not sure whether the
+host did it for you.
+
 Workloads keep running through all three steps. A container keeps running when the
 server stops, and so does an exec process. The restarted server rediscovers both
 rather than duplicating them. See
@@ -66,6 +81,11 @@ The rollback mechanism is a backup. Take one before the upgrade:
 ```sh
 takt admin backup /backups/pre-upgrade.zip
 ```
+
+The archive leaves the keyring out unless `--include-keys` asks for it. The
+rollback this page describes happens on the same host, where the keyring
+stays in place, so the flag is not needed here. A backup that must restore
+onto another host needs it.
 
 To go back: stop the server, restore the backup, and start the older binary. The
 restore procedure, including moving the current database aside first, is in
