@@ -88,7 +88,11 @@ func main() {
 				return err
 			}
 
-			cmd.SetContext(client.NewContext(cmd.Context(), c))
+			// The settings travel beside the client built from them, for the
+			// subcommand that needs the parts a built client no longer shows:
+			// login connects without the stored token and saves the address
+			// it logged in against.
+			cmd.SetContext(client.NewContext(cli.NewContext(cmd.Context(), settings), c))
 
 			return nil
 		},
