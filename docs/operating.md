@@ -86,7 +86,8 @@ takt checks the name each request asks for, which is what closes this. A request
 naming an address or `localhost` is accepted, since an attacker cannot point either at
 a victim's own machine. A request naming anything else has to name something in
 `hosts`, or it is refused. A request from a browser page on another origin is refused
-whatever it names.
+whatever it names, with the same carve-out: a page served from an address
+literal or from `localhost` counts as the operator's own.
 
 A request carrying a body must also declare `Content-Type: application/json`. That is
 already the only body the API reads, and requiring it turns away the form-encoded and
@@ -204,7 +205,7 @@ keys/             the keys secrets are encrypted with, one file each
 exec/state/       what takt started, one directory per exec workload
 exec/workloads/   where exec workloads run, one directory each
 volumes/          one directory per volume
-mounts/files/     the secrets and variables workloads mount, one directory each
+mounts/files/     the secrets, variables and tokens workloads mount, one directory each
 mounts/state/     what takt wrote for each of them
 ```
 
@@ -387,9 +388,14 @@ before it runs the command. A confined workload reaches:
 
 - its own working directory, for reading and writing,
 - each volume it mounts, for reading and writing,
-- each secret or variable it mounts, for reading only,
+- each secret, variable or token it mounts, for reading only,
 - its own command, and the host's system directories,
 - anything `exec.allow-paths` names, for reading only.
+
+There is deliberately no grant for `/tmp`. It is shared by everything running
+as the server's user, so granting it would let one workload read what another
+wrote there. A workload that insists on a temporary directory can be pointed
+at its own with `TMPDIR`.
 
 Everything else is refused, the rest of the data directory included. There is no
 opt-out, and no reduced mode on a host that offers less: confinement that did nothing
@@ -447,7 +453,8 @@ workload's, so the same manifest field would mean something different per runtim
 Container workloads are unaffected, and so is every `exec` workload naming no limits.
 
 Inside the subtree, takt keeps a `main` cgroup holding the server and every unlimited
-workload, and one `takt-<id>-<version>` cgroup per limited workload. The limits are
+workload, and one `takt-<id>-<instance>-<version>` cgroup per limited instance, so a
+workload's instances get cgroups of their own. The limits are
 written before the command starts, so it never runs outside them, and the cgroup is
 removed when the workload stops.
 
@@ -564,7 +571,8 @@ memory: a server restart clears it, and the next pass either fails again and res
 it or succeeds. One error is reported per workload, which for a workload running
 several instances is the most recent failure among them.
 
-At `info` the server is quiet unless something is wrong. Setting the level to `debug`
+At `info` the server reports what changed — a workload started or deleted, an
+image pulled, a secret set — and problems. Setting the level to `debug`
 reports each decision a reconciliation pass makes. Turn it on when a workload is not
 behaving the way its manifest says it should:
 
@@ -633,8 +641,10 @@ With [authentication](acl.md) enabled, the scrape requires the `viewer` role.
 
 A prometheus that runs as a takt workload declares its own identity: mount a
 token in its manifest and point the scrape configuration at the file. The
-server mints the credential as the instance starts, rotates it in place, and
-revokes it with the instance — nothing is created or cleaned up by hand. See
+server mints the credential as the version's first instance starts, shares it
+across the workload's instances, rotates it in place, and revokes it when the
+version is replaced or the workload goes — nothing is created or cleaned up by
+hand. See
 [Workload identity](acl.md#workload-identity).
 
 ```yaml
