@@ -128,6 +128,10 @@ type (
 		events chan driver.Event
 		// Counts the supervising goroutines, so that a caller can wait for them.
 		waits sync.WaitGroup
+
+		// Remembers decoded records, so that observing a workload whose state has
+		// not changed does not re-read its files on every pass.
+		states *stateCache
 	}
 
 	// The Config type contains fields used to construct a Driver.
@@ -182,6 +186,7 @@ func New(config Config) *Driver {
 		// Buffered so that a process ending never blocks its own supervisor on a
 		// reconciler that is mid-pass.
 		events: make(chan driver.Event, 16),
+		states: newStateCache(),
 	}
 }
 
@@ -753,6 +758,8 @@ func (d *Driver) discardRecord(id string, r record) error {
 		return fmt.Errorf("failed to remove workload directory: %w", pathless(err))
 	}
 
+	d.states.forget(r.path)
+
 	return nil
 }
 
@@ -1042,7 +1049,7 @@ func (d *Driver) instances(id string) []driver.Instance {
 	instances := make([]driver.Instance, 0, len(records))
 
 	for _, r := range records {
-		recorded, err := readState(r.path)
+		recorded, err := d.states.read(r.path)
 		if err != nil {
 			// A directory with no readable record describes nothing that can be
 			// converged. Reporting an instance for it would have the reconciler act

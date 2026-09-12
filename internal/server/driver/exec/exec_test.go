@@ -273,6 +273,74 @@ func TestDriver_Observe(t *testing.T) {
 		assert.Equal(t, driver.StateFailed, instances[0].State)
 	})
 
+	t.Run("serves an unchanged record without re-reading it", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		writeInstance(t, root, "example", 1, map[string]any{
+			"pid":        freePID(t),
+			"startTicks": 12345,
+			"specHash":   "hash-one",
+			"version":    1,
+			"startedAt":  time.Now().Format(time.RFC3339Nano),
+		})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+		require.Equal(t, "hash-one", instances[0].SpecHash)
+
+		// Replace the file's bytes with garbage of the same length and put its
+		// modification time back, so its identity is unchanged while its content
+		// is unreadable. A second observation reporting the record anyway proves
+		// it was answered from memory rather than from the file.
+		path := filepath.Join(root, "state", testID, "0", "1", "state.json")
+
+		info, err := os.Stat(path)
+		require.NoError(t, err)
+
+		garbage := bytes.Repeat([]byte("x"), int(info.Size()))
+		require.NoError(t, os.WriteFile(path, garbage, 0o600))
+		require.NoError(t, os.Chtimes(path, info.ModTime(), info.ModTime()))
+
+		instances, err = d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+		assert.Equal(t, "hash-one", instances[0].SpecHash)
+	})
+
+	t.Run("notices a record that was rewritten", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		writeInstance(t, root, "example", 1, map[string]any{
+			"pid":        freePID(t),
+			"startTicks": 12345,
+			"specHash":   "hash-one",
+			"version":    1,
+			"startedAt":  time.Now().Format(time.RFC3339Nano),
+		})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+		require.Equal(t, "hash-one", instances[0].SpecHash)
+
+		// A different length as well as a different value, so the rewrite is
+		// noticed even on a filesystem whose timestamps are too coarse to tell
+		// two quick writes apart.
+		writeInstance(t, root, "example", 1, map[string]any{
+			"pid":        freePID(t),
+			"startTicks": 12345,
+			"specHash":   "hash-two-rewritten",
+			"version":    1,
+			"startedAt":  time.Now().Format(time.RFC3339Nano),
+		})
+
+		instances, err = d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+		assert.Equal(t, "hash-two-rewritten", instances[0].SpecHash)
+	})
+
 	t.Run("skips a directory with no readable record", func(t *testing.T) {
 		d, root := newDriver(t)
 
