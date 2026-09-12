@@ -24,13 +24,13 @@ takt service get <name>                 Show a single service
 takt service delete <name>              Delete a service                     (alias: rm)
 
 takt secret set <name>                  Set a secret's value
-takt secret list                        List secrets                         (alias: ls)
-takt secret get <name>                  Show a single secret
+takt secret list                        List the secrets the server holds    (alias: ls)
+takt secret get <name>                  Get a single secret
 takt secret delete <name>               Delete a secret                      (alias: rm)
 
 takt variable set <name> [value]        Set a variable's value
-takt variable list                      List variables                       (alias: ls)
-takt variable get <name>                Show a single variable
+takt variable list                      List the variables the server holds  (alias: ls)
+takt variable get <name>                Get a single variable
 takt variable delete <name>             Delete a variable                    (alias: rm)
 
 takt token create <principal>           Create a token for a principal
@@ -47,19 +47,22 @@ takt auth logout                        Revoke the credential this client authen
 
 takt admin health                       Check that the server is alive
 takt admin backup <destination>         Write a backup of the node to a file
-takt admin restore <archive> [config]   Restore a node from a backup archive
+takt admin restore <archive> [config-file]  Put a node back from a backup archive
 takt admin rekey                        Re-encrypt every secret under a new key
 ```
 
 Commands are grouped by what they act on, so a verb reads the same whichever noun
 precedes it.
 
-Read commands print indented JSON, so they pipe into `jq`.
+Commands print indented JSON — a read prints what it fetched, and a write prints
+what it created or changed — so they pipe into `jq`. `takt --version` prints the
+version the binary was built as.
 
 ## Connecting to a server
 
 Every command resolves how it connects from three places, most specific first.
-Only `serve` ignores all of them, since it is the server.
+Two commands ignore all of them: `serve`, since it is the server, and
+`admin restore`, which works over the data directory without one running.
 
 1. Flags. `--address` (`-a`) is the URL of the server, defaulting to
    `http://localhost:7373`. `--ca-cert` names a PEM file holding the
@@ -74,8 +77,8 @@ Only `serve` ignores all of them, since it is the server.
 3. A config file, TOML, holding `address`, `token` and `ca_cert`. `--config`
    names it, `TAKT_CONFIG` does the same from the environment, and the default
    is `.takt/config` under the home directory. `takt auth login` writes the
-   token it mints here, which is what makes a login stick for the commands
-   that follow. The file and its directory are created readable only by the
+   token it mints here, beside the address it minted it at, which is what
+   makes a login stick for the commands that follow. The file and its directory are created readable only by the
    owner, because the file holds a credential.
 
 Each field resolves independently, so a token from the file combines with an
@@ -124,6 +127,7 @@ do, and writes nothing.
   "Spec": {
     "version": "v1",
     "name": "example",
+    "count": 1,
     "ports": [
       { "to": 80, "from": 31729, "protocol": "tcp" }
     ],
@@ -173,6 +177,7 @@ had changed. Such a port is printed without a `from`, and its path is listed in
   "Spec": {
     "version": "v1",
     "name": "example",
+    "count": 1,
     "labels": { "app": "web" },
     "ports": [
       { "to": 80, "from": 31729, "protocol": "tcp" },
@@ -234,8 +239,8 @@ and what the runtime reports about each instance.
 
 A workload that names a schedule also reports when it next runs.
 
-A workload that is failing to converge reports why and when, in `lastError` and
-`lastErrorAt`. The error clears once an attempt succeeds, so a workload sitting
+A workload that is failing to converge reports why and when, in `LastError` and
+`LastErrorAt`. The error clears once an attempt succeeds, so a workload sitting
 `pending` with an error is one the server has tried and failed to start — where one
 without is merely slow.
 
@@ -511,7 +516,9 @@ arguments are visible to anything that can list processes on the host, and they 
 in shell history.
 
 The value is taken exactly as given, including a trailing newline. `printf %s` rather
-than `echo` is what keeps one out of it.
+than `echo` is what keeps one out of it. The first mebibyte is what is taken: a
+value larger than that is cut there without an error, so a file that may exceed it
+needs checking before it is given.
 
 **Labels replace rather than merge.** Setting a value without `--label` removes the
 labels the secret had, the way applying a workload manifest without them does. There
@@ -591,7 +598,8 @@ arguments are visible to anything that can list processes and they land in shell
 history, which a variable has no reason to avoid.
 
 A value read from a file or from standard input is taken exactly as given, including
-a trailing newline. Giving both an argument and `--from-file` is refused.
+a trailing newline, up to the same one-mebibyte cut `secret set` applies. Giving
+both an argument and `--from-file` is refused.
 
 **Labels replace rather than merge.** Setting a value without `--label` removes the
 labels the variable had. Labelling one replaces no workload: what redeploys a reader
@@ -679,6 +687,9 @@ Revokes the token with the identifier `token list` reports. Revocation is
 immediate: the next request presenting the credential is refused. Requires the
 `admin` role.
 
+This is the one command that revokes the recovery token, which `auth logout`
+refuses. Doing so re-arms `acl init`, so mint the replacement deliberately.
+
 ## acl init
 
 ```sh
@@ -720,14 +731,20 @@ takt auth login
 takt auth login --callback-port 9000 --scopes openid,email,profile,groups
 ```
 
+| Flag | Description |
+|---|---|
+| `--callback-port` | The loopback port the issuer sends the browser back to. Default `8250`. |
+| `--scopes` | The scopes to request from the issuer. Default `openid,email,profile`. |
+
 Logs in through the server's OIDC issuer and writes the minted short-lived
-token to the config file. The command asks the server who its issuer is, so
-it needs no OIDC flags, and runs the authorization code flow against a
-loopback callback — open the printed URL in a browser. The server performs
-the code exchange, because the exchange is what needs the issuer's client
-secret, so the secret never reaches the CLI. The issuer must permit the
-redirect URI `http://127.0.0.1:8250/oidc/callback`, or the one
-`--callback-port` names.
+token to the config file, beside the address it logged in against. The
+command asks the server who its issuer is, so it needs no OIDC flags, and
+runs the authorization code flow against a loopback callback — open the
+printed URL in a browser. The command gives the browser five minutes before
+it gives up. The server performs the code exchange, because the exchange is
+what needs the issuer's client secret, so the secret never reaches the CLI.
+The issuer must permit the redirect URI
+`http://127.0.0.1:8250/oidc/callback`, or the one `--callback-port` names.
 
 ## auth whoami
 
@@ -789,7 +806,8 @@ noticed later, if at all.
 
 A destination that already exists is refused rather than replaced. The file is
 written readable only by its owner, because it holds every workload's specification,
-environment included.
+environment included. A backup that fails partway removes the partial file it
+wrote, so a destination that exists afterwards is a backup that finished.
 
 The path and the size are printed as JSON. What the backup does not cover is printed
 to standard error, so the two do not mix when the output is piped.
@@ -833,7 +851,10 @@ restored database perfectly happily, and the node then comes up holding state th
 quietly not what was backed up.
 
 Nothing else in the data directory is touched. An archive holding an entry this
-command has nowhere to put is refused in full, before anything is written.
+command has nowhere to put is refused in full, before anything is written. The
+files mounted secrets were written to and the exec runtime's process records are
+deliberately not restored: both describe a host that no longer exists, and the
+first pass after startup re-derives them.
 
 A database already in the data directory is refused rather than replaced, as is a key
 the keyring already answers to under the same identifier. Move a database aside
