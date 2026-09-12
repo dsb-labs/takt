@@ -1,0 +1,4 @@
+Delete a service.
+
+The workloads the service selected keep running. What stops is the
+service reporting their addresses.

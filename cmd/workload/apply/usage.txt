@@ -1,0 +1,8 @@
+Create or update a workload from a manifest file.
+
+Applying the same manifest twice is a no-op: the workload's version only
+changes when its specification does.
+
+Use --dry-run to report what applying the manifest would do without doing
+any of it. The report says whether the workload would be created, whether
+its running instances would be replaced, and which fields would change.

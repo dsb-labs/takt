@@ -1,0 +1,21 @@
+Put a node back from a backup archive.
+
+Run this with the server stopped. Unlike the other commands here this
+one talks to no server at all: it reads the same configuration file
+"takt serve" does, works over the data directory directly, and refuses
+to run while something is listening on the configured address.
+
+The database is written into the data directory and the keyring into
+wherever the configuration puts it, along with removing any stale
+write-ahead log. Nothing else in the data directory is touched. Neither
+the mounted secret files nor the recorded exec processes are restored:
+both describe a host that no longer exists, and the first pass after
+startup re-derives them.
+
+A database already in the data directory is refused rather than
+replaced. Move it aside first, deliberately.
+
+Volume data is not in a backup, so it is not restored here. What the
+report names is what a restored node still needs: the volumes whose
+data has to be copied back under the identifier they are found by, and
+the keys the secrets are sealed under that the keyring does not hold.

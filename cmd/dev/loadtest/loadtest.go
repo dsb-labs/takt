@@ -2,6 +2,7 @@
 package loadtest
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,9 @@ import (
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "dev loadtest" command used to drive a server through a
 // scenario.
 func Command() *cobra.Command {
@@ -23,21 +27,8 @@ func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "loadtest <scenario>",
 		Short: "Drive a server through a load test scenario",
-		Long: "Drive a server through a load test scenario.\n\n" +
-			"A scenario describes the shape of a fleet — how many workloads, and what\n" +
-			"proportion of them publish ports, mount secrets, fail, or are checked.\n" +
-			"The workloads themselves are this command's own and do as little as\n" +
-			"possible, so a run measures takt rather than what it was asked to run.\n\n" +
-			"The report is JSON on standard output, and the command says nothing\n" +
-			"else. A run that found problems says so through its exit status, and\n" +
-			"what it found is in the report.\n\n" +
-			"Exits non-zero when a request failed, a workload never ran, or something\n" +
-			"was left behind. Latency is reported rather than judged: how fast a\n" +
-			"machine is says nothing about whether the code is right.\n\n" +
-			"Everything the run creates is named after --prefix and removed at the\n" +
-			"end, so two runs on one server neither collide nor tear down each\n" +
-			"other's work.",
-		Args: cobra.ExactArgs(1),
+		Long:  usage,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, err := os.Open(args[0])
 			if err != nil {

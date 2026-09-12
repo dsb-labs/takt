@@ -1,0 +1,9 @@
+Delete a workload and stop its work.
+
+Deletion is asynchronous: the workload is reported as terminating while its
+instances are stopped, and disappears once nothing is left running for it.
+Pass --wait to block until the teardown has finished.
+
+A workload another one references is refused, and the error names the workloads
+reading its address. Pass --force to delete it anyway. Those workloads are then
+redeployed and report the reference they can no longer resolve.

@@ -1,0 +1,11 @@
+List volumes.
+
+Each volume reports where its data is and which workloads mount it. A
+volume nothing mounts is one that can be deleted without forcing.
+
+Repeat --query to narrow the result. A volume has to match all of them.
+A query is a JSON path into the volume's labels and the value it must
+hold:
+
+  takt volume list --query '$.labels.app=web'
+  takt volume list -q '$.labels.app=web' -q '$.labels.env=prod'

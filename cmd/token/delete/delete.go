@@ -2,6 +2,7 @@
 package delete
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -9,18 +10,17 @@ import (
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "token delete" command used to revoke a token.
 func Command() *cobra.Command {
 	return &cobra.Command{
 		Use:     "delete <id>",
 		Aliases: []string{"rm"},
 		Short:   "Revoke a token",
-		Long: "Revoke a token by the identifier \"token list\" reports.\n\n" +
-			"Revocation is immediate: the next request presenting the credential is\n" +
-			"refused. The recovery token can be revoked here too, which is safe as\n" +
-			"long as an admin credential remains — and recoverable through the reset\n" +
-			"file if not.",
-		Args: cobra.ExactArgs(1),
+		Long:    usage,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

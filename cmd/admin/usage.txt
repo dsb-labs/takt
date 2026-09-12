@@ -1,0 +1,5 @@
+Operate on the node itself.
+
+These commands act on the state takt keeps rather than on the workloads
+it runs. What they touch is shared by every workload on the node, so a
+maintenance window is usually the right time for them.

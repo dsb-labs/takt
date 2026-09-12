@@ -2,6 +2,7 @@
 package list
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -9,6 +10,9 @@ import (
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "workload list" command used to list the workloads known to the takt
 // server.
@@ -19,17 +23,8 @@ func Command() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List workloads",
-		Long: "List workloads.\n\n" +
-			"Repeat --query to narrow the result. A workload has to match all of them.\n" +
-			"A query is a JSON path into the workload's specification and the value it\n" +
-			"must hold:\n\n" +
-			"  takt workload list --query '$.labels.app=web'\n" +
-			"  takt workload list -q '$.labels.app=web' -q '$.labels.env=prod'\n" +
-			"  takt workload list -q '$.container.image=nginx:1.27-alpine'\n\n" +
-			"Values are compared as text, so a number is matched by its digits\n" +
-			"($.ports[0].to=80). A boolean is stored as 1 or 0 and has to be\n" +
-			"written that way.",
-		Args: cobra.NoArgs,
+		Long:    usage,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())
 

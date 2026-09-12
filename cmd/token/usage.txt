@@ -1,0 +1,8 @@
+Create, list and revoke tokens.
+
+A token is the credential an API caller presents. It binds to a principal
+name, and the policy applied with "takt acl apply" decides what that
+principal may do. The server stores only a hash, so a created token is
+printed once and never again.
+
+These commands require the admin role.

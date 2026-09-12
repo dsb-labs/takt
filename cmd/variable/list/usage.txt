@@ -1,0 +1,13 @@
+List the variables the server holds, with the value of each one and the
+workloads reading it.
+
+The values are reported, unlike a secret's. Reviewing what a fleet is
+configured with is the reason to choose a variable, so a listing that
+withheld them would defeat the point.
+
+Repeat --query to narrow the result. A variable has to match all of them.
+A query is a JSON path into the variable's labels and the value it must
+hold:
+
+  takt variable list --query '$.labels.app=web'
+  takt variable list -q '$.labels.app=web' -q '$.labels.env=prod'

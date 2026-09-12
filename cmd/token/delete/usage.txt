@@ -1,0 +1,6 @@
+Revoke a token by the identifier "token list" reports.
+
+Revocation is immediate: the next request presenting the credential is
+refused. The recovery token can be revoked here too, which is safe as
+long as an admin credential remains — and recoverable through the reset
+file if not.

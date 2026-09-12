@@ -1,0 +1,6 @@
+Log in, inspect and revoke your own credential.
+
+Login exchanges an OIDC identity for a short-lived token and writes it
+to the config file, so the commands that follow present it without
+ceremony. Whoami reports who the server thinks you are. Logout revokes
+whatever credential authenticated the call.

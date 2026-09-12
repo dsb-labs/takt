@@ -1,0 +1,5 @@
+Create, inspect and delete volumes.
+
+A volume is storage a workload mounts, with a lifetime of its own. It is
+created before the workload that mounts it and outlives that workload, so
+deleting a workload never destroys what it stored.

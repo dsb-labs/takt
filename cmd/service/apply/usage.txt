@@ -1,0 +1,6 @@
+Create or update a service from a manifest file.
+
+The stored selection becomes what the manifest says, however many times
+it is applied. The workloads the target selects do not have to exist: a
+service applied ahead of its workloads reports no backends until they
+arrive.

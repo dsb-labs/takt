@@ -1,0 +1,13 @@
+Re-encrypt every secret under a new key.
+
+The server generates a key, re-seals every secret under it, and starts
+using it. This is the way off the key a node was started with, which
+matters when that key leaks and as ordinary hygiene.
+
+No workload is redeployed. A rekey changes how a value is stored, not
+what it is, so no secret's revision moves and nothing reading one is
+replaced.
+
+Back the keyring up afterwards. The copy taken before this no longer
+opens anything the node holds. The key that was replaced is kept, since
+it still opens the backups taken before now.

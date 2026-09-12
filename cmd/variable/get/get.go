@@ -2,6 +2,7 @@
 package get
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -10,17 +11,17 @@ import (
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "variable get" command used to read a single variable.
 func Command() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "get <name>",
 		Short: "Get a single variable",
-		Long: "Get a single variable, with its value and the workloads reading it.\n\n" +
-			"The value is part of the output, where a secret's is not. Being able to\n" +
-			"confirm what a workload is configured with is the reason to choose a\n" +
-			"variable.",
-		Args: cobra.ExactArgs(1),
+		Long:  usage,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

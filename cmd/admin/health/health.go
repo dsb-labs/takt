@@ -3,6 +3,7 @@ package health
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"time"
 
@@ -11,6 +12,9 @@ import (
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "admin health" command used to check that a server is alive.
 func Command() *cobra.Command {
 	var wait time.Duration
@@ -18,14 +22,8 @@ func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "health",
 		Short: "Check that the server is alive",
-		Long: "Check that the server is alive.\n\n" +
-			"The command asks the server's health endpoint and exits zero when it\n" +
-			"answers. It prints nothing on success: the exit code is the signal,\n" +
-			"which is what a script conditions on.\n\n" +
-			"With --wait, the endpoint is asked once a second until it answers or\n" +
-			"the duration runs out. This is for the moment after starting a server,\n" +
-			"when the next step needs it listening.",
-		Args: cobra.NoArgs,
+		Long:  usage,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())
 

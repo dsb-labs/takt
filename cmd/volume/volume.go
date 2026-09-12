@@ -3,6 +3,7 @@
 package volume
 
 import (
+	_ "embed"
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/cmd/volume/apply"
@@ -11,16 +12,16 @@ import (
 	"github.com/dsb-labs/takt/cmd/volume/list"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "volume" command, which does nothing on its own and holds the
 // commands that act on a volume.
 func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "volume",
 		Short: "Create, inspect and delete volumes",
-		Long: "Create, inspect and delete volumes.\n\n" +
-			"A volume is storage a workload mounts, with a lifetime of its own. It is\n" +
-			"created before the workload that mounts it and outlives that workload, so\n" +
-			"deleting a workload never destroys what it stored.",
+		Long:  usage,
 	}
 
 	cmd.AddCommand(

@@ -1,0 +1,6 @@
+Get the canonical current policy document.
+
+Before any apply, the policy is the empty version-v1 document, which
+grants nothing to anyone. The output is valid input to "acl apply",
+since YAML reads JSON, so the current policy can be captured into the
+file a git repository tracks.

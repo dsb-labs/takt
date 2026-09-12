@@ -1,0 +1,5 @@
+Create, inspect and delete services.
+
+A service selects workload instances by their workload's labels and
+reports the addresses of the ones fit to serve, so an external load
+balancer can spread requests across them.

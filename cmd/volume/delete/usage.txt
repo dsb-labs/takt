@@ -1,0 +1,6 @@
+Delete a volume and the data it holds.
+
+This is the only thing in takt that destroys stored data. A volume a
+workload mounts is refused, and the workloads holding it are named; pass
+--force to remove it anyway, which leaves those workloads running with a
+mount that no longer resolves.

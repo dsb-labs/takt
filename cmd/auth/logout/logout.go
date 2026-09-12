@@ -2,6 +2,7 @@
 package logout
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -10,17 +11,17 @@ import (
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "auth logout" command used to revoke the credential
 // this client authenticated with.
 func Command() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
 		Short: "Revoke the credential this client authenticated with",
-		Long: "Revoke the credential this client authenticated with, whatever its kind,\n" +
-			"and remove it from the config file. Self-revocation is always safe, so\n" +
-			"this needs no role. The one refusal is the recovery token, whose\n" +
-			"revocation path is the reset file in the server's data directory.",
-		Args: cobra.NoArgs,
+		Long:  usage,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())
 

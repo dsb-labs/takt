@@ -1,0 +1,4 @@
+Show a single volume.
+
+Reports where the volume's data is on the host running the server, and the
+workloads currently mounting it.

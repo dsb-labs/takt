@@ -3,6 +3,7 @@
 package auth
 
 import (
+	_ "embed"
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/cmd/auth/login"
@@ -10,17 +11,16 @@ import (
 	"github.com/dsb-labs/takt/cmd/auth/whoami"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "auth" command, which does nothing on its own and
 // holds the commands that act on the caller's authentication.
 func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
 		Short: "Log in, inspect and revoke your own credential",
-		Long: "Log in, inspect and revoke your own credential.\n\n" +
-			"Login exchanges an OIDC identity for a short-lived token and writes it\n" +
-			"to the config file, so the commands that follow present it without\n" +
-			"ceremony. Whoami reports who the server thinks you are. Logout revokes\n" +
-			"whatever credential authenticated the call.",
+		Long:  usage,
 	}
 
 	cmd.AddCommand(

@@ -2,12 +2,16 @@
 package delete
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "secret delete" command used to remove a secret.
 func Command() *cobra.Command {
@@ -17,12 +21,8 @@ func Command() *cobra.Command {
 		Use:     "delete <name>",
 		Aliases: []string{"rm"},
 		Short:   "Delete a secret",
-		Long: "Delete a secret.\n\n" +
-			"A secret a workload reads is refused, and the workloads reading it are\n" +
-			"named; pass --force to remove it anyway. Those workloads keep running until\n" +
-			"something replaces them, and then cannot start until the secret exists\n" +
-			"again.",
-		Args: cobra.ExactArgs(1),
+		Long:    usage,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

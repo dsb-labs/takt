@@ -1,0 +1,5 @@
+Get a single variable, with its value and the workloads reading it.
+
+The value is part of the output, where a secret's is not. Being able to
+confirm what a workload is configured with is the reason to choose a
+variable.

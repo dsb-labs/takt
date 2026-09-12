@@ -2,6 +2,7 @@
 package create
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -21,20 +22,17 @@ type Result struct {
 	Token client.Token
 }
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "token create" command used to mint a token for a
 // principal.
 func Command() *cobra.Command {
 	return &cobra.Command{
 		Use:   "create <principal>",
 		Short: "Create a token for a principal",
-		Long: "Create a token for a principal.\n\n" +
-			"The principal is the name the policy grants roles to. By convention humans\n" +
-			"are emails and machines are bare names, so an identity provider's username\n" +
-			"cannot collide with a machine's grants.\n\n" +
-			"The credential is printed once and never stored. The principal need not be\n" +
-			"granted anything yet: merge the grant, then hand over the token, in\n" +
-			"whichever order onboarding runs.",
-		Args: cobra.ExactArgs(1),
+		Long:  usage,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

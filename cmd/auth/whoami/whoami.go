@@ -2,6 +2,7 @@
 package whoami
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -10,17 +11,17 @@ import (
 	"github.com/dsb-labs/takt/pkg/client"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "auth whoami" command used to report the caller's own
 // identity.
 func Command() *cobra.Command {
 	return &cobra.Command{
 		Use:   "whoami",
 		Short: "Report who the server thinks you are",
-		Long: "Report the principal, role and groups the server resolves your credential\n" +
-			"to. It needs authentication but no role, so a principal the policy grants\n" +
-			"nothing yet sees exactly that state — which is what onboarding looks like\n" +
-			"from the inside.",
-		Args: cobra.NoArgs,
+		Long:  usage,
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())
 

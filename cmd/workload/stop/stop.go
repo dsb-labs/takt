@@ -2,12 +2,16 @@
 package stop
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "workload stop" command used to suspend a workload and hold
 // it down.
@@ -17,13 +21,8 @@ func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "stop <name>",
 		Short: "Stop a workload and hold it down",
-		Long: "Stop a workload and hold it down.\n\n" +
-			"Stopping is asynchronous: the workload is marked as suspended and the server\n" +
-			"stops its instances afterwards. Suspension survives a server restart and holds\n" +
-			"until \"workload start\" clears it. The specification and its version are\n" +
-			"untouched, so starting the workload resumes it rather than replacing it.\n" +
-			"Pass --wait to block until nothing is running for it.",
-		Args: cobra.ExactArgs(1),
+		Long:  usage,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
 

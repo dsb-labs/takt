@@ -2,6 +2,7 @@
 package list
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 
@@ -9,6 +10,9 @@ import (
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "variable list" command used to list the variables the server
 // holds.
@@ -19,17 +23,8 @@ func Command() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List the variables the server holds",
-		Long: "List the variables the server holds, with the value of each one and the\n" +
-			"workloads reading it.\n\n" +
-			"The values are reported, unlike a secret's. Reviewing what a fleet is\n" +
-			"configured with is the reason to choose a variable, so a listing that\n" +
-			"withheld them would defeat the point.\n\n" +
-			"Repeat --query to narrow the result. A variable has to match all of them.\n" +
-			"A query is a JSON path into the variable's labels and the value it must\n" +
-			"hold:\n\n" +
-			"  takt variable list --query '$.labels.app=web'\n" +
-			"  takt variable list -q '$.labels.app=web' -q '$.labels.env=prod'",
-		Args: cobra.NoArgs,
+		Long:    usage,
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())
 

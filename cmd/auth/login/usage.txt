@@ -1,0 +1,14 @@
+Log in through the server's OIDC issuer and store the minted token in the
+config file, beside the address of the server that minted it.
+
+The command asks the server who its issuer is, runs the authorization
+code flow against a loopback callback, and hands the code to the server
+to exchange for a short-lived client token — the exchange is what needs
+the issuer's client secret, so the secret stays on the server. Open the
+printed URL in a browser when one does not open on its own. The issuer
+must permit the redirect URI http://127.0.0.1:8250/oidc/callback, or
+the one --callback-port names.
+
+The token lands in the config file rather than on stdout, because a
+child process cannot set an environment variable in its parent shell
+and every login ending in copy-paste ceremony would be the alternative.

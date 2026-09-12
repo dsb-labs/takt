@@ -1,0 +1,24 @@
+Set a variable's value, given as an argument, read from a file, or read
+from standard input.
+
+The value may be an argument here, where a secret's may not. Arguments are
+visible to anything that can list processes on the host and they land in
+shell history, which is exactly what a secret has to avoid and what a
+variable has no reason to.
+
+Setting a variable to the value it already holds does nothing, so a script
+that sets every variable on every run does not restart the workloads reading
+them. A value that did change replaces those workloads, and reaches them as
+they start.
+
+A value read from a file or from standard input is taken exactly as given,
+including any trailing newline:
+
+  takt variable set log-level debug
+  takt variable set motd --from-file ./motd.txt
+  printf %s debug | takt variable set log-level
+
+Labels are replaced, not merged, the way a workload manifest replaces a
+workload's. Setting a value without --label removes the labels the variable
+had. Labelling one replaces no workload: what redeploys a reader is the
+value it reads.

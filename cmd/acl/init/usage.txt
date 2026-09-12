@@ -1,0 +1,9 @@
+Mint the recovery token, exactly once.
+
+The recovery token sits above policy and exists for init and lockout
+recovery, not for daily use. Apply the first policy with it, or create
+the first admin token, and then put it somewhere safe.
+
+A second init is refused for as long as a recovery token exists. Losing
+the token is recovered at the host: write a file named acl.reset into
+the server's data directory, restart the server, and init works again.
