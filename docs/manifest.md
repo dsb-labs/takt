@@ -54,7 +54,7 @@ container:
 | `count` | no | How many instances to run. One when omitted. See [Count](#count). |
 | `labels` | no | Key-value pairs attached to the workload. See [Labels](#labels). |
 | `ports` | no | The ports the workload publishes. |
-| `env` | no | Environment variables set for the workload. A value may reference a secret, a variable or a token. |
+| `env` | no | Environment variables set for the workload. A value may reference a secret, a variable, a token or another workload's address. |
 | `volumes` | no | What the workload mounts — a volume, a secret, a variable, a token or a host path — and where it finds each one. |
 | `restart` | no | What happens when the workload ends. |
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
@@ -82,7 +82,7 @@ written.
 Keys starting with `takt.` are refused. The server writes its own labels under that
 prefix, and refusing yours is better than silently overwriting it.
 
-A value is free text without control characters, up to 256 bytes. An empty value
+A value is free text without control characters, valid UTF-8, up to 256 bytes. An empty value
 is allowed. Up to 32 labels may be carried.
 
 Volumes, secrets and variables carry labels under the same rules, so there is one
@@ -259,7 +259,7 @@ reports it back, so you never have to invent unique numbers by hand.
 
 ```sh
 takt workload get example | jq '.Ports'
-[ { "Name": "http", "To": 80, "From": 20000, "Protocol": "tcp", "Dynamic": true } ]
+[ { "Name": "http", "To": 80, "From": 20000, "Protocol": "tcp", "Dynamic": true, "Instance": 0 } ]
 ```
 
 An allocated port is sticky. It stays the same across restarts and image changes, so
@@ -341,8 +341,8 @@ reached at one address whichever protocol a caller uses.
 ```sh
 takt workload get dns | jq '.Ports'
 [
-  { "To": 53, "From": 20000, "Protocol": "tcp", "Dynamic": true },
-  { "To": 53, "From": 20000, "Protocol": "udp", "Dynamic": true }
+  { "To": 53, "From": 20000, "Protocol": "tcp", "Dynamic": true, "Instance": 0 },
+  { "To": 53, "From": 20000, "Protocol": "udp", "Dynamic": true, "Instance": 0 }
 ]
 ```
 
@@ -613,9 +613,11 @@ exec:
   command: ["/usr/local/bin/backup", "--target", "var/lib/example"]
 ```
 
-Resolving the absolute path there would mean confining the process to its own
-directory, which needs privileges takt does not have. An absolute path in a command
-therefore reaches the host's own root, wherever the volume was mounted.
+Resolving the absolute path there would mean giving the process a root of its own,
+which is not how an exec workload runs. An absolute path in a command is resolved
+against the host's own root, wherever the volume was mounted — subject to
+[confinement](operating.md#confinement), which decides what of the host the
+process may reach at all.
 
 Two mounts cannot name the same volume, or the same path. A trailing slash makes no
 difference, so `/data` and `/data/` are the same mount.
@@ -840,7 +842,7 @@ health:
 |---|---|---|---|
 | `http` | one of | | The path to request. Any 2xx response passes. |
 | `tcp` | one of | | Check that the port accepts a connection. |
-| `port` | no | | Which published port to check, by name or by number. Needed when more than one is published. |
+| `port` | no | | Which published port to check, by name or by number. Needed when more than one TCP port is published — UDP ports do not count, since a check cannot use one. |
 | `interval` | no | `10s` | How often to check. |
 | `timeout` | no | `2s` | How long one check may take. |
 | `retries` | no | `3` | Consecutive failures that mark the workload failed. |
@@ -889,7 +891,9 @@ resources:
 
 A limit that is not named is not applied. There is no default ceiling: a limit takt
 invented would be wrong for most workloads, and a workload killed by a limit nobody
-set is worse than one that was never limited. Unset means unlimited.
+set is worse than one that was never limited. Unset means unlimited. A `resources`
+block that names no limit at all is refused, because an empty block asks for
+nothing and probably meant to ask for something.
 
 `memory` is a hard cap, and it covers swap. A workload that reaches it is killed
 rather than allowed to swap past it, so the limit means what it says. The restart
@@ -913,7 +917,7 @@ schedule:
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `cron` | yes | | A cron expression, in the standard five-field form. |
+| `cron` | yes | | A cron expression: the standard five-field form, a descriptor such as `@daily` or `@hourly`, or `@every` with a duration. |
 | `overlap` | no | `replace` | What to do when an occurrence is due and the previous run has not finished. |
 
 A scheduled workload runs at the times its expression names and waits in between. It
@@ -948,4 +952,5 @@ stops answering, and a scheduled workload is expected to end.
 A scheduled workload cannot run more than one instance, because N copies of a cron
 job firing at once is almost never what a schedule means.
 
-`takt workload get` reports when a scheduled workload next runs, once it has run at least once.
+`takt workload get` reports when a scheduled workload next runs. Before the first
+run the occurrence is counted from when the workload was applied.
