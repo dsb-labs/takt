@@ -95,6 +95,12 @@ type (
 		pullMux    sync.Mutex
 		pulls      map[string]*pull
 		pullEvents chan driver.Event
+
+		// The answers ended containers' inspects gave, keyed by container ID.
+		// Nothing an inspect reads changes once a container has ended, so each
+		// is asked once and the answer dropped when the container is removed.
+		endedMux sync.Mutex
+		ended    map[string]inspection
 	}
 
 	// The pull type records how a background image pull is going, and how it
@@ -102,6 +108,14 @@ type (
 	pull struct {
 		done bool
 		err  error
+	}
+
+	// The inspection type holds the facts about a container that only a full
+	// inspection carries, in the terms an observation reports.
+	inspection struct {
+		exitCode  int
+		startedAt time.Time
+		health    string
 	}
 
 	// The Config type contains fields used to construct a Driver.
@@ -168,6 +182,7 @@ func New(config Config) *Driver {
 		tracer:      telemetry.Tracer(config.TracerProvider, scope),
 		instruments: newInstruments(telemetry.Meter(config.MeterProvider, scope)),
 		pulls:       make(map[string]*pull),
+		ended:       make(map[string]inspection),
 		// Buffered so a pull finishing when nothing watches does not block it.
 		// A dropped event costs a tick of latency, not correctness.
 		pullEvents: make(chan driver.Event, 16),
@@ -422,6 +437,10 @@ func (d *Driver) remove(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to remove container: %w", err)
 	}
 
+	d.endedMux.Lock()
+	delete(d.ended, id)
+	d.endedMux.Unlock()
+
 	return nil
 }
 
@@ -504,6 +523,12 @@ func (d *Driver) observe(ctx context.Context, name string, health bool) ([]drive
 	containers, err := d.containers(ctx, name)
 	if err != nil {
 		return nil, err
+	}
+
+	// Only an unfiltered listing can say a container is gone rather than merely
+	// out of scope, so it is the one that trims what the driver remembers.
+	if name == "" {
+		d.forget(containers)
 	}
 
 	superseded := supersededBy(containers)
@@ -714,24 +739,19 @@ func (d *Driver) containers(ctx context.Context, workload string) ([]container.S
 // detail but shouldn't fail the whole observation, and the container may simply
 // have been removed between listing and inspecting.
 func (d *Driver) inspect(ctx context.Context, instance *driver.Instance) {
-	details, err := d.client.ContainerInspect(ctx, instance.ID)
-	if err != nil {
-		d.logger.With("container", instance.ID, "error", err).Debug("failed to inspect container")
+	details, ok := d.inspection(ctx, instance)
+	if !ok {
 		return
 	}
 
-	if details.State == nil {
-		return
+	if details.health != "" {
+		instance.RuntimeHealth = details.health
 	}
 
-	if details.State.Health != nil {
-		instance.RuntimeHealth = details.State.Health.Status
-	}
+	instance.ExitCode = details.exitCode
 
-	instance.ExitCode = details.State.ExitCode
-
-	if startedAt, err := time.Parse(time.RFC3339Nano, details.State.StartedAt); err == nil {
-		instance.StartedAt = startedAt
+	if !details.startedAt.IsZero() {
+		instance.StartedAt = details.startedAt
 	}
 
 	// A container that exited non-zero is a failure however Docker labels its
@@ -739,6 +759,75 @@ func (d *Driver) inspect(ctx context.Context, instance *driver.Instance) {
 	if instance.State == driver.StateExited && instance.ExitCode != 0 {
 		instance.State = driver.StateFailed
 	}
+}
+
+// inspection answers what an inspect of the container would, asking the daemon
+// only when the driver does not already know.
+//
+// The answer for a container that has ended is remembered: its exit code, start
+// time, and final health verdict cannot change once nothing is running, so asking
+// again on every pass paid a round-trip for a fact the driver already held. A
+// retained container lives until its instance's next replacement, which is every
+// pass of a workload crashing in a loop.
+func (d *Driver) inspection(ctx context.Context, instance *driver.Instance) (inspection, bool) {
+	ended := instance.State == driver.StateExited || instance.State == driver.StateFailed
+
+	if ended {
+		d.endedMux.Lock()
+		remembered, ok := d.ended[instance.ID]
+		d.endedMux.Unlock()
+
+		if ok {
+			return remembered, true
+		}
+	}
+
+	details, err := d.client.ContainerInspect(ctx, instance.ID)
+	if err != nil {
+		d.logger.With("container", instance.ID, "error", err).Debug("failed to inspect container")
+		return inspection{}, false
+	}
+
+	if details.State == nil {
+		return inspection{}, false
+	}
+
+	answer := inspection{exitCode: details.State.ExitCode}
+
+	if details.State.Health != nil {
+		answer.health = details.State.Health.Status
+	}
+
+	if startedAt, err := time.Parse(time.RFC3339Nano, details.State.StartedAt); err == nil {
+		answer.startedAt = startedAt
+	}
+
+	if ended {
+		d.endedMux.Lock()
+		d.ended[instance.ID] = answer
+		d.endedMux.Unlock()
+	}
+
+	return answer, true
+}
+
+// forget drops the remembered answers for containers a full listing no longer
+// shows, which is how a removal this driver did not make — an operator's docker
+// rm — stops leaving an answer behind forever.
+func (d *Driver) forget(containers []container.Summary) {
+	listed := make(map[string]struct{}, len(containers))
+	for _, c := range containers {
+		listed[c.ID] = struct{}{}
+	}
+
+	d.endedMux.Lock()
+	defer d.endedMux.Unlock()
+
+	maps.DeleteFunc(d.ended, func(id string, _ inspection) bool {
+		_, ok := listed[id]
+
+		return !ok
+	})
 }
 
 // ensureImage makes the named image available under the workload's pull policy.

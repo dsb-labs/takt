@@ -1208,6 +1208,76 @@ func TestDriver_Observe(t *testing.T) {
 		assert.False(t, instances[0].StartedAt.IsZero())
 	})
 
+	t.Run("inspects an ended container once across passes", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		summary := dockercontainer.Summary{
+			ID:     "container-one",
+			State:  dockercontainer.StateExited,
+			Labels: map[string]string{docker.LabelWorkload: "example"},
+		}
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).
+			Return([]dockercontainer.Summary{summary}, nil).Times(2)
+
+		// Once, deliberately: how an ended container ended cannot change, so the
+		// second pass must reuse the first pass's answer.
+		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				State: &dockercontainer.State{
+					Status:    dockercontainer.StateExited,
+					ExitCode:  137,
+					StartedAt: "2026-08-18T12:00:00Z",
+				},
+			},
+		}, nil).Once()
+
+		d := testDriver(t, client)
+
+		for range 2 {
+			instances, err := d.Observe(t.Context())
+			require.NoError(t, err)
+			require.Len(t, instances, 1)
+
+			assert.Equal(t, driver.StateFailed, instances[0].State)
+			assert.Equal(t, 137, instances[0].ExitCode)
+			assert.False(t, instances[0].StartedAt.IsZero())
+		}
+	})
+
+	t.Run("asks afresh for a container that was removed and replaced", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		summary := dockercontainer.Summary{
+			ID:     "container-one",
+			State:  dockercontainer.StateExited,
+			Labels: map[string]string{docker.LabelWorkload: "example"},
+		}
+
+		// The container is listed, gone, then listed again under the same ID. The
+		// pass that saw it gone must drop the remembered answer, so the third pass
+		// pays a second inspect rather than reporting a corpse's facts for new work.
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).
+			Return([]dockercontainer.Summary{summary}, nil).Once()
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).
+			Return(nil, nil).Once()
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).
+			Return([]dockercontainer.Summary{summary}, nil).Once()
+
+		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
+			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
+				State: &dockercontainer.State{Status: dockercontainer.StateExited, ExitCode: 1},
+			},
+		}, nil).Times(2)
+
+		d := testDriver(t, client)
+
+		for range 3 {
+			_, err := d.Observe(t.Context())
+			require.NoError(t, err)
+		}
+	})
+
 	t.Run("keeps a clean exit as exited", func(t *testing.T) {
 		client := NewMockClient(t)
 
