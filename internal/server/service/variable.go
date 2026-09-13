@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
@@ -66,6 +67,7 @@ type (
 	VariableService struct {
 		logger    *slog.Logger
 		variables VariableRepository
+		events    WorkloadEventRepository
 		rehash    func(ctx context.Context, workload string) error
 	}
 
@@ -76,6 +78,9 @@ type (
 		Logger *slog.Logger
 		// The repository holding the variables.
 		Variables VariableRepository
+		// The repository the service records events in, against each workload a
+		// changed variable redeploys. May be nil, in which case nothing is recorded.
+		Events WorkloadEventRepository
 		// Called for each workload referencing a variable whose value changed, so that
 		// its specification hash moves and the reconciler replaces its instances. May
 		// be nil, in which case a change does not redeploy anything.
@@ -88,6 +93,7 @@ func NewVariableService(config VariableServiceConfig) *VariableService {
 	return &VariableService{
 		logger:    config.Logger.With("component", "service"),
 		variables: config.Variables,
+		events:    config.Events,
 		rehash:    config.Rehash,
 	}
 }
@@ -276,6 +282,10 @@ func (s *VariableService) redeploy(ctx context.Context, name string) error {
 	// left behind.
 	var failed []error
 	for _, workload := range usedBy {
+		// Recorded here rather than by the rehash, which recomputes against every
+		// value a workload reads and so cannot say which of them moved.
+		record(ctx, s.logger, s.events, workload, event.VariableChanged, event.Fields{Name: name})
+
 		if err = s.rehash(ctx, workload); err != nil {
 			failed = append(failed, fmt.Errorf("failed to redeploy workload %s: %w", workload, err))
 		}

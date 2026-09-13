@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
@@ -107,6 +108,7 @@ type (
 	SecretService struct {
 		logger  *slog.Logger
 		secrets SecretRepository
+		events  WorkloadEventRepository
 		rehash  func(ctx context.Context, workload string) error
 
 		// Guards the cipher and the identifier naming it, which move together and
@@ -134,6 +136,9 @@ type (
 		// The identifier of the key the cipher holds, recorded against every
 		// secret the service seals so that the database says which key opens it.
 		KeyID string
+		// The repository the service records events in, against each workload a
+		// changed secret redeploys. May be nil, in which case nothing is recorded.
+		Events WorkloadEventRepository
 		// Called for each workload referencing a secret whose value changed, so that
 		// its specification hash moves and the reconciler replaces its instances. May
 		// be nil, in which case a rotation does not redeploy anything.
@@ -148,6 +153,7 @@ func NewSecretService(config SecretServiceConfig) *SecretService {
 		secrets: config.Secrets,
 		cipher:  config.Cipher,
 		keyID:   config.KeyID,
+		events:  config.Events,
 		rehash:  config.Rehash,
 	}
 }
@@ -381,6 +387,10 @@ func (s *SecretService) redeploy(ctx context.Context, name string) error {
 	// left behind.
 	var failed []error
 	for _, workload := range usedBy {
+		// Recorded here rather than by the rehash, which recomputes against every
+		// value a workload reads and so cannot say which of them moved.
+		record(ctx, s.logger, s.events, workload, event.SecretChanged, event.Fields{Name: name})
+
 		if err = s.rehash(ctx, workload); err != nil {
 			failed = append(failed, fmt.Errorf("failed to redeploy workload %s: %w", workload, err))
 		}

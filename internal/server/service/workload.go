@@ -153,6 +153,9 @@ type (
 	// The WorkloadEventRepository interface describes the event operations the
 	// service uses.
 	WorkloadEventRepository interface {
+		// Record should record an event against the named workload, coalescing it
+		// with an event already recorded carrying the same reason and data.
+		Record(ctx context.Context, name string, reason event.Reason, data []byte) error
 		// List should return the events recorded against the named workload, most
 		// recently seen first, up to limit of them.
 		List(ctx context.Context, name string, limit int) ([]database.WorkloadEvent, error)
@@ -634,6 +637,21 @@ func (s *WorkloadService) Apply(ctx context.Context, spec manifest.Spec) (Worklo
 	s.redeploy(ctx, stored.Name)
 
 	s.logger.With("workload", stored.Name, "version", stored.Version, "created", created).Debug("workload applied")
+
+	// An apply that changed nothing records nothing. The version only moves when the
+	// specification did, so this tells a workload that was just applied from one
+	// re-applied unchanged by whatever runs the manifests on a loop — and only the
+	// first of those explains anything the reconciler goes on to do.
+	switch {
+	case created:
+		s.record(ctx, stored.Name, event.Applied, event.Fields{Hash: stored.SpecHash})
+	case stored.Version != resolved.existing.Version:
+		s.record(ctx, stored.Name, event.SpecificationModified, event.Fields{
+			Hash:     stored.SpecHash,
+			Previous: resolved.existing.SpecHash,
+		})
+	}
+
 	s.wake()
 
 	workload, err := s.hydrate(ctx, stored)
@@ -1177,6 +1195,11 @@ func (s *WorkloadService) Delete(ctx context.Context, name string, force bool) (
 	s.rehashAll(ctx, name, referencing)
 
 	s.logger.With("workload", name).Debug("workload marked for deletion")
+
+	// Recorded even though the row is on its way out, because the teardown takes
+	// passes and an operator watching it happen is reading this. The events go with
+	// the row when it finally goes.
+	s.record(ctx, name, event.Deleted, event.Fields{})
 	s.wake()
 
 	return s.hydrate(ctx, marked)
@@ -1212,6 +1235,13 @@ func (s *WorkloadService) Stop(ctx context.Context, name string) (Workload, erro
 	}
 
 	s.logger.With("workload", name).Debug("workload suspended")
+
+	// Only the suspension that changed something is recorded. Suspending a workload
+	// already suspended asks for what is already true.
+	if existing.SuspendedAt.IsZero() {
+		s.record(ctx, name, event.Suspended, event.Fields{})
+	}
+
 	s.wake()
 
 	return s.hydrate(ctx, marked)
@@ -1245,6 +1275,13 @@ func (s *WorkloadService) Start(ctx context.Context, name string) (Workload, err
 	}
 
 	s.logger.With("workload", name).Debug("workload resumed")
+
+	// As with suspending, only a resume that changed something is recorded: starting
+	// a workload that was never suspended changes nothing.
+	if !existing.SuspendedAt.IsZero() {
+		s.record(ctx, name, event.Resumed, event.Fields{})
+	}
+
 	s.wake()
 
 	return s.hydrate(ctx, resumed)
@@ -1319,6 +1356,37 @@ func (s *WorkloadService) Events(ctx context.Context, name string, limit int) ([
 	}
 
 	return events, nil
+}
+
+// record stores an event against a workload, saying what an operator asked the
+// server to do to it.
+//
+// The reconciler records what it observed while converging. This records what was
+// asked for, which is the other half of the answer to why a workload looks the way
+// it does: an operator reading that instances were replaced wants to see the apply
+// that caused it on the row above.
+//
+// A failure here is logged rather than returned. The change itself has already
+// landed, so failing the caller's request over an event would report as failed
+// something that succeeded.
+func (s *WorkloadService) record(ctx context.Context, name string, reason event.Reason, fields event.Fields) {
+	record(ctx, s.logger, s.events, name, reason, fields)
+}
+
+// record stores an event against the named workload, for the services that hold a
+// repository to store it in. Shared because the secret and variable services record
+// against a workload too, naming the value of theirs it reads.
+//
+// An events repository of nil records nothing, so a service wired without one still
+// runs.
+func record(ctx context.Context, logger *slog.Logger, events WorkloadEventRepository, name string, reason event.Reason, fields event.Fields) {
+	if events == nil {
+		return
+	}
+
+	if err := events.Record(ctx, name, reason, event.Encode(fields)); err != nil {
+		logger.With("error", err, "workload", name, "reason", reason).Error("failed to record workload event")
+	}
 }
 
 // Logs writes the recent output of the named workload to out, as the options describe.
@@ -1589,6 +1657,8 @@ func (s *WorkloadService) redeploy(ctx context.Context, name string) {
 // second time to act on them.
 func (s *WorkloadService) rehashAll(ctx context.Context, name string, referencing []string) {
 	for _, workload := range referencing {
+		s.record(ctx, workload, event.AddressMoved, event.Fields{Name: name})
+
 		if _, err := s.Rehash(ctx, workload); err != nil {
 			s.logger.With("workload", workload, "references", name, "error", err).
 				Error("failed to rehash a workload referencing one whose address may have moved")
