@@ -3,14 +3,16 @@ import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 
 import Tooltip from "./Tooltip.vue";
 
-const props = defineProps<{ workload: string; count: number }>();
+// The viewer reads one instance, named by the page it sits on, rather than
+// offering a choice: a workload's output is read an instance at a time and
+// the page a reader is already on says which one they meant.
+const props = defineProps<{ workload: string; instance: number }>();
 
 const tail = ref(100);
 // How far back to read, in minutes. Zero reads everything the tail allows.
 // The server applies this to container workloads and ignores it for exec
 // ones, whose output carries no timestamps to filter on.
 const since = ref(0);
-const instance = ref<"all" | number>("all");
 const previous = ref(false);
 const follow = ref(false);
 const text = ref("");
@@ -22,16 +24,11 @@ const error = ref("");
 const loading = ref(false);
 const output = ref<HTMLElement>();
 
-const instances = computed(() =>
-  Array.from({ length: props.count }, (_, index) => index),
-);
-
-// A follow reads one stream until it ends, so a workload running more than
-// one instance has to say which. The server refuses the combination, and the
-// control is disabled for the same reason rather than surfacing that error.
-const followDisabled = computed(
-  () => previous.value || (props.count > 1 && instance.value === "all"),
-);
+// A follow reads a live stream until it ends, so there is nothing to follow
+// on the attempt before the one running now. The server refuses the
+// combination, and the control is disabled for the same reason rather than
+// surfacing that error.
+const followDisabled = computed(() => previous.value);
 
 let controller: AbortController | undefined;
 
@@ -44,7 +41,7 @@ function params(): string {
       new Date(Date.now() - since.value * 60_000).toISOString(),
     );
   }
-  if (instance.value !== "all") query.set("instance", String(instance.value));
+  query.set("instance", String(props.instance));
   if (previous.value) query.set("previous", "true");
   if (follow.value) query.set("follow", "true");
   return query.toString();
@@ -140,7 +137,7 @@ watch(followDisabled, (disabled) => {
   if (disabled) follow.value = false;
 });
 
-watch([tail, since, instance, previous, follow], () => void load());
+watch([tail, since, previous, follow, () => props.instance], () => void load());
 
 void load();
 
@@ -150,21 +147,6 @@ onUnmounted(() => controller?.abort());
 <template>
   <div>
     <div class="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-      <label
-        class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-600 dark:text-slate-400"
-      >
-        Instance
-        <select
-          v-model="instance"
-          class="rounded-md border border-slate-300 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-800"
-        >
-          <option value="all">all</option>
-          <option v-for="index in instances" :key="index" :value="index">
-            {{ index }}
-          </option>
-        </select>
-      </label>
-
       <label
         class="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-slate-600 dark:text-slate-400"
       >
@@ -210,7 +192,7 @@ onUnmounted(() => controller?.abort());
       <Tooltip
         :text="
           followDisabled
-            ? 'A follow reads one live instance, so pick an instance and turn previous off.'
+            ? 'A follow reads the live stream, so turn previous off.'
             : undefined
         "
       >
