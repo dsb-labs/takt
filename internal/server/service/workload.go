@@ -267,13 +267,45 @@ type (
 		Changed []string
 	}
 
-	// The Health type reports what takt established about a workload's health,
-	// and whether it checks the workload at all.
-	Health struct {
-		// Whether the workload declares a check takt performs.
-		Checked bool
-		// The most recent outcome, meaningful only when Checked.
-		Result health.Result
+	// The Workload type is the service's view of a workload: the desired state that
+	// was submitted, together with what the driver reports is running for it.
+	Workload struct {
+		// The name that identifies the workload.
+		Name string
+		// Incremented every time the workload's specification changes.
+		Version int
+		// Which runtime the specification names.
+		Runtime manifest.Runtime
+		// The specification that was submitted.
+		Spec manifest.Spec
+		// Arbitrary key-value pairs attached to the workload.
+		Labels map[string]string
+		// The instances the driver is currently running for the workload.
+		Instances []Instance
+		// The port mappings the server settled on, including any it allocated.
+		Ports []ResolvedPort
+		// The workload's overall state, derived from its instances and whether it is
+		// being deleted or suspended.
+		State state.Workload
+		// Whether the workload has been marked for deletion and is being torn down.
+		Deleting bool
+		// Whether the workload has been stopped and is intentionally not running.
+		Suspended bool
+		// The time the workload was first applied.
+		CreatedAt time.Time
+		// The time the workload's specification last changed, or a suspended
+		// workload was last resumed.
+		UpdatedAt time.Time
+		// When the workload next runs, for one that names a schedule. Zero for a workload
+		// that runs continuously, and for a scheduled one that has not run yet.
+		NextRun time.Time
+		// Why the last converge pass over the workload failed. Empty for one that is
+		// converging. Held in memory by the reconciler, so it clears when a pass
+		// succeeds and does not survive a server restart.
+		LastError string
+		// When the last converge failure was recorded, meaningful only when LastError
+		// is set.
+		LastErrorAt time.Time
 	}
 
 	// The Instance type is the service's view of one instance: what the driver
@@ -317,6 +349,15 @@ type (
 		Pids int
 		// The processes and threads the instance may run.
 		PidsLimit int
+	}
+
+	// The Health type reports what takt established about a workload's health,
+	// and whether it checks the workload at all.
+	Health struct {
+		// Whether the workload declares a check takt performs.
+		Checked bool
+		// The most recent outcome, meaningful only when Checked.
+		Result health.Result
 	}
 
 	// The SecretRevisions interface describes how the service learns what version of
@@ -2240,45 +2281,4 @@ func nextRun(schedule *manifest.Schedule, instances []driver.Instance, applied t
 	}
 
 	return parsed.Next(last)
-}
-
-// The Workload type is the service's view of a workload: the desired state that
-// was submitted, together with what the driver reports is running for it.
-type Workload struct {
-	// The name that identifies the workload.
-	Name string
-	// Incremented every time the workload's specification changes.
-	Version int
-	// Which runtime the specification names.
-	Runtime manifest.Runtime
-	// The specification that was submitted.
-	Spec manifest.Spec
-	// Arbitrary key-value pairs attached to the workload.
-	Labels map[string]string
-	// The instances the driver is currently running for the workload.
-	Instances []Instance
-	// The port mappings the server settled on, including any it allocated.
-	Ports []ResolvedPort
-	// The workload's overall state, derived from its instances and whether it is
-	// being deleted or suspended.
-	State state.Workload
-	// Whether the workload has been marked for deletion and is being torn down.
-	Deleting bool
-	// Whether the workload has been stopped and is intentionally not running.
-	Suspended bool
-	// The time the workload was first applied.
-	CreatedAt time.Time
-	// The time the workload's specification last changed, or a suspended
-	// workload was last resumed.
-	UpdatedAt time.Time
-	// When the workload next runs, for one that names a schedule. Zero for a workload
-	// that runs continuously, and for a scheduled one that has not run yet.
-	NextRun time.Time
-	// Why the last converge pass over the workload failed. Empty for one that is
-	// converging. Held in memory by the reconciler, so it clears when a pass
-	// succeeds and does not survive a server restart.
-	LastError string
-	// When the last converge failure was recorded, meaningful only when LastError
-	// is set.
-	LastErrorAt time.Time
 }
