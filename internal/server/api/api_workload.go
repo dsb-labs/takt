@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +30,9 @@ type (
 		DryRun(ctx context.Context, spec manifest.Spec) (service.DryRun, error)
 		// Get should return the workload with the given name.
 		Get(ctx context.Context, name string) (service.Workload, error)
+		// Events should return what the server recorded about the named workload,
+		// most recently seen first, up to limit of them.
+		Events(ctx context.Context, name string, limit int) ([]service.Event, error)
 		// List should return the workloads matching every one of the given queries,
 		// or all of them when none are given.
 		List(ctx context.Context, queries ...string) ([]service.Workload, error)
@@ -80,6 +84,14 @@ const (
 	// it is asked to read — so an uncapped request would let a caller decide how much
 	// work the server does.
 	maxLogTail = 10000
+	// The default number of events returned when a request doesn't ask for a
+	// specific number. Matches the default declared in the specification.
+	defaultEventLimit = 100
+	// The fewest events a request may ask for, and the most. As with the log tail
+	// above, the specification declares both and the generated code enforces
+	// neither, so the server applies the bounds it documents.
+	minEventLimit = 1
+	maxEventLimit = 1000
 )
 
 // NewWorkloadAPI returns a new instance of the WorkloadAPI type.
@@ -254,6 +266,33 @@ func (a *WorkloadAPI) GetWorkload(ctx context.Context, request api.GetWorkloadRe
 	}
 
 	return api.GetWorkload200JSONResponse{Workload: newWorkload(workload)}, nil
+}
+
+// GetWorkloadEvents returns what the server recorded about the named workload.
+func (a *WorkloadAPI) GetWorkloadEvents(ctx context.Context, request api.GetWorkloadEventsRequestObject) (api.GetWorkloadEventsResponseObject, error) {
+	limit := defaultEventLimit
+	if request.Params.Limit != nil {
+		limit = min(max(*request.Params.Limit, minEventLimit), maxEventLimit)
+	}
+
+	events, err := a.workloads.Events(ctx, request.Name, limit)
+	switch {
+	case errors.Is(err, service.ErrWorkloadNotFound):
+		return api.GetWorkloadEvents404JSONResponse{
+			Error: fmt.Sprintf("workload %q does not exist", request.Name),
+		}, nil
+	case err != nil:
+		return api.GetWorkloadEvents500JSONResponse{
+			Error: internalError(a.logger, "get workload events", err),
+		}, nil
+	}
+
+	response := api.GetWorkloadEvents200JSONResponse{Events: make([]api.WorkloadEvent, 0, len(events))}
+	for _, recorded := range events {
+		response.Events = append(response.Events, newWorkloadEvent(recorded))
+	}
+
+	return response, nil
 }
 
 // ListWorkloads returns the workloads matching the request's queries, or every
@@ -660,6 +699,33 @@ func indexOf(instance service.Instance) *int {
 	return new(instance.Index)
 }
 
+// newWorkloadEvent maps the service's view of an event onto the wire format.
+//
+// The data is decoded rather than passed through as a string, so a caller reads
+// an object it can address by field rather than JSON nested inside JSON. It
+// decodes straight into the wire type because the schema names the same fields
+// event.Fields does, so a field added to one has to be added to the other.
+//
+// Data that will not decode is left absent: the reason, the message and the times
+// are still worth returning, and there is nothing the caller could do with a
+// payload the server cannot read either.
+func newWorkloadEvent(e service.Event) api.WorkloadEvent {
+	recorded := api.WorkloadEvent{
+		Reason:    api.WorkloadEventReason(e.Reason),
+		Message:   e.Message,
+		Count:     e.Count,
+		FirstSeen: e.FirstSeen,
+		LastSeen:  e.LastSeen,
+	}
+
+	var data api.WorkloadEventData
+	if err := json.Unmarshal(e.Data, &data); err == nil && data != (api.WorkloadEventData{}) {
+		recorded.Data = &data
+	}
+
+	return recorded
+}
+
 // newWorkload maps the service's view of a workload onto the wire format.
 func newWorkload(w service.Workload) api.Workload {
 	workload := api.Workload{
@@ -674,11 +740,6 @@ func newWorkload(w service.Workload) api.Workload {
 
 	if !w.NextRun.IsZero() {
 		workload.NextRun = new(w.NextRun)
-	}
-
-	if w.LastError != "" {
-		workload.LastError = new(w.LastError)
-		workload.LastErrorAt = new(w.LastErrorAt)
 	}
 
 	if w.Deleting {

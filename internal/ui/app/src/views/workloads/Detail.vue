@@ -3,10 +3,11 @@ import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useDeleteWorkload, useWorkloadAction } from "@/api/mutations";
-import { useWorkload } from "@/api/queries";
+import { useWorkload, useWorkloadEvents } from "@/api/queries";
 import DeleteControl from "@/components/DeleteControl.vue";
 import DetailCard from "@/components/DetailCard.vue";
 import DetailPage from "@/components/DetailPage.vue";
+import EventsCard from "@/components/EventsCard.vue";
 import LabelsCard from "@/components/LabelsCard.vue";
 import ErrorBanner from "@/components/ErrorBanner.vue";
 import ReferenceCard from "@/components/ReferenceCard.vue";
@@ -36,6 +37,7 @@ const route = useRoute();
 const name = route.params.name as string;
 
 const workload = useWorkload(() => name);
+const events = useWorkloadEvents(() => name);
 
 const router = useRouter();
 const stop = useWorkloadAction("stop", () => name);
@@ -232,16 +234,6 @@ await workload.suspense().catch(() => {});
 
     <template v-if="workload.data.value">
       <ErrorBanner v-if="actionError" :message="actionError" />
-
-      <div
-        v-if="workload.data.value.lastError"
-        class="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-300"
-      >
-        <span v-if="workload.data.value.lastErrorAt" class="font-medium">
-          {{ relativeTime(workload.data.value.lastErrorAt) }}:
-        </span>
-        {{ workload.data.value.lastError }}
-      </div>
 
       <div class="mt-6 grid gap-6 xl:grid-cols-2">
         <DetailCard title="Overview">
@@ -557,6 +549,10 @@ await workload.suspense().catch(() => {});
             </table>
           </div>
         </DetailCard>
+      </div>
+
+      <div class="mt-6">
+        <EventsCard :events="events.data.value" />
       </div>
 
       <div v-if="spec" class="mt-6">

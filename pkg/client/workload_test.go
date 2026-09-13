@@ -486,36 +486,6 @@ func TestClient_Get(t *testing.T) {
 		assert.Nil(t, got.Instances[0].Usage)
 	})
 
-	t.Run("reports why a workload is not converging", func(t *testing.T) {
-		failing := workload("example", api.WorkloadStatePending)
-		failedAt := time.Now().UTC().Truncate(time.Second)
-
-		failing.LastError = new("failed to start workload: no such image")
-		failing.LastErrorAt = &failedAt
-
-		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: failing})
-		})
-
-		got, err := c.Get(t.Context(), "example")
-		require.NoError(t, err)
-
-		assert.Equal(t, "failed to start workload: no such image", got.LastError)
-		assert.Equal(t, failedAt, got.LastErrorAt)
-	})
-
-	t.Run("reports no error for a converging workload", func(t *testing.T) {
-		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
-		})
-
-		got, err := c.Get(t.Context(), "example")
-		require.NoError(t, err)
-
-		assert.Empty(t, got.LastError)
-		assert.True(t, got.LastErrorAt.IsZero())
-	})
-
 	t.Run("reports a missing workload", func(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})
@@ -1164,6 +1134,88 @@ func (b *syncBuffer) String() string {
 	defer b.mux.Unlock()
 
 	return b.buf.String()
+}
+
+func TestClient_Events(t *testing.T) {
+	t.Parallel()
+
+	seen := time.Now().UTC().Truncate(time.Second)
+
+	t.Run("reads the events the server recorded", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/api/v1/workloads/example/events", r.URL.Path)
+			assert.Equal(t, "20", r.URL.Query().Get("limit"))
+
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadEventsResult{
+				Events: []api.WorkloadEvent{
+					{
+						Reason:    api.WorkloadEventReasonImagePulling,
+						Message:   "pulling image alpine:3",
+						Data:      &api.WorkloadEventData{Reference: new("alpine:3")},
+						Count:     4,
+						FirstSeen: seen,
+						LastSeen:  seen.Add(time.Minute),
+					},
+				},
+			})
+		})
+
+		got, err := c.Events(t.Context(), "example", 20)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+
+		assert.Equal(t, client.EventImagePulling, got[0].Reason)
+		assert.Equal(t, "pulling image alpine:3", got[0].Message)
+		assert.Equal(t, "alpine:3", got[0].Data.Reference)
+		assert.Equal(t, 4, got[0].Count)
+		assert.Equal(t, seen, got[0].FirstSeen)
+		assert.Equal(t, seen.Add(time.Minute), got[0].LastSeen)
+	})
+
+	// An exit status of zero is a clean exit, and the server leaving the field out
+	// says it never learned one. Reading both as the same number would lose that.
+	t.Run("tells a clean exit apart from one the server did not record", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadEventsResult{
+				Events: []api.WorkloadEvent{
+					{Reason: api.WorkloadEventReasonInstanceExited, Data: &api.WorkloadEventData{ExitCode: new(0)}},
+					{Reason: api.WorkloadEventReasonInstanceExited, Data: &api.WorkloadEventData{}},
+				},
+			})
+		})
+
+		got, err := c.Events(t.Context(), "example", 0)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+
+		require.NotNil(t, got[0].Data.ExitCode)
+		assert.Equal(t, 0, *got[0].Data.ExitCode)
+		assert.Nil(t, got[1].Data.ExitCode)
+	})
+
+	// A reason this version of the client has no constant for still has to arrive, so
+	// an older client reads what a newer server recorded rather than dropping it.
+	t.Run("reads a reason it does not name", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadEventsResult{
+				Events: []api.WorkloadEvent{{Reason: "somethingNewer", Message: "somethingNewer"}},
+			})
+		})
+
+		got, err := c.Events(t.Context(), "example", 0)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, client.EventReason("somethingNewer"), got[0].Reason)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})
+		})
+
+		_, err := c.Events(t.Context(), "nope", 0)
+		assert.ErrorIs(t, err, client.ErrWorkloadNotFound)
+	})
 }
 
 func TestClient_NamesTheRequestWhenTheServerIsUnreachable(t *testing.T) {

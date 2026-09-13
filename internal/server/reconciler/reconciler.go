@@ -207,7 +207,7 @@ type (
 		// concurrent reads it.
 		allocations map[string][]database.Port
 
-		// Guards backoff, lastError and restarts, which are the only state a pass
+		// Guards backoff and restarts, which are the only state a pass
 		// carries between workloads and so the only things converging them
 		// concurrently can contend on.
 		mux sync.Mutex
@@ -218,11 +218,6 @@ type (
 		// consumed by the next pass over each. In memory rather than stored,
 		// because a request the server loses can simply be made again.
 		restarts map[string]struct{}
-		// Why the last converge pass over each workload failed. In memory rather
-		// than stored, because a converge error has no live source to re-derive
-		// from once the pass has ended: after a restart the next pass either fails
-		// again and repopulates it, or succeeds, and either answer is current.
-		lastError map[string]lastError
 		// Counts completed passes, so that a caller can tell a pass has finished
 		// rather than inferring it from something a pass happens to do first.
 		passes atomic.Uint64
@@ -313,15 +308,6 @@ type (
 		gaveUp bool
 	}
 
-	// The lastError type records why a converge pass over a workload failed, so
-	// that a workload sitting pending can say what is stopping it.
-	lastError struct {
-		// What the failing pass reported.
-		message string
-		// When the failure was recorded.
-		at time.Time
-	}
-
 	// The slot type identifies one instance of one workload, which is the grain
 	// backoff and health are kept at.
 	slot struct {
@@ -402,7 +388,6 @@ func New(config Config) *Reconciler {
 		interval:     config.Interval,
 		backoff:      make(map[slot]backoff),
 		restarts:     make(map[string]struct{}),
-		lastError:    make(map[string]lastError),
 		observations: observations,
 		tracer:       telemetry.Tracer(config.TracerProvider, scope),
 		instruments:  newInstruments(telemetry.Meter(config.MeterProvider, scope)),
@@ -780,7 +765,6 @@ func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, 
 				span.RecordError(err)
 				span.SetStatus(codes.Error, err.Error())
 				r.logger.With("workload", row.Name, "error", err).Error("failed to reconcile workload")
-				r.fail(row.Name, err)
 			}
 		})
 	}
@@ -1812,7 +1796,6 @@ func (r *Reconciler) settle(workload string, index int) {
 	defer r.mux.Unlock()
 
 	delete(r.backoff, slot{workload: workload, instance: index})
-	delete(r.lastError, workload)
 }
 
 // settleAll forgets every instance's backoff and the workload's last error, for the
@@ -1826,28 +1809,6 @@ func (r *Reconciler) settleAll(workload string) {
 			delete(r.backoff, key)
 		}
 	}
-
-	delete(r.lastError, workload)
-}
-
-// fail records why a converge pass over a workload failed, so that the workload can
-// report it until a pass succeeds.
-func (r *Reconciler) fail(workload string, err error) {
-	r.mux.Lock()
-	defer r.mux.Unlock()
-
-	r.lastError[workload] = lastError{message: err.Error(), at: r.now()}
-}
-
-// LastError reports why the last converge pass over a workload failed and when,
-// reporting false when the workload's last pass succeeded or none has run.
-func (r *Reconciler) LastError(workload string) (string, time.Time, bool) {
-	r.mux.Lock()
-	defer r.mux.Unlock()
-
-	recorded, ok := r.lastError[workload]
-
-	return recorded.message, recorded.at, ok
 }
 
 func (r *Reconciler) start(ctx context.Context, row database.Workload, index int) error {
