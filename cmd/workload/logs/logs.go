@@ -3,6 +3,7 @@ package logs
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"time"
@@ -11,6 +12,9 @@ import (
 
 	"github.com/dsb-labs/takt/pkg/client"
 )
+
+//go:embed usage.txt
+var usage string
 
 // Command returns the "workload logs" command used to read a workload's recent output.
 func Command() *cobra.Command {
@@ -23,6 +27,7 @@ func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logs <name>",
 		Short: "Read a workload's recent output",
+		Long:  usage,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.FromContext(cmd.Context())
