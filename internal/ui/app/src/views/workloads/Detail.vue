@@ -552,7 +552,7 @@ await workload.suspense().catch(() => {});
         v-if="workload.data.value.instances?.length"
         class="mt-6 grid gap-6 xl:grid-cols-2"
       >
-        <DetailCard title="Memory">
+        <DetailCard title="Memory" class="min-w-0">
           <UsageChart
             :series="usage.memory"
             :limit="usage.memoryLimit"
@@ -560,7 +560,7 @@ await workload.suspense().catch(() => {});
           />
         </DetailCard>
 
-        <DetailCard title="CPU">
+        <DetailCard title="CPU" class="min-w-0">
           <UsageChart
             :series="usage.cpu"
             :limit="usage.cpuLimit"
