@@ -678,6 +678,88 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		assert.Nil(t, reported.Failures)
 	})
 
+	t.Run("reports what an instance is using against what it may use", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+
+		cpu := 0.25
+
+		using := workload("example", state.Running)
+		using.Instances[0].Usage = service.Usage{
+			Memory:      220200960,
+			MemoryLimit: 536870912,
+			CPU:         &cpu,
+			CPULimit:    2,
+			Pids:        12,
+			PidsLimit:   100,
+		}
+
+		svc.EXPECT().Get(mock.Anything, "example").Return(using, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		var result generated.GetWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		reported := (*result.Workload.Instances)[0].Usage
+		require.NotNil(t, reported)
+
+		assert.Equal(t, 220200960, reported.Memory)
+		assert.Equal(t, 12, reported.Pids)
+
+		require.NotNil(t, reported.MemoryLimit)
+		assert.Equal(t, 536870912, *reported.MemoryLimit)
+		require.NotNil(t, reported.CPU)
+		assert.InEpsilon(t, 0.25, *reported.CPU, 0.0001)
+		require.NotNil(t, reported.CPULimit)
+		assert.InEpsilon(t, 2.0, *reported.CPULimit, 0.0001)
+		require.NotNil(t, reported.PidsLimit)
+		assert.Equal(t, 100, *reported.PidsLimit)
+	})
+
+	// A workload bounded only by the host has no figure to be shown against, and a
+	// number standing in for "no limit" would read as one.
+	t.Run("reports no limits for an unlimited instance", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+
+		using := workload("example", state.Running)
+		using.Instances[0].Usage = service.Usage{Memory: 220200960, Pids: 12}
+
+		svc.EXPECT().Get(mock.Anything, "example").Return(using, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		var result generated.GetWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		reported := (*result.Workload.Instances)[0].Usage
+		require.NotNil(t, reported)
+
+		assert.Nil(t, reported.MemoryLimit)
+		assert.Nil(t, reported.CPULimit)
+		assert.Nil(t, reported.PidsLimit)
+
+		// The first reading of an instance has no partner to average against.
+		assert.Nil(t, reported.CPU)
+	})
+
+	// Nothing is reported rather than zero: a workload using no memory and a
+	// workload nothing is known about are different answers.
+	t.Run("reports no usage for an instance with no reading", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").
+			Return(workload("example", state.Running), nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		var result generated.GetWorkloadResult
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
+
+		assert.Nil(t, (*result.Workload.Instances)[0].Usage)
+	})
+
 	t.Run("reports no health for an unchecked workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "example").

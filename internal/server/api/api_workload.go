@@ -582,6 +582,44 @@ func instanceHealth(instance service.Instance) *api.InstanceHealth {
 	return &api.InstanceHealth{Status: api.HealthStatus(instance.RuntimeHealth)}
 }
 
+// instanceUsage maps what an instance is consuming onto the wire format, reporting
+// nothing for an instance the runtime had no reading for.
+//
+// An instance that is not running is one of those, and so is one whose runtime
+// cannot report on it. Nothing is reported rather than zero, because a workload
+// using no memory and a workload nothing is known about are different answers and
+// only one of them is true.
+//
+// A limit the specification did not name is left out for the same reason: the
+// instance is bounded by the host rather than by a figure takt could print, and a
+// number standing in for "no limit" would read as one.
+func instanceUsage(instance service.Instance) *api.InstanceUsage {
+	reported := instance.Usage
+	if reported == (service.Usage{}) {
+		return nil
+	}
+
+	usage := api.InstanceUsage{
+		Memory: int(reported.Memory),
+		Pids:   reported.Pids,
+		CPU:    reported.CPU,
+	}
+
+	if reported.MemoryLimit > 0 {
+		usage.MemoryLimit = new(int(reported.MemoryLimit))
+	}
+
+	if reported.CPULimit > 0 {
+		usage.CPULimit = new(reported.CPULimit)
+	}
+
+	if reported.PidsLimit > 0 {
+		usage.PidsLimit = new(reported.PidsLimit)
+	}
+
+	return &usage
+}
+
 // newResolvedPorts maps the ports the server settled on onto the wire format.
 func newResolvedPorts(ports []service.ResolvedPort) []api.ResolvedPort {
 	resolved := make([]api.ResolvedPort, 0, len(ports))
@@ -669,6 +707,7 @@ func newWorkload(w service.Workload) api.Workload {
 			// The instance's own verdict rather than a workload-wide one, so one
 			// instance failing its check does not read as all of them failing.
 			Health: instanceHealth(instance),
+			Usage:  instanceUsage(instance),
 		}
 
 		// An exit code is only meaningful once the instance has stopped. Reporting

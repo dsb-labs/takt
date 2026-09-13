@@ -3113,6 +3113,51 @@ components:
           type: string
           format: date-time
           description: When the instance last started.
+        usage:
+          $ref: "#/components/schemas/InstanceUsage"
+
+    InstanceUsage:
+      type: object
+      description: |
+        What the instance is consuming, beside the limits its specification asked
+        for. Absent for an instance nothing can be read for, which one that is not
+        running is, as is one the runtime cannot report on. A limit is absent when
+        the specification named none, in which case the instance is bounded only by
+        the host.
+      required: [memory, pids]
+      properties:
+        memory:
+          type: integer
+          description: |
+            The memory the instance is using, in bytes. Page cache the kernel
+            reclaims before it enforces a limit is left out, so this is the figure
+            the limit answers to.
+          minimum: 0
+        memoryLimit:
+          type: integer
+          description: The memory the instance may use, in bytes.
+          minimum: 0
+        cpu:
+          type: number
+          format: double
+          description: |
+            The processors the instance is using, averaged since the reading before
+            it. Absent until a second reading has been taken, since a rate needs a
+            pair.
+          minimum: 0
+        cpuLimit:
+          type: number
+          format: double
+          description: The processors the instance may use.
+          minimum: 0
+        pids:
+          type: integer
+          description: The processes and threads the instance is running.
+          minimum: 0
+        pidsLimit:
+          type: integer
+          description: The processes and threads the instance may run.
+          minimum: 0
 
     Runtime:
       type: string

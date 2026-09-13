@@ -1980,6 +1980,40 @@ export interface components {
        * @description When the instance last started.
        */
       startedAt?: string;
+      usage?: components["schemas"]["InstanceUsage"];
+    };
+    /**
+     * @description What the instance is consuming, beside the limits its specification asked
+     *     for. Absent for an instance nothing can be read for, which one that is not
+     *     running is, as is one the runtime cannot report on. A limit is absent when
+     *     the specification named none, in which case the instance is bounded only by
+     *     the host.
+     */
+    InstanceUsage: {
+      /**
+       * @description The memory the instance is using, in bytes. Page cache the kernel
+       *     reclaims before it enforces a limit is left out, so this is the figure
+       *     the limit answers to.
+       */
+      memory: number;
+      /** @description The memory the instance may use, in bytes. */
+      memoryLimit?: number;
+      /**
+       * Format: double
+       * @description The processors the instance is using, averaged since the reading before
+       *     it. Absent until a second reading has been taken, since a rate needs a
+       *     pair.
+       */
+      cpu?: number;
+      /**
+       * Format: double
+       * @description The processors the instance may use.
+       */
+      cpuLimit?: number;
+      /** @description The processes and threads the instance is running. */
+      pids: number;
+      /** @description The processes and threads the instance may run. */
+      pidsLimit?: number;
     };
     /**
      * @description Which runtime block the workload's specification names.
