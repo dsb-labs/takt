@@ -2,6 +2,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 
 import Tooltip from "@/components/Tooltip.vue";
+import { parser, type Span } from "@/lib/ansi";
 
 // The viewer reads one instance, named by the page it sits on, rather than
 // offering a choice: a workload's output is read an instance at a time and
@@ -15,7 +16,9 @@ const tail = ref(100);
 const since = ref(0);
 const previous = ref(false);
 const follow = ref(false);
-const text = ref("");
+// The output as lines of styled runs rather than as text, so the colours a
+// program writes are drawn rather than printed as escape sequences.
+const lines = ref<Span[][]>([]);
 // Whether the text on screen belongs to a superseded request. It stays
 // visible until the replacement's first bytes arrive, so changing a control
 // repaints the content in place rather than blanking the box.
@@ -29,6 +32,10 @@ const output = ref<HTMLElement>();
 // combination, and the control is disabled for the same reason rather than
 // surfacing that error.
 const followDisabled = computed(() => previous.value);
+
+// Nothing has been read yet, as distinct from a read that returned nothing:
+// a stream that has only opened still shows the box empty.
+const empty = computed(() => !lines.value.some((line) => line.length));
 
 let controller: AbortController | undefined;
 
@@ -45,6 +52,44 @@ function params(): string {
   if (previous.value) query.set("previous", "true");
   if (follow.value) query.set("follow", "true");
   return query.toString();
+}
+
+// append adds what a read produced to the last line, starting a new one at
+// every newline. A carriage return with no newline after it rewrites the line
+// instead, which is how a program draws a progress bar in place.
+function append(spans: Span[]) {
+  if (!lines.value.length) lines.value.push([]);
+
+  for (const span of spans) {
+    let rest = span.text;
+
+    for (;;) {
+      const at = rest.search(/[\n\r]/);
+      if (at < 0) {
+        if (rest)
+          lines.value[lines.value.length - 1].push({ ...span, text: rest });
+        break;
+      }
+
+      if (at > 0) {
+        lines.value[lines.value.length - 1].push({
+          ...span,
+          text: rest.slice(0, at),
+        });
+      }
+
+      if (rest[at] === "\n") lines.value.push([]);
+      else lines.value[lines.value.length - 1] = [];
+
+      rest = rest.slice(at + 1);
+    }
+  }
+}
+
+// note writes a line of the viewer's own, which is not output and is drawn as
+// an aside rather than as something the workload said.
+function note(text: string) {
+  lines.value.push([{ text, classes: "text-slate-500 italic" }], []);
 }
 
 async function scrollToEnd() {
@@ -79,14 +124,18 @@ async function read(signal: AbortSignal) {
   if (!reader) throw new Error("the response carries no body");
 
   const decoder = new TextDecoder();
+  // The parser is per read, since a fresh stream starts with nothing open and
+  // nothing held back.
+  const parse = parser();
+
   for (;;) {
     const { done, value } = await reader.read();
     if (done) return;
     if (stale.value) {
-      text.value = "";
+      lines.value = [];
       stale.value = false;
     }
-    text.value += decoder.decode(value, { stream: true });
+    append(parse(decoder.decode(value, { stream: true })));
     await scrollToEnd();
   }
 }
@@ -109,7 +158,7 @@ async function load() {
 
       // A response that carried nothing still replaces what it superseded.
       if (stale.value) {
-        text.value = "";
+        lines.value = [];
         stale.value = false;
       }
     } catch (cause) {
@@ -126,7 +175,7 @@ async function load() {
 
     if (!follow.value || mine.signal.aborted) return;
 
-    text.value += "\n--- the instance ended, waiting for its replacement ---\n";
+    note("--- the instance ended, waiting for its replacement ---");
     await scrollToEnd();
     await sleep(2000, mine.signal);
     if (mine.signal.aborted) return;
@@ -239,6 +288,17 @@ onUnmounted(() => controller?.abort());
     <pre
       ref="output"
       class="h-96 overflow-auto border-t border-slate-200 bg-slate-950 px-4 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-slate-200 dark:border-slate-800"
-      >{{ text || (loading ? "Loading…" : "No output.") }}</pre>
+    ><template v-if="empty">{{
+        loading ? "Loading…" : "No output."
+      }}</template
+      ><template v-for="(line, at) in lines" v-else :key="at"
+        ><span
+          v-for="(span, index) in line"
+          :key="index"
+          :class="span.classes"
+          :style="span.style"
+          >{{ span.text }}</span
+        >{{ "\n" }}</template
+      ></pre>
   </div>
 </template>
