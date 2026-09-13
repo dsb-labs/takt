@@ -1097,7 +1097,7 @@ func TestWorkloadService_Events(t *testing.T) {
 		// The reason and the data survive for a caller doing something with them,
 		// and the sentence is produced here rather than having been stored.
 		assert.Equal(t, event.ImagePulling, got[0].Reason)
-		assert.Equal(t, "pulling image alpine:3", got[0].Message)
+		assert.Equal(t, "Pulling image alpine:3", got[0].Message)
 		assert.JSONEq(t, `{"reference":"alpine:3"}`, string(got[0].Data))
 		assert.Equal(t, 4, got[0].Count)
 		assert.Equal(t, first, got[0].FirstSeen)

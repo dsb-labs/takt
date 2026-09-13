@@ -1980,12 +1980,13 @@ export interface components {
     WorkloadEvent: {
       reason: components["schemas"]["WorkloadEventReason"];
       /**
-       * @description The event as a sentence, rendered by the server from the reason and the
-       *     data.
+       * @description What happened, in words written for a person to read, where the reason is
+       *     written for a machine to match on.
        *
-       *     Rendered when the event is read rather than when it was recorded, so the
-       *     wording is not frozen into what the server stored.
-       * @example pulling image alpine:3
+       *     The server renders this from the reason and the data when the event is
+       *     read rather than when it was recorded, so the wording is not frozen into
+       *     the stored row. Match on the reason rather than on this.
+       * @example Pulling image alpine:3
        */
       message: string;
       data?: components["schemas"]["WorkloadEventData"];
@@ -2098,6 +2099,8 @@ export interface components {
       delay?: number;
       /** @description The schedule expression the event concerns. */
       schedule?: string;
+      /** @description The signal sent to the workload, where the event reports one. */
+      signal?: string;
       /** @description The host ports the event concerns. */
       ports?: number[];
       /** @description What went wrong, where the event reports a failure. */
