@@ -5,6 +5,12 @@ import { client } from "./client";
 // Every mutation invalidates the queries reading what it changed, so the view
 // reflects the action on the next render rather than the next poll.
 //
+// A delete starts the invalidation without awaiting it. The detail query for
+// the deleted resource shares the invalidated prefix and now answers 404, and
+// awaiting that refetch through its retries would hold the delete modal open
+// for seconds after the server already agreed. The caller's next move is to
+// leave the detail page, so nothing reads the answer anyway.
+//
 // Each delete takes a force flag. An unforced delete of something another
 // workload reads is refused with the reason, and the view offers to force it.
 
@@ -39,7 +45,8 @@ export function useDeleteWorkload(name: () => string) {
       });
       if (error) throw new Error(error.error);
     },
-    onSuccess: () => queries.invalidateQueries({ queryKey: ["workloads"] }),
+    onSuccess: () =>
+      void queries.invalidateQueries({ queryKey: ["workloads"] }),
   });
 }
 
@@ -68,7 +75,7 @@ export function useDeleteSecret(name: () => string) {
       });
       if (error) throw new Error(error.error);
     },
-    onSuccess: () => queries.invalidateQueries({ queryKey: ["secrets"] }),
+    onSuccess: () => void queries.invalidateQueries({ queryKey: ["secrets"] }),
   });
 }
 
@@ -97,7 +104,8 @@ export function useDeleteVariable(name: () => string) {
       });
       if (error) throw new Error(error.error);
     },
-    onSuccess: () => queries.invalidateQueries({ queryKey: ["variables"] }),
+    onSuccess: () =>
+      void queries.invalidateQueries({ queryKey: ["variables"] }),
   });
 }
 
@@ -114,7 +122,7 @@ export function useDeleteService(name: () => string) {
       });
       if (error) throw new Error(error.error);
     },
-    onSuccess: () => queries.invalidateQueries({ queryKey: ["services"] }),
+    onSuccess: () => void queries.invalidateQueries({ queryKey: ["services"] }),
   });
 }
 
@@ -128,7 +136,7 @@ export function useDeleteVolume(name: () => string) {
       });
       if (error) throw new Error(error.error);
     },
-    onSuccess: () => queries.invalidateQueries({ queryKey: ["volumes"] }),
+    onSuccess: () => void queries.invalidateQueries({ queryKey: ["volumes"] }),
   });
 }
 
