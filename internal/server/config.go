@@ -17,6 +17,7 @@ import (
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/port"
 )
 
@@ -172,6 +173,13 @@ type (
 		MinPort int `toml:"min-port"`
 		// The highest host port that may be allocated.
 		MaxPort int `toml:"max-port"`
+		// The most events kept for one workload. The oldest are removed as new ones
+		// arrive, so this bounds what the table can grow to rather than how long an
+		// event survives.
+		//
+		// The default keeps the card an operator reads and little else. Raise it on a
+		// host where a workload's history is worth more than the rows it costs.
+		MaxEvents int `toml:"max-events"`
 	}
 
 	// The AuthConfig type contains configuration for authenticating API
@@ -272,9 +280,10 @@ func DefaultConfig() Config {
 			// Named explicitly rather than left empty, because empty is what docker
 			// reads as every interface. A reader should not have to know that to see
 			// which of the two this is.
-			Bind:    "0.0.0.0",
-			MinPort: port.DefaultMin,
-			MaxPort: port.DefaultMax,
+			Bind:      "0.0.0.0",
+			MinPort:   port.DefaultMin,
+			MaxPort:   port.DefaultMax,
+			MaxEvents: event.DefaultMaxEvents,
 		},
 		Logging: LoggingConfig{
 			Level: "info",
@@ -481,6 +490,11 @@ func (c WorkloadConfig) validate() error {
 		return errors.New("workload port range maximum must be between 1 and 65535")
 	case c.MinPort > c.MaxPort:
 		return errors.New("workload port range minimum must not exceed its maximum")
+	// Zero would keep nothing, which is a surprising way to spell the switch that
+	// turns events off. That switch does not exist, so the value is refused rather
+	// than quietly given a meaning.
+	case c.MaxEvents < 1:
+		return errors.New("workload maximum events must be at least 1")
 	}
 
 	for _, path := range c.AllowHostPaths {
