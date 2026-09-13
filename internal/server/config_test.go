@@ -41,6 +41,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "0.0.0.0", config.Workload.Bind)
 				assert.Equal(t, 25000, config.Workload.MinPort)
 				assert.Equal(t, 26000, config.Workload.MaxPort)
+				assert.Equal(t, 50, config.Workload.MaxEvents)
 				assert.Equal(t, "/etc/takt/keys", config.Secrets.Keys)
 				assert.Equal(t, "/etc/takt/keys", config.KeysPath())
 				assert.Equal(t, []string{"/opt/runtime", "/nix/store"}, config.Exec.AllowPaths)
@@ -112,6 +113,7 @@ func TestDefaultConfig(t *testing.T) {
 		assert.Positive(t, config.Reconcile.Interval)
 		assert.Positive(t, config.Workload.MinPort)
 		assert.Positive(t, config.Workload.MaxPort)
+		assert.Positive(t, config.Workload.MaxEvents)
 	})
 
 	t.Run("binds to loopback", func(t *testing.T) {
@@ -249,6 +251,12 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			Name:         "a port range outside the usable range",
 			Mutate:       func(c *server.Config) { c.Workload.MaxPort = 70000 },
+			ExpectsError: true,
+		},
+		{
+			// Zero keeps nothing, which is not how events are turned off.
+			Name:         "an event limit of zero",
+			Mutate:       func(c *server.Config) { c.Workload.MaxEvents = 0 },
 			ExpectsError: true,
 		},
 		{
