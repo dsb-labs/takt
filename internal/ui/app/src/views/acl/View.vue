@@ -4,8 +4,8 @@ import DetailCard from "@/components/DetailCard.vue";
 import ErrorBanner from "@/components/ErrorBanner.vue";
 import SortHeader from "@/components/SortHeader.vue";
 import YamlView from "@/components/YamlView.vue";
-import { absoluteTime, relativeTime } from "@/format";
-import { useSort } from "@/sort";
+import { absoluteTime, relativeTime } from "@/lib/format";
+import { useSort } from "@/composables/sort";
 
 const policy = usePolicy();
 const tokens = useTokens();

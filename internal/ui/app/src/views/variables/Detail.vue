@@ -12,8 +12,8 @@ import ErrorBanner from "@/components/ErrorBanner.vue";
 import UsedByCard from "@/components/UsedByCard.vue";
 import ValueForm from "@/components/ValueForm.vue";
 import OverviewRow from "@/components/OverviewRow.vue";
-import { absoluteTime, relativeTime } from "@/format";
-import { operator } from "@/auth";
+import { absoluteTime, relativeTime } from "@/lib/format";
+import { operator } from "@/composables/auth";
 
 const route = useRoute();
 const router = useRouter();

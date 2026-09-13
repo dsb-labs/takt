@@ -16,9 +16,9 @@ import {
   cores,
   healthStyles,
   relativeTime,
-} from "@/format";
-import { seriesOf, useUsageSeries } from "@/series";
-import { useSort } from "@/sort";
+} from "@/lib/format";
+import { seriesOf, useUsageSeries } from "@/composables/series";
+import { useSort } from "@/composables/sort";
 
 const route = useRoute();
 // Snapshots rather than computed reads, for the reason the workload view

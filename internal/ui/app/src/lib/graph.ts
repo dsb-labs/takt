@@ -8,7 +8,7 @@ import type {
   Workload,
   WorkloadState,
 } from "@/api/types";
-import { references } from "@/references";
+import { references } from "@/lib/references";
 
 // The GraphNode type is a node in the reference graph: a workload or one of
 // the resources a workload can reference.

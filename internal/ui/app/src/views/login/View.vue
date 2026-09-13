@@ -4,7 +4,7 @@ import { useRoute, useRouter } from "vue-router";
 
 import { useLogin } from "@/api/mutations";
 import { useOIDC } from "@/api/queries";
-import { loadIdentity } from "@/auth";
+import { loadIdentity } from "@/composables/auth";
 import ErrorBanner from "@/components/ErrorBanner.vue";
 
 const route = useRoute();

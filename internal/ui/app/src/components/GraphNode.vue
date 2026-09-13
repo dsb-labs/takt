@@ -2,8 +2,8 @@
 import { Handle, Position } from "@vue-flow/core";
 import { useRouter } from "vue-router";
 
-import type { GraphNode } from "@/graph";
-import { referenceTarget } from "@/references";
+import type { GraphNode } from "@/lib/graph";
+import { referenceTarget } from "@/lib/references";
 
 const props = defineProps<{ data: GraphNode }>();
 const router = useRouter();

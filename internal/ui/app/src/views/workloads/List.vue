@@ -6,9 +6,9 @@ import ErrorBanner from "@/components/ErrorBanner.vue";
 import ListTable from "@/components/ListTable.vue";
 import QueryInput from "@/components/QueryInput.vue";
 import StateBadge from "@/components/StateBadge.vue";
-import { relativeTime, healthStyles } from "@/format";
-import { useQueryFilter } from "@/filter";
-import { useSort } from "@/sort";
+import { relativeTime, healthStyles } from "@/lib/format";
+import { useQueryFilter } from "@/composables/filter";
+import { useSort } from "@/composables/sort";
 import type { Workload, WorkloadState } from "@/api/types";
 
 const { filter, queries } = useQueryFilter();

@@ -5,7 +5,7 @@ import { useRoute, useRouter } from "vue-router";
 import { version } from "../package.json";
 import { useLogout } from "@/api/mutations";
 import { useReadiness } from "@/api/queries";
-import { admin, forgetIdentity, identity } from "@/auth";
+import { admin, forgetIdentity, identity } from "@/composables/auth";
 
 const route = useRoute();
 const router = useRouter();

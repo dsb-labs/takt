@@ -14,7 +14,7 @@ import { computed, onUnmounted, ref } from "vue";
 import { Line } from "vue-chartjs";
 
 import { pollInterval } from "@/api/queries";
-import type { Point, Series } from "@/series";
+import type { Point, Series } from "@/composables/series";
 
 // Only the pieces a line chart draws with, so the bundle carries the chart
 // types this page uses rather than every chart the library can draw.

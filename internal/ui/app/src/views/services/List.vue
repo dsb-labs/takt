@@ -3,9 +3,9 @@ import { useServices } from "@/api/queries";
 import ErrorBanner from "@/components/ErrorBanner.vue";
 import ListTable from "@/components/ListTable.vue";
 import QueryInput from "@/components/QueryInput.vue";
-import { pluralize } from "@/format";
-import { useQueryFilter } from "@/filter";
-import { useSort } from "@/sort";
+import { pluralize } from "@/lib/format";
+import { useQueryFilter } from "@/composables/filter";
+import { useSort } from "@/composables/sort";
 
 const { filter, queries } = useQueryFilter();
 const services = useServices(() => queries.value);
