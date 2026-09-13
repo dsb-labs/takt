@@ -664,10 +664,10 @@ func newWorkload(w service.Workload) api.Workload {
 			ID:       instance.ID,
 			SpecHash: instance.SpecHash,
 			State:    api.InstanceState(instance.State),
-			Index:    indexOf(instance),
+			Index:    indexOf(instance.Instance),
 			// The instance's own verdict rather than a workload-wide one, so one
 			// instance failing its check does not read as all of them failing.
-			Health: instanceHealth(w.Healths[instance.Index], instance),
+			Health: instanceHealth(instance.Health, instance.Instance),
 		}
 
 		// An exit code is only meaningful once the instance has stopped. Reporting

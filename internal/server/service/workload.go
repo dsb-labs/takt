@@ -259,6 +259,20 @@ type (
 		Result health.Result
 	}
 
+	// The Instance type is the service's view of one instance: what the driver
+	// observed, together with what takt itself established about it.
+	//
+	// The observation is embedded rather than copied field by field, because it is
+	// the driver's answer and restating it here would be a second place for it to
+	// drift. What takt establishes sits beside it: whether the instance passes the
+	// check takt performs is not something a runtime reports, and a driver that had
+	// to carry it would be answering a question it was never asked.
+	Instance struct {
+		driver.Instance
+		// What takt established about whether the instance is working.
+		Health Health
+	}
+
 	// The SecretRevisions interface describes how the service learns what version of
 	// each secret a workload reads.
 	//
@@ -1970,15 +1984,22 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 		next = nextRun(spec.Schedule, instances, row.UpdatedAt)
 	}
 
+	// Paired with what takt established about each of them only once their states
+	// have settled, so nothing downstream can see an instance whose verdict has been
+	// read but not yet applied.
+	reported := make([]Instance, 0, len(instances))
+	for _, instance := range instances {
+		reported = append(reported, Instance{Instance: instance, Health: healths[instance.Index]})
+	}
+
 	return Workload{
 		Name:        row.Name,
 		Version:     row.Version,
 		Runtime:     manifest.Runtime(row.Runtime),
 		Spec:        spec,
 		Labels:      row.Labels,
-		Instances:   instances,
+		Instances:   reported,
 		Ports:       newResolvedPorts(ports),
-		Healths:     healths,
 		State:       state.Of(instances, deleting, suspended),
 		Deleting:    deleting,
 		Suspended:   suspended,
@@ -2038,12 +2059,9 @@ type Workload struct {
 	// Arbitrary key-value pairs attached to the workload.
 	Labels map[string]string
 	// The instances the driver is currently running for the workload.
-	Instances []driver.Instance
+	Instances []Instance
 	// The port mappings the server settled on, including any it allocated.
 	Ports []ResolvedPort
-	// What takt established about whether each instance is working, keyed by the
-	// instance's index.
-	Healths map[int]Health
 	// The workload's overall state, derived from its instances and whether it is
 	// being deleted or suspended.
 	State state.Workload
