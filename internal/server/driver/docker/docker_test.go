@@ -1,8 +1,10 @@
 package docker_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1112,6 +1114,178 @@ func TestDriver_ObserveWorkload(t *testing.T) {
 
 		assert.True(t, retained["older"], "the superseded container is not retained")
 		assert.False(t, retained["newer"], "the current container is retained")
+	})
+}
+
+func TestDriver_Usage(t *testing.T) {
+	t.Parallel()
+
+	read := time.Date(2026, time.September, 13, 10, 0, 0, 0, time.UTC)
+
+	stats := func(id string, response dockercontainer.StatsResponse) dockercontainer.StatsResponseReader {
+		response.ID = id
+		response.Read = read
+
+		body, err := json.Marshal(response)
+		require.NoError(t, err)
+
+		return dockercontainer.StatsResponseReader{Body: io.NopCloser(bytes.NewReader(body))}
+	}
+
+	t.Run("reports what each running container consumes", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:     "container-one",
+				State:  dockercontainer.StateRunning,
+				Labels: map[string]string{docker.LabelWorkload: "example"},
+			},
+		}, nil).Once()
+
+		client.EXPECT().ContainerStatsOneShot(mock.Anything, "container-one").Return(stats("container-one", dockercontainer.StatsResponse{
+			MemoryStats: dockercontainer.MemoryStats{Usage: 220200960},
+			CPUStats:    dockercontainer.CPUStats{CPUUsage: dockercontainer.CPUUsage{TotalUsage: uint64(90 * time.Second)}},
+			PidsStats:   dockercontainer.PidsStats{Current: 12},
+		}), nil).Once()
+
+		d := testDriver(t, client)
+
+		usage, err := d.Usage(t.Context(), "cvhs0dq0kqj4c9r8m1a0", "example")
+		require.NoError(t, err)
+		require.Len(t, usage, 1)
+
+		assert.Equal(t, driver.Usage{
+			Memory: 220200960,
+			CPU:    90 * time.Second,
+			Pids:   12,
+			At:     read,
+		}, usage["container-one"])
+	})
+
+	// The figure a limit is enforced against leaves out the page cache the kernel
+	// reclaims first, so the reading has to match what docker stats prints rather
+	// than the raw counter.
+	t.Run("leaves the reclaimable page cache out of the memory it reports", func(t *testing.T) {
+		for name, memory := range map[string]dockercontainer.MemoryStats{
+			"cgroup v1": {Usage: 300, Stats: map[string]uint64{"total_inactive_file": 100}},
+			"cgroup v2": {Usage: 300, Stats: map[string]uint64{"inactive_file": 100}},
+		} {
+			t.Run(name, func(t *testing.T) {
+				client := NewMockClient(t)
+
+				client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+					{
+						ID:     "container-one",
+						State:  dockercontainer.StateRunning,
+						Labels: map[string]string{docker.LabelWorkload: "example"},
+					},
+				}, nil).Once()
+
+				client.EXPECT().ContainerStatsOneShot(mock.Anything, "container-one").
+					Return(stats("container-one", dockercontainer.StatsResponse{MemoryStats: memory}), nil).Once()
+
+				d := testDriver(t, client)
+
+				usage, err := d.Usage(t.Context(), "cvhs0dq0kqj4c9r8m1a0", "example")
+				require.NoError(t, err)
+				require.Len(t, usage, 1)
+
+				assert.Equal(t, uint64(200), usage["container-one"].Memory)
+			})
+		}
+	})
+
+	// A retained container has ended and a stopped one consumes nothing, so neither
+	// is part of what the workload is using.
+	t.Run("leaves out the containers that are not doing the work", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:      "older",
+				State:   dockercontainer.StateRunning,
+				Created: 1000,
+				Labels: map[string]string{
+					docker.LabelWorkload: "example",
+					docker.LabelVersion:  "1",
+				},
+			},
+			{
+				ID:      "newer",
+				State:   dockercontainer.StateRunning,
+				Created: 2000,
+				Labels: map[string]string{
+					docker.LabelWorkload: "example",
+					docker.LabelVersion:  "2",
+				},
+			},
+			{
+				ID:     "stopped",
+				State:  dockercontainer.StateExited,
+				Labels: map[string]string{docker.LabelWorkload: "example"},
+			},
+		}, nil).Once()
+
+		client.EXPECT().ContainerStatsOneShot(mock.Anything, "newer").
+			Return(stats("newer", dockercontainer.StatsResponse{}), nil).Once()
+
+		d := testDriver(t, client)
+
+		usage, err := d.Usage(t.Context(), "cvhs0dq0kqj4c9r8m1a0", "example")
+		require.NoError(t, err)
+		require.Len(t, usage, 1)
+		assert.Contains(t, usage, "newer")
+	})
+
+	// A container can end between the listing and the read, and a workload of several
+	// instances would otherwise report nothing because one of them did.
+	t.Run("keeps the readings it has when one container cannot be read", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:    "container-one",
+				State: dockercontainer.StateRunning,
+				Labels: map[string]string{
+					docker.LabelWorkload: "example",
+					docker.LabelInstance: "0",
+				},
+			},
+			{
+				ID:    "container-two",
+				State: dockercontainer.StateRunning,
+				Labels: map[string]string{
+					docker.LabelWorkload: "example",
+					docker.LabelInstance: "1",
+				},
+			},
+		}, nil).Once()
+
+		client.EXPECT().ContainerStatsOneShot(mock.Anything, "container-one").
+			Return(dockercontainer.StatsResponseReader{}, errors.New("no such container")).Once()
+
+		client.EXPECT().ContainerStatsOneShot(mock.Anything, "container-two").
+			Return(stats("container-two", dockercontainer.StatsResponse{PidsStats: dockercontainer.PidsStats{Current: 3}}), nil).Once()
+
+		d := testDriver(t, client)
+
+		usage, err := d.Usage(t.Context(), "cvhs0dq0kqj4c9r8m1a0", "example")
+		require.NoError(t, err)
+		require.Len(t, usage, 1)
+		assert.Equal(t, 3, usage["container-two"].Pids)
+	})
+
+	t.Run("returns the error when the containers cannot be listed", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).
+			Return(nil, errors.New("daemon unreachable")).Once()
+
+		d := testDriver(t, client)
+
+		_, err := d.Usage(t.Context(), "cvhs0dq0kqj4c9r8m1a0", "example")
+		require.Error(t, err)
 	})
 }
 
