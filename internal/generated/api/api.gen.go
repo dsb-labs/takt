@@ -340,6 +340,108 @@ func (e VolumeMountPropagation) Valid() bool {
 	}
 }
 
+// Defines values for WorkloadEventReason.
+const (
+	WorkloadEventReasonAddressMoved          WorkloadEventReason = "addressMoved"
+	WorkloadEventReasonApplied               WorkloadEventReason = "applied"
+	WorkloadEventReasonConvergeFailed        WorkloadEventReason = "convergeFailed"
+	WorkloadEventReasonDeleted               WorkloadEventReason = "deleted"
+	WorkloadEventReasonHashMoved             WorkloadEventReason = "hashMoved"
+	WorkloadEventReasonHealthCheckFailing    WorkloadEventReason = "healthCheckFailing"
+	WorkloadEventReasonHealthCheckRecovered  WorkloadEventReason = "healthCheckRecovered"
+	WorkloadEventReasonImagePullFailed       WorkloadEventReason = "imagePullFailed"
+	WorkloadEventReasonImagePulled           WorkloadEventReason = "imagePulled"
+	WorkloadEventReasonImagePulling          WorkloadEventReason = "imagePulling"
+	WorkloadEventReasonInstanceExited        WorkloadEventReason = "instanceExited"
+	WorkloadEventReasonInstanceRemoved       WorkloadEventReason = "instanceRemoved"
+	WorkloadEventReasonInstanceStarted       WorkloadEventReason = "instanceStarted"
+	WorkloadEventReasonMountsRefreshed       WorkloadEventReason = "mountsRefreshed"
+	WorkloadEventReasonOccurrenceReplaced    WorkloadEventReason = "occurrenceReplaced"
+	WorkloadEventReasonOccurrenceSkipped     WorkloadEventReason = "occurrenceSkipped"
+	WorkloadEventReasonPortsAbandoned        WorkloadEventReason = "portsAbandoned"
+	WorkloadEventReasonPortsDrifted          WorkloadEventReason = "portsDrifted"
+	WorkloadEventReasonReferenceUnresolved   WorkloadEventReason = "referenceUnresolved"
+	WorkloadEventReasonRestartGaveUp         WorkloadEventReason = "restartGaveUp"
+	WorkloadEventReasonRestartPaced          WorkloadEventReason = "restartPaced"
+	WorkloadEventReasonRestartRequested      WorkloadEventReason = "restartRequested"
+	WorkloadEventReasonResumed               WorkloadEventReason = "resumed"
+	WorkloadEventReasonRunFinished           WorkloadEventReason = "runFinished"
+	WorkloadEventReasonRunStarted            WorkloadEventReason = "runStarted"
+	WorkloadEventReasonScheduleInvalid       WorkloadEventReason = "scheduleInvalid"
+	WorkloadEventReasonSecretChanged         WorkloadEventReason = "secretChanged"
+	WorkloadEventReasonSpecificationModified WorkloadEventReason = "specificationModified"
+	WorkloadEventReasonSuspended             WorkloadEventReason = "suspended"
+	WorkloadEventReasonVariableChanged       WorkloadEventReason = "variableChanged"
+)
+
+// Valid indicates whether the value is a known member of the WorkloadEventReason enum.
+func (e WorkloadEventReason) Valid() bool {
+	switch e {
+	case WorkloadEventReasonAddressMoved:
+		return true
+	case WorkloadEventReasonApplied:
+		return true
+	case WorkloadEventReasonConvergeFailed:
+		return true
+	case WorkloadEventReasonDeleted:
+		return true
+	case WorkloadEventReasonHashMoved:
+		return true
+	case WorkloadEventReasonHealthCheckFailing:
+		return true
+	case WorkloadEventReasonHealthCheckRecovered:
+		return true
+	case WorkloadEventReasonImagePullFailed:
+		return true
+	case WorkloadEventReasonImagePulled:
+		return true
+	case WorkloadEventReasonImagePulling:
+		return true
+	case WorkloadEventReasonInstanceExited:
+		return true
+	case WorkloadEventReasonInstanceRemoved:
+		return true
+	case WorkloadEventReasonInstanceStarted:
+		return true
+	case WorkloadEventReasonMountsRefreshed:
+		return true
+	case WorkloadEventReasonOccurrenceReplaced:
+		return true
+	case WorkloadEventReasonOccurrenceSkipped:
+		return true
+	case WorkloadEventReasonPortsAbandoned:
+		return true
+	case WorkloadEventReasonPortsDrifted:
+		return true
+	case WorkloadEventReasonReferenceUnresolved:
+		return true
+	case WorkloadEventReasonRestartGaveUp:
+		return true
+	case WorkloadEventReasonRestartPaced:
+		return true
+	case WorkloadEventReasonRestartRequested:
+		return true
+	case WorkloadEventReasonResumed:
+		return true
+	case WorkloadEventReasonRunFinished:
+		return true
+	case WorkloadEventReasonRunStarted:
+		return true
+	case WorkloadEventReasonScheduleInvalid:
+		return true
+	case WorkloadEventReasonSecretChanged:
+		return true
+	case WorkloadEventReasonSpecificationModified:
+		return true
+	case WorkloadEventReasonSuspended:
+		return true
+	case WorkloadEventReasonVariableChanged:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WorkloadState.
 const (
 	WorkloadStateCompleted   WorkloadState = "completed"
@@ -734,6 +836,14 @@ type GetVariableResult struct {
 type GetVolumeResult struct {
 	// Volume A volume, together with the workloads currently mounting it.
 	Volume Volume `json:"volume"`
+}
+
+// GetWorkloadEventsResult The body returned when a workload's events are read. An object rather than a
+// bare array, so something later reported about the set as a whole is a new
+// field rather than a changed type.
+type GetWorkloadEventsResult struct {
+	// Events The workload's events, most recently seen first.
+	Events []WorkloadEvent `json:"events"`
 }
 
 // GetWorkloadResult The body returned when a single workload is read.
@@ -2023,20 +2133,6 @@ type Workload struct {
 	// when nothing is running yet.
 	Instances *[]Instance `json:"instances,omitempty"`
 
-	// LastError Why the last attempt to converge the workload failed. Absent for a
-	// workload whose last attempt succeeded, or that none has been made for.
-	//
-	// Held in memory rather than stored: it clears when an attempt succeeds
-	// and does not survive a server restart, after which the next attempt
-	// either fails again and restores it or succeeds. The text is for a human
-	// reading it, not for matching.
-	LastError *string `json:"lastError,omitempty"`
-
-	// LastErrorAt When the last converge failure was recorded. Present exactly when
-	// lastError is, so a failure an hour ago and one on every attempt read
-	// differently.
-	LastErrorAt *time.Time `json:"lastErrorAt,omitempty"`
-
 	// Name The name that identifies the workload.
 	Name string `json:"name"`
 
@@ -2092,6 +2188,112 @@ type Workload struct {
 	// unchanged specification leaves it as-is.
 	Version int `json:"version"`
 }
+
+// WorkloadEvent Something the server observed about a workload while converging it.
+//
+// Repeated sightings of one reason and data coalesce into a single event, so
+// this carries a count and the two times that bound it rather than appearing
+// once per sighting.
+type WorkloadEvent struct {
+	// Count How many times the event was seen between firstSeen and lastSeen.
+	//
+	// One for an event seen once. A sighting of something already recorded
+	// raises this rather than adding an event, so a condition lasting across
+	// many reconcile passes reads as one row with a high count.
+	Count int `json:"count"`
+
+	// Data The values an event's message was rendered from, such as the image reference a
+	// pull is fetching.
+	//
+	// Which fields are present depends on the reason, and every one of them is
+	// optional. This is here for a caller doing something with the event beyond
+	// showing it, which already has the message.
+	Data *WorkloadEventData `json:"data,omitempty"`
+
+	// FirstSeen When the event was first seen.
+	//
+	// This bounds the current run of sightings rather than reaching back to the
+	// first one ever. A cause that recurs after a long enough gap starts a new
+	// run, so the pair of times describes the episode being reported rather than
+	// spanning two.
+	FirstSeen time.Time `json:"firstSeen"`
+
+	// LastSeen When the event was last seen. Events are returned most recent by this
+	// first.
+	LastSeen time.Time `json:"lastSeen"`
+
+	// Message The event as a sentence, rendered by the server from the reason and the
+	// data.
+	//
+	// Rendered when the event is read rather than when it was recorded, so the
+	// wording is not frozen into what the server stored.
+	Message string `json:"message"`
+
+	// Reason Why an event was recorded, as a stable code rather than a sentence.
+	//
+	// Match on this rather than on the message, which is worded for a human and may
+	// be reworded between releases. The set below grows as the server learns to
+	// report more, so a caller may meet a reason it does not know from a server
+	// newer than itself. Treat an unrecognised reason as one to show rather than one
+	// to reject.
+	Reason WorkloadEventReason `json:"reason"`
+}
+
+// WorkloadEventData The values an event's message was rendered from, such as the image reference a
+// pull is fetching.
+//
+// Which fields are present depends on the reason, and every one of them is
+// optional. This is here for a caller doing something with the event beyond
+// showing it, which already has the message.
+type WorkloadEventData struct {
+	// Count How many times something has happened, such as the consecutive failures a
+	// health check has reported.
+	//
+	// This counts within one sighting. The count of sightings is on the event
+	// itself.
+	Count *int `json:"count,omitempty"`
+
+	// Delay How long the server is waiting before it tries again, in nanoseconds.
+	Delay *int64 `json:"delay,omitempty"`
+
+	// Error What went wrong, where the event reports a failure.
+	Error *string `json:"error,omitempty"`
+
+	// ExitCode The status an instance ended with. Absent where the event did not record
+	// one, which is not the same as a clean exit reporting zero.
+	ExitCode *int `json:"exitCode,omitempty"`
+
+	// Hash The specification hash the workload is converging towards.
+	Hash *string `json:"hash,omitempty"`
+
+	// Instance The ordinal of the instance the event concerns, counting from zero.
+	Instance *int `json:"instance,omitempty"`
+
+	// Name The name of another object the event concerns, such as the secret whose
+	// change moved a workload's hash.
+	Name *string `json:"name,omitempty"`
+
+	// Ports The host ports the event concerns.
+	Ports *[]int `json:"ports,omitempty"`
+
+	// Previous The specification hash the workload was at, where the event reports a move.
+	Previous *string `json:"previous,omitempty"`
+
+	// Reference The image reference, expected hash, or other reference the event concerns.
+	Reference *string `json:"reference,omitempty"`
+
+	// Schedule The schedule expression the event concerns.
+	Schedule *string `json:"schedule,omitempty"`
+}
+
+// WorkloadEventReason Why an event was recorded, as a stable code rather than a sentence.
+//
+// Match on this rather than on the message, which is worded for a human and may
+// be reworded between releases. The set below grows as the server learns to
+// report more, so a caller may meet a reason it does not know from a server
+// newer than itself. Treat an unrecognised reason as one to show rather than one
+// to reject.
+type WorkloadEventReason string
 
 // WorkloadSpec The desired state of a workload. Exactly one runtime block must be present;
 // which one it is selects the driver that runs the workload.
@@ -2409,6 +2611,14 @@ type DeleteWorkloadParams struct {
 	// workloads are redeployed and then report the reference they can no longer
 	// resolve, retrying until something holds the name again.
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+}
+
+// GetWorkloadEventsParams defines parameters for GetWorkloadEvents.
+type GetWorkloadEventsParams struct {
+	// Limit The number of events to return, most recently seen first. Capped, because
+	// the server reads what it is asked for and an unbounded request would let
+	// a caller decide how much work the server does.
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetWorkloadLogsParams defines parameters for GetWorkloadLogs.
@@ -3370,6 +3580,27 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
 	DryRunWorkload(ctx context.Context, name WorkloadName, body DryRunWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetWorkloadEvents Read what the server recorded about a workload
+	//
+	// Returns what the server observed about the workload while converging it, most
+	// recently seen first.
+	//
+	// An event says why the workload is in the state it is in: which image is being
+	// pulled, why an instance was replaced, why a start failed. The state itself is
+	// on the workload, so these answer the question the state raises rather than
+	// repeating it.
+	//
+	// Repeated sightings of one thing coalesce into a single event carrying a count
+	// and the two times that bound it. An event is a claim about the past: it says
+	// a thing was true when it was last seen, not that it is true now.
+	//
+	// The server keeps a bounded number of events per workload, oldest removed
+	// first, so a workload's history reaches back as far as its rate of events
+	// allows rather than for a fixed time.
+	//
+	// Corresponds with GET /api/v1/workloads/{name}/events (the `GetWorkloadEvents` operationId).
+	GetWorkloadEvents(ctx context.Context, name WorkloadName, params *GetWorkloadEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetWorkloadLogs Read a workload's logs
 	//
@@ -4784,6 +5015,37 @@ func (c *Client) DryRunWorkloadWithBody(ctx context.Context, name WorkloadName, 
 // Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
 func (c *Client) DryRunWorkload(ctx context.Context, name WorkloadName, body DryRunWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDryRunWorkloadRequest(c.Server, name, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetWorkloadEvents Read what the server recorded about a workload
+//
+// Returns what the server observed about the workload while converging it, most
+// recently seen first.
+//
+// An event says why the workload is in the state it is in: which image is being
+// pulled, why an instance was replaced, why a start failed. The state itself is
+// on the workload, so these answer the question the state raises rather than
+// repeating it.
+//
+// Repeated sightings of one thing coalesce into a single event carrying a count
+// and the two times that bound it. An event is a claim about the past: it says
+// a thing was true when it was last seen, not that it is true now.
+//
+// The server keeps a bounded number of events per workload, oldest removed
+// first, so a workload's history reaches back as far as its rate of events
+// allows rather than for a fixed time.
+//
+// Corresponds with GET /api/v1/workloads/{name}/events (the `GetWorkloadEvents` operationId).
+func (c *Client) GetWorkloadEvents(ctx context.Context, name WorkloadName, params *GetWorkloadEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetWorkloadEventsRequest(c.Server, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -6644,6 +6906,67 @@ func NewDryRunWorkloadRequestWithBody(server string, name WorkloadName, contentT
 	return req, nil
 }
 
+// NewGetWorkloadEventsRequest constructs an http.Request for the GetWorkloadEvents method
+func NewGetWorkloadEventsRequest(server string, name WorkloadName, params *GetWorkloadEventsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/workloads/%s/events", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetWorkloadLogsRequest constructs an http.Request for the GetWorkloadLogs method
 func NewGetWorkloadLogsRequest(server string, name WorkloadName, params *GetWorkloadLogsParams) (*http.Request, error) {
 	var err error
@@ -7791,6 +8114,29 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/workloads/{name}/dry-run (the `DryRunWorkload` operationId).
 	DryRunWorkloadWithResponse(ctx context.Context, name WorkloadName, body DryRunWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*DryRunWorkloadResponse, error)
+
+	// GetWorkloadEventsWithResponse Read what the server recorded about a workload
+	//
+	// Returns what the server observed about the workload while converging it, most
+	// recently seen first.
+	//
+	// An event says why the workload is in the state it is in: which image is being
+	// pulled, why an instance was replaced, why a start failed. The state itself is
+	// on the workload, so these answer the question the state raises rather than
+	// repeating it.
+	//
+	// Repeated sightings of one thing coalesce into a single event carrying a count
+	// and the two times that bound it. An event is a claim about the past: it says
+	// a thing was true when it was last seen, not that it is true now.
+	//
+	// The server keeps a bounded number of events per workload, oldest removed
+	// first, so a workload's history reaches back as far as its rate of events
+	// allows rather than for a fixed time.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/workloads/{name}/events (the `GetWorkloadEvents` operationId).
+	GetWorkloadEventsWithResponse(ctx context.Context, name WorkloadName, params *GetWorkloadEventsParams, reqEditors ...RequestEditorFn) (*GetWorkloadEventsResponse, error)
 
 	// GetWorkloadLogsWithResponse Read a workload's logs
 	//
@@ -10290,6 +10636,68 @@ func (r DryRunWorkloadResponse) ContentType() string {
 	return ""
 }
 
+type GetWorkloadEventsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetWorkloadEventsResult
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetWorkloadEventsResponse) GetJSON200() *GetWorkloadEventsResult {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r GetWorkloadEventsResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetWorkloadEventsResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetWorkloadEventsResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetWorkloadEventsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetWorkloadEventsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetWorkloadEventsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetWorkloadEventsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetWorkloadLogsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -11683,6 +12091,35 @@ func (c *ClientWithResponses) DryRunWorkloadWithResponse(ctx context.Context, na
 		return nil, err
 	}
 	return ParseDryRunWorkloadResponse(rsp)
+}
+
+// GetWorkloadEventsWithResponse Read what the server recorded about a workload
+//
+// Returns what the server observed about the workload while converging it, most
+// recently seen first.
+//
+// An event says why the workload is in the state it is in: which image is being
+// pulled, why an instance was replaced, why a start failed. The state itself is
+// on the workload, so these answer the question the state raises rather than
+// repeating it.
+//
+// Repeated sightings of one thing coalesce into a single event carrying a count
+// and the two times that bound it. An event is a claim about the past: it says
+// a thing was true when it was last seen, not that it is true now.
+//
+// The server keeps a bounded number of events per workload, oldest removed
+// first, so a workload's history reaches back as far as its rate of events
+// allows rather than for a fixed time.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/workloads/{name}/events (the `GetWorkloadEvents` operationId).
+func (c *ClientWithResponses) GetWorkloadEventsWithResponse(ctx context.Context, name WorkloadName, params *GetWorkloadEventsParams, reqEditors ...RequestEditorFn) (*GetWorkloadEventsResponse, error) {
+	rsp, err := c.GetWorkloadEvents(ctx, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetWorkloadEventsResponse(rsp)
 }
 
 // GetWorkloadLogsWithResponse Read a workload's logs
@@ -13732,6 +14169,53 @@ func ParseDryRunWorkloadResponse(rsp *http.Response) (*DryRunWorkloadResponse, e
 	return response, nil
 }
 
+// ParseGetWorkloadEventsResponse parses an HTTP response from a GetWorkloadEventsWithResponse call
+func ParseGetWorkloadEventsResponse(rsp *http.Response) (*GetWorkloadEventsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetWorkloadEventsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetWorkloadEventsResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetWorkloadLogsResponse parses an HTTP response from a GetWorkloadLogsWithResponse call
 func ParseGetWorkloadLogsResponse(rsp *http.Response) (*GetWorkloadLogsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -14032,6 +14516,9 @@ type ServerInterface interface {
 	// DryRunWorkload Report what applying a workload would do
 	// (POST /api/v1/workloads/{name}/dry-run)
 	DryRunWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
+	// GetWorkloadEvents Read what the server recorded about a workload
+	// (GET /api/v1/workloads/{name}/events)
+	GetWorkloadEvents(w http.ResponseWriter, r *http.Request, name WorkloadName, params GetWorkloadEventsParams)
 	// GetWorkloadLogs Read a workload's logs
 	// (GET /api/v1/workloads/{name}/logs)
 	GetWorkloadLogs(w http.ResponseWriter, r *http.Request, name WorkloadName, params GetWorkloadLogsParams)
@@ -15313,6 +15800,56 @@ func (siw *ServerInterfaceWrapper) DryRunWorkload(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetWorkloadEvents operation middleware
+func (siw *ServerInterfaceWrapper) GetWorkloadEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetWorkloadEventsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWorkloadEvents(w, r, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetWorkloadLogs operation middleware
 func (siw *ServerInterfaceWrapper) GetWorkloadLogs(w http.ResponseWriter, r *http.Request) {
 
@@ -15642,6 +16179,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}", wrapper.GetWorkload)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/workloads/{name}", wrapper.ApplyWorkload)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}/logs", wrapper.GetWorkloadLogs)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}/events", wrapper.GetWorkloadEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/stop", wrapper.StopWorkload)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/start", wrapper.StartWorkload)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/restart", wrapper.RestartWorkload)
@@ -18108,6 +18646,73 @@ func (response DryRunWorkload500JSONResponse) VisitDryRunWorkloadResponse(w http
 	return err
 }
 
+type GetWorkloadEventsRequestObject struct {
+	Name   WorkloadName `json:"name"`
+	Params GetWorkloadEventsParams
+}
+
+type GetWorkloadEventsResponseObject interface {
+	VisitGetWorkloadEventsResponse(w http.ResponseWriter) error
+}
+
+type GetWorkloadEvents200JSONResponse GetWorkloadEventsResult
+
+func (response GetWorkloadEvents200JSONResponse) VisitGetWorkloadEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadEvents400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response GetWorkloadEvents400JSONResponse) VisitGetWorkloadEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadEvents404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetWorkloadEvents404JSONResponse) VisitGetWorkloadEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetWorkloadEvents500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetWorkloadEvents500JSONResponse) VisitGetWorkloadEventsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetWorkloadLogsRequestObject struct {
 	Name   WorkloadName `json:"name"`
 	Params GetWorkloadLogsParams
@@ -18492,6 +19097,9 @@ type StrictServerInterface interface {
 	// DryRunWorkload Report what applying a workload would do
 	// (POST /api/v1/workloads/{name}/dry-run)
 	DryRunWorkload(ctx context.Context, request DryRunWorkloadRequestObject) (DryRunWorkloadResponseObject, error)
+	// GetWorkloadEvents Read what the server recorded about a workload
+	// (GET /api/v1/workloads/{name}/events)
+	GetWorkloadEvents(ctx context.Context, request GetWorkloadEventsRequestObject) (GetWorkloadEventsResponseObject, error)
 	// GetWorkloadLogs Read a workload's logs
 	// (GET /api/v1/workloads/{name}/logs)
 	GetWorkloadLogs(ctx context.Context, request GetWorkloadLogsRequestObject) (GetWorkloadLogsResponseObject, error)
@@ -19605,6 +20213,33 @@ func (sh *strictHandler) DryRunWorkload(w http.ResponseWriter, r *http.Request, 
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(DryRunWorkloadResponseObject); ok {
 		if err := validResponse.VisitDryRunWorkloadResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetWorkloadEvents operation middleware
+func (sh *strictHandler) GetWorkloadEvents(w http.ResponseWriter, r *http.Request, name WorkloadName, params GetWorkloadEventsParams) {
+	var request GetWorkloadEventsRequestObject
+
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetWorkloadEvents(ctx, request.(GetWorkloadEventsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetWorkloadEvents")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetWorkloadEventsResponseObject); ok {
+		if err := validResponse.VisitGetWorkloadEventsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -20,6 +20,7 @@ import (
 
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/health"
 	"github.com/dsb-labs/takt/internal/server/port"
 	"github.com/dsb-labs/takt/internal/server/resolve"
@@ -147,10 +148,14 @@ type (
 		// Restart should record that the workload's instances are to be replaced
 		// on the next pass over it.
 		Restart(workload string)
-		// LastError should report why the last converge pass over a workload
-		// failed and when, reporting false when the workload's last pass
-		// succeeded or none has run.
-		LastError(workload string) (string, time.Time, bool)
+	}
+
+	// The WorkloadEventRepository interface describes the event operations the
+	// service uses.
+	WorkloadEventRepository interface {
+		// List should return the events recorded against the named workload, most
+		// recently seen first, up to limit of them.
+		List(ctx context.Context, name string, limit int) ([]database.WorkloadEvent, error)
 	}
 
 	// The PortRepository interface describes the port allocation operations the
@@ -299,13 +304,28 @@ type (
 		// When the workload next runs, for one that names a schedule. Zero for a workload
 		// that runs continuously, and for a scheduled one that has not run yet.
 		NextRun time.Time
-		// Why the last converge pass over the workload failed. Empty for one that is
-		// converging. Held in memory by the reconciler, so it clears when a pass
-		// succeeds and does not survive a server restart.
-		LastError string
-		// When the last converge failure was recorded, meaningful only when LastError
-		// is set.
-		LastErrorAt time.Time
+	}
+
+	// The Event type is the service's view of something the server observed about
+	// a workload while converging it.
+	//
+	// It carries both the reason and the sentence rendered from it. A caller doing
+	// something with the event matches on the reason, and one showing it to an
+	// operator prints the message, so neither has to hold a table of the other.
+	Event struct {
+		// Why the event was recorded, as a stable code rather than a sentence.
+		Reason event.Reason
+		// The event as a sentence, rendered when the event is read so the wording is
+		// not frozen into what was stored.
+		Message string
+		// The JSON encoding of the values the message was rendered from.
+		Data []byte
+		// How many times the event was seen between FirstSeen and LastSeen.
+		Count int
+		// When the current run of sightings began.
+		FirstSeen time.Time
+		// When the event was last seen.
+		LastSeen time.Time
 	}
 
 	// The Instance type is the service's view of one instance: what the driver
@@ -496,6 +516,7 @@ type (
 		claims     Claimer
 		checker    Checker
 		reconciler Reconciler
+		events     WorkloadEventRepository
 		hostPaths  []string
 		samples    *usageSamples
 	}
@@ -554,11 +575,13 @@ type WorkloadServiceConfig struct {
 	// The checker that establishes whether workloads are working. May be nil, in
 	// which case no workload is checked and none reports health.
 	Checker Checker
-	// The loop that owns the runtime: woken whenever desired state changes,
-	// handed restart requests to act on, and read for the last converge error of
-	// each workload. May be nil when no reconciler is running, as in tests, in
-	// which case nothing is woken and no workload reports an error.
+	// The loop that owns the runtime: woken whenever desired state changes and
+	// handed restart requests to act on. May be nil when no reconciler is
+	// running, as in tests, in which case nothing is woken.
 	Reconciler Reconciler
+	// The repository holding what the server recorded about each workload. May be
+	// nil, in which case every workload reports no events.
+	Events WorkloadEventRepository
 	// The absolute prefixes a path mount may sit beneath. Empty rejects every
 	// path mount, which is the safe default: a host path reaches outside
 	// takt-managed state, so which ones are reachable is the operator's call.
@@ -581,6 +604,7 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		claims:     config.Claimer,
 		checker:    config.Checker,
 		reconciler: config.Reconciler,
+		events:     config.Events,
 		hostPaths:  config.AllowHostPaths,
 		samples:    newUsageSamples(),
 	}
@@ -943,9 +967,7 @@ func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Worklo
 
 	workloads := make([]Workload, 0, len(rows))
 	for _, row := range rows {
-		message, at := s.lastError(row.Name)
-
-		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.healths(row.Name, observed[row.Name]), message, at)
+		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.healths(row.Name, observed[row.Name]))
 		if err != nil {
 			return nil, err
 		}
@@ -1257,6 +1279,46 @@ func (s *WorkloadService) Restart(ctx context.Context, name string) (Workload, e
 	s.wake()
 
 	return s.hydrate(ctx, existing)
+}
+
+// Events returns what the server recorded about the named workload while
+// converging it, most recently seen first, up to limit of them.
+// Returns ErrWorkloadNotFound when no such workload exists.
+//
+// The workload is read first so that a name nothing knows is reported as missing
+// rather than as having no events, which are different answers to different
+// questions.
+func (s *WorkloadService) Events(ctx context.Context, name string, limit int) ([]Event, error) {
+	if _, err := s.workloads.Get(ctx, name); err != nil {
+		if errors.Is(err, database.ErrWorkloadNotFound) {
+			return nil, ErrWorkloadNotFound
+		}
+
+		return nil, fmt.Errorf("failed to load workload: %w", err)
+	}
+
+	if s.events == nil {
+		return nil, nil
+	}
+
+	rows, err := s.events.List(ctx, name, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read workload events: %w", err)
+	}
+
+	events := make([]Event, 0, len(rows))
+	for _, row := range rows {
+		events = append(events, Event{
+			Reason:    row.Reason,
+			Message:   event.Message(row.Reason, row.Data),
+			Data:      row.Data,
+			Count:     row.Count,
+			FirstSeen: row.FirstSeen,
+			LastSeen:  row.LastSeen,
+		})
+	}
+
+	return events, nil
 }
 
 // Logs writes the recent output of the named workload to out, as the options describe.
@@ -1901,11 +1963,9 @@ func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (W
 		return Workload{}, fmt.Errorf("failed to read workload ports: %w", err)
 	}
 
-	message, at := s.lastError(row.Name)
-
 	instances := s.observeWorkload(ctx, row)
 
-	return newWorkload(row, instances, ports, s.healths(row.Name, instances), message, at)
+	return newWorkload(row, instances, ports, s.healths(row.Name, instances))
 }
 
 // observeWorkload asks each driver what it is running for one workload.
@@ -2104,21 +2164,6 @@ func (s *WorkloadService) wake() {
 	}
 }
 
-// lastError returns why a workload's last converge pass failed, reporting zero values
-// for one that is converging.
-func (s *WorkloadService) lastError(workload string) (string, time.Time) {
-	if s.reconciler == nil {
-		return "", time.Time{}
-	}
-
-	message, at, ok := s.reconciler.LastError(workload)
-	if !ok {
-		return "", time.Time{}
-	}
-
-	return message, at
-}
-
 // healths returns what takt knows about each instance's health, keyed by the
 // instance's index. Only the observed instances are asked after, since a result can
 // only exist for an instance that runs.
@@ -2181,7 +2226,7 @@ func (r references) hashInputs(digest string) spechash.Inputs {
 	}
 }
 
-func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, healths map[int]Health, lastError string, lastErrorAt time.Time) (Workload, error) {
+func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, healths map[int]Health) (Workload, error) {
 	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return Workload{}, err
@@ -2231,21 +2276,19 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 	}
 
 	return Workload{
-		Name:        row.Name,
-		Version:     row.Version,
-		Runtime:     manifest.Runtime(row.Runtime),
-		Spec:        spec,
-		Labels:      row.Labels,
-		Instances:   reported,
-		Ports:       newResolvedPorts(ports),
-		State:       state.Of(instances, deleting, suspended),
-		Deleting:    deleting,
-		Suspended:   suspended,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
-		NextRun:     next,
-		LastError:   lastError,
-		LastErrorAt: lastErrorAt,
+		Name:      row.Name,
+		Version:   row.Version,
+		Runtime:   manifest.Runtime(row.Runtime),
+		Spec:      spec,
+		Labels:    row.Labels,
+		Instances: reported,
+		Ports:     newResolvedPorts(ports),
+		State:     state.Of(instances, deleting, suspended),
+		Deleting:  deleting,
+		Suspended: suspended,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+		NextRun:   next,
 	}, nil
 }
 

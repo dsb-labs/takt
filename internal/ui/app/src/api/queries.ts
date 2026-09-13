@@ -36,6 +36,21 @@ export function useWorkload(name: () => string) {
   });
 }
 
+export function useWorkloadEvents(name: () => string) {
+  return useQuery({
+    queryKey: ["workloads", computed(name), "events"],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET(
+        "/api/v1/workloads/{name}/events",
+        { params: { path: { name: name() } } },
+      );
+      if (error) throw new Error(error.error);
+      return data.events;
+    },
+  });
+}
+
 export function useSecrets(query: () => string[]) {
   return useQuery({
     queryKey: ["secrets", computed(query)],

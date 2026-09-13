@@ -125,6 +125,7 @@ func Run(ctx context.Context, config Config) error {
 	secrets := database.NewSecretRepository(db)
 	variables := database.NewVariableRepository(db)
 	tokens := database.NewTokenRepository(db)
+	events := database.NewWorkloadEventRepository(db, config.Workload.MaxEvents)
 
 	// Recovering from a lost recovery token is a host-level act: write the
 	// reset file into the data directory and restart. Consuming it here
@@ -398,6 +399,7 @@ func Run(ctx context.Context, config Config) error {
 		Claimer:        claimer,
 		Checker:        checker,
 		Reconciler:     reconcile,
+		Events:         events,
 		AllowHostPaths: config.Workload.AllowHostPaths,
 	})
 

@@ -1,0 +1,7 @@
+Read what the server recorded about a workload.
+
+An event says why the workload is in the state it is in: which image is being
+pulled, why an instance was replaced, why a start failed. Events are returned
+most recently seen first. Repeated sightings of one thing are reported once,
+with a count and the times that bound them, so a pull running across forty
+passes reads as one event rather than forty.
