@@ -899,6 +899,11 @@ nothing and probably meant to ask for something.
 rather than allowed to swap past it, so the limit means what it says. The restart
 policy then treats the kill as any other failure.
 
+`workload get` reports what each instance is consuming against these limits, and the
+workload's page in the UI draws the same figures over time. A limit about to bite is
+therefore visible before it bites. [The CLI reference](cli.md#workload-get) describes
+the figures.
+
 Resources sit beside the runtime blocks because how much a workload may consume is a
 question about the workload, and the limits mean the same thing on either runtime. A
 container's are enforced by its own runtime. An exec workload's are enforced with a
