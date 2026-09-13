@@ -2,10 +2,10 @@
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 
-import { useSetSecret } from "../../api/mutations";
-import DetailCard from "../../components/DetailCard.vue";
-import ErrorBanner from "../../components/ErrorBanner.vue";
-import ValueForm from "../../components/ValueForm.vue";
+import { useSetSecret } from "@/api/mutations";
+import DetailCard from "@/components/DetailCard.vue";
+import ErrorBanner from "@/components/ErrorBanner.vue";
+import ValueForm from "@/components/ValueForm.vue";
 
 const router = useRouter();
 const setSecret = useSetSecret();

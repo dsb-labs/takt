@@ -2,23 +2,23 @@
 import { computed, ref } from "vue";
 import { useRoute } from "vue-router";
 
-import { useWorkload } from "../../../api/queries";
-import DetailCard from "../../../components/DetailCard.vue";
-import DetailPage from "../../../components/DetailPage.vue";
-import LogViewer from "../../../components/LogViewer.vue";
-import OverviewRow from "../../../components/OverviewRow.vue";
-import SortHeader from "../../../components/SortHeader.vue";
-import StateBadge from "../../../components/StateBadge.vue";
-import UsageChart from "../../../components/UsageChart.vue";
+import { useWorkload } from "@/api/queries";
+import DetailCard from "@/components/DetailCard.vue";
+import DetailPage from "@/components/DetailPage.vue";
+import LogViewer from "@/components/LogViewer.vue";
+import OverviewRow from "@/components/OverviewRow.vue";
+import SortHeader from "@/components/SortHeader.vue";
+import StateBadge from "@/components/StateBadge.vue";
+import UsageChart from "@/components/UsageChart.vue";
 import {
   absoluteTime,
   bytes,
   cores,
   healthStyles,
   relativeTime,
-} from "../../../format";
-import { seriesOf, useUsageSeries } from "../../../series";
-import { useSort } from "../../../sort";
+} from "@/format";
+import { seriesOf, useUsageSeries } from "@/series";
+import { useSort } from "@/sort";
 
 const route = useRoute();
 // Snapshots rather than computed reads, for the reason the workload view

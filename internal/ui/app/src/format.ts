@@ -1,4 +1,4 @@
-import type { HealthStatus } from "./api/types";
+import type { HealthStatus } from "@/api/types";
 
 // Formatting helpers shared by the views.
 

@@ -1,4 +1,4 @@
-import type { VolumeMount, WorkloadSpec } from "./api/types";
+import type { VolumeMount, WorkloadSpec } from "@/api/types";
 
 // A Reference is something a workload's specification names: a secret,
 // variable, token or another workload expanded into its environment, or a

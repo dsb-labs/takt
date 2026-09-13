@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 
-import Tooltip from "./Tooltip.vue";
+import Tooltip from "@/components/Tooltip.vue";
 
 // The viewer reads one instance, named by the page it sits on, rather than
 // offering a choice: a workload's output is read an instance at a time and

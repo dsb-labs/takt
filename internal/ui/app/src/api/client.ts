@@ -1,6 +1,6 @@
 import createClient from "openapi-fetch";
 
-import type { paths } from "./schema";
+import type { paths } from "@/api/schema";
 
 // The UI is served from the same listener as the API, so requests are relative
 // and whatever address reached the page reaches the API.

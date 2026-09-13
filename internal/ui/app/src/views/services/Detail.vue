@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from "vue-router";
 
-import { useDeleteService } from "../../api/mutations";
-import { useService } from "../../api/queries";
-import DeleteControl from "../../components/DeleteControl.vue";
-import DetailCard from "../../components/DetailCard.vue";
-import DetailPage from "../../components/DetailPage.vue";
-import LabelsCard from "../../components/LabelsCard.vue";
-import SortHeader from "../../components/SortHeader.vue";
-import OverviewRow from "../../components/OverviewRow.vue";
-import { absoluteTime, relativeTime } from "../../format";
-import { labelQuery } from "../../filter";
-import { useSort } from "../../sort";
-import { operator } from "../../auth";
+import { useDeleteService } from "@/api/mutations";
+import { useService } from "@/api/queries";
+import DeleteControl from "@/components/DeleteControl.vue";
+import DetailCard from "@/components/DetailCard.vue";
+import DetailPage from "@/components/DetailPage.vue";
+import LabelsCard from "@/components/LabelsCard.vue";
+import SortHeader from "@/components/SortHeader.vue";
+import OverviewRow from "@/components/OverviewRow.vue";
+import { absoluteTime, relativeTime } from "@/format";
+import { labelQuery } from "@/filter";
+import { useSort } from "@/sort";
+import { operator } from "@/auth";
 
 const route = useRoute();
 const router = useRouter();

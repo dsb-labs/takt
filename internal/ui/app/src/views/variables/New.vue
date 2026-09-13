@@ -2,10 +2,10 @@
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 
-import { useSetVariable } from "../../api/mutations";
-import DetailCard from "../../components/DetailCard.vue";
-import ErrorBanner from "../../components/ErrorBanner.vue";
-import ValueForm from "../../components/ValueForm.vue";
+import { useSetVariable } from "@/api/mutations";
+import DetailCard from "@/components/DetailCard.vue";
+import ErrorBanner from "@/components/ErrorBanner.vue";
+import ValueForm from "@/components/ValueForm.vue";
 
 const router = useRouter();
 const setVariable = useSetVariable();

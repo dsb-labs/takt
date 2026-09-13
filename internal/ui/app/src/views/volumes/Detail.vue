@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from "vue-router";
 
-import { useDeleteVolume } from "../../api/mutations";
-import { useVolume } from "../../api/queries";
-import DeleteControl from "../../components/DeleteControl.vue";
-import DetailCard from "../../components/DetailCard.vue";
-import DetailPage from "../../components/DetailPage.vue";
-import LabelsCard from "../../components/LabelsCard.vue";
-import UsedByCard from "../../components/UsedByCard.vue";
-import OverviewRow from "../../components/OverviewRow.vue";
-import { absoluteTime, relativeTime } from "../../format";
-import { operator } from "../../auth";
+import { useDeleteVolume } from "@/api/mutations";
+import { useVolume } from "@/api/queries";
+import DeleteControl from "@/components/DeleteControl.vue";
+import DetailCard from "@/components/DetailCard.vue";
+import DetailPage from "@/components/DetailPage.vue";
+import LabelsCard from "@/components/LabelsCard.vue";
+import UsedByCard from "@/components/UsedByCard.vue";
+import OverviewRow from "@/components/OverviewRow.vue";
+import { absoluteTime, relativeTime } from "@/format";
+import { operator } from "@/auth";
 
 const route = useRoute();
 const router = useRouter();

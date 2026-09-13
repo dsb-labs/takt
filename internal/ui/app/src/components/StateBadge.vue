@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import type { InstanceState, WorkloadState } from "../api/types";
+import type { InstanceState, WorkloadState } from "@/api/types";
 
 // Both vocabularies, because an instance's state reads the same way a
 // workload's does and the two agree on every word they share.

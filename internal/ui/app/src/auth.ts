@@ -1,7 +1,7 @@
 import { ref } from "vue";
 
-import { client } from "./api/client";
-import type { components } from "./api/schema";
+import { client } from "@/api/client";
+import type { components } from "@/api/schema";
 
 export type Identity = components["schemas"]["GetAuthResult"];
 

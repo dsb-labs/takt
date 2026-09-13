@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { useVolumes } from "../../api/queries";
-import ErrorBanner from "../../components/ErrorBanner.vue";
-import ListTable from "../../components/ListTable.vue";
-import QueryInput from "../../components/QueryInput.vue";
-import { absoluteTime, pluralize, relativeTime } from "../../format";
-import { useQueryFilter } from "../../filter";
-import { useSort } from "../../sort";
+import { useVolumes } from "@/api/queries";
+import ErrorBanner from "@/components/ErrorBanner.vue";
+import ListTable from "@/components/ListTable.vue";
+import QueryInput from "@/components/QueryInput.vue";
+import { absoluteTime, pluralize, relativeTime } from "@/format";
+import { useQueryFilter } from "@/filter";
+import { useSort } from "@/sort";
 
 const { filter, queries } = useQueryFilter();
 const volumes = useVolumes(() => queries.value);

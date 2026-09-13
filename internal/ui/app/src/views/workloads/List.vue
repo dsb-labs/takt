@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { useWorkloads } from "../../api/queries";
-import ErrorBanner from "../../components/ErrorBanner.vue";
-import ListTable from "../../components/ListTable.vue";
-import QueryInput from "../../components/QueryInput.vue";
-import StateBadge from "../../components/StateBadge.vue";
-import { relativeTime, healthStyles } from "../../format";
-import { useQueryFilter } from "../../filter";
-import { useSort } from "../../sort";
-import type { Workload, WorkloadState } from "../../api/types";
+import { useWorkloads } from "@/api/queries";
+import ErrorBanner from "@/components/ErrorBanner.vue";
+import ListTable from "@/components/ListTable.vue";
+import QueryInput from "@/components/QueryInput.vue";
+import StateBadge from "@/components/StateBadge.vue";
+import { relativeTime, healthStyles } from "@/format";
+import { useQueryFilter } from "@/filter";
+import { useSort } from "@/sort";
+import type { Workload, WorkloadState } from "@/api/types";
 
 const { filter, queries } = useQueryFilter();
 const workloads = useWorkloads(() => queries.value);
