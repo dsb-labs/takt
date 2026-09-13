@@ -11,13 +11,18 @@ export type Sort<T> = {
 
 // useSort orders a list by a named column. Clicking the same column again
 // reverses the order, and clicking another column starts it ascending.
+//
+// A list keyed by a name reads best ascending, which is why that is the default.
+// One keyed by a time usually wants the most recent first, so the initial
+// direction can be set.
 export function useSort<T>(
   items: () => T[] | undefined,
   initial: string,
   columns: Record<string, (item: T) => string | number>,
+  initialDescending = false,
 ): Sort<T> {
   const key = ref(initial);
-  const descending = ref(false);
+  const descending = ref(initialDescending);
 
   function toggle(name: string) {
     if (key.value === name) {
