@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import type { WorkloadState } from "../api/types";
+import type { InstanceState, WorkloadState } from "../api/types";
 
-const props = defineProps<{ state: WorkloadState }>();
+// Both vocabularies, because an instance's state reads the same way a
+// workload's does and the two agree on every word they share.
+const props = defineProps<{ state: WorkloadState | InstanceState }>();
 
-const styles: Record<WorkloadState, string> = {
+const styles: Record<WorkloadState | InstanceState, string> = {
   running:
     "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
   degraded: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
@@ -16,6 +18,7 @@ const styles: Record<WorkloadState, string> = {
   completed:
     "bg-pulse-100 text-pulse-800 dark:bg-pulse-900 dark:text-pulse-200",
   failed: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300",
+  exited: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
   suspended:
     "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300",
 };

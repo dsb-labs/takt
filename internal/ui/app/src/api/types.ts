@@ -5,6 +5,7 @@ import type { components } from "./schema";
 export type Workload = components["schemas"]["Workload"];
 export type WorkloadState = components["schemas"]["WorkloadState"];
 export type Instance = components["schemas"]["Instance"];
+export type InstanceState = components["schemas"]["InstanceState"];
 export type InstanceHealth = components["schemas"]["InstanceHealth"];
 export type InstanceUsage = components["schemas"]["InstanceUsage"];
 export type HealthStatus = components["schemas"]["HealthStatus"];

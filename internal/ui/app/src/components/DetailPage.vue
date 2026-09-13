@@ -9,6 +9,10 @@ defineProps<{
   sectionTo: string;
   name: string;
   error?: string;
+  // The steps between the section and the page, for a resource that belongs
+  // to another one. A step with nowhere to go is written as plain text, which
+  // is what a grouping like "Instances" is.
+  trail?: { label: string; to?: string }[];
 }>();
 </script>
 
@@ -18,6 +22,13 @@ defineProps<{
       <RouterLink :to="sectionTo" class="hover:underline">{{
         section
       }}</RouterLink>
+      <template v-for="step in trail ?? []" :key="step.label">
+        <span class="mx-1">/</span>
+        <RouterLink v-if="step.to" :to="step.to" class="hover:underline">{{
+          step.label
+        }}</RouterLink>
+        <span v-else>{{ step.label }}</span>
+      </template>
       <span class="mx-1">/</span>
       <span class="text-slate-900 dark:text-slate-100">{{ name }}</span>
     </nav>
