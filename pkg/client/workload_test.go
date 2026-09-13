@@ -419,6 +419,73 @@ func TestClient_Get(t *testing.T) {
 		assert.Nil(t, got.Instances[0].Health)
 	})
 
+	t.Run("reports what a limited instance is consuming", func(t *testing.T) {
+		limited := workload("example", api.WorkloadStateRunning)
+
+		(*limited.Instances)[0].Usage = &api.InstanceUsage{
+			Memory:      220200960,
+			MemoryLimit: new(536870912),
+			CPU:         new(0.35),
+			CPULimit:    new(1.5),
+			Pids:        12,
+			PidsLimit:   new(128),
+		}
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: limited})
+		})
+
+		got, err := c.Get(t.Context(), "example")
+		require.NoError(t, err)
+		require.Len(t, got.Instances, 1)
+
+		reported := got.Instances[0].Usage
+		require.NotNil(t, reported)
+		assert.Equal(t, 220200960, reported.Memory)
+		require.NotNil(t, reported.MemoryLimit)
+		assert.Equal(t, 536870912, *reported.MemoryLimit)
+		require.NotNil(t, reported.CPU)
+		assert.InDelta(t, 0.35, *reported.CPU, 0.001)
+		require.NotNil(t, reported.CPULimit)
+		assert.InDelta(t, 1.5, *reported.CPULimit, 0.001)
+		assert.Equal(t, 12, reported.Pids)
+		require.NotNil(t, reported.PidsLimit)
+		assert.Equal(t, 128, *reported.PidsLimit)
+	})
+
+	t.Run("reports no limits for an unlimited instance", func(t *testing.T) {
+		unlimited := workload("example", api.WorkloadStateRunning)
+
+		(*unlimited.Instances)[0].Usage = &api.InstanceUsage{Memory: 220200960, Pids: 12}
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: unlimited})
+		})
+
+		got, err := c.Get(t.Context(), "example")
+		require.NoError(t, err)
+		require.Len(t, got.Instances, 1)
+
+		reported := got.Instances[0].Usage
+		require.NotNil(t, reported)
+		assert.Equal(t, 220200960, reported.Memory)
+		assert.Nil(t, reported.MemoryLimit)
+		assert.Nil(t, reported.CPU)
+		assert.Nil(t, reported.CPULimit)
+		assert.Nil(t, reported.PidsLimit)
+	})
+
+	t.Run("reports no usage for an instance the server could not read", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+		})
+
+		got, err := c.Get(t.Context(), "example")
+		require.NoError(t, err)
+		require.Len(t, got.Instances, 1)
+		assert.Nil(t, got.Instances[0].Usage)
+	})
+
 	t.Run("reports why a workload is not converging", func(t *testing.T) {
 		failing := workload("example", api.WorkloadStatePending)
 		failedAt := time.Now().UTC().Truncate(time.Second)
