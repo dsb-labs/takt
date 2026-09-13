@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 
-import { identity, loadIdentity } from "./auth";
+import { client } from "./api/client";
+import { forgetIdentity, identity, loadIdentity } from "./auth";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -100,6 +101,25 @@ router.beforeEach(async (to) => {
   }
 
   return true;
+});
+
+// A session that expires while a view stays open surfaces as a 401 on a poll
+// or an action, never as a navigation, so the guard alone never sees it. This
+// middleware turns that refusal into the redirect the guard would have made,
+// carrying the page for after signing back in. The session endpoint answers
+// 401 in its own right, when the login page probes for a session or a pasted
+// token is refused, so it is left to its callers. Only the first refusal
+// redirects: once the identity is forgotten, the rest of the in-flight polls
+// say nothing new.
+client.use({
+  onResponse({ response, schemaPath }) {
+    if (response.status !== 401 || schemaPath === "/api/v1/auth") return;
+    if (!identity.value) return;
+
+    forgetIdentity();
+    const current = router.currentRoute.value;
+    void router.push({ name: "login", query: { next: current.fullPath } });
+  },
 });
 
 // The tab names what the page shows, so several open tabs can be told apart.
