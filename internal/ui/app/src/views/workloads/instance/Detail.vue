@@ -80,7 +80,8 @@ await workload.suspense().catch(() => {});
     section="Workloads"
     section-to="/"
     :trail="[{ label: name, to: `/workloads/${name}` }, { label: 'Instances' }]"
-    :name="String(index)"
+    :name="`${name} instance ${index}`"
+    :crumb="String(index)"
     :error="
       workload.isError.value
         ? `Failed to read the workload: ${workload.error.value?.message}`
