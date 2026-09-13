@@ -2028,8 +2028,6 @@ export interface components {
      */
     WorkloadEventReason:
       | "imagePulling"
-      | "imagePulled"
-      | "imagePullFailed"
       | "restartPaced"
       | "restartGaveUp"
       | "referenceUnresolved"

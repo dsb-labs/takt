@@ -26,10 +26,16 @@ func TestMessage(t *testing.T) {
 			Expected: "Pulling image alpine:3",
 		},
 		{
-			Name:     "carries the reason a pull failed",
-			Reason:   event.ImagePullFailed,
-			Fields:   event.Fields{Reference: "alpine:3", Error: "no such image"},
-			Expected: "Could not pull image alpine:3: no such image",
+			Name:     "carries the reason a reference could not be resolved",
+			Reason:   event.ReferenceUnresolved,
+			Fields:   event.Fields{Reference: "api", Error: "no address"},
+			Expected: "Waiting for api to resolve: no address",
+		},
+		{
+			Name:     "describes a reference the event could not name",
+			Reason:   event.ReferenceUnresolved,
+			Fields:   event.Fields{Error: "no address"},
+			Expected: "Waiting for a reference to resolve: no address",
 		},
 		{
 			Name:     "renders a backoff delay as a duration",
