@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import {
-  CategoryScale,
   Chart,
-  Filler,
-  Legend,
   LinearScale,
   LineElement,
   PointElement,
@@ -18,15 +15,7 @@ import type { Series } from "../series";
 
 // Only the pieces a line chart draws with, so the bundle carries the chart
 // types this page uses rather than every chart the library can draw.
-Chart.register(
-  CategoryScale,
-  LinearScale,
-  LineElement,
-  PointElement,
-  Filler,
-  Legend,
-  Tooltip,
-);
+Chart.register(LinearScale, LineElement, PointElement, Tooltip);
 
 const props = defineProps<{
   series: Series[];
@@ -113,69 +102,98 @@ function extent(series: Series[]): [number, number] | null {
   return [Math.min(...instants), Math.max(...instants)];
 }
 
-// ago writes an instant as how long before now it was, which is what a
-// rolling window wants on its axis: "now", "2m ago".
-function ago(instant: number): string {
-  const seconds = Math.round((Date.now() - instant) / 1000);
-  if (seconds < 10) return "now";
+// ago writes an instant as how long before the latest reading it was, which is
+// what a rolling window wants on its axis: "now", "2m ago".
+function ago(instant: number, latest: number): string {
+  const seconds = Math.round((latest - instant) / 1000);
+  if (seconds < 5) return "now";
   if (seconds < 60) return `${seconds}s ago`;
 
   return `${Math.round(seconds / 60)}m ago`;
 }
 
-const options = computed<ChartOptions<"line">>(() => ({
-  responsive: true,
-  maintainAspectRatio: false,
-  // A poll every few seconds would otherwise animate the whole chart each
-  // time, which reads as a wobble rather than as new data.
-  animation: false,
-  interaction: { mode: "nearest", axis: "x", intersect: false },
-  scales: {
-    x: {
-      type: "linear",
-      grid: { display: false },
-      border: { color: grid.value },
-      ticks: {
-        color: text.value,
-        maxRotation: 0,
-        autoSkipPadding: 24,
-        callback: (value) => ago(Number(value)),
+// marks places a tick every so often back from the latest reading, rather
+// than leaving the library to pick round numbers of milliseconds. Two of
+// those can land inside the same second of history and both read "1m ago",
+// and the ticks it adds past the ends leave the lines short of the walls.
+function marks(span: [number, number]): number[] {
+  const [oldest, latest] = span;
+  const step =
+    latest - oldest <= 60_000
+      ? 15_000
+      : latest - oldest <= 180_000
+        ? 30_000
+        : 60_000;
+
+  const ticks: number[] = [];
+  for (let at = latest; at >= oldest; at -= step) ticks.push(at);
+
+  return ticks.reverse();
+}
+
+const options = computed<ChartOptions<"line">>(() => {
+  // The axis runs from the first reading to the last, so the lines reach both
+  // walls rather than starting a tick in from each.
+  const span = extent(props.series) ?? [0, 1];
+  const latest = span[1];
+
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    // A poll every few seconds would otherwise animate the whole chart each
+    // time, which reads as a wobble rather than as new data.
+    animation: false,
+    interaction: { mode: "nearest", axis: "x", intersect: false },
+    scales: {
+      x: {
+        type: "linear",
+        min: span[0],
+        max: latest,
+        offset: false,
+        grid: { display: false },
+        border: { color: grid.value },
+        afterBuildTicks: (axis) => {
+          axis.ticks = marks(span).map((value) => ({ value }));
+        },
+        ticks: {
+          color: text.value,
+          maxRotation: 0,
+          autoSkip: false,
+          callback: (value) => ago(Number(value), latest),
+        },
+      },
+      y: {
+        beginAtZero: true,
+        grid: { color: grid.value },
+        border: { display: false },
+        ticks: {
+          color: text.value,
+          callback: (value) => props.format(Number(value)),
+        },
       },
     },
-    y: {
-      beginAtZero: true,
-      grid: { color: grid.value },
-      border: { display: false },
-      ticks: {
-        color: text.value,
-        callback: (value) => props.format(Number(value)),
+    plugins: {
+      // The lines are named in the tooltip, and a workload running two or
+      // three instances does not need a key for colours it can hover.
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          title: (items) => ago(Number(items[0]?.parsed.x), latest),
+          label: (item) =>
+            `${item.dataset.label}: ${props.format(Number(item.parsed.y))}`,
+        },
       },
     },
-  },
-  plugins: {
-    legend: {
-      position: "bottom",
-      labels: {
-        color: text.value,
-        boxWidth: 8,
-        boxHeight: 8,
-        usePointStyle: true,
-        pointStyle: "circle",
-      },
-    },
-    tooltip: {
-      callbacks: {
-        title: (items) => ago(Number(items[0]?.parsed.x)),
-        label: (item) =>
-          `${item.dataset.label}: ${props.format(Number(item.parsed.y))}`,
-      },
-    },
-  },
-}));
+  };
+});
 </script>
 
 <template>
-  <div class="h-56 px-4 py-4">
+  <!-- min-w-0 because the chart sizes itself to this container: a grid item
+       is free to grow past its column by default, which leaves the canvas
+       measuring a width the phone does not have and the page scrolling
+       sideways. -->
+  <div class="h-56 min-w-0 px-4 py-4">
     <p
       v-if="!series.length"
       class="flex h-full items-center justify-center text-sm text-slate-500 dark:text-slate-400"
