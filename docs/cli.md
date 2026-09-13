@@ -7,6 +7,7 @@ takt workload apply <manifest>          Create or update a workload from a manif
 takt workload apply --dry-run <file>    Report what applying a manifest would do
 takt workload list                      List workloads                       (alias: ls)
 takt workload get <name>                Show a single workload
+takt workload events <name>             Read what the server recorded about a workload
 takt workload logs <name>               Read a workload's recent output
 takt workload delete <name>             Delete a workload and stop its work  (alias: rm)
 takt workload stop <name>               Stop a workload and hold it down
@@ -257,10 +258,37 @@ it reports no usage. Give it a `resources` block and it reports like any other.
 
 A workload that names a schedule also reports when it next runs.
 
-A workload that is failing to converge reports why and when, in `LastError` and
-`LastErrorAt`. The error clears once an attempt succeeds, so a workload sitting
-`pending` with an error is one the server has tried and failed to start — where one
-without is merely slow.
+Why a workload is in the state it is in is not reported here. Read `workload events`
+for that.
+
+## workload events
+
+```sh
+takt workload events example
+takt workload events example --limit 20
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--limit`, `-n` | `100` | Events to read, most recently seen first. |
+
+Prints what the server recorded about a workload while converging it, as JSON. An
+event names a cause rather than a state: which image is being pulled, why an instance
+was replaced, why a start failed. It tells a workload sitting `pending` because the
+server has tried and failed to start it apart from one that is merely slow.
+
+Each event carries a `reason`, a `message` rendered from it, a `count`, and the two
+times that bound the sightings that count covers. Match on the `reason` rather than
+the `message`, which is worded for a human and may be reworded. A server newer than
+the client may report a reason the client does not know.
+
+Repeated sightings of one cause are reported once. A pull running across forty passes
+reads as one event counted forty times, rather than forty events. The `data` field
+carries the values the message was rendered from, such as the image reference a pull
+is fetching, for a caller doing something with the event beyond showing it.
+
+The server keeps a bounded number of events per workload, ten by default. See
+[operating](operating.md) for the cap and how to raise it.
 
 ## workload logs
 
