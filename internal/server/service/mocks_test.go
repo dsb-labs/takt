@@ -11,6 +11,7 @@ import (
 
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/health"
 	"github.com/dsb-labs/takt/internal/server/port"
 	"github.com/dsb-labs/takt/internal/server/service"
@@ -4546,6 +4547,75 @@ func (_c *MockWorkloadEventRepository_List_Call) Return(workloadEvents []databas
 }
 
 func (_c *MockWorkloadEventRepository_List_Call) RunAndReturn(run func(ctx context.Context, name string, limit int) ([]database.WorkloadEvent, error)) *MockWorkloadEventRepository_List_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Record provides a mock function for the type MockWorkloadEventRepository
+func (_mock *MockWorkloadEventRepository) Record(ctx context.Context, name string, reason event.Reason, data []byte) error {
+	ret := _mock.Called(ctx, name, reason, data)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Record")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, event.Reason, []byte) error); ok {
+		r0 = returnFunc(ctx, name, reason, data)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockWorkloadEventRepository_Record_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Record'
+type MockWorkloadEventRepository_Record_Call struct {
+	*mock.Call
+}
+
+// Record is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+//   - reason event.Reason
+//   - data []byte
+func (_e *MockWorkloadEventRepository_Expecter) Record(ctx any, name any, reason any, data any) *MockWorkloadEventRepository_Record_Call {
+	return &MockWorkloadEventRepository_Record_Call{Call: _e.mock.On("Record", ctx, name, reason, data)}
+}
+
+func (_c *MockWorkloadEventRepository_Record_Call) Run(run func(ctx context.Context, name string, reason event.Reason, data []byte)) *MockWorkloadEventRepository_Record_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 event.Reason
+		if args[2] != nil {
+			arg2 = args[2].(event.Reason)
+		}
+		var arg3 []byte
+		if args[3] != nil {
+			arg3 = args[3].([]byte)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWorkloadEventRepository_Record_Call) Return(err error) *MockWorkloadEventRepository_Record_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockWorkloadEventRepository_Record_Call) RunAndReturn(run func(ctx context.Context, name string, reason event.Reason, data []byte) error) *MockWorkloadEventRepository_Record_Call {
 	_c.Call.Return(run)
 	return _c
 }
