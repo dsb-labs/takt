@@ -3976,3 +3976,179 @@ func newConcurrentTestService(t *testing.T) (*service.WorkloadService, *sql.DB) 
 func workloadName(i int) string {
 	return "workload-" + strconv.Itoa(i)
 }
+
+func TestWorkloadService_RecordsRequests(t *testing.T) {
+	t.Parallel()
+
+	t.Run("records the apply that created a workload", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events := NewMockWorkloadEventRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				w.Version = 1
+
+				return w, true, nil
+			}).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		events.EXPECT().Record(mock.Anything, "example", event.Applied, mock.Anything).Return(nil).Once()
+
+		svc := newTestRecordingService(t, d, repo, ports, events)
+
+		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
+		require.NoError(t, err)
+	})
+
+	t.Run("records the apply that changed a specification", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events := NewMockWorkloadEventRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				w.Version = 2
+
+				return w, false, nil
+			}).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		// The hash the workload is moving to and the one it moved from, so an
+		// operator reading a replacement can tell which apply caused it.
+		events.EXPECT().Record(mock.Anything, "example", event.SpecificationModified,
+			mock.MatchedBy(func(data []byte) bool {
+				return strings.Contains(string(data), `"previous":"hash-one"`)
+			})).Return(nil).Once()
+
+		svc := newTestRecordingService(t, d, repo, ports, events)
+
+		spec := containerSpec("example", "example/example:v2")
+
+		_, _, err := svc.Apply(t.Context(), spec)
+		require.NoError(t, err)
+	})
+
+	t.Run("records nothing for an apply that changed nothing", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events := NewMockWorkloadEventRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				w.Version = 1
+
+				return w, false, nil
+			}).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		svc := newTestRecordingService(t, d, repo, ports, events)
+
+		// Whatever runs the manifests on a loop re-applies them unchanged, and an
+		// event for each of those would bury the applies that explain something.
+		// The repository expects no call, so one would fail the test.
+		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
+		require.NoError(t, err)
+	})
+
+	t.Run("records a suspension that changed something", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events := NewMockWorkloadEventRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		repo.EXPECT().Suspend(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		events.EXPECT().Record(mock.Anything, "example", event.Suspended, mock.Anything).Return(nil).Once()
+
+		svc := newTestRecordingService(t, d, repo, ports, events)
+
+		_, err := svc.Stop(t.Context(), "example")
+		require.NoError(t, err)
+	})
+
+	t.Run("records nothing for suspending a suspended workload", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events := NewMockWorkloadEventRepository(t)
+
+		suspended := storedWorkload("example")
+		suspended.SuspendedAt = time.Now().UTC()
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(suspended, nil).Once()
+		repo.EXPECT().Suspend(mock.Anything, "example").Return(suspended, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		svc := newTestRecordingService(t, d, repo, ports, events)
+
+		_, err := svc.Stop(t.Context(), "example")
+		require.NoError(t, err)
+	})
+
+	t.Run("records a resume of a suspended workload", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events := NewMockWorkloadEventRepository(t)
+
+		suspended := storedWorkload("example")
+		suspended.SuspendedAt = time.Now().UTC()
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(suspended, nil).Once()
+		repo.EXPECT().Resume(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		events.EXPECT().Record(mock.Anything, "example", event.Resumed, mock.Anything).Return(nil).Once()
+
+		svc := newTestRecordingService(t, d, repo, ports, events)
+
+		_, err := svc.Start(t.Context(), "example")
+		require.NoError(t, err)
+	})
+
+	t.Run("records a deletion", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events := NewMockWorkloadEventRepository(t)
+
+		deleted := storedWorkload("example")
+		deleted.DeletedAt = time.Now().UTC()
+
+		repo.EXPECT().MarkDeleting(mock.Anything, "example").Return(deleted, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		// Recorded even though the row is on its way out: the teardown takes passes,
+		// and an operator watching it happen is reading these.
+		events.EXPECT().Record(mock.Anything, "example", event.Deleted, mock.Anything).Return(nil).Once()
+
+		svc := newTestRecordingService(t, d, repo, ports, events)
+
+		_, err := svc.Delete(t.Context(), "example", false)
+		require.NoError(t, err)
+	})
+}
+
+// newTestRecordingService builds a service holding an events repository, for the
+// tests about what an operator's request records.
+func newTestRecordingService(
+	t *testing.T,
+	d *MockDriver,
+	repo *MockWorkloadRepository,
+	ports *MockPortRepository,
+	events *MockWorkloadEventRepository,
+) *service.WorkloadService {
+	t.Helper()
+
+	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+
+	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+	return service.NewWorkloadService(service.WorkloadServiceConfig{
+		Address:   "10.0.0.5",
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]service.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Events:    events,
+		Claimer:   newTestClaimer(ports, allocatorStub{}),
+	})
+}

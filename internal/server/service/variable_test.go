@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/service"
 )
 
@@ -103,6 +104,36 @@ func TestVariableService_Set(t *testing.T) {
 		_, _, err := svc.Set(t.Context(), "log-level", "debug", nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"one", "two"}, rehashed)
+	})
+
+	t.Run("records which variable moved each workload's hash", func(t *testing.T) {
+		variables, events := NewMockVariableRepository(t), NewMockWorkloadEventRepository(t)
+
+		variables.EXPECT().Get(mock.Anything, "log-level").
+			Return(database.Variable{}, database.ErrVariableNotFound).Once()
+		variables.EXPECT().Upsert(mock.Anything, "log-level", "debug", mock.Anything).
+			Return(database.Variable{Name: "log-level", Value: "debug"}, nil).Once()
+		variables.EXPECT().UsedBy(mock.Anything, "log-level").
+			Return([]string{"one", "two"}, nil).Twice()
+
+		// Recorded here rather than by the rehash, which recomputes against every
+		// value a workload reads and so cannot say which of them moved.
+		for _, workload := range []string{"one", "two"} {
+			events.EXPECT().Record(mock.Anything, workload, event.VariableChanged,
+				event.Encode(event.Fields{Name: "log-level"})).Return(nil).Once()
+		}
+
+		svc := service.NewVariableService(service.VariableServiceConfig{
+			Logger:    newTestLogger(t),
+			Variables: variables,
+			Events:    events,
+			Rehash: func(_ context.Context, _ string) error {
+				return nil
+			},
+		})
+
+		_, _, err := svc.Set(t.Context(), "log-level", "debug", nil)
+		require.NoError(t, err)
 	})
 
 	t.Run("keeps redeploying past a failed rehash", func(t *testing.T) {
