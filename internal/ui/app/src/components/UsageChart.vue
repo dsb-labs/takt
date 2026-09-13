@@ -40,18 +40,10 @@ const onScheme = (event: MediaQueryListEvent) => (dark.value = event.matches);
 scheme.addEventListener("change", onScheme);
 onUnmounted(() => scheme.removeEventListener("change", onScheme));
 
-// The accents a line is drawn in, taken in order, so instance zero is the
-// same colour on the memory chart as it is on the CPU one. They repeat past
-// the sixth instance, which is more lines than a chart this size reads well
-// with anyway.
-const accents = [
-  "oklch(0.65 0.12 81)", // pulse
-  "oklch(0.7 0.15 162)", // emerald
-  "oklch(0.68 0.15 237)", // sky
-  "oklch(0.65 0.2 300)", // violet
-  "oklch(0.75 0.15 70)", // amber
-  "oklch(0.7 0.16 20)", // rose
-];
+// A chart draws one instance, so every line is the one accent. Colouring by
+// index instead would repaint a chart when the reconciler replaced the
+// instance behind it, and would say nothing the page does not.
+const accent = "oklch(0.65 0.12 81)"; // pulse
 
 const limitColour = "oklch(0.64 0.21 25)";
 
@@ -64,8 +56,6 @@ const text = computed(() =>
 
 const data = computed<ChartData<"line">>(() => {
   const lines: ChartDataset<"line">[] = props.series.map((series) => {
-    const accent = accents[series.index % accents.length];
-
     return {
       label: series.label,
       data: broken(series.points),
