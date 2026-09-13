@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/secret"
 	"github.com/dsb-labs/takt/internal/server/service"
 )
@@ -163,6 +164,37 @@ func TestSecretService_Set(t *testing.T) {
 		_, _, err := svc.Set(t.Context(), "db-password", []byte("hunter2"), nil)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"one", "two"}, rehashed)
+	})
+
+	t.Run("records which secret moved each workload's hash", func(t *testing.T) {
+		secrets, events := NewMockSecretRepository(t), NewMockWorkloadEventRepository(t)
+
+		secrets.EXPECT().Get(mock.Anything, "db-password").
+			Return(database.Secret{}, database.ErrSecretNotFound).Once()
+		secrets.EXPECT().Upsert(mock.Anything, "db-password", mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			Return(database.Secret{Name: "db-password", Revision: "rev-one"}, nil).Once()
+		secrets.EXPECT().UsedBy(mock.Anything, "db-password").
+			Return([]string{"one", "two"}, nil).Twice()
+
+		// Recorded here rather than by the rehash, which recomputes against every
+		// value a workload reads and so cannot say which of them moved.
+		for _, workload := range []string{"one", "two"} {
+			events.EXPECT().Record(mock.Anything, workload, event.SecretChanged,
+				event.Encode(event.Fields{Name: "db-password"})).Return(nil).Once()
+		}
+
+		svc := service.NewSecretService(service.SecretServiceConfig{
+			Logger:  newTestLogger(t),
+			Secrets: secrets,
+			Cipher:  newTestCipher(t),
+			Events:  events,
+			Rehash: func(_ context.Context, _ string) error {
+				return nil
+			},
+		})
+
+		_, _, err := svc.Set(t.Context(), "db-password", []byte("hunter2"), nil)
+		require.NoError(t, err)
 	})
 
 	t.Run("keeps redeploying past a failed rehash", func(t *testing.T) {
