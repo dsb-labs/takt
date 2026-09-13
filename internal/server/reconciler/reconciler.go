@@ -27,6 +27,7 @@ import (
 
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/health"
 	"github.com/dsb-labs/takt/internal/server/mount"
 	"github.com/dsb-labs/takt/internal/server/state"
@@ -175,6 +176,17 @@ type (
 		Result(workload string, instance int) (health.Result, bool)
 	}
 
+	// The Recorder interface describes how the reconciler records what it observed
+	// about a workload while converging it.
+	//
+	// A pass converges workloads concurrently, so an implementation must be safe to
+	// call from several goroutines at once.
+	Recorder interface {
+		// Record should record an event against the named workload, coalescing it
+		// with an event already recorded carrying the same reason and data.
+		Record(ctx context.Context, workload string, reason event.Reason, data []byte) error
+	}
+
 	// The Reconciler type drives the running state of the node towards the desired
 	// state held in the repository.
 	//
@@ -193,6 +205,7 @@ type (
 		mounts      Mounts
 		tokens      Tokens
 		checker     Checker
+		events      Recorder
 		bind        string
 		reallocate  func(ctx context.Context, workload string, instance int) (bool, error)
 		now         func() time.Time
@@ -214,6 +227,15 @@ type (
 		// How long to wait before restarting each instance that keeps failing.
 		// Keyed per instance, so one instance crashing does not pace the others.
 		backoff map[slot]backoff
+		// The instance whose ending has already been recorded against each slot,
+		// keyed by the instance's own identifier.
+		//
+		// A pass is level-triggered, so an instance that ended is seen ended by
+		// every pass until something replaces it. Without this, one ending would be
+		// recorded as an event per pass for as long as the corpse stayed, and its
+		// count would report how long nobody looked rather than how often the
+		// workload ended.
+		exits map[slot]string
 		// The workloads whose instances an operator asked to have replaced,
 		// consumed by the next pass over each. In memory rather than stored,
 		// because a request the server loses can simply be made again.
@@ -260,6 +282,10 @@ type (
 		// Reports what takt's own health checks established. May be nil, in which
 		// case only the state the driver reports is acted on.
 		Checker Checker
+		// Records what a pass observed about a workload, which is what an operator
+		// reads to learn why it looks the way it does. May be nil, in which case
+		// nothing is recorded.
+		Events Recorder
 		// The address a workload's host ports are published on, which is where a
 		// health check is performed. Empty probes loopback.
 		Bind string
@@ -302,10 +328,25 @@ type (
 		attempts int
 		// The earliest time the next restart may be attempted.
 		next time.Time
+		// How long the wait ending at next is. Kept alongside it so an event can
+		// name the delay rather than infer it from the clock.
+		wait time.Duration
 		// Whether the workload has been given up on. The decision repeats on
 		// every pass over a workload that stays given up, and this is what lets
 		// it count once.
 		gaveUp bool
+	}
+
+	// The staleness type says why a slot's instances no longer match what is
+	// wanted, which is the question an operator asks of a replacement they did not
+	// expect.
+	//
+	// It travels beside the instances rather than being worked out again where the
+	// replacement happens, because only the comparison that found them stale knows
+	// which of the two it was.
+	staleness struct {
+		reason event.Reason
+		fields event.Fields
 	}
 
 	// The slot type identifies one instance of one workload, which is the grain
@@ -382,11 +423,13 @@ func New(config Config) *Reconciler {
 		mounts:       config.Mounts,
 		tokens:       config.Tokens,
 		checker:      config.Checker,
+		events:       config.Events,
 		bind:         config.Bind,
 		reallocate:   config.Reallocate,
 		now:          clock(config.Now),
 		interval:     config.Interval,
 		backoff:      make(map[slot]backoff),
+		exits:        make(map[slot]string),
 		restarts:     make(map[string]struct{}),
 		observations: observations,
 		tracer:       telemetry.Tracer(config.TracerProvider, scope),
@@ -425,6 +468,26 @@ func (r *Reconciler) restartRequested(workload string) bool {
 	delete(r.restarts, workload)
 
 	return ok
+}
+
+// record stores an event against a workload, saying what this pass observed
+// about it.
+//
+// A failure here is logged rather than returned. Recording is an observation of
+// a converge rather than a step in one, so a pass that cannot write down what it
+// saw has still done its job, and every caller is somewhere that would otherwise
+// abandon real work to report it.
+//
+// Callers must not hold r.mux. The write goes to the database, so holding the
+// lock across it would serialise a concurrent pass behind a disk write.
+func (r *Reconciler) record(ctx context.Context, workload string, reason event.Reason, fields event.Fields) {
+	if r.events == nil {
+		return
+	}
+
+	if err := r.events.Record(ctx, workload, reason, event.Encode(fields)); err != nil {
+		r.logger.With("error", err, "workload", workload, "reason", reason).Error("failed to record workload event")
+	}
 }
 
 // Notify asks for a reconciliation pass to run as soon as possible, and is how a
@@ -765,6 +828,12 @@ func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, 
 				span.RecordError(err)
 				span.SetStatus(codes.Error, err.Error())
 				r.logger.With("workload", row.Name, "error", err).Error("failed to reconcile workload")
+
+				// The event that replaced lastError, and recorded in the one place
+				// every converge failure passes through so no path has to remember
+				// to report its own. A failure that persists repeats every pass,
+				// which coalescing folds into one row with a climbing count.
+				r.record(ctx, row.Name, event.ConvergeFailed, event.Fields{Error: err.Error()})
 			}
 		})
 	}
@@ -825,6 +894,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		}
 
 		r.logger.With("workload", row.Name).Info("restarting workload on request")
+		r.record(ctx, row.Name, event.RestartRequested, event.Fields{})
 
 		if err := r.stop(ctx, row); err != nil {
 			return fmt.Errorf("failed to stop workload for restart: %w", err)
@@ -837,7 +907,7 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	// the schedule decides rather than the restart policy. Validation refuses a
 	// schedule with a count above one, so the whole path converges a single
 	// instance.
-	if schedule := r.schedule(row); schedule != nil {
+	if schedule := r.schedule(ctx, row); schedule != nil {
 		if slices.ContainsFunc(instances, terminating) {
 			r.logger.With("workload", row.Name).Debug("waiting for workload to finish terminating")
 
@@ -861,6 +931,8 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		if err := r.discardInstance(ctx, row, index); err != nil {
 			return err
 		}
+
+		r.record(ctx, row.Name, event.InstanceRemoved, event.Fields{Instance: index})
 	}
 
 	byIndex := make(map[int][]driver.Instance, count)
@@ -910,11 +982,16 @@ func (r *Reconciler) convergeSlot(ctx context.Context, row database.Workload, in
 		return true, nil
 	}
 
+	// Reported before anything is decided, so the ending stands whatever follows it:
+	// a restart, a retirement, or a replacement because the specification moved
+	// while the instance was down.
+	r.ended(ctx, row, index, instances, event.InstanceExited)
+
 	// A specification change is what makes an instance stale, and replacing it is
 	// the only way to apply the change. The expected hash is the slot's own: an
 	// instance carries the addresses it resolved, and two slots may legitimately
 	// carry different ones.
-	if stale := r.staleSlot(ctx, row, index, instances); len(stale) > 0 {
+	if stale, why := r.staleSlot(ctx, row, index, instances); len(stale) > 0 {
 		if *replaced {
 			// Another slot was replaced this pass. This one is due and rolls on a
 			// later pass, which is what keeps a change from taking every instance
@@ -925,6 +1002,11 @@ func (r *Reconciler) convergeSlot(ctx context.Context, row database.Workload, in
 		*replaced = true
 
 		r.logger.With("workload", row.Name, "instance", index, "version", row.Version).Debug("replacing stale instance")
+
+		// Recorded here rather than where the staleness was found, so a slot that is
+		// due but rolls on a later pass does not report a replacement that has not
+		// happened.
+		r.record(ctx, row.Name, why.reason, why.fields)
 
 		if err := r.stopInstance(ctx, row, index); err != nil {
 			return false, fmt.Errorf("failed to stop stale instance: %w", err)
@@ -995,9 +1077,17 @@ func (r *Reconciler) startAll(ctx context.Context, row database.Workload, count 
 // or its ports are mid-move — the slot is left alone rather than judged against a
 // hash that could not be computed: replacing it would start something that cannot
 // resolve its environment either.
-func (r *Reconciler) staleSlot(ctx context.Context, row database.Workload, index int, instances []driver.Instance) []driver.Instance {
+// The second return value says which of the two staleness is, so the replacement
+// that follows can record why it happened. It is meaningful only where instances
+// are returned.
+func (r *Reconciler) staleSlot(
+	ctx context.Context,
+	row database.Workload,
+	index int,
+	instances []driver.Instance,
+) ([]driver.Instance, staleness) {
 	if len(instances) == 0 {
-		return nil
+		return nil, staleness{}
 	}
 
 	expected, err := r.slotHash(ctx, row, index)
@@ -1005,7 +1095,7 @@ func (r *Reconciler) staleSlot(ctx context.Context, row database.Workload, index
 		r.logger.With("workload", row.Name, "instance", index, "error", err).
 			Debug("leaving an instance whose expected hash cannot be resolved")
 
-		return nil
+		return nil, staleness{}
 	}
 
 	var stale []driver.Instance
@@ -1016,15 +1106,26 @@ func (r *Reconciler) staleSlot(ctx context.Context, row database.Workload, index
 		}
 	}
 
+	if len(stale) > 0 {
+		return stale, staleness{
+			reason: event.HashMoved,
+			fields: event.Fields{Instance: index, Hash: expected, Previous: stale[0].SpecHash},
+		}
+	}
+
 	// The hash says nothing about the slot's own host ports, which live in rows
 	// rather than in the specification for every slot but the first. An instance
 	// publishing ports its rows no longer name is bound to an address nothing
 	// records, which is the same staleness by another route.
-	if len(stale) == 0 && portsDrifted(instances, r.slotPorts(row, index)) {
-		stale = slices.Clone(instances)
+	ports := r.slotPorts(row, index)
+	if portsDrifted(instances, ports) {
+		return slices.Clone(instances), staleness{
+			reason: event.PortsDrifted,
+			fields: event.Fields{Instance: index, Ports: hostPorts(ports)},
+		}
 	}
 
-	return stale
+	return nil, staleness{}
 }
 
 // portsDrifted reports whether a running instance publishes ports other than the
@@ -1183,6 +1284,17 @@ func (r *Reconciler) refresh(ctx context.Context, row database.Workload) error {
 		r.logger.With("workload", row.Name, "signal", signal).Info("signalled a workload whose mounted values changed")
 	}
 
+	// One event per value rather than one per signal, which is the opposite grain
+	// to the signals above. A signal is something the workload receives, so sending
+	// it twice would be wrong. An event answers which value moved, and a workload
+	// that rotated three secrets moved three.
+	for _, refresh := range refreshed {
+		r.record(ctx, row.Name, event.MountsRefreshed, event.Fields{
+			Name:   refresh.Reference.String(),
+			Signal: string(refresh.Signal),
+		})
+	}
+
 	return nil
 }
 
@@ -1245,7 +1357,7 @@ func (r *Reconciler) register(rows []database.Workload, observed map[string][]dr
 // treated as no schedule at all. Both were validated before they were stored, so
 // either means the specification and the rules have diverged — and running a workload
 // continuously is a better failure than never running it again.
-func (r *Reconciler) schedule(row database.Workload) cron.Schedule {
+func (r *Reconciler) schedule(ctx context.Context, row database.Workload) cron.Schedule {
 	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return nil
@@ -1259,6 +1371,10 @@ func (r *Reconciler) schedule(row database.Workload) cron.Schedule {
 	parsed, err := declared.Parsed()
 	if err != nil {
 		r.logger.With("workload", row.Name, "error", err).Error("failed to parse schedule")
+		r.record(ctx, row.Name, event.ScheduleInvalid, event.Fields{
+			Schedule: declared.Cron,
+			Error:    err.Error(),
+		})
 
 		return nil
 	}
@@ -1295,6 +1411,28 @@ func restartPolicy(row database.Workload) *manifest.Restart {
 	}
 
 	return spec.Restart
+}
+
+// hostPorts reads the host side of a set of allocations, which is the half an
+// event names because it is the half an operator reaches the workload on.
+func hostPorts(rows []database.Port) []int {
+	ports := make([]int, 0, len(rows))
+	for _, row := range rows {
+		ports = append(ports, row.Host)
+	}
+
+	return ports
+}
+
+// imageOf reads the image reference a workload runs, which an event names so an
+// operator can see which pull they are waiting on. A workload that runs a process
+// rather than a container has none, and so reads as empty.
+func imageOf(spec manifest.Spec) string {
+	if spec.Container == nil {
+		return ""
+	}
+
+	return spec.Container.Image
 }
 
 // retired reports whether every ended instance is one the policy leaves alone, and so
@@ -1451,11 +1589,13 @@ func (r *Reconciler) occurrence(ctx context.Context, row database.Workload, inst
 	if slices.ContainsFunc(instances, running) {
 		if overlap(row) == manifest.OverlapSkip {
 			r.logger.With("workload", row.Name).Info("skipped an occurrence, the previous run is still going")
+			r.record(ctx, row.Name, event.OccurrenceSkipped, event.Fields{})
 
 			return nil
 		}
 
 		r.logger.With("workload", row.Name).Debug("replacing a run still going at its next occurrence")
+		r.record(ctx, row.Name, event.OccurrenceReplaced, event.Fields{})
 	}
 
 	// Whatever is there is cleared first: container names derive from the workload and
@@ -1466,7 +1606,13 @@ func (r *Reconciler) occurrence(ctx context.Context, row database.Workload, inst
 
 	r.settleAll(row.Name)
 
-	return r.start(ctx, row, 0)
+	if err := r.start(ctx, row, 0); err != nil {
+		return err
+	}
+
+	r.record(ctx, row.Name, event.RunStarted, event.Fields{})
+
+	return nil
 }
 
 // between decides what to do with a scheduled workload when no occurrence is due.
@@ -1482,6 +1628,10 @@ func (r *Reconciler) between(ctx context.Context, row database.Workload, instanc
 	if slices.ContainsFunc(instances, running) {
 		return nil
 	}
+
+	// A scheduled workload waits between occurrences with its last run left in
+	// place, so this is where a run that has finished is seen.
+	r.ended(ctx, row, 0, instances, event.RunFinished)
 
 	if !slices.ContainsFunc(instances, failed) {
 		return nil
@@ -1580,9 +1730,8 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 		return fmt.Errorf("failed to delete workload: %w", err)
 	}
 
-	// Backoff and the last error would otherwise outlive the workload, pacing the
-	// restarts of a later workload that happens to reuse the name and reporting a
-	// failure it never had.
+	// Backoff would otherwise outlive the workload, pacing the restarts of a later
+	// workload that happens to reuse the name.
 	r.settleAll(row.Name)
 
 	// A restart asked for before the deletion landed dies with the workload, for
@@ -1641,9 +1790,9 @@ func (r *Reconciler) suspend(ctx context.Context, row database.Workload, instanc
 		}
 	}
 
-	// Backoff and the last error describe attempts to run the workload, which is
-	// exactly what suspension asks to stop. Clearing them means a resume starts
-	// from a clean slate rather than inside a backoff window.
+	// Backoff describes attempts to run the workload, which is exactly what
+	// suspension asks to stop. Clearing it means a resume starts from a clean slate
+	// rather than inside a backoff window.
 	r.settleAll(row.Name)
 
 	// A restart asked for before the suspension landed is superseded by it. What
@@ -1667,7 +1816,8 @@ func (r *Reconciler) attempt(ctx context.Context, row database.Workload, index i
 	}
 
 	if err := r.start(ctx, row, index); err != nil {
-		r.hold(ctx, row.Name, index, restartPolicy(row))
+		state := r.hold(ctx, row.Name, index, restartPolicy(row))
+		r.paced(ctx, row.Name, state)
 
 		return err
 	}
@@ -1689,9 +1839,17 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, index i
 	// An instance told to give up gives up. It is left exactly as it ended, so the
 	// outcome stays readable, and changing the specification starts it again.
 	if !policy.Restarts(exitCodeOf(instances), r.attempts(row.Name, index)) {
+		// Inside the branch that reports the decision as new, not beside the log
+		// line below: giving up repeats on every pass over an instance that stays
+		// down, and an event recorded out here would go on being seen forever.
 		if r.giveUp(row.Name, index) {
 			r.instruments.giveups.Add(ctx, 1,
 				metric.WithAttributes(attribute.String("workload", row.Name)))
+
+			r.record(ctx, row.Name, event.RestartGaveUp, event.Fields{
+				Instance: index,
+				Count:    r.attempts(row.Name, index),
+			})
 		}
 
 		r.logger.With("workload", row.Name, "instance", index, "attempts", r.attempts(row.Name, index)).
@@ -1708,7 +1866,8 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, index i
 	}
 
 	if err := r.start(ctx, row, index); err != nil {
-		r.hold(ctx, row.Name, index, policy)
+		state := r.hold(ctx, row.Name, index, policy)
+		r.paced(ctx, row.Name, state)
 
 		return err
 	}
@@ -1746,13 +1905,84 @@ func (r *Reconciler) hold(ctx context.Context, workload string, index int, resta
 	state := r.backoff[key]
 
 	state.attempts++
-	state.next = r.now().Add(delay(state.attempts, restart.Delay))
+	state.wait = delay(state.attempts, restart.Delay)
+	state.next = r.now().Add(state.wait)
 	r.backoff[key] = state
 
 	r.instruments.restarts.Add(ctx, 1,
 		metric.WithAttributes(attribute.String("workload", workload)))
 
 	return state
+}
+
+// ended records how an instance finished, once per instance rather than once per
+// pass that sees it finished.
+//
+// The reason is the caller's because the two answer different questions: a
+// scheduled workload ending is a run that finished, and a long-running one ending
+// is an instance that exited when it was meant to stay up.
+//
+// Nothing is recorded for a slot with nothing ended, which is the ordinary case and
+// so is the first thing checked.
+func (r *Reconciler) ended(ctx context.Context, row database.Workload, index int, instances []driver.Instance, reason event.Reason) {
+	last, ok := lastEnded(instances)
+	if !ok || !r.firstSighting(row.Name, index, last.ID) {
+		return
+	}
+
+	code := last.ExitCode
+
+	r.record(ctx, row.Name, reason, event.Fields{Instance: index, ExitCode: &code})
+}
+
+// firstSighting reports whether an ended instance is one whose ending has not been
+// recorded yet, remembering it when it is.
+func (r *Reconciler) firstSighting(workload string, index int, id string) bool {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	key := slot{workload: workload, instance: index}
+	if r.exits[key] == id {
+		return false
+	}
+
+	r.exits[key] = id
+
+	return true
+}
+
+// lastEnded returns the instance in a slot that ran most recently and is no longer
+// running, reporting false when every instance is still up.
+func lastEnded(instances []driver.Instance) (driver.Instance, bool) {
+	var (
+		last  driver.Instance
+		found bool
+	)
+
+	for _, instance := range instances {
+		if running(instance) || terminating(instance) {
+			continue
+		}
+
+		if !found || instance.StartedAt.After(last.StartedAt) {
+			last = instance
+			found = true
+		}
+	}
+
+	return last, found
+}
+
+// paced records that an instance's next attempt is being held off, naming the
+// wait and which attempt it paces.
+//
+// Separate from hold, which does the pacing, because hold runs under r.mux and no
+// event may be recorded while that is held.
+func (r *Reconciler) paced(ctx context.Context, workload string, state backoff) {
+	r.record(ctx, workload, event.RestartPaced, event.Fields{
+		Count: state.attempts,
+		Delay: state.wait,
+	})
 }
 
 // giveUp marks an instance as given up on, reporting whether it was not already —
@@ -1783,14 +2013,9 @@ func (r *Reconciler) attempts(workload string, index int) int {
 	return r.backoff[slot{workload: workload, instance: index}].attempts
 }
 
-// settle forgets an instance's backoff and its workload's last error, which is what
-// starting from a clean slate means: the next failure is paced from the beginning
-// rather than from where the last run of failures left off, and nothing is reported
-// as wrong until something is.
-//
-// The error clears here rather than when an attempt begins, so that it stands for
-// exactly as long as the workload has not converged. An error that vanished the
-// moment a retry began would be invisible for the window an operator is looking.
+// settle forgets an instance's backoff, which is what starting from a clean slate
+// means: the next failure is paced from the beginning rather than from where the
+// last run of failures left off.
 func (r *Reconciler) settle(workload string, index int) {
 	r.mux.Lock()
 	defer r.mux.Unlock()
@@ -1798,11 +2023,17 @@ func (r *Reconciler) settle(workload string, index int) {
 	delete(r.backoff, slot{workload: workload, instance: index})
 }
 
-// settleAll forgets every instance's backoff and the workload's last error, for the
-// paths that act on the whole workload: a teardown, a suspension, a schedule.
+// settleAll forgets every instance's backoff, for the paths that act on the whole
+// workload: a teardown, a suspension, a schedule.
 func (r *Reconciler) settleAll(workload string) {
 	r.mux.Lock()
 	defer r.mux.Unlock()
+
+	for key := range r.exits {
+		if key.workload == workload {
+			delete(r.exits, key)
+		}
+	}
 
 	for key := range r.backoff {
 		if key.workload == workload {
@@ -1878,10 +2109,15 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 		// An image still being fetched is a waiting state rather than a failure.
 		// The instance stays pending with its ports and pacing untouched, and a
 		// later pass — hurried along by the driver when the pull lands — starts
-		// it. Deliberately not recorded as the workload's last error, because a
-		// pull in progress is nothing an operator has to act on.
+		// it.
+		//
+		// The event is what makes the wait visible: a workload pulling a large
+		// image and one the reconciler has not reached yet both read as pending,
+		// and this is what tells them apart. It repeats every pass until the pull
+		// lands, which coalescing folds into one row with a climbing count.
 		if errors.Is(err, driver.ErrImagePulling) {
 			r.logger.With("workload", row.Name, "instance", index).Debug("waiting for image pull")
+			r.record(ctx, row.Name, event.ImagePulling, event.Fields{Reference: imageOf(w.Spec)})
 
 			return nil
 		}
@@ -1899,6 +2135,7 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 	}
 
 	r.logger.With("workload", row.Name, "id", id, "instance", index, "version", row.Version).Info("workload started")
+	r.record(ctx, row.Name, event.InstanceStarted, event.Fields{Instance: index})
 
 	// After the start rather than before it. A replacement's files are written
 	// alongside those the instance being replaced is still reading, and sweeping them
@@ -2042,12 +2279,18 @@ func (r *Reconciler) abandonPorts(ctx context.Context, row database.Workload, in
 		return
 	}
 
+	// Read before the reallocation rather than after it, because afterwards these
+	// are whatever the workload moved to rather than what it gave up.
+	abandoned := hostPorts(r.slotPorts(row, index))
+
 	changed, err := r.reallocate(ctx, row.Name, index)
 	switch {
 	case err != nil:
 		r.logger.With("workload", row.Name, "instance", index, "error", err).Error("failed to reallocate workload ports")
 	case changed:
 		r.logger.With("workload", row.Name, "instance", index).Info("reallocated host ports after a failed start")
+
+		r.record(ctx, row.Name, event.PortsAbandoned, event.Fields{Instance: index, Ports: abandoned})
 	}
 }
 
