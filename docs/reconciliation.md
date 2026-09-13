@@ -67,7 +67,7 @@ retained remnant, and one left out there would never be reaped.
 
 Workloads then converge concurrently, bounded to the machine's CPU count with a
 floor of four. Failures affect one workload: a converge that returns an error is
-logged, recorded as the workload's `lastError`, and retried by the next pass.
+logged, recorded as an event against the workload, and retried by the next pass.
 
 ## Converging one workload
 
@@ -159,8 +159,8 @@ readable, counted once on the `takt_workload_giveups_total` metric, and started
 again only by a specification change. Zero attempts — the default — means takt
 keeps trying, which is what a long-running service wants.
 
-Why a start failed is kept in memory as the workload's `lastError`, reported by
-`takt workload get` until a pass over the workload succeeds. A failed start also
+Why a start failed is recorded as an event against the workload and reported by
+`takt workload events`. A failed start also
 abandons the host ports takt chose for that instance — the port may be what the
 start is failing on, and the next attempt tries different ones. For the first
 instance that reaches further than the instance: its ports are the workload's

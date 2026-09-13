@@ -36,6 +36,38 @@ workload deleted while the server was down leaves a retained instance behind, an
 instance absent from an observation would never be reaped. So the sweep that removes
 work nothing asked for sees everything, and convergence sees only what is live.
 
+## Events are the one observation takt keeps
+
+Nothing about what is running is persisted. Why it is running that way is.
+
+The two are different claims. An instance's state is answerable by asking the runtime,
+so storing it would only create something that can go stale. Why an instance was
+replaced is not answerable by asking anything: the pass that decided it knew the
+reason and the next pass does not. Left unrecorded it is gone, and a workload waiting
+on an image pull looks the same as one the reconciler has not reached.
+
+So a converge pass records events, and `takt workload events` reads them back. An
+event stores a reason code and a JSON payload rather than a sentence. The sentence is
+rendered from the pair when the event is read, which keeps the wording out of the
+stored row: rewording a message is a code change rather than a migration, and a caller
+that wants to match on a cause matches the reason rather than parsing prose.
+
+Reconciliation is level-triggered, so a cause that lasts is seen once per pass. An
+event already recorded with the same reason and payload raises a count rather than
+adding a row. That bounds what a stuck workload can write, and it reports the
+condition better: one row counted forty times says a pull has been running for forty
+passes, where forty rows say it forty times.
+
+A count that only ever rose would lose the difference between one long episode and two
+short ones. An image pulled again three days later would read as a condition that
+began three days ago. So a sighting of something last seen more than fifteen minutes
+ago starts the count again. The window clears the longest restart backoff plus a pass,
+so a workload deep in backoff does not reset its own count.
+
+The rows kept per workload are capped, and the oldest go as new ones arrive. This
+bounds the table rather than expiring an event by age: on a workload nothing happens
+to, the last thing that did happen is worth keeping however long ago it was.
+
 ## Reconciliation
 
 [Reconciliation](reconciliation.md) walks through the mechanics — when a pass

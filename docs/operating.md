@@ -569,13 +569,26 @@ takt's labels on it. For an exec workload it is a `previous.log` beside the
 
 ## Watching what takt is doing
 
-Start with the workload itself. A workload the server has tried and failed to start
-reports why in `takt workload get`, as `lastError` with the time it was recorded. The
-error stands until an attempt succeeds, so a workload failing on every pass carries a
-recent timestamp where one that failed once an hour ago does not. It is held in
-memory: a server restart clears it, and the next pass either fails again and restores
-it or succeeds. One error is reported per workload, which for a workload running
-several instances is the most recent failure among them.
+Start with the workload itself. The server records why a workload is in the state it
+is in, and `takt workload events` reads it back:
+
+```bash
+takt workload events example
+```
+
+An event names a cause rather than a state: which image is being pulled, why an
+instance was replaced, why a start failed. They are returned most recently seen
+first, and they survive a server restart.
+
+A cause that lasts is reported once rather than once per pass. An image pull running
+across forty passes reads as one event with a count of forty and the two times that
+bound it, so a condition that has just started and one that has held for an hour look
+different at a glance. A cause that recurs after a long enough gap starts its count
+again, which keeps the pair of times describing one episode rather than spanning two.
+
+The events kept per workload are capped, and the oldest go as new ones arrive. The cap
+defaults to ten and is set with `max-events` under `[workload]`. Raise it on a host
+where a workload's history is worth more than the rows it costs.
 
 At `info` the server reports what changed — a workload started or deleted, an
 image pulled, a secret set — and problems. Setting the level to `debug`
@@ -594,7 +607,8 @@ workload's history.
 
 The server serves a web UI from the root of its listener. Open the server's address
 in a browser to reach it. The UI lists every workload with its state, instances,
-ports, next run and last error, and shows what each workload references: the
+ports and next run, shows the events recorded against one, and shows what each
+workload references: the
 secrets, variables, volumes and workloads its specification names. It reads logs,
 with a live follow for one instance. It can stop, start, restart and delete a
 workload, rotate a secret, and set a variable.
