@@ -416,6 +416,109 @@ func (c *cgroup) restrictPids() error {
 	return limitFile(c.path, "pids.max", strconv.Itoa(c.pids))
 }
 
+// usageOf reports what the processes in a cgroup are consuming, read from the
+// counters the kernel keeps beside the limits they answer to.
+//
+// The reading is taken as a whole or not at all: a cgroup removed while it was
+// being read would otherwise report a memory figure and no processor time, which
+// reads as a workload that stopped using the processor rather than as one that
+// has gone.
+func usageOf(path string) (driver.Usage, error) {
+	memory, err := memoryUsage(path)
+	if err != nil {
+		return driver.Usage{}, err
+	}
+
+	processor, err := cpuUsage(path)
+	if err != nil {
+		return driver.Usage{}, err
+	}
+
+	pids, err := counter(path, "pids.current")
+	if err != nil {
+		return driver.Usage{}, err
+	}
+
+	return driver.Usage{
+		Memory: memory,
+		CPU:    processor,
+		Pids:   int(pids),
+		// The kernel does not timestamp its counters, so the reading is stamped
+		// as it is taken. The counters were read a moment ago at most.
+		At: time.Now(),
+	}, nil
+}
+
+// memoryUsage reports the memory a cgroup is using without the inactive page cache,
+// which the kernel reclaims before it enforces the limit. The container runtime
+// computes its figure the same way, so the two runtimes report the same thing.
+func memoryUsage(path string) (uint64, error) {
+	current, err := counter(path, "memory.current")
+	if err != nil {
+		return 0, err
+	}
+
+	// A kernel that does not keep the line is not a failed reading: the whole
+	// charge is then the best figure there is, and it is the one the limit is
+	// enforced against anyway.
+	inactive, err := statistic(path, "memory.stat", "inactive_file")
+	if err != nil || inactive > current {
+		return current, nil
+	}
+
+	return current - inactive, nil
+}
+
+// cpuUsage reports the processor time the processes in a cgroup have consumed since
+// it was created, summed across every processor.
+func cpuUsage(path string) (time.Duration, error) {
+	usec, err := statistic(path, "cpu.stat", "usage_usec")
+	if err != nil {
+		return 0, err
+	}
+
+	return time.Duration(usec) * time.Microsecond, nil
+}
+
+// counter reads a cgroup file holding a single number.
+func counter(path, name string) (uint64, error) {
+	data, err := os.ReadFile(filepath.Join(path, name))
+	if err != nil {
+		return 0, fmt.Errorf("failed to read %s: %w", name, pathless(err))
+	}
+
+	value, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse %s: %w", name, err)
+	}
+
+	return value, nil
+}
+
+// statistic reads one named line from a cgroup file holding a list of them.
+func statistic(path, name, key string) (uint64, error) {
+	data, err := os.ReadFile(filepath.Join(path, name))
+	if err != nil {
+		return 0, fmt.Errorf("failed to read %s: %w", name, pathless(err))
+	}
+
+	for line := range strings.Lines(string(data)) {
+		field, rest, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || field != key {
+			continue
+		}
+
+		value, err := strconv.ParseUint(strings.TrimSpace(rest), 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse %s of %s: %w", key, name, err)
+		}
+
+		return value, nil
+	}
+
+	return 0, fmt.Errorf("%s holds no %s", name, key)
+}
+
 // limitFile writes one limit into a cgroup, naming the limit when the kernel
 // refuses it.
 func limitFile(path, name, value string) error {

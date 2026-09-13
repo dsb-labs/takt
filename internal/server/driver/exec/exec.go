@@ -1104,6 +1104,48 @@ func instance(workload string, index int, recorded state, retained bool) driver.
 	return out
 }
 
+// Usage reports what each running process of one workload is consuming, keyed by
+// the identifier its instance is reported under.
+//
+// Only a workload with resource limits is reported on. Its limits are enforced by a
+// cgroup of its own, and the counters kept beside them are the reading. A workload
+// that asked for no limits shares whichever cgroup the server runs in, so there is
+// nothing there that describes the workload rather than the server, and reporting
+// the server's own consumption as the workload's would be worse than reporting
+// nothing.
+//
+// A retained process has ended and consumes nothing, so it is left out, as is a
+// record whose cgroup cannot be read: one workload's missing reading should not hide
+// the instances beside it.
+//
+// The name is unused here for the reason it is unused by ObserveWorkload.
+func (d *Driver) Usage(_ context.Context, id, _ string) (map[string]driver.Usage, error) {
+	records, err := d.records(id)
+	if err != nil {
+		return nil, err
+	}
+
+	usage := make(map[string]driver.Usage, len(records))
+
+	for _, r := range records {
+		recorded, err := d.states.read(r.path)
+		if err != nil || recorded.Cgroup == "" || retained(r.path) || !recorded.alive() {
+			continue
+		}
+
+		reading, err := usageOf(recorded.Cgroup)
+		if err != nil {
+			d.logger.With("id", id, "instance", r.instance, "error", err).Debug("skipping instance usage")
+
+			continue
+		}
+
+		usage[strconv.Itoa(recorded.PID)] = reading
+	}
+
+	return usage, nil
+}
+
 // Watch reports when a supervised process ends.
 //
 // There is no event stream to subscribe to, so the driver is its own source: the
