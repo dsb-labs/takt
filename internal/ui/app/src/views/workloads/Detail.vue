@@ -251,9 +251,14 @@ await workload.suspense().catch(() => {});
             <OverviewRow v-if="spec?.container" label="Image" mono>{{
               spec.container.image
             }}</OverviewRow>
-            <OverviewRow v-if="command" label="Command" mono>{{
-              command
-            }}</OverviewRow>
+            <OverviewRow
+              v-if="command"
+              label="Command"
+              mono
+              clip
+              :title="command"
+              >{{ command }}</OverviewRow
+            >
             <OverviewRow label="Count">{{ spec?.count ?? 1 }}</OverviewRow>
             <OverviewRow v-if="spec?.restart" label="Restart">{{
               spec.restart.policy
