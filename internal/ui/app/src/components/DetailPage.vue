@@ -13,6 +13,10 @@ defineProps<{
   // to another one. A step with nowhere to go is written as plain text, which
   // is what a grouping like "Instances" is.
   trail?: { label: string; to?: string }[];
+  // What the breadcrumb calls the page, when the heading reads longer than
+  // the trail needs. The trail already says which workload an instance
+  // belongs to, where the heading has to say it on its own.
+  crumb?: string;
 }>();
 </script>
 
@@ -30,7 +34,9 @@ defineProps<{
         <span v-else>{{ step.label }}</span>
       </template>
       <span class="mx-1">/</span>
-      <span class="text-slate-900 dark:text-slate-100">{{ name }}</span>
+      <span class="text-slate-900 dark:text-slate-100">{{
+        crumb ?? name
+      }}</span>
     </nav>
 
     <ErrorBanner v-if="error" :message="error" />
