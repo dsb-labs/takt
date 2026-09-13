@@ -3178,8 +3178,6 @@ components:
       enum:
         # The reasons a workload has not started yet.
         - imagePulling
-        - imagePulled
-        - imagePullFailed
         - restartPaced
         - restartGaveUp
         - referenceUnresolved

@@ -349,8 +349,6 @@ const (
 	WorkloadEventReasonHashMoved             WorkloadEventReason = "hashMoved"
 	WorkloadEventReasonHealthCheckFailing    WorkloadEventReason = "healthCheckFailing"
 	WorkloadEventReasonHealthCheckRecovered  WorkloadEventReason = "healthCheckRecovered"
-	WorkloadEventReasonImagePullFailed       WorkloadEventReason = "imagePullFailed"
-	WorkloadEventReasonImagePulled           WorkloadEventReason = "imagePulled"
 	WorkloadEventReasonImagePulling          WorkloadEventReason = "imagePulling"
 	WorkloadEventReasonInstanceExited        WorkloadEventReason = "instanceExited"
 	WorkloadEventReasonInstanceRemoved       WorkloadEventReason = "instanceRemoved"
@@ -390,10 +388,6 @@ func (e WorkloadEventReason) Valid() bool {
 	case WorkloadEventReasonHealthCheckFailing:
 		return true
 	case WorkloadEventReasonHealthCheckRecovered:
-		return true
-	case WorkloadEventReasonImagePullFailed:
-		return true
-	case WorkloadEventReasonImagePulled:
 		return true
 	case WorkloadEventReasonImagePulling:
 		return true
