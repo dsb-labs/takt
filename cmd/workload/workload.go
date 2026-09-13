@@ -3,10 +3,13 @@
 package workload
 
 import (
+	_ "embed"
+
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/cmd/workload/apply"
 	delcmd "github.com/dsb-labs/takt/cmd/workload/delete"
+	"github.com/dsb-labs/takt/cmd/workload/events"
 	"github.com/dsb-labs/takt/cmd/workload/get"
 	"github.com/dsb-labs/takt/cmd/workload/list"
 	"github.com/dsb-labs/takt/cmd/workload/logs"
@@ -15,12 +18,16 @@ import (
 	"github.com/dsb-labs/takt/cmd/workload/stop"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "workload" command, which does nothing on its own and holds the
 // commands that act on a workload.
 func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workload",
 		Short: "Apply, inspect and delete workloads",
+		Long:  usage,
 	}
 
 	cmd.AddCommand(
@@ -29,6 +36,7 @@ func Command() *cobra.Command {
 		get.Command(),
 		delcmd.Command(),
 		logs.Command(),
+		events.Command(),
 		stop.Command(),
 		start.Command(),
 		restart.Command(),

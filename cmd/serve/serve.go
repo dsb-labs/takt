@@ -4,6 +4,7 @@
 package serve
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -11,11 +12,15 @@ import (
 	"github.com/dsb-labs/takt/internal/server"
 )
 
+//go:embed usage.txt
+var usage string
+
 // Command returns the "serve" command used to start and run the takt server.
 func Command() *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve [config-file]",
 		Short: "Run the takt server",
+		Long:  usage,
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			config := server.DefaultConfig()

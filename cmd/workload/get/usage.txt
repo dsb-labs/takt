@@ -1,0 +1,6 @@
+Show a single workload.
+
+The workload is printed as indented JSON, holding its specification, its
+version, the state the server last observed, and the instances running for
+it. Use "workload events" for why it is in that state, and "workload logs"
+for what it wrote.

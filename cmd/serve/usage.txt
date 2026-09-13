@@ -1,0 +1,7 @@
+Run the takt server.
+
+The server reconciles the machine against the workloads declared against it,
+serves the API the CLI and the web interface read, and holds the database
+those workloads are stored in. Pass a path to a configuration file to run
+with it. Without one the server runs on its defaults, which are documented
+in docs/configuration.md.

@@ -1,0 +1,7 @@
+Apply, inspect and delete workloads.
+
+A workload is what takt runs: a container, a service or a scheduled job,
+declared in a manifest and reconciled towards on every pass. The commands
+here submit that manifest, read what the server made of it, and hold a
+workload down or start it again. Nothing here acts on the machine directly.
+The server converges towards what was declared, in its own time.
