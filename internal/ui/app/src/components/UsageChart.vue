@@ -1,21 +1,24 @@
 <script setup lang="ts">
 import {
   Chart,
+  Filler,
   LinearScale,
   LineElement,
   PointElement,
   Tooltip,
   type ChartData,
+  type ChartDataset,
   type ChartOptions,
 } from "chart.js";
 import { computed, onUnmounted, ref } from "vue";
 import { Line } from "vue-chartjs";
 
-import type { Series } from "../series";
+import { pollInterval } from "../api/queries";
+import type { Point, Series } from "../series";
 
 // Only the pieces a line chart draws with, so the bundle carries the chart
 // types this page uses rather than every chart the library can draw.
-Chart.register(LinearScale, LineElement, PointElement, Tooltip);
+Chart.register(Filler, LinearScale, LineElement, PointElement, Tooltip);
 
 const props = defineProps<{
   series: Series[];
@@ -23,7 +26,7 @@ const props = defineProps<{
   // chart. Undefined when the specification named none, which leaves the
   // chart scaled to what is being used.
   limit?: number;
-  // How a figure is written on an axis, in a tooltip and in the legend.
+  // How a figure is written on the axis and in a tooltip.
   format: (value: number) => string;
 }>();
 
@@ -60,16 +63,27 @@ const text = computed(() =>
 );
 
 const data = computed<ChartData<"line">>(() => {
-  const lines = props.series.map((series, index) => ({
-    label: series.label,
-    data: series.points,
-    borderColor: accents[index % accents.length],
-    backgroundColor: accents[index % accents.length],
-    borderWidth: 2,
-    pointRadius: 0,
-    pointHitRadius: 8,
-    tension: 0.3,
-  }));
+  const lines: ChartDataset<"line">[] = props.series.map((series) => {
+    const accent = accents[series.index % accents.length];
+
+    return {
+      label: series.label,
+      data: broken(series.points),
+      borderColor: accent,
+      // The area under the line is the same colour worn thin, which gives the
+      // reading some weight on the card without hiding the grid behind it.
+      backgroundColor: accent.replace(")", " / 0.15)"),
+      fill: "origin",
+      borderWidth: 2,
+      pointRadius: 0,
+      pointHitRadius: 8,
+      // The readings are samples taken every few seconds, so the line joins
+      // them as it finds them. A curve through them invents a shape the
+      // instance never had.
+      tension: 0,
+      spanGaps: false,
+    };
+  });
 
   // The limit is a line of its own rather than an annotation, drawn from the
   // first reading to the last so it spans whatever the chart is showing.
@@ -80,18 +94,36 @@ const data = computed<ChartData<"line">>(() => {
       data: span.map((x) => ({ x, y: props.limit as number })),
       borderColor: limitColour,
       backgroundColor: limitColour,
+      fill: false,
       borderWidth: 1.5,
-      // The dashes are what tell a reader the line is a bound rather than a
-      // seventh instance.
+      // The dashes are what tell a reader the line is a bound rather than
+      // another reading.
       borderDash: [4, 4],
       pointRadius: 0,
       pointHitRadius: 0,
       tension: 0,
-    } as (typeof lines)[number]);
+    });
   }
 
   return { datasets: lines };
 });
+
+// broken joins the points a chart draws, with a gap left wherever the page
+// stopped polling — a hidden tab, or a request that failed. Without it the
+// line is drawn straight across the pause, which reads as a slow climb or
+// fall the instance never made.
+function broken(points: Point[]): (Point | { x: number; y: null })[] {
+  const gap = pollInterval * 3;
+
+  return points.flatMap((point, at) => {
+    const previous = points[at - 1];
+    if (previous && point.x - previous.x > gap) {
+      return [{ x: previous.x + gap / 2, y: null }, point];
+    }
+
+    return [point];
+  });
+}
 
 // extent reports the first and last instant any series has a reading at,
 // which is how far the limit line has to reach.
