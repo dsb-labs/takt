@@ -16,6 +16,7 @@ import YamlView from "../../components/YamlView.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import Tooltip from "../../components/Tooltip.vue";
 import OverviewRow from "../../components/OverviewRow.vue";
+import UsageChart from "../../components/UsageChart.vue";
 import {
   absoluteTime,
   bytes,
@@ -26,6 +27,7 @@ import {
 } from "../../format";
 import type { Instance } from "../../api/types";
 import { hostPaths, references } from "../../references";
+import { useUsageSeries } from "../../series";
 import { useSort } from "../../sort";
 import { operator } from "../../auth";
 
@@ -154,6 +156,11 @@ const instanceSort = useSort(() => workload.data.value?.instances, "index", {
   started: (i) => i.startedAt ?? "",
   exit: (i) => i.exitCode ?? -1,
 });
+
+// The charts fill in as the view polls: the page starts with whatever the
+// first reading holds and gathers a history from there, since the server
+// keeps no more than the sample it works a rate out from.
+const { usage } = useUsageSeries(() => workload.data.value?.instances);
 
 const portSort = useSort(() => workload.data.value?.ports, "instance", {
   instance: (p) => p.instance ?? 0,
@@ -535,6 +542,30 @@ await workload.suspense().catch(() => {});
               </tbody>
             </table>
           </div>
+        </DetailCard>
+      </div>
+
+      <!-- Charted only while something is running: a stopped workload has
+           no readings, and a chart of what it used before it stopped would
+           go stale on the screen. -->
+      <div
+        v-if="workload.data.value.instances?.length"
+        class="mt-6 grid gap-6 xl:grid-cols-2"
+      >
+        <DetailCard title="Memory">
+          <UsageChart
+            :series="usage.memory"
+            :limit="usage.memoryLimit"
+            :format="bytes"
+          />
+        </DetailCard>
+
+        <DetailCard title="CPU">
+          <UsageChart
+            :series="usage.cpu"
+            :limit="usage.cpuLimit"
+            :format="cores"
+          />
         </DetailCard>
       </div>
 
