@@ -49,6 +49,10 @@ type (
 		// ContainerLogs should return the log stream for the container with the
 		// given identifier.
 		ContainerLogs(ctx context.Context, id string, options container.LogsOptions) (io.ReadCloser, error)
+		// ContainerStatsOneShot should return a single reading of the resource usage
+		// of the container with the given identifier, without waiting for a second
+		// sample. The caller must close the body.
+		ContainerStatsOneShot(ctx context.Context, id string) (container.StatsResponseReader, error)
 		// Events should return a stream of engine events matching the given options,
 		// alongside a channel carrying any error that ends the stream.
 		Events(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error)
@@ -131,6 +135,10 @@ func (c *engineClient) ContainerInspect(ctx context.Context, id string) (contain
 
 func (c *engineClient) ContainerLogs(ctx context.Context, id string, options container.LogsOptions) (io.ReadCloser, error) {
 	return c.inner.ContainerLogs(ctx, id, options)
+}
+
+func (c *engineClient) ContainerStatsOneShot(ctx context.Context, id string) (container.StatsResponseReader, error) {
+	return c.inner.ContainerStatsOneShot(ctx, id)
 }
 
 func (c *engineClient) Events(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error) {

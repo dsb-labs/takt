@@ -3,6 +3,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/telemetry"
@@ -570,6 +572,99 @@ func (d *Driver) observe(ctx context.Context, name string, health bool) ([]drive
 	}
 
 	return instances, nil
+}
+
+// Usage reports what each running container of one workload is consuming, keyed by
+// container ID.
+//
+// A retained container is left out. It exists so that its output can be read, and
+// what it consumes is not the workload's usage. A container the daemon cannot
+// report on is left out too, because it may have ended between the listing and
+// the read. One missing reading should not hide the others.
+//
+// The identifier is unused here for the reason it is unused by ObserveWorkload.
+func (d *Driver) Usage(ctx context.Context, _, name string) (map[string]driver.Usage, error) {
+	containers, err := d.containers(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+
+	superseded := supersededBy(containers)
+	usage := make(map[string]driver.Usage, len(containers))
+
+	var mux sync.Mutex
+
+	// The daemon answers each read on its own, so a workload with several
+	// instances pays for the slowest rather than for the sum.
+	var g errgroup.Group
+	g.SetLimit(8)
+
+	for _, c := range containers {
+		if c.State != container.StateRunning || superseded[c.ID] {
+			continue
+		}
+
+		g.Go(func() error {
+			reading, err := d.stats(ctx, c.ID)
+			if err != nil {
+				d.logger.With("container", c.ID, "error", err).Debug("skipping container usage")
+
+				return nil
+			}
+
+			mux.Lock()
+			defer mux.Unlock()
+
+			usage[c.ID] = reading
+
+			return nil
+		})
+	}
+
+	// Nothing above returns an error, since a failed read skips its container.
+	_ = g.Wait()
+
+	return usage, nil
+}
+
+// stats reads the usage of one container.
+//
+// The one-shot read returns without waiting for a second sample. The daemon
+// otherwise waits for one to compute a processor rate, and the caller computes
+// that rate from its own readings anyway.
+func (d *Driver) stats(ctx context.Context, id string) (driver.Usage, error) {
+	response, err := d.client.ContainerStatsOneShot(ctx, id)
+	if err != nil {
+		return driver.Usage{}, fmt.Errorf("failed to read container stats: %w", err)
+	}
+	defer response.Body.Close()
+
+	var stats container.StatsResponse
+	if err = json.NewDecoder(response.Body).Decode(&stats); err != nil {
+		return driver.Usage{}, fmt.Errorf("failed to decode container stats: %w", err)
+	}
+
+	return driver.Usage{
+		Memory: memoryUsage(stats.MemoryStats),
+		CPU:    time.Duration(stats.CPUStats.CPUUsage.TotalUsage),
+		Pids:   int(stats.PidsStats.Current),
+		At:     stats.Read,
+	}, nil
+}
+
+// memoryUsage reports the memory a container uses without its inactive page cache,
+// in the way the docker CLI computes it. A cgroup v1 host names the counter
+// total_inactive_file, and a cgroup v2 host names it inactive_file.
+func memoryUsage(stats container.MemoryStats) uint64 {
+	if inactive, ok := stats.Stats["total_inactive_file"]; ok && inactive < stats.Usage {
+		return stats.Usage - inactive
+	}
+
+	if inactive := stats.Stats["inactive_file"]; inactive < stats.Usage {
+		return stats.Usage - inactive
+	}
+
+	return stats.Usage
 }
 
 // Watch returns a channel of events describing changes to the containers the
