@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { usePolicy, useTokens } from "../../api/queries";
-import DetailCard from "../../components/DetailCard.vue";
-import ErrorBanner from "../../components/ErrorBanner.vue";
-import SortHeader from "../../components/SortHeader.vue";
-import YamlView from "../../components/YamlView.vue";
-import { absoluteTime, relativeTime } from "../../format";
-import { useSort } from "../../sort";
+import { usePolicy, useTokens } from "@/api/queries";
+import DetailCard from "@/components/DetailCard.vue";
+import ErrorBanner from "@/components/ErrorBanner.vue";
+import SortHeader from "@/components/SortHeader.vue";
+import YamlView from "@/components/YamlView.vue";
+import { absoluteTime, relativeTime } from "@/format";
+import { useSort } from "@/sort";
 
 const policy = usePolicy();
 const tokens = useTokens();

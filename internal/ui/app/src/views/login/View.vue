@@ -2,10 +2,10 @@
 import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { useLogin } from "../../api/mutations";
-import { useOIDC } from "../../api/queries";
-import { loadIdentity } from "../../auth";
-import ErrorBanner from "../../components/ErrorBanner.vue";
+import { useLogin } from "@/api/mutations";
+import { useOIDC } from "@/api/queries";
+import { loadIdentity } from "@/auth";
+import ErrorBanner from "@/components/ErrorBanner.vue";
 
 const route = useRoute();
 const router = useRouter();

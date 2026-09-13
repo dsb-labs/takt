@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="T">
-import SortHeader from "./SortHeader.vue";
-import type { Sort } from "../sort";
+import SortHeader from "@/components/SortHeader.vue";
+import type { Sort } from "@/sort";
 
 // The table every list view renders: a bordered shell, sortable headers, an
 // empty-state row, and one hoverable row per item. The cells stay with the

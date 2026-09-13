@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import DetailCard from "./DetailCard.vue";
-import SortHeader from "./SortHeader.vue";
-import { useSort } from "../sort";
+import DetailCard from "@/components/DetailCard.vue";
+import SortHeader from "@/components/SortHeader.vue";
+import { useSort } from "@/sort";
 
 // The workloads reading a resource, as a sortable table. A resource nothing
 // uses says so, since that is the one that can be deleted without forcing.

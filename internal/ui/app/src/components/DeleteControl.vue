@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
-import ErrorBanner from "./ErrorBanner.vue";
+import ErrorBanner from "@/components/ErrorBanner.vue";
 
 // The delete flow every resource shares: a button that opens a modal with a
 // force checkbox. A plain delete of something another workload reads is

@@ -2,19 +2,19 @@
 import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { useDeleteWorkload, useWorkloadAction } from "../../api/mutations";
-import { useWorkload } from "../../api/queries";
-import DeleteControl from "../../components/DeleteControl.vue";
-import DetailCard from "../../components/DetailCard.vue";
-import DetailPage from "../../components/DetailPage.vue";
-import LabelsCard from "../../components/LabelsCard.vue";
-import ErrorBanner from "../../components/ErrorBanner.vue";
-import ReferenceCard from "../../components/ReferenceCard.vue";
-import SortHeader from "../../components/SortHeader.vue";
-import YamlView from "../../components/YamlView.vue";
-import StateBadge from "../../components/StateBadge.vue";
-import Tooltip from "../../components/Tooltip.vue";
-import OverviewRow from "../../components/OverviewRow.vue";
+import { useDeleteWorkload, useWorkloadAction } from "@/api/mutations";
+import { useWorkload } from "@/api/queries";
+import DeleteControl from "@/components/DeleteControl.vue";
+import DetailCard from "@/components/DetailCard.vue";
+import DetailPage from "@/components/DetailPage.vue";
+import LabelsCard from "@/components/LabelsCard.vue";
+import ErrorBanner from "@/components/ErrorBanner.vue";
+import ReferenceCard from "@/components/ReferenceCard.vue";
+import SortHeader from "@/components/SortHeader.vue";
+import YamlView from "@/components/YamlView.vue";
+import StateBadge from "@/components/StateBadge.vue";
+import Tooltip from "@/components/Tooltip.vue";
+import OverviewRow from "@/components/OverviewRow.vue";
 import {
   absoluteTime,
   bytes,
@@ -22,11 +22,11 @@ import {
   healthStyles,
   relativeTime,
   usageStyles,
-} from "../../format";
-import type { Instance } from "../../api/types";
-import { hostPaths, references } from "../../references";
-import { useSort } from "../../sort";
-import { operator } from "../../auth";
+} from "@/format";
+import type { Instance } from "@/api/types";
+import { hostPaths, references } from "@/references";
+import { useSort } from "@/sort";
+import { operator } from "@/auth";
 
 const route = useRoute();
 // A snapshot rather than a computed: Suspense keeps this view on screen

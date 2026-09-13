@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import DetailCard from "./DetailCard.vue";
-import SortHeader from "./SortHeader.vue";
-import { referenceTarget, type Reference } from "../references";
-import { useSort } from "../sort";
+import DetailCard from "@/components/DetailCard.vue";
+import SortHeader from "@/components/SortHeader.vue";
+import { referenceTarget, type Reference } from "@/references";
+import { useSort } from "@/sort";
 
 // One kind of reference a workload reads, as its own card. Renders nothing
 // when the workload reads none of this kind.

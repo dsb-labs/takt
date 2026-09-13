@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import ErrorBanner from "./ErrorBanner.vue";
+import ErrorBanner from "@/components/ErrorBanner.vue";
 
 // The frame every detail page shares: the breadcrumb back to its list, the
 // error banner when the resource cannot be read, and the header row holding

@@ -2,18 +2,18 @@
 import { ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { useDeleteVariable, useSetVariable } from "../../api/mutations";
-import { useVariable } from "../../api/queries";
-import DeleteControl from "../../components/DeleteControl.vue";
-import DetailCard from "../../components/DetailCard.vue";
-import DetailPage from "../../components/DetailPage.vue";
-import LabelsCard from "../../components/LabelsCard.vue";
-import ErrorBanner from "../../components/ErrorBanner.vue";
-import UsedByCard from "../../components/UsedByCard.vue";
-import ValueForm from "../../components/ValueForm.vue";
-import OverviewRow from "../../components/OverviewRow.vue";
-import { absoluteTime, relativeTime } from "../../format";
-import { operator } from "../../auth";
+import { useDeleteVariable, useSetVariable } from "@/api/mutations";
+import { useVariable } from "@/api/queries";
+import DeleteControl from "@/components/DeleteControl.vue";
+import DetailCard from "@/components/DetailCard.vue";
+import DetailPage from "@/components/DetailPage.vue";
+import LabelsCard from "@/components/LabelsCard.vue";
+import ErrorBanner from "@/components/ErrorBanner.vue";
+import UsedByCard from "@/components/UsedByCard.vue";
+import ValueForm from "@/components/ValueForm.vue";
+import OverviewRow from "@/components/OverviewRow.vue";
+import { absoluteTime, relativeTime } from "@/format";
+import { operator } from "@/auth";
 
 const route = useRoute();
 const router = useRouter();

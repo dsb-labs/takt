@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/vue-query";
 
-import { client } from "./client";
+import { client } from "@/api/client";
 
 // Every mutation invalidates the queries reading what it changed, so the view
 // reflects the action on the next render rather than the next poll.

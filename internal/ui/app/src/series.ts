@@ -1,6 +1,6 @@
 import { computed, ref, watch, type Ref } from "vue";
 
-import type { Instance } from "./api/types";
+import type { Instance } from "@/api/types";
 
 // A rolling history of what the instances of a workload are consuming,
 // gathered from the readings a view already polls for.

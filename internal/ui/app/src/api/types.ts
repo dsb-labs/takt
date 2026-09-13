@@ -1,4 +1,4 @@
-import type { components } from "./schema";
+import type { components } from "@/api/schema";
 
 // Aliases for the generated schema types the views render, so a component
 // imports a name rather than an index expression.

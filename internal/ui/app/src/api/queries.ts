@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/vue-query";
 import { computed } from "vue";
 
-import { client } from "./client";
+import { client } from "@/api/client";
 
 // How often the list views ask the server again. Polling matches the server's
 // level-triggered reconciliation model: there is no change feed to subscribe

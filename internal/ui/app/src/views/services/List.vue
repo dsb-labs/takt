@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { useServices } from "../../api/queries";
-import ErrorBanner from "../../components/ErrorBanner.vue";
-import ListTable from "../../components/ListTable.vue";
-import QueryInput from "../../components/QueryInput.vue";
-import { pluralize } from "../../format";
-import { useQueryFilter } from "../../filter";
-import { useSort } from "../../sort";
+import { useServices } from "@/api/queries";
+import ErrorBanner from "@/components/ErrorBanner.vue";
+import ListTable from "@/components/ListTable.vue";
+import QueryInput from "@/components/QueryInput.vue";
+import { pluralize } from "@/format";
+import { useQueryFilter } from "@/filter";
+import { useSort } from "@/sort";
 
 const { filter, queries } = useQueryFilter();
 const services = useServices(() => queries.value);
