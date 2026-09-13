@@ -20,6 +20,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/driver/docker"
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/health"
 	"github.com/dsb-labs/takt/internal/server/mount"
 	"github.com/dsb-labs/takt/internal/server/reconciler"
@@ -3613,4 +3614,184 @@ func newMockDriver(t *testing.T) *MockDriver {
 	d.EXPECT().Name().Return(docker.Name).Maybe()
 
 	return d
+}
+
+func TestReconciler_Run_RecordsWhatItObserved(t *testing.T) {
+	t.Parallel()
+
+	t.Run("records the instance it started", func(t *testing.T) {
+		d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+			storedWorkload("example", "hash-one"),
+		}, nil)
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(nil, nil)
+		d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-one", nil).Once()
+
+		events := make(chan driver.Event)
+		d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Events:    recorder,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+		awaitPasses(t, r, 1)
+
+		cancel()
+		require.NoError(t, <-done)
+
+		assert.Equal(t, 1, recorder.count(event.InstanceStarted))
+	})
+
+	t.Run("records the wait for an image pull", func(t *testing.T) {
+		d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+			storedWorkload("example", "hash-one"),
+		}, nil)
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(nil, nil)
+		d.EXPECT().Start(mock.Anything, mock.Anything).Return("", driver.ErrImagePulling)
+
+		events := make(chan driver.Event)
+		d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Events:    recorder,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+		awaitPasses(t, r, 1)
+
+		cancel()
+		require.NoError(t, <-done)
+
+		// A workload pulling a large image and one the reconciler has not reached
+		// yet both read as pending. This is what tells them apart, and it names the
+		// image so an operator knows what is being fetched.
+		require.Equal(t, 1, recorder.count(event.ImagePulling))
+		assert.JSONEq(t, `{"reference":"example/example:latest"}`, string(recorder.data(event.ImagePulling)))
+	})
+
+	t.Run("records an ending once rather than once a pass", func(t *testing.T) {
+		d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+			storedWorkload("example", "hash-one"),
+		}, nil)
+
+		// The same corpse is observed by every pass, because the restart that
+		// would replace it is paced. That is what makes one ending visible
+		// repeatedly.
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).
+			RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+				passes.inc()
+
+				return []driver.Instance{{
+					ID:       "container-one",
+					Workload: "example",
+					SpecHash: "hash-one",
+					State:    driver.StateExited,
+				}}, nil
+			})
+		d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Maybe()
+		d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil).Maybe()
+		d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-one", nil).Maybe()
+
+		events := make(chan driver.Event)
+		d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Events:    recorder,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		for i := 1; i <= 3; i++ {
+			passes.wait(t, i)
+			awaitPasses(t, r, uint64(i))
+
+			r.Notify()
+		}
+
+		cancel()
+		require.NoError(t, <-done)
+
+		// Coalescing would fold these into one row with a climbing count, which
+		// would report how many passes saw the corpse rather than how many
+		// instances ended.
+		assert.Equal(t, 1, recorder.count(event.InstanceExited))
+	})
+}
+
+// The testRecorder type collects what a pass recorded, so a test can count the
+// events a reason produced rather than assert on the order they arrived in.
+type testRecorder struct {
+	mux      sync.Mutex
+	recorded map[event.Reason][][]byte
+}
+
+func newTestRecorder(t *testing.T) *testRecorder {
+	t.Helper()
+
+	return &testRecorder{recorded: make(map[event.Reason][][]byte)}
+}
+
+func (r *testRecorder) Record(_ context.Context, _ string, reason event.Reason, data []byte) error {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	r.recorded[reason] = append(r.recorded[reason], data)
+
+	return nil
+}
+
+// count returns how many times the reason was recorded.
+func (r *testRecorder) count(reason event.Reason) int {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	return len(r.recorded[reason])
+}
+
+// data returns what was stored against the first event carrying the reason.
+func (r *testRecorder) data(reason event.Reason) []byte {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	if len(r.recorded[reason]) == 0 {
+		return nil
+	}
+
+	return r.recorded[reason][0]
 }
