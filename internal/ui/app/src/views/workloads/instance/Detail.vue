@@ -7,6 +7,7 @@ import DetailCard from "../../../components/DetailCard.vue";
 import DetailPage from "../../../components/DetailPage.vue";
 import LogViewer from "../../../components/LogViewer.vue";
 import OverviewRow from "../../../components/OverviewRow.vue";
+import SortHeader from "../../../components/SortHeader.vue";
 import StateBadge from "../../../components/StateBadge.vue";
 import UsageChart from "../../../components/UsageChart.vue";
 import {
@@ -17,6 +18,7 @@ import {
   relativeTime,
 } from "../../../format";
 import { seriesOf, useUsageSeries } from "../../../series";
+import { useSort } from "../../../sort";
 
 const route = useRoute();
 // Snapshots rather than computed reads, for the reason the workload view
@@ -60,6 +62,13 @@ const ports = computed(() =>
     (port) => (port.instance ?? 0) === index,
   ),
 );
+
+const portSort = useSort(() => ports.value, "name", {
+  name: (p) => p.name ?? "",
+  host: (p) => p.from,
+  workload: (p) => p.to,
+  protocol: (p) => p.protocol ?? "",
+});
 
 const host = window.location.hostname;
 
@@ -203,15 +212,25 @@ await workload.suspense().catch(() => {});
               <tr
                 class="border-b border-slate-200 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400"
               >
-                <th class="px-4 py-2 font-medium">Name</th>
-                <th class="px-4 py-2 font-medium">Host</th>
-                <th class="px-4 py-2 font-medium">Workload</th>
-                <th class="px-4 py-2 font-medium">Protocol</th>
+                <SortHeader
+                  v-for="[column, label] in [
+                    ['name', 'Name'],
+                    ['host', 'Host'],
+                    ['workload', 'Workload'],
+                    ['protocol', 'Protocol'],
+                  ]"
+                  :key="column"
+                  :name="column!"
+                  :sort-key="portSort.key.value"
+                  :descending="portSort.descending.value"
+                  @sort="portSort.toggle"
+                  >{{ label }}</SortHeader
+                >
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="port in ports"
+                v-for="port in portSort.sorted.value"
                 :key="`${port.to}-${port.protocol}`"
                 class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
               >
