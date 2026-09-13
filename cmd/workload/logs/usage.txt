@@ -1,0 +1,7 @@
+Read a workload's recent output.
+
+The last 100 lines are read by default. Pass --follow to keep reading until
+the instance ends, --previous to read the instance a replacement took over
+from, and --instance to pick one of a workload running more than one. Pass
+--since a duration such as 10m, or an RFC 3339 time, to read only what was
+written after that moment.
