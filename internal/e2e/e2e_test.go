@@ -841,6 +841,37 @@ func (s *Suite) TestNeverPolicyKeepsAFailureVisible() {
 	}
 }
 
+// TestEventsRecordWhyAWorkloadLooksTheWayItDoes covers the read surface end to end.
+// A workload that was applied and then started records both, so an operator reading
+// the events sees the cause rather than only the state.
+func (s *Suite) TestEventsRecordWhyAWorkloadLooksTheWayItDoes() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name))
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	events, err := s.client.Events(s.ctx(), name, 0)
+	s.Require().NoError(err)
+
+	reasons := make(map[client.EventReason]client.Event, len(events))
+	for _, recorded := range events {
+		reasons[recorded.Reason] = recorded
+	}
+
+	s.Contains(reasons, client.EventApplied, "the apply that created the workload was not recorded")
+	s.Require().Contains(reasons, client.EventInstanceStarted, "the instance the reconciler started was not recorded")
+
+	// Rendered by the server from the reason and the data, rather than stored as a
+	// sentence, so a client reads words without holding a table of them.
+	started := reasons[client.EventInstanceStarted]
+	s.Equal("Started instance 0", started.Message)
+	s.Positive(started.Count)
+	s.False(started.LastSeen.Before(started.FirstSeen))
+}
+
 // TestNeverPullPolicyRefusesAnAbsentImage covers the pull policy's loud failure: a
 // workload forbidden to pull must not fall through to a pull when its image is
 // absent, or the policy is indistinguishable from missing.
