@@ -236,6 +236,9 @@ type (
 		// count would report how long nobody looked rather than how often the
 		// workload ended.
 		exits map[slot]string
+		// The health verdict already recorded against each slot, so that a check
+		// holding steady is not recorded on every pass that reads it.
+		verdicts map[slot]health.Status
 		// The workloads whose instances an operator asked to have replaced,
 		// consumed by the next pass over each. In memory rather than stored,
 		// because a request the server loses can simply be made again.
@@ -430,6 +433,7 @@ func New(config Config) *Reconciler {
 		interval:     config.Interval,
 		backoff:      make(map[slot]backoff),
 		exits:        make(map[slot]string),
+		verdicts:     make(map[slot]health.Status),
 		restarts:     make(map[string]struct{}),
 		observations: observations,
 		tracer:       telemetry.Tracer(config.TracerProvider, scope),
@@ -671,7 +675,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 			continue
 		}
 
-		observed[instance.Workload] = append(observed[instance.Workload], r.checked(instance))
+		observed[instance.Workload] = append(observed[instance.Workload], r.checked(ctx, instance))
 	}
 
 	// Read once per pass rather than per workload. Written before the converges
@@ -1077,6 +1081,7 @@ func (r *Reconciler) startAll(ctx context.Context, row database.Workload, count 
 // or its ports are mid-move — the slot is left alone rather than judged against a
 // hash that could not be computed: replacing it would start something that cannot
 // resolve its environment either.
+//
 // The second return value says which of the two staleness is, so the replacement
 // that follows can record why it happened. It is meaningful only where instances
 // are returned.
@@ -1094,6 +1099,10 @@ func (r *Reconciler) staleSlot(
 	if err != nil {
 		r.logger.With("workload", row.Name, "instance", index, "error", err).
 			Debug("leaving an instance whose expected hash cannot be resolved")
+
+		// Recorded every pass that cannot resolve, and coalesced into one row, so a
+		// workload waiting on another says so rather than sitting still in silence.
+		r.record(ctx, row.Name, event.ReferenceUnresolved, event.Fields{Error: err.Error()})
 
 		return nil, staleness{}
 	}
@@ -1539,7 +1548,7 @@ func healthPort(check manifest.Health, ports []database.Port) (int, error) {
 // whether the process died or merely stopped answering. A check that has not passed
 // yet makes it pending, which the pass treats as up — a workload still starting
 // must not be replaced for not having answered yet.
-func (r *Reconciler) checked(instance driver.Instance) driver.Instance {
+func (r *Reconciler) checked(ctx context.Context, instance driver.Instance) driver.Instance {
 	if r.checker == nil || instance.State != driver.StateRunning {
 		return instance
 	}
@@ -1548,6 +1557,8 @@ func (r *Reconciler) checked(instance driver.Instance) driver.Instance {
 	if !ok {
 		return instance
 	}
+
+	r.health(ctx, instance, result)
 
 	switch result.Status {
 	case health.StatusUnhealthy:
@@ -1915,6 +1926,61 @@ func (r *Reconciler) hold(ctx context.Context, workload string, index int, resta
 	return state
 }
 
+// health records the edges an instance's check crosses, which is what tells a
+// replacement caused by a workload that stopped answering from one caused by a
+// crash.
+//
+// Only a change is recorded. A check runs continuously and a pass reads its most
+// recent verdict, so recording the verdict itself would report on every pass how
+// the workload is rather than when it changed.
+//
+// The verdict is read where the pass reads it rather than where the probe writes
+// it, so a check that fails and recovers between two passes is not recorded. That
+// is the price of keeping this off the probe's path, which writes its result while
+// holding the checker's lock.
+func (r *Reconciler) health(ctx context.Context, instance driver.Instance, result health.Result) {
+	previous, changed := r.verdict(instance.Workload, instance.Index, result.Status)
+	if !changed {
+		return
+	}
+
+	switch {
+	case result.Status == health.StatusUnhealthy:
+		r.record(ctx, instance.Workload, event.HealthCheckFailing, event.Fields{
+			Instance: instance.Index,
+			Count:    result.Failures,
+			Error:    result.Error,
+		})
+	case result.Status == health.StatusHealthy && previous == health.StatusUnhealthy:
+		// Recovery is only recorded against a failure this saw. A workload passing
+		// its first check has not recovered from anything, and saying so on every
+		// workload that starts would bury the ones that did.
+		r.record(ctx, instance.Workload, event.HealthCheckRecovered, event.Fields{Instance: instance.Index})
+	}
+}
+
+// verdict reports the status an instance's check last held and whether the one
+// given differs from it, remembering the new one either way.
+//
+// A status never seen before counts as a change, so a workload adopted while
+// already failing is reported rather than passed over for having always been that
+// way.
+func (r *Reconciler) verdict(workload string, index int, status health.Status) (health.Status, bool) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	key := slot{workload: workload, instance: index}
+
+	previous, seen := r.verdicts[key]
+	if seen && previous == status {
+		return previous, false
+	}
+
+	r.verdicts[key] = status
+
+	return previous, true
+}
+
 // ended records how an instance finished, once per instance rather than once per
 // pass that sees it finished.
 //
@@ -2032,6 +2098,12 @@ func (r *Reconciler) settleAll(workload string) {
 	for key := range r.exits {
 		if key.workload == workload {
 			delete(r.exits, key)
+		}
+	}
+
+	for key := range r.verdicts {
+		if key.workload == workload {
+			delete(r.verdicts, key)
 		}
 	}
 
