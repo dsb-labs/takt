@@ -21,6 +21,15 @@ export const router = createRouter({
       name: "workload",
       component: () => import("./views/workloads/Detail.vue"),
     },
+    // An instance is addressed by its index rather than by the driver's
+    // handle for it. A container ID changes every time the reconciler
+    // replaces the instance, which would leave a link dead within minutes,
+    // where instance 0 is instance 0 for as long as the workload runs.
+    {
+      path: "/workloads/:name/instances/:index",
+      name: "instance",
+      component: () => import("./views/workloads/instance/Detail.vue"),
+    },
     {
       path: "/graph",
       name: "graph",
@@ -142,5 +151,11 @@ router.afterEach((to) => {
     typeof to.params.name === "string"
       ? to.params.name
       : sections[String(to.name)];
-  document.title = name ? `${name} · takt` : "takt";
+
+  // An instance page names the instance as well as the workload, so two of
+  // them open at once are told apart by more than their shared name.
+  const title =
+    to.name === "instance" ? `${name} instance ${to.params.index}` : name;
+
+  document.title = title ? `${title} · takt` : "takt";
 });

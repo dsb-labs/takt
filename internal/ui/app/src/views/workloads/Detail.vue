@@ -9,14 +9,12 @@ import DetailCard from "../../components/DetailCard.vue";
 import DetailPage from "../../components/DetailPage.vue";
 import LabelsCard from "../../components/LabelsCard.vue";
 import ErrorBanner from "../../components/ErrorBanner.vue";
-import LogViewer from "../../components/LogViewer.vue";
 import ReferenceCard from "../../components/ReferenceCard.vue";
 import SortHeader from "../../components/SortHeader.vue";
 import YamlView from "../../components/YamlView.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import Tooltip from "../../components/Tooltip.vue";
 import OverviewRow from "../../components/OverviewRow.vue";
-import UsageChart from "../../components/UsageChart.vue";
 import {
   absoluteTime,
   bytes,
@@ -27,7 +25,6 @@ import {
 } from "../../format";
 import type { Instance } from "../../api/types";
 import { hostPaths, references } from "../../references";
-import { useUsageSeries } from "../../series";
 import { useSort } from "../../sort";
 import { operator } from "../../auth";
 
@@ -156,14 +153,6 @@ const instanceSort = useSort(() => workload.data.value?.instances, "index", {
   started: (i) => i.startedAt ?? "",
   exit: (i) => i.exitCode ?? -1,
 });
-
-// The charts fill in as the view polls: the page starts with whatever the
-// first reading holds and gathers a history from there, since the server
-// keeps no more than the sample it works a rate out from.
-const usage = useUsageSeries(
-  () => name,
-  () => workload.data.value?.instances,
-);
 
 const portSort = useSort(() => workload.data.value?.ports, "instance", {
   instance: (p) => p.instance ?? 0,
@@ -377,7 +366,14 @@ await workload.suspense().catch(() => {});
                   :key="instance.id"
                   class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
                 >
-                  <td class="px-4 py-2.5">{{ instance.index ?? 0 }}</td>
+                  <td class="px-4 py-2.5">
+                    <RouterLink
+                      :to="`/workloads/${name}/instances/${instance.index ?? 0}`"
+                      class="text-pulse-700 dark:text-pulse-300 hover:underline"
+                    >
+                      {{ instance.index ?? 0 }}
+                    </RouterLink>
+                  </td>
                   <td
                     class="hidden px-4 py-2.5 font-mono text-xs sm:table-cell"
                   >
@@ -545,36 +541,6 @@ await workload.suspense().catch(() => {});
               </tbody>
             </table>
           </div>
-        </DetailCard>
-      </div>
-
-      <!-- Charted only while something is running: a stopped workload has
-           no readings, and a chart of what it used before it stopped would
-           go stale on the screen. -->
-      <div
-        v-if="workload.data.value.instances?.length"
-        class="mt-6 grid gap-6 xl:grid-cols-2"
-      >
-        <DetailCard title="Memory" class="min-w-0">
-          <UsageChart
-            :series="usage.memory"
-            :limit="usage.memoryLimit"
-            :format="bytes"
-          />
-        </DetailCard>
-
-        <DetailCard title="CPU" class="min-w-0">
-          <UsageChart
-            :series="usage.cpu"
-            :limit="usage.cpuLimit"
-            :format="cores"
-          />
-        </DetailCard>
-      </div>
-
-      <div class="mt-6">
-        <DetailCard title="Logs">
-          <LogViewer :workload="name" :count="spec?.count ?? 1" />
         </DetailCard>
       </div>
 
