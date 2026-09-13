@@ -89,16 +89,12 @@ func Message(reason Reason, data []byte) string {
 	switch reason {
 	case ImagePulling:
 		return fmt.Sprintf("Pulling image %s", fields.Reference)
-	case ImagePulled:
-		return fmt.Sprintf("Pulled image %s", fields.Reference)
-	case ImagePullFailed:
-		return fmt.Sprintf("Could not pull image %s: %s", fields.Reference, fields.Error)
 	case RestartPaced:
 		return fmt.Sprintf("Waiting %s before restart %d", fields.Delay, fields.Count)
 	case RestartGaveUp:
 		return fmt.Sprintf("Gave up restarting after %d attempts", fields.Count)
 	case ReferenceUnresolved:
-		return fmt.Sprintf("Waiting for %s to resolve: %s", fields.Reference, fields.Error)
+		return fmt.Sprintf("Waiting for %s to resolve: %s", reference(fields), fields.Error)
 
 	case SpecificationModified:
 		return "Specification changed"
@@ -155,6 +151,16 @@ func Message(reason Reason, data []byte) string {
 	}
 
 	return string(reason)
+}
+
+// reference renders what an event names, describing it instead where the event knows
+// a reference could not be resolved without knowing which of several it was.
+func reference(fields Fields) string {
+	if fields.Reference == "" {
+		return "a reference"
+	}
+
+	return fields.Reference
 }
 
 // exitCode renders an instance's exit status, naming it as unknown when the event

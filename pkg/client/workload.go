@@ -299,10 +299,6 @@ const (
 const (
 	// EventImagePulling indicates the workload is waiting on an image being fetched.
 	EventImagePulling EventReason = "imagePulling"
-	// EventImagePulled indicates an image the workload needed has arrived.
-	EventImagePulled EventReason = "imagePulled"
-	// EventImagePullFailed indicates an image the workload needs could not be fetched.
-	EventImagePullFailed EventReason = "imagePullFailed"
 	// EventRestartPaced indicates the server is waiting before it starts the workload
 	// again, having started it recently.
 	EventRestartPaced EventReason = "restartPaced"

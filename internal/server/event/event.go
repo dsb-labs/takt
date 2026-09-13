@@ -31,10 +31,6 @@ const (
 	// ImagePulling is recorded while a workload's image is being fetched, which
 	// otherwise looks the same as a workload the reconciler has not reached.
 	ImagePulling Reason = "imagePulling"
-	// ImagePulled is recorded when a workload's image has been fetched.
-	ImagePulled Reason = "imagePulled"
-	// ImagePullFailed is recorded when a workload's image cannot be fetched.
-	ImagePullFailed Reason = "imagePullFailed"
 	// RestartPaced is recorded while a failing instance waits out its backoff.
 	RestartPaced Reason = "restartPaced"
 	// RestartGaveUp is recorded when a workload has exhausted its restart attempts.
