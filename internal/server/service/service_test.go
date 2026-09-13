@@ -45,9 +45,10 @@ func storedService() database.Service {
 // targetedWorkload returns a hydrated workload publishing 8080/tcp for each of
 // the given instances, each mapped to a host port of 20000 plus its index.
 func targetedWorkload(name string, instances ...driver.Instance) service.Workload {
-	workload := service.Workload{
-		Name:      name,
-		Instances: instances,
+	workload := service.Workload{Name: name}
+
+	for _, instance := range instances {
+		workload.Instances = append(workload.Instances, service.Instance{Instance: instance})
 	}
 
 	for _, instance := range instances {
@@ -185,7 +186,7 @@ func TestServiceService_Get(t *testing.T) {
 			Selected: []service.Workload{
 				{
 					Name:      "worker",
-					Instances: []driver.Instance{{Index: 0, State: driver.StateRunning}},
+					Instances: []service.Instance{{Instance: driver.Instance{Index: 0, State: driver.StateRunning}}},
 				},
 			},
 			Expected: nil,
@@ -197,7 +198,7 @@ func TestServiceService_Get(t *testing.T) {
 			Selected: []service.Workload{
 				{
 					Name:      "dns",
-					Instances: []driver.Instance{{Index: 0, State: driver.StateRunning}},
+					Instances: []service.Instance{{Instance: driver.Instance{Index: 0, State: driver.StateRunning}}},
 					Ports: []service.ResolvedPort{
 						{Instance: 0, To: 8080, From: 20000, Protocol: manifest.ProtocolUDP},
 					},

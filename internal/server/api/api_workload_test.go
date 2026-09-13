@@ -590,8 +590,8 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 
 		stopped := workload("example", state.Failed)
-		stopped.Instances = []driver.Instance{
-			{ID: "container-one", State: driver.StateFailed, ExitCode: 137, SpecHash: "hash-one"},
+		stopped.Instances = []service.Instance{
+			{Instance: driver.Instance{ID: "container-one", State: driver.StateFailed, ExitCode: 137, SpecHash: "hash-one"}},
 		}
 
 		svc.EXPECT().Get(mock.Anything, "example").Return(stopped, nil).Once()
@@ -614,7 +614,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 
 		checked := workload("example", state.Failed)
-		checked.Healths = map[int]service.Health{0: {
+		checked.Instances[0].Health = service.Health{
 			Checked: true,
 			Result: health.Result{
 				Status:    health.StatusUnhealthy,
@@ -622,7 +622,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 				CheckedAt: time.Now(),
 				Error:     "/healthz answered 500",
 			},
-		}}
+		}
 
 		svc.EXPECT().Get(mock.Anything, "example").Return(checked, nil).Once()
 
@@ -653,8 +653,8 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		// An image carrying its own HEALTHCHECK is being checked by docker whether or
 		// not the manifest declares one, and surfacing that beats discarding it.
 		declared := workload("example", state.Running)
-		declared.Instances = []driver.Instance{
-			{ID: "container-one", State: driver.StateRunning, SpecHash: "hash-one", RuntimeHealth: "healthy"},
+		declared.Instances = []service.Instance{
+			{Instance: driver.Instance{ID: "container-one", State: driver.StateRunning, SpecHash: "hash-one", RuntimeHealth: "healthy"}},
 		}
 
 		svc.EXPECT().Get(mock.Anything, "example").Return(declared, nil).Once()
@@ -1168,8 +1168,8 @@ func workload(name string, state state.Workload) service.Workload {
 		State:     state,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
-		Instances: []driver.Instance{
-			{ID: "container-one", State: driver.StateRunning, SpecHash: "hash-one"},
+		Instances: []service.Instance{
+			{Instance: driver.Instance{ID: "container-one", State: driver.StateRunning, SpecHash: "hash-one"}},
 		},
 	}
 }

@@ -915,7 +915,8 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 			require.NoError(t, err)
 
 			assert.Equal(t, tc.ExpectState, got.State)
-			assert.Equal(t, tc.Checked, got.Healths[0].Checked)
+			require.Len(t, got.Instances, 1)
+			assert.Equal(t, tc.Checked, got.Instances[0].Health.Checked)
 		})
 	}
 }
