@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -122,6 +123,83 @@ func TestDriver_ResourceLimits(t *testing.T) {
 		assert.NotContains(t, filepath.Base(cgroupOf(t, pid)), "takt-"+testID)
 
 		require.NoError(t, d.Stop(t.Context(), testID, "example"))
+	})
+}
+
+// A cgroup is named for the workload's identifier, instance and version, and every
+// test here shares the first two. The versions differ from those the tests beside
+// this one use, so that two tests running in parallel cannot end up sharing a
+// cgroup — removing one ends whatever it holds, which would be the other's process.
+func TestDriver_Usage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports what a limited workload is consuming", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		// A shell busying itself, so there is processor time to report as well as
+		// memory. Read from the kernel's own counters, so what is asserted is what
+		// the limits are enforced against.
+		w := workload("example", 7, "hash-one", "while :; do :; done")
+		w.Spec.Resources = &manifest.Resources{Memory: "32m", CPU: 0.5, Pids: 5}
+
+		pid, err := d.Start(t.Context(), w)
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateRunning)
+
+		// The counters are the kernel's, written as the workload runs, so the first
+		// reading can arrive before the shell has been charged for anything.
+		var usage driver.Usage
+
+		require.Eventually(t, func() bool {
+			readings, err := d.Usage(t.Context(), testID, "example")
+			require.NoError(t, err)
+
+			usage = readings[pid]
+
+			return usage.CPU > 0
+		}, time.Second*5, time.Millisecond*50)
+
+		assert.Positive(t, usage.Memory)
+		assert.GreaterOrEqual(t, usage.Pids, 1)
+		assert.False(t, usage.At.IsZero())
+
+		require.NoError(t, d.Stop(t.Context(), testID, "example"))
+	})
+
+	// An unlimited workload runs in the server's own cgroup, so the only counters
+	// there describe the server. Reporting those as the workload's would be worse
+	// than reporting nothing.
+	t.Run("reports nothing for a workload asking for no limits", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload("example", 8, "hash-one", "sleep 60"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateRunning)
+
+		usage, err := d.Usage(t.Context(), testID, "example")
+		require.NoError(t, err)
+		assert.Empty(t, usage)
+
+		require.NoError(t, d.Stop(t.Context(), testID, "example"))
+	})
+
+	t.Run("reports nothing for a workload that has stopped", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		w := workload("example", 9, "hash-one", "sleep 60")
+		w.Spec.Resources = &manifest.Resources{Pids: 5}
+
+		_, err := d.Start(t.Context(), w)
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateRunning)
+		require.NoError(t, d.Stop(t.Context(), testID, "example"))
+
+		usage, err := d.Usage(t.Context(), testID, "example")
+		require.NoError(t, err)
+		assert.Empty(t, usage)
 	})
 }
 
