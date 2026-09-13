@@ -1159,7 +1159,7 @@ func TestWorkloadAPI_GetWorkloadEvents(t *testing.T) {
 		svc.EXPECT().Events(mock.Anything, "example", 100).Return([]service.Event{
 			{
 				Reason:    event.ImagePulling,
-				Message:   "pulling image alpine:3",
+				Message:   "Pulling image alpine:3",
 				Data:      event.Encode(event.Fields{Reference: "alpine:3"}),
 				Count:     4,
 				FirstSeen: seen,
@@ -1175,7 +1175,7 @@ func TestWorkloadAPI_GetWorkloadEvents(t *testing.T) {
 		require.Len(t, result.Events, 1)
 
 		assert.Equal(t, generated.WorkloadEventReasonImagePulling, result.Events[0].Reason)
-		assert.Equal(t, "pulling image alpine:3", result.Events[0].Message)
+		assert.Equal(t, "Pulling image alpine:3", result.Events[0].Message)
 		assert.Equal(t, 4, result.Events[0].Count)
 
 		require.NotNil(t, result.Events[0].Data)

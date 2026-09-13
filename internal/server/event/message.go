@@ -40,6 +40,8 @@ type Fields struct {
 	Delay time.Duration `json:"delay,omitempty"`
 	// The schedule expression the event concerns.
 	Schedule string `json:"schedule,omitempty"`
+	// The signal sent to the workload, where the event reports one.
+	Signal string `json:"signal,omitempty"`
 	// The host ports the event concerns.
 	Ports []int `json:"ports,omitempty"`
 	// What went wrong, where the event reports a failure.
@@ -62,7 +64,11 @@ func Encode(fields Fields) []byte {
 	return data
 }
 
-// Message renders the sentence an operator reads for an event.
+// Message renders the line an operator reads for an event.
+//
+// The reason is written for a machine to match on. This is the half written for
+// a person, so it says what happened in plain words rather than restating the
+// reason code.
 //
 // Rendering happens here rather than at the call site that recorded the event so
 // the wording is not frozen into the stored row. A reason with no case below
@@ -82,69 +88,70 @@ func Message(reason Reason, data []byte) string {
 
 	switch reason {
 	case ImagePulling:
-		return fmt.Sprintf("pulling image %s", fields.Reference)
+		return fmt.Sprintf("Pulling image %s", fields.Reference)
 	case ImagePulled:
-		return fmt.Sprintf("pulled image %s", fields.Reference)
+		return fmt.Sprintf("Pulled image %s", fields.Reference)
 	case ImagePullFailed:
-		return fmt.Sprintf("could not pull image %s: %s", fields.Reference, fields.Error)
+		return fmt.Sprintf("Could not pull image %s: %s", fields.Reference, fields.Error)
 	case RestartPaced:
-		return fmt.Sprintf("waiting %s before restart %d", fields.Delay, fields.Count)
+		return fmt.Sprintf("Waiting %s before restart %d", fields.Delay, fields.Count)
 	case RestartGaveUp:
-		return fmt.Sprintf("gave up restarting after %d attempts", fields.Count)
+		return fmt.Sprintf("Gave up restarting after %d attempts", fields.Count)
 	case ReferenceUnresolved:
-		return fmt.Sprintf("waiting for %s to resolve: %s", fields.Reference, fields.Error)
+		return fmt.Sprintf("Waiting for %s to resolve: %s", fields.Reference, fields.Error)
 
 	case SpecificationModified:
-		return "specification changed"
+		return "Specification changed"
 	case PortsDrifted:
-		return fmt.Sprintf("replacing instance %d, published ports no longer match", fields.Instance)
+		return fmt.Sprintf("Replacing instance %d, which no longer publishes host %s %s",
+			fields.Instance, plural("port", len(fields.Ports)), ports(fields))
 	case HashMoved:
-		return fmt.Sprintf("replacing instance %d, specification hash moved to %s", fields.Instance, fields.Hash)
+		return fmt.Sprintf("Replacing instance %d, the specification hash moved to %s", fields.Instance, fields.Hash)
 	case SecretChanged:
-		return fmt.Sprintf("secret %s changed", fields.Name)
+		return fmt.Sprintf("Secret %s changed", fields.Name)
 	case VariableChanged:
-		return fmt.Sprintf("variable %s changed", fields.Name)
+		return fmt.Sprintf("Variable %s changed", fields.Name)
 	case AddressMoved:
-		return fmt.Sprintf("workload %s moved", fields.Name)
+		return fmt.Sprintf("Workload %s moved to a new address", fields.Name)
 	case HealthCheckFailing:
-		return fmt.Sprintf("health check failed %d times in a row: %s", fields.Count, fields.Error)
+		return fmt.Sprintf("Health check failed %d times in a row: %s", fields.Count, fields.Error)
 	case HealthCheckRecovered:
-		return "health check passing again"
+		return "Health check is passing again"
 	case InstanceExited:
-		return fmt.Sprintf("instance %d exited with status %s", fields.Instance, exitCode(fields))
+		return fmt.Sprintf("Instance %d exited with status %s", fields.Instance, exitCode(fields))
 
 	case Applied:
-		return "applied"
+		return "Specification applied"
 	case Suspended:
-		return "suspended"
+		return "Workload suspended"
 	case Resumed:
-		return "resumed"
+		return "Workload resumed"
 	case RestartRequested:
-		return "restart requested"
+		return "Restart requested"
 	case Deleted:
-		return "marked for deletion"
+		return "Workload marked for deletion"
 	case InstanceStarted:
-		return fmt.Sprintf("started instance %d", fields.Instance)
+		return fmt.Sprintf("Started instance %d", fields.Instance)
 	case InstanceRemoved:
-		return fmt.Sprintf("removed instance %d, no longer wanted", fields.Instance)
+		return fmt.Sprintf("Removed instance %d, which is no longer wanted", fields.Instance)
 	case PortsAbandoned:
-		return fmt.Sprintf("gave up host %s %s", plural("port", len(fields.Ports)), ports(fields))
+		return fmt.Sprintf("Gave up host %s %s", plural("port", len(fields.Ports)), ports(fields))
 	case MountsRefreshed:
-		return "signalled, mounted values changed"
+		return fmt.Sprintf("Mounted value %s changed, sent %s", fields.Name, fields.Signal)
 
 	case RunStarted:
-		return "run started"
+		return "Run started"
 	case RunFinished:
-		return fmt.Sprintf("run finished with status %s", exitCode(fields))
+		return fmt.Sprintf("Run finished with status %s", exitCode(fields))
 	case OccurrenceSkipped:
-		return "occurrence skipped, the previous run had not finished"
+		return "Skipped an occurrence, the run before it had not finished"
 	case OccurrenceReplaced:
-		return "occurrence replaced a run that had not finished"
+		return "An occurrence replaced a run that had not finished"
 	case ScheduleInvalid:
-		return fmt.Sprintf("could not read schedule %q: %s", fields.Schedule, fields.Error)
+		return fmt.Sprintf("Could not read schedule %q: %s", fields.Schedule, fields.Error)
 
 	case ConvergeFailed:
-		return fmt.Sprintf("could not converge: %s", fields.Error)
+		return fmt.Sprintf("Could not converge: %s", fields.Error)
 	}
 
 	return string(reason)

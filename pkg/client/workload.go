@@ -122,6 +122,8 @@ type (
 		Delay time.Duration
 		// The schedule expression the event concerns.
 		Schedule string
+		// The signal sent to the workload, where the event reports one.
+		Signal string
 		// The host ports the event concerns.
 		Ports []int
 		// What went wrong, where the event reports a failure.
@@ -1106,6 +1108,7 @@ func newEvent(e api.WorkloadEvent) Event {
 		Count:     value(e.Data.Count),
 		Delay:     time.Duration(value(e.Data.Delay)),
 		Schedule:  value(e.Data.Schedule),
+		Signal:    value(e.Data.Signal),
 		Ports:     value(e.Data.Ports),
 		Error:     value(e.Data.Error),
 	}

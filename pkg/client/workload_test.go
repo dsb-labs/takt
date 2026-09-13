@@ -1150,7 +1150,7 @@ func TestClient_Events(t *testing.T) {
 				Events: []api.WorkloadEvent{
 					{
 						Reason:    api.WorkloadEventReasonImagePulling,
-						Message:   "pulling image alpine:3",
+						Message:   "Pulling image alpine:3",
 						Data:      &api.WorkloadEventData{Reference: new("alpine:3")},
 						Count:     4,
 						FirstSeen: seen,
@@ -1165,7 +1165,7 @@ func TestClient_Events(t *testing.T) {
 		require.Len(t, got, 1)
 
 		assert.Equal(t, client.EventImagePulling, got[0].Reason)
-		assert.Equal(t, "pulling image alpine:3", got[0].Message)
+		assert.Equal(t, "Pulling image alpine:3", got[0].Message)
 		assert.Equal(t, "alpine:3", got[0].Data.Reference)
 		assert.Equal(t, 4, got[0].Count)
 		assert.Equal(t, seen, got[0].FirstSeen)
