@@ -154,6 +154,26 @@ type (
 		Retained bool
 	}
 
+	// The Usage type describes what one running instance is consuming, as its
+	// runtime reports it at one moment.
+	//
+	// It is observed state, and raw: a driver reports counters rather than rates,
+	// because a rate needs two readings and a driver is asked for one. Whoever holds
+	// the previous reading turns the processor time into a rate.
+	Usage struct {
+		// The memory the instance is using, in bytes. Inactive page cache is left
+		// out, because the kernel reclaims it before a limit is enforced. Docker
+		// reports the same figure, so the two agree.
+		Memory uint64
+		// The processor time the instance has consumed since it started, summed
+		// across every processor.
+		CPU time.Duration
+		// The number of processes and threads the instance is running.
+		Pids int
+		// When the runtime took the reading.
+		At time.Time
+	}
+
 	// The LogOptions type describes which of a workload's output to read.
 	LogOptions struct {
 		// How many lines to read from the end of the output.
