@@ -160,7 +160,10 @@ const instanceSort = useSort(() => workload.data.value?.instances, "index", {
 // The charts fill in as the view polls: the page starts with whatever the
 // first reading holds and gathers a history from there, since the server
 // keeps no more than the sample it works a rate out from.
-const { usage } = useUsageSeries(() => workload.data.value?.instances);
+const usage = useUsageSeries(
+  () => name,
+  () => workload.data.value?.instances,
+);
 
 const portSort = useSort(() => workload.data.value?.ports, "instance", {
   instance: (p) => p.instance ?? 0,
