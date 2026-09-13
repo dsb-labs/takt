@@ -855,6 +855,13 @@ type Instance struct {
 	// says not to run it again. Exited says only that it ended, which is what the
 	// driver observed. Completed adds what the policy makes of that.
 	State InstanceState `json:"state"`
+
+	// Usage What the instance is consuming, beside the limits its specification asked
+	// for. Absent for an instance nothing can be read for, which one that is not
+	// running is, as is one the runtime cannot report on. A limit is absent when
+	// the specification named none, in which case the instance is bounded only by
+	// the host.
+	Usage *InstanceUsage `json:"usage,omitempty"`
 }
 
 // InstanceHealth The result of the workload's health check for this instance, absent when the
@@ -883,6 +890,35 @@ type InstanceHealth struct {
 // says not to run it again. Exited says only that it ended, which is what the
 // driver observed. Completed adds what the policy makes of that.
 type InstanceState string
+
+// InstanceUsage What the instance is consuming, beside the limits its specification asked
+// for. Absent for an instance nothing can be read for, which one that is not
+// running is, as is one the runtime cannot report on. A limit is absent when
+// the specification named none, in which case the instance is bounded only by
+// the host.
+type InstanceUsage struct {
+	// CPU The processors the instance is using, averaged since the reading before
+	// it. Absent until a second reading has been taken, since a rate needs a
+	// pair.
+	CPU *float64 `json:"cpu,omitempty"`
+
+	// CPULimit The processors the instance may use.
+	CPULimit *float64 `json:"cpuLimit,omitempty"`
+
+	// Memory The memory the instance is using, in bytes. Page cache the kernel
+	// reclaims before it enforces a limit is left out, so this is the figure
+	// the limit answers to.
+	Memory int `json:"memory"`
+
+	// MemoryLimit The memory the instance may use, in bytes.
+	MemoryLimit *int `json:"memoryLimit,omitempty"`
+
+	// Pids The processes and threads the instance is running.
+	Pids int `json:"pids"`
+
+	// PidsLimit The processes and threads the instance may run.
+	PidsLimit *int `json:"pidsLimit,omitempty"`
+}
 
 // Labels Key-value pairs attached to a workload, volume, service, secret or
 // variable, which the list query filter matches against.
