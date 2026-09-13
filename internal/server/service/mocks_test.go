@@ -3752,6 +3752,80 @@ func (_c *MockDriver_ObserveWorkload_Call) RunAndReturn(run func(ctx context.Con
 	return _c
 }
 
+// Usage provides a mock function for the type MockDriver
+func (_mock *MockDriver) Usage(ctx context.Context, id string, name string) (map[string]driver.Usage, error) {
+	ret := _mock.Called(ctx, id, name)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Usage")
+	}
+
+	var r0 map[string]driver.Usage
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (map[string]driver.Usage, error)); ok {
+		return returnFunc(ctx, id, name)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) map[string]driver.Usage); ok {
+		r0 = returnFunc(ctx, id, name)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]driver.Usage)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, id, name)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockDriver_Usage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Usage'
+type MockDriver_Usage_Call struct {
+	*mock.Call
+}
+
+// Usage is a helper method to define mock.On call
+//   - ctx context.Context
+//   - id string
+//   - name string
+func (_e *MockDriver_Expecter) Usage(ctx any, id any, name any) *MockDriver_Usage_Call {
+	return &MockDriver_Usage_Call{Call: _e.mock.On("Usage", ctx, id, name)}
+}
+
+func (_c *MockDriver_Usage_Call) Run(run func(ctx context.Context, id string, name string)) *MockDriver_Usage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDriver_Usage_Call) Return(stringToUsage map[string]driver.Usage, err error) *MockDriver_Usage_Call {
+	_c.Call.Return(stringToUsage, err)
+	return _c
+}
+
+func (_c *MockDriver_Usage_Call) RunAndReturn(run func(ctx context.Context, id string, name string) (map[string]driver.Usage, error)) *MockDriver_Usage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockWorkloadRepository creates a new instance of MockWorkloadRepository. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockWorkloadRepository(t interface {

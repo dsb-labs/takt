@@ -556,7 +556,8 @@ func (w *flushWriter) Write(p []byte) (int, error) {
 //
 // The check takt performs takes precedence: it is the one the operator asked for,
 // where the runtime's is whatever the image happened to carry.
-func instanceHealth(reported service.Health, instance driver.Instance) *api.InstanceHealth {
+func instanceHealth(instance service.Instance) *api.InstanceHealth {
+	reported := instance.Health
 	if reported.Checked {
 		result := api.InstanceHealth{Status: api.HealthStatus(reported.Result.Status),
 
@@ -613,7 +614,7 @@ func newResolvedPorts(ports []service.ResolvedPort) []api.ResolvedPort {
 // indexOf reports an instance's index for the wire, omitted for the first instance
 // so a workload running one instance reads exactly as it did before indexes
 // existed.
-func indexOf(instance driver.Instance) *int {
+func indexOf(instance service.Instance) *int {
 	if instance.Index == 0 {
 		return nil
 	}
@@ -664,10 +665,10 @@ func newWorkload(w service.Workload) api.Workload {
 			ID:       instance.ID,
 			SpecHash: instance.SpecHash,
 			State:    api.InstanceState(instance.State),
-			Index:    indexOf(instance.Instance),
+			Index:    indexOf(instance),
 			// The instance's own verdict rather than a workload-wide one, so one
 			// instance failing its check does not read as all of them failing.
-			Health: instanceHealth(instance.Health, instance.Instance),
+			Health: instanceHealth(instance),
 		}
 
 		// An exit code is only meaningful once the instance has stopped. Reporting
