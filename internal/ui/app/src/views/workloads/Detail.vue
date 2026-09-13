@@ -345,8 +345,8 @@ await workload.suspense().catch(() => {});
                       ['id', 'ID', 'hidden sm:table-cell'],
                       ['state', 'State'],
                       ['health', 'Health'],
-                      ['memory', 'Memory', 'hidden sm:table-cell'],
-                      ['cpu', 'CPU', 'hidden sm:table-cell'],
+                      ['memory', 'Memory', 'hidden w-44 sm:table-cell'],
+                      ['cpu', 'CPU', 'hidden w-36 sm:table-cell'],
                       ['started', 'Started', 'hidden sm:table-cell'],
                       ['exit', 'Exit code', 'hidden sm:table-cell'],
                     ]"
@@ -426,8 +426,13 @@ await workload.suspense().catch(() => {});
                   >
                     {{ healthLabel(instance) }}
                   </td>
+                  <!-- A reading changes on every poll, and a column sized to
+                       its content would resize with it and shift the rest of
+                       the row. The width on the header holds the column still,
+                       and tabular figures keep the reading itself from
+                       shuffling as digits change. -->
                   <td
-                    class="hidden px-4 py-2.5 sm:table-cell"
+                    class="hidden px-4 py-2.5 tabular-nums sm:table-cell"
                     :class="
                       usageStyles(
                         instance.usage?.memory ?? 0,
@@ -438,7 +443,7 @@ await workload.suspense().catch(() => {});
                     {{ memoryLabel(instance) }}
                   </td>
                   <td
-                    class="hidden px-4 py-2.5 sm:table-cell"
+                    class="hidden px-4 py-2.5 tabular-nums sm:table-cell"
                     :class="
                       usageStyles(
                         instance.usage?.cpu ?? 0,
@@ -507,7 +512,12 @@ await workload.suspense().catch(() => {});
                   class="border-b border-slate-100 last:border-b-0 dark:border-slate-800/50"
                 >
                   <td class="hidden px-4 py-2.5 sm:table-cell">
-                    {{ port.instance ?? 0 }}
+                    <RouterLink
+                      :to="`/workloads/${name}/instances/${port.instance ?? 0}`"
+                      class="text-pulse-700 dark:text-pulse-300 hover:underline"
+                    >
+                      {{ port.instance ?? 0 }}
+                    </RouterLink>
                   </td>
                   <td class="px-4 py-2.5">{{ port.name || "—" }}</td>
                   <td class="px-4 py-2.5 font-mono text-xs">
