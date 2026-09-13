@@ -237,6 +237,24 @@ takt workload get example
 Prints one workload: the specification that was submitted, the ports takt settled on,
 and what the runtime reports about each instance.
 
+A running instance also reports what it is consuming, in `Usage`. The figures are the
+memory it holds, the processors it is using, and the processes and threads it is
+running. Each sits beside the limit it answers to. A limit is absent when [the
+specification](manifest.md#resources) named none. That leaves the instance bounded by
+the host rather than by a figure worth printing.
+
+The memory figure leaves out the page cache the kernel reclaims before it enforces a
+limit. It is therefore the figure the limit applies to, rather than everything the
+workload has ever touched. The CPU figure averages the interval between this read and
+the one before it, so the first read of an instance reports none. Read again and it is
+there. An instance that is not running reports no usage at all.
+
+The server reads usage from the runtime each time you ask for a workload, so a read
+costs a call to the runtime. `workload list` does not report it.
+
+An `exec` workload that names no limits has no cgroup of its own to be measured in, so
+it reports no usage. Give it a `resources` block and it reports like any other.
+
 A workload that names a schedule also reports when it next runs.
 
 A workload that is failing to converge reports why and when, in `LastError` and

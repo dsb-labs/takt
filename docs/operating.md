@@ -458,6 +458,12 @@ workload's instances get cgroups of their own. The limits are
 written before the command starts, so it never runs outside them, and the cgroup is
 removed when the workload stops.
 
+takt reads the usage figures from that cgroup too, so an `exec` workload reports what
+it is consuming exactly when it is limited. An unlimited one shares the `main` cgroup
+with the server and every other unlimited workload. A reading of that would describe
+the lot of them rather than the workload, so an unlimited workload reports nothing.
+takt reads a container workload from its runtime, which reports either way.
+
 One interaction with the service manager is worth knowing. A limited workload's
 processes necessarily live inside the unit's subtree, and systemd's default
 `KillMode=control-group` kills everything in it when the unit stops. A limited
