@@ -16,7 +16,15 @@ import YamlView from "../../components/YamlView.vue";
 import StateBadge from "../../components/StateBadge.vue";
 import Tooltip from "../../components/Tooltip.vue";
 import OverviewRow from "../../components/OverviewRow.vue";
-import { absoluteTime, healthStyles, relativeTime } from "../../format";
+import {
+  absoluteTime,
+  bytes,
+  cores,
+  healthStyles,
+  relativeTime,
+  usageStyles,
+} from "../../format";
+import type { Instance } from "../../api/types";
 import { hostPaths, references } from "../../references";
 import { useSort } from "../../sort";
 import { operator } from "../../auth";
@@ -112,11 +120,37 @@ function healthLabel(instance: {
     : instance.health.status;
 }
 
+// memoryLabel and cpuLabel render a reading against the limit it answers to,
+// leaving out a limit the specification never named. An instance the server
+// has no reading for, which anything not running has none of, shows a dash
+// rather than a zero it is not using.
+function memoryLabel(instance: Instance): string {
+  if (!instance.usage) return "—";
+
+  const used = bytes(instance.usage.memory);
+  const limit = instance.usage.memoryLimit;
+
+  return limit ? `${used} / ${bytes(limit)}` : used;
+}
+
+function cpuLabel(instance: Instance): string {
+  // The rate needs a pair of readings, so the first poll after an instance
+  // starts has a limit to show but nothing to show against it yet.
+  if (instance.usage?.cpu === undefined) return "—";
+
+  const used = cores(instance.usage.cpu);
+  const limit = instance.usage.cpuLimit;
+
+  return limit ? `${used} / ${cores(limit)}` : used;
+}
+
 const instanceSort = useSort(() => workload.data.value?.instances, "index", {
   index: (i) => i.index ?? 0,
   id: (i) => i.id,
   state: (i) => i.state,
   health: (i) => i.health?.status ?? "",
+  memory: (i) => i.usage?.memory ?? -1,
+  cpu: (i) => i.usage?.cpu ?? -1,
   started: (i) => i.startedAt ?? "",
   exit: (i) => i.exitCode ?? -1,
 });
@@ -312,6 +346,8 @@ await workload.suspense().catch(() => {});
                       ['id', 'ID', 'hidden sm:table-cell'],
                       ['state', 'State'],
                       ['health', 'Health'],
+                      ['memory', 'Memory', 'hidden sm:table-cell'],
+                      ['cpu', 'CPU', 'hidden sm:table-cell'],
                       ['started', 'Started', 'hidden sm:table-cell'],
                       ['exit', 'Exit code', 'hidden sm:table-cell'],
                     ]"
@@ -383,6 +419,28 @@ await workload.suspense().catch(() => {});
                     :title="instance.health?.error"
                   >
                     {{ healthLabel(instance) }}
+                  </td>
+                  <td
+                    class="hidden px-4 py-2.5 sm:table-cell"
+                    :class="
+                      usageStyles(
+                        instance.usage?.memory ?? 0,
+                        instance.usage?.memoryLimit,
+                      )
+                    "
+                  >
+                    {{ memoryLabel(instance) }}
+                  </td>
+                  <td
+                    class="hidden px-4 py-2.5 sm:table-cell"
+                    :class="
+                      usageStyles(
+                        instance.usage?.cpu ?? 0,
+                        instance.usage?.cpuLimit,
+                      )
+                    "
+                  >
+                    {{ cpuLabel(instance) }}
                   </td>
                   <td
                     class="hidden px-4 py-2.5 text-slate-500 sm:table-cell dark:text-slate-400"
