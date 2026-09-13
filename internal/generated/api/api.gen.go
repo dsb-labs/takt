@@ -2222,11 +2222,12 @@ type WorkloadEvent struct {
 	// first.
 	LastSeen time.Time `json:"lastSeen"`
 
-	// Message The event as a sentence, rendered by the server from the reason and the
-	// data.
+	// Message What happened, in words written for a person to read, where the reason is
+	// written for a machine to match on.
 	//
-	// Rendered when the event is read rather than when it was recorded, so the
-	// wording is not frozen into what the server stored.
+	// The server renders this from the reason and the data when the event is
+	// read rather than when it was recorded, so the wording is not frozen into
+	// the stored row. Match on the reason rather than on this.
 	Message string `json:"message"`
 
 	// Reason Why an event was recorded, as a stable code rather than a sentence.
@@ -2284,6 +2285,9 @@ type WorkloadEventData struct {
 
 	// Schedule The schedule expression the event concerns.
 	Schedule *string `json:"schedule,omitempty"`
+
+	// Signal The signal sent to the workload, where the event reports one.
+	Signal *string `json:"signal,omitempty"`
 }
 
 // WorkloadEventReason Why an event was recorded, as a stable code rather than a sentence.
