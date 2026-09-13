@@ -849,6 +849,148 @@ func TestWorkloadService_Get(t *testing.T) {
 	})
 }
 
+// The driver mock answers Usage with nothing by default, and testify takes the
+// first expectation that fits rather than the most specific, so each test here
+// clears that default before saying what the runtime reports.
+func TestWorkloadService_Get_Usage(t *testing.T) {
+	t.Parallel()
+
+	// A stored workload whose specification asks for limits, so that what is
+	// reported can be compared against them.
+	limited := func() database.Workload {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Resources = &manifest.Resources{Memory: "512m", CPU: 2, Pids: 100}
+		spec.Defaults()
+
+		row := storedWorkload("example")
+		row.Spec = encodedSpec(spec)
+
+		return row
+	}
+
+	running := []driver.Instance{
+		{ID: "container-one", Workload: "example", State: driver.StateRunning, SpecHash: "hash-one"},
+	}
+
+	t.Run("reports what an instance is using against what it may use", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(limited(), nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(running, nil).Once()
+		d.EXPECT().Usage(mock.Anything, mock.Anything, mock.Anything).Unset()
+		d.EXPECT().Usage(mock.Anything, mock.Anything, "example").Return(map[string]driver.Usage{
+			"container-one": {Memory: 220200960, CPU: time.Minute, Pids: 12, At: time.Now()},
+		}, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		got, err := svc.Get(t.Context(), "example")
+		require.NoError(t, err)
+
+		require.Len(t, got.Instances, 1)
+
+		usage := got.Instances[0].Usage
+		assert.Equal(t, uint64(220200960), usage.Memory)
+		assert.Equal(t, 12, usage.Pids)
+
+		// The limits come from the specification rather than the runtime, which
+		// reports the host's capacity for a workload that asked for none.
+		assert.Equal(t, uint64(512*1024*1024), usage.MemoryLimit)
+		assert.InEpsilon(t, 2.0, usage.CPULimit, 0.0001)
+		assert.Equal(t, 100, usage.PidsLimit)
+	})
+
+	// A rate is the average between two readings, so the first of them has no
+	// partner to compute one against. Reporting nothing is what leaves the caller
+	// free to show the figure it does have.
+	t.Run("reports a processor rate once there are two readings", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		at := time.Now()
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(limited(), nil).Twice()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(running, nil).Twice()
+		d.EXPECT().Usage(mock.Anything, mock.Anything, mock.Anything).Unset()
+		d.EXPECT().Usage(mock.Anything, mock.Anything, "example").Return(map[string]driver.Usage{
+			"container-one": {CPU: 10 * time.Second, At: at},
+		}, nil).Once()
+		d.EXPECT().Usage(mock.Anything, mock.Anything, "example").Return(map[string]driver.Usage{
+			"container-one": {CPU: 15 * time.Second, At: at.Add(10 * time.Second)},
+		}, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		first, err := svc.Get(t.Context(), "example")
+		require.NoError(t, err)
+		require.Len(t, first.Instances, 1)
+		assert.Nil(t, first.Instances[0].Usage.CPU)
+
+		second, err := svc.Get(t.Context(), "example")
+		require.NoError(t, err)
+
+		// Five seconds of processor time over ten seconds of wall clock, which is
+		// half a processor however many the host has.
+		require.Len(t, second.Instances, 1)
+		require.NotNil(t, second.Instances[0].Usage.CPU)
+		assert.InEpsilon(t, 0.5, *second.Instances[0].Usage.CPU, 0.0001)
+	})
+
+	t.Run("reports nothing for an instance the runtime has no reading for", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(limited(), nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(running, nil).Once()
+		d.EXPECT().Usage(mock.Anything, mock.Anything, mock.Anything).Unset()
+		d.EXPECT().Usage(mock.Anything, mock.Anything, "example").Return(nil, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		got, err := svc.Get(t.Context(), "example")
+		require.NoError(t, err)
+
+		require.Len(t, got.Instances, 1)
+		assert.Empty(t, got.Instances[0].Usage)
+	})
+
+	// A runtime that cannot say what a workload is using is no reason to fail a read
+	// of the workload, in the way an observation that fails is not.
+	t.Run("still reports the workload when usage cannot be read", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(limited(), nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(running, nil).Once()
+		d.EXPECT().Usage(mock.Anything, mock.Anything, mock.Anything).Unset()
+		d.EXPECT().Usage(mock.Anything, mock.Anything, "example").Return(nil, errors.New("docker is down")).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		got, err := svc.Get(t.Context(), "example")
+		require.NoError(t, err)
+
+		require.Len(t, got.Instances, 1)
+		assert.Empty(t, got.Instances[0].Usage)
+	})
+
+	// Listing is the path every mutation returns through as well as the one a list
+	// takes, and a reading costs a call to the runtime per instance.
+	t.Run("does not read usage when listing workloads", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{limited()}, nil).Once()
+		ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(running, nil).Once()
+		d.EXPECT().Usage(mock.Anything, mock.Anything, mock.Anything).Unset()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		workloads, err := svc.List(t.Context())
+		require.NoError(t, err)
+		require.Len(t, workloads, 1)
+		require.Len(t, workloads[0].Instances, 1)
+		assert.Empty(t, workloads[0].Instances[0].Usage)
+	})
+}
+
 func TestWorkloadService_Get_Health(t *testing.T) {
 	t.Parallel()
 
@@ -3669,12 +3811,14 @@ func newTestLogger(t *testing.T) *slog.Logger {
 }
 
 // newMockDriver returns a driver mock that already answers Name, which every consumer
-// calls to report which runtime it is talking about.
+// calls to report which runtime it is talking about, and reports no usage, which a
+// test asserting on usage overrides with an expectation of its own.
 func newMockDriver(t *testing.T) *MockDriver {
 	t.Helper()
 
 	d := NewMockDriver(t)
 	d.EXPECT().Name().Return(docker.Name).Maybe()
+	d.EXPECT().Usage(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	return d
 }
