@@ -206,12 +206,14 @@ func Run(ctx context.Context, config Config) error {
 		Secrets: secrets,
 		Cipher:  cipher,
 		KeyID:   keyID,
+		Events:  events,
 		Rehash:  rehash,
 	})
 
 	variableSvc := service.NewVariableService(service.VariableServiceConfig{
 		Logger:    logger,
 		Variables: variables,
+		Events:    events,
 		Rehash:    rehash,
 	})
 
@@ -281,6 +283,10 @@ func Run(ctx context.Context, config Config) error {
 		// than what it was minted for.
 		Tokens:  tokenSvc,
 		Checker: checker,
+		// Recorded against the workload a pass observed something about, so an
+		// operator reads why it looks the way it does rather than only what it
+		// looks like.
+		Events: events,
 		// A check goes to where the workload's ports are published, which is not
 		// loopback for a server told to publish somewhere specific.
 		Bind: config.Workload.Bind,
