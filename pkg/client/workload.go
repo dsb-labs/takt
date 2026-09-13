@@ -137,6 +137,30 @@ type (
 		// What the most recent health check established. Nil when the instance is
 		// not checked at all.
 		Health *Health
+		// What the instance is consuming, against the limits it answers to. Nil
+		// when the server had no reading for it, which an instance that is not
+		// running has none of.
+		Usage *Usage
+	}
+
+	// The Usage type is the client-side view of what an instance is consuming.
+	//
+	// A limit is nil when the specification named none, which leaves the instance
+	// bounded by the host rather than by a figure anything could print.
+	Usage struct {
+		// The memory the instance is using, in bytes.
+		Memory int
+		// The memory the instance may use, in bytes.
+		MemoryLimit *int
+		// The processors the instance is using, averaged since the reading before
+		// it. Nil until a second reading has been taken, since a rate needs a pair.
+		CPU *float64
+		// The processors the instance may use.
+		CPULimit *float64
+		// The processes and threads the instance is running.
+		Pids int
+		// The processes and threads the instance may run.
+		PidsLimit *int
 	}
 
 	// The Health type is the client-side view of a health check's outcome.
@@ -966,6 +990,17 @@ func newWorkload(w api.Workload) (Workload, error) {
 			}
 			if instance.Health.Error != nil {
 				mapped.Health.Error = *instance.Health.Error
+			}
+		}
+
+		if instance.Usage != nil {
+			mapped.Usage = &Usage{
+				Memory:      instance.Usage.Memory,
+				MemoryLimit: instance.Usage.MemoryLimit,
+				CPU:         instance.Usage.CPU,
+				CPULimit:    instance.Usage.CPULimit,
+				Pids:        instance.Usage.Pids,
+				PidsLimit:   instance.Usage.PidsLimit,
 			}
 		}
 
