@@ -9,10 +9,10 @@ import DetailPage from "@/components/DetailPage.vue";
 import LabelsCard from "@/components/LabelsCard.vue";
 import SortHeader from "@/components/SortHeader.vue";
 import OverviewRow from "@/components/OverviewRow.vue";
-import { absoluteTime, relativeTime } from "@/format";
-import { labelQuery } from "@/filter";
-import { useSort } from "@/sort";
-import { operator } from "@/auth";
+import { absoluteTime, relativeTime } from "@/lib/format";
+import { labelQuery } from "@/composables/filter";
+import { useSort } from "@/composables/sort";
+import { operator } from "@/composables/auth";
 
 const route = useRoute();
 const router = useRouter();

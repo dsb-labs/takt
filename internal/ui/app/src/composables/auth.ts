@@ -1,3 +1,7 @@
+// The session is one piece of state the whole app shares rather than
+// something a component calls to get its own copy. It sits here because a
+// directory for one store would say less than this comment does.
+
 import { ref } from "vue";
 
 import { client } from "@/api/client";

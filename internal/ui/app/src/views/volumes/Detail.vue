@@ -9,8 +9,8 @@ import DetailPage from "@/components/DetailPage.vue";
 import LabelsCard from "@/components/LabelsCard.vue";
 import UsedByCard from "@/components/UsedByCard.vue";
 import OverviewRow from "@/components/OverviewRow.vue";
-import { absoluteTime, relativeTime } from "@/format";
-import { operator } from "@/auth";
+import { absoluteTime, relativeTime } from "@/lib/format";
+import { operator } from "@/composables/auth";
 
 const route = useRoute();
 const router = useRouter();

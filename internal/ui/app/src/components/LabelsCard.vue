@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import DetailCard from "@/components/DetailCard.vue";
-import { labelQuery } from "@/filter";
+import { labelQuery } from "@/composables/filter";
 
 // The labels on a resource, each linking to its list filtered by that label.
 // The target names the list page the resource belongs to.

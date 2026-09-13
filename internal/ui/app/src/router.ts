@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import { client } from "@/api/client";
-import { forgetIdentity, identity, loadIdentity } from "@/auth";
+import { forgetIdentity, identity, loadIdentity } from "@/composables/auth";
 
 export const router = createRouter({
   history: createWebHistory(),

@@ -22,11 +22,11 @@ import {
   healthStyles,
   relativeTime,
   usageStyles,
-} from "@/format";
+} from "@/lib/format";
 import type { Instance } from "@/api/types";
-import { hostPaths, references } from "@/references";
-import { useSort } from "@/sort";
-import { operator } from "@/auth";
+import { hostPaths, references } from "@/lib/references";
+import { useSort } from "@/composables/sort";
+import { operator } from "@/composables/auth";
 
 const route = useRoute();
 // A snapshot rather than a computed: Suspense keeps this view on screen

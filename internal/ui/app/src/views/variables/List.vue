@@ -3,10 +3,10 @@ import { useVariables } from "@/api/queries";
 import ErrorBanner from "@/components/ErrorBanner.vue";
 import ListTable from "@/components/ListTable.vue";
 import QueryInput from "@/components/QueryInput.vue";
-import { absoluteTime, pluralize, relativeTime } from "@/format";
-import { useQueryFilter } from "@/filter";
-import { useSort } from "@/sort";
-import { operator } from "@/auth";
+import { absoluteTime, pluralize, relativeTime } from "@/lib/format";
+import { useQueryFilter } from "@/composables/filter";
+import { useSort } from "@/composables/sort";
+import { operator } from "@/composables/auth";
 
 const { filter, queries } = useQueryFilter();
 const variables = useVariables(() => queries.value);
