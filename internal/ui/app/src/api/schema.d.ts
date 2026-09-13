@@ -110,6 +110,43 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/workloads/{name}/events": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The name that identifies the workload. */
+        name: components["parameters"]["WorkloadName"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Read what the server recorded about a workload
+     * @description Returns what the server observed about the workload while converging it, most
+     *     recently seen first.
+     *
+     *     An event says why the workload is in the state it is in: which image is being
+     *     pulled, why an instance was replaced, why a start failed. The state itself is
+     *     on the workload, so these answer the question the state raises rather than
+     *     repeating it.
+     *
+     *     Repeated sightings of one thing coalesce into a single event carrying a count
+     *     and the two times that bound it. An event is a claim about the past: it says
+     *     a thing was true when it was last seen, not that it is true now.
+     *
+     *     The server keeps a bounded number of events per workload, oldest removed
+     *     first, so a workload's history reaches back as far as its rate of events
+     *     allows rather than for a fixed time.
+     */
+    get: operations["getWorkloadEvents"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/workloads/{name}/stop": {
     parameters: {
       query?: never;
@@ -1932,23 +1969,139 @@ export interface components {
        *     about what is actually happening.
        */
       nextRun?: string;
+    };
+    /**
+     * @description Something the server observed about a workload while converging it.
+     *
+     *     Repeated sightings of one reason and data coalesce into a single event, so
+     *     this carries a count and the two times that bound it rather than appearing
+     *     once per sighting.
+     */
+    WorkloadEvent: {
+      reason: components["schemas"]["WorkloadEventReason"];
       /**
-       * @description Why the last attempt to converge the workload failed. Absent for a
-       *     workload whose last attempt succeeded, or that none has been made for.
+       * @description The event as a sentence, rendered by the server from the reason and the
+       *     data.
        *
-       *     Held in memory rather than stored: it clears when an attempt succeeds
-       *     and does not survive a server restart, after which the next attempt
-       *     either fails again and restores it or succeeds. The text is for a human
-       *     reading it, not for matching.
+       *     Rendered when the event is read rather than when it was recorded, so the
+       *     wording is not frozen into what the server stored.
+       * @example pulling image alpine:3
        */
-      lastError?: string;
+      message: string;
+      data?: components["schemas"]["WorkloadEventData"];
+      /**
+       * @description How many times the event was seen between firstSeen and lastSeen.
+       *
+       *     One for an event seen once. A sighting of something already recorded
+       *     raises this rather than adding an event, so a condition lasting across
+       *     many reconcile passes reads as one row with a high count.
+       */
+      count: number;
       /**
        * Format: date-time
-       * @description When the last converge failure was recorded. Present exactly when
-       *     lastError is, so a failure an hour ago and one on every attempt read
-       *     differently.
+       * @description When the event was first seen.
+       *
+       *     This bounds the current run of sightings rather than reaching back to the
+       *     first one ever. A cause that recurs after a long enough gap starts a new
+       *     run, so the pair of times describes the episode being reported rather than
+       *     spanning two.
        */
-      lastErrorAt?: string;
+      firstSeen: string;
+      /**
+       * Format: date-time
+       * @description When the event was last seen. Events are returned most recent by this
+       *     first.
+       */
+      lastSeen: string;
+    };
+    /**
+     * @description Why an event was recorded, as a stable code rather than a sentence.
+     *
+     *     Match on this rather than on the message, which is worded for a human and may
+     *     be reworded between releases. The set below grows as the server learns to
+     *     report more, so a caller may meet a reason it does not know from a server
+     *     newer than itself. Treat an unrecognised reason as one to show rather than one
+     *     to reject.
+     * @example imagePulling
+     * @enum {string}
+     */
+    WorkloadEventReason:
+      | "imagePulling"
+      | "imagePulled"
+      | "imagePullFailed"
+      | "restartPaced"
+      | "restartGaveUp"
+      | "referenceUnresolved"
+      | "specificationModified"
+      | "portsDrifted"
+      | "hashMoved"
+      | "secretChanged"
+      | "variableChanged"
+      | "addressMoved"
+      | "healthCheckFailing"
+      | "healthCheckRecovered"
+      | "instanceExited"
+      | "applied"
+      | "suspended"
+      | "resumed"
+      | "restartRequested"
+      | "deleted"
+      | "instanceStarted"
+      | "instanceRemoved"
+      | "portsAbandoned"
+      | "mountsRefreshed"
+      | "runStarted"
+      | "runFinished"
+      | "occurrenceSkipped"
+      | "occurrenceReplaced"
+      | "scheduleInvalid"
+      | "convergeFailed";
+    /**
+     * @description The values an event's message was rendered from, such as the image reference a
+     *     pull is fetching.
+     *
+     *     Which fields are present depends on the reason, and every one of them is
+     *     optional. This is here for a caller doing something with the event beyond
+     *     showing it, which already has the message.
+     */
+    WorkloadEventData: {
+      /** @description The image reference, expected hash, or other reference the event concerns. */
+      reference?: string;
+      /**
+       * @description The name of another object the event concerns, such as the secret whose
+       *     change moved a workload's hash.
+       */
+      name?: string;
+      /** @description The specification hash the workload is converging towards. */
+      hash?: string;
+      /** @description The specification hash the workload was at, where the event reports a move. */
+      previous?: string;
+      /** @description The ordinal of the instance the event concerns, counting from zero. */
+      instance?: number;
+      /**
+       * @description The status an instance ended with. Absent where the event did not record
+       *     one, which is not the same as a clean exit reporting zero.
+       */
+      exitCode?: number;
+      /**
+       * @description How many times something has happened, such as the consecutive failures a
+       *     health check has reported.
+       *
+       *     This counts within one sighting. The count of sightings is on the event
+       *     itself.
+       */
+      count?: number;
+      /**
+       * Format: int64
+       * @description How long the server is waiting before it tries again, in nanoseconds.
+       */
+      delay?: number;
+      /** @description The schedule expression the event concerns. */
+      schedule?: string;
+      /** @description The host ports the event concerns. */
+      ports?: number[];
+      /** @description What went wrong, where the event reports a failure. */
+      error?: string;
     };
     /** @description A single unit of work the driver is running for a workload. */
     Instance: {
@@ -2378,6 +2531,15 @@ export interface components {
     /** @description The body returned when a single workload is read. */
     GetWorkloadResult: {
       workload: components["schemas"]["Workload"];
+    };
+    /**
+     * @description The body returned when a workload's events are read. An object rather than a
+     *     bare array, so something later reported about the set as a whole is a new
+     *     field rather than a changed type.
+     */
+    GetWorkloadEventsResult: {
+      /** @description The workload's events, most recently seen first. */
+      events: components["schemas"]["WorkloadEvent"][];
     };
     /**
      * @description The body returned when a workload is applied.
@@ -2947,6 +3109,39 @@ export interface operations {
         };
         content: {
           "text/plain": string;
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      404: components["responses"]["NotFound"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  getWorkloadEvents: {
+    parameters: {
+      query?: {
+        /**
+         * @description The number of events to return, most recently seen first. Capped, because
+         *     the server reads what it is asked for and an unbounded request would let
+         *     a caller decide how much work the server does.
+         */
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description The name that identifies the workload. */
+        name: components["parameters"]["WorkloadName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The workload's events. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GetWorkloadEventsResult"];
         };
       };
       400: components["responses"]["BadRequest"];

@@ -304,3 +304,20 @@ func wireLabels(labels map[string]string) *api.Labels {
 
 	return &wire
 }
+
+// value reads what a pointer on the wire holds, giving the zero value where the
+// server left the field out.
+//
+// The generated types use a pointer for every optional field, and most of them mean
+// nothing more than absent. A caller reading a zero rather than dereferencing a nil
+// loses no information for those. Fields where absent and zero say different things,
+// such as an exit status, keep their pointer and are not read through here.
+func value[T any](pointer *T) T {
+	if pointer == nil {
+		var zero T
+
+		return zero
+	}
+
+	return *pointer
+}

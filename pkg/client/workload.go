@@ -31,6 +31,15 @@ type (
 	// whether its runtime reports it started.
 	HealthStatus string
 
+	// The EventReason type names why the server recorded an event.
+	//
+	// Match on this rather than on the rendered message, which is worded for a human
+	// and may be reworded between releases. The constants below are what this version
+	// of the client knows about. A server newer than the client may send a reason none
+	// of them names, so a switch on a reason needs a default rather than treating the
+	// set as closed.
+	EventReason string
+
 	// The Workload type is the client-side view of a workload: the desired state
 	// that was submitted, together with what the server reports is running for it.
 	Workload struct {
@@ -60,12 +69,63 @@ type (
 		// When the workload next runs, for one that names a schedule. Zero for a
 		// workload that runs continuously.
 		NextRun time.Time
-		// Why the last attempt to converge the workload failed. Empty for one whose
-		// last attempt succeeded, or that none has been made for.
-		LastError string
-		// When the last converge failure was recorded, meaningful only when
-		// LastError is set.
-		LastErrorAt time.Time
+	}
+
+	// The Event type is something the server observed about a workload while
+	// converging it.
+	//
+	// Repeated sightings of one thing coalesce into a single event, so this carries
+	// a count and the two times that bound it rather than appearing once per
+	// sighting. It says a thing was true as of LastSeen, which is a claim about the
+	// past rather than about the workload now.
+	Event struct {
+		// Why the event was recorded.
+		Reason EventReason
+		// The event as a sentence, rendered by the server.
+		Message string
+		// The values the message was rendered from. Which fields are set depends on
+		// the reason, and none are for a reason whose message says everything.
+		Data EventData
+		// How many times the event was seen between FirstSeen and LastSeen.
+		Count int
+		// When the current run of sightings began.
+		FirstSeen time.Time
+		// When the event was last seen.
+		LastSeen time.Time
+	}
+
+	// The EventData type carries the values an event's message was rendered from.
+	//
+	// It is one struct covering every reason rather than a type per reason, because
+	// reasons overlap in what they name. A reason sets the two or three fields its
+	// message needs and leaves the rest at their zero values.
+	EventData struct {
+		// The image reference, expected hash, or other reference the event concerns.
+		Reference string
+		// The name of another object the event concerns, such as the secret whose
+		// change moved a workload's hash.
+		Name string
+		// The specification hash the workload is converging towards.
+		Hash string
+		// The specification hash the workload was at, where the event reports a move.
+		Previous string
+		// The ordinal of the instance the event concerns, counting from zero.
+		Instance int
+		// The status an instance ended with. Nil where the event did not record one,
+		// which is not the same as a clean exit reporting zero.
+		ExitCode *int
+		// How many times something has happened, such as the consecutive failures a
+		// health check has reported. This counts within one sighting, where Event.Count
+		// counts the sightings.
+		Count int
+		// How long the server is waiting before it tries again.
+		Delay time.Duration
+		// The schedule expression the event concerns.
+		Schedule string
+		// The host ports the event concerns.
+		Ports []int
+		// What went wrong, where the event reports a failure.
+		Error string
 	}
 
 	// The DryRun type reports what applying a specification would do, none of it
@@ -233,6 +293,94 @@ const (
 	HealthUnhealthy HealthStatus = "unhealthy"
 )
 
+// The reasons a workload has not started yet.
+const (
+	// EventImagePulling indicates the workload is waiting on an image being fetched.
+	EventImagePulling EventReason = "imagePulling"
+	// EventImagePulled indicates an image the workload needed has arrived.
+	EventImagePulled EventReason = "imagePulled"
+	// EventImagePullFailed indicates an image the workload needs could not be fetched.
+	EventImagePullFailed EventReason = "imagePullFailed"
+	// EventRestartPaced indicates the server is waiting before it starts the workload
+	// again, having started it recently.
+	EventRestartPaced EventReason = "restartPaced"
+	// EventRestartGaveUp indicates the server has stopped trying to start the workload.
+	EventRestartGaveUp EventReason = "restartGaveUp"
+	// EventReferenceUnresolved indicates something the specification refers to could
+	// not be read, such as a pinned image reference.
+	EventReferenceUnresolved EventReason = "referenceUnresolved"
+)
+
+// The reasons a workload restarted.
+const (
+	// EventSpecificationModified indicates the submitted specification changed.
+	EventSpecificationModified EventReason = "specificationModified"
+	// EventPortsDrifted indicates an instance's published ports no longer match the
+	// ports the workload was given.
+	EventPortsDrifted EventReason = "portsDrifted"
+	// EventHashMoved indicates an instance is being replaced because the workload's
+	// specification hash moved.
+	EventHashMoved EventReason = "hashMoved"
+	// EventSecretChanged indicates a secret the workload reads was written.
+	EventSecretChanged EventReason = "secretChanged"
+	// EventVariableChanged indicates a variable the workload reads was written.
+	EventVariableChanged EventReason = "variableChanged"
+	// EventAddressMoved indicates another workload this one refers to moved.
+	EventAddressMoved EventReason = "addressMoved"
+	// EventHealthCheckFailing indicates the workload's health check has failed enough
+	// consecutive times to count against it.
+	EventHealthCheckFailing EventReason = "healthCheckFailing"
+	// EventHealthCheckRecovered indicates the workload's health check passes again.
+	EventHealthCheckRecovered EventReason = "healthCheckRecovered"
+	// EventInstanceExited indicates an instance ended on its own.
+	EventInstanceExited EventReason = "instanceExited"
+)
+
+// The reasons naming something done to a workload.
+const (
+	// EventApplied indicates a specification was submitted for the workload.
+	EventApplied EventReason = "applied"
+	// EventSuspended indicates an operator stopped the workload and held it down.
+	EventSuspended EventReason = "suspended"
+	// EventResumed indicates an operator started a suspended workload again.
+	EventResumed EventReason = "resumed"
+	// EventRestartRequested indicates an operator asked for the workload's instances
+	// to be replaced.
+	EventRestartRequested EventReason = "restartRequested"
+	// EventDeleted indicates the workload was marked for deletion.
+	EventDeleted EventReason = "deleted"
+	// EventInstanceStarted indicates the server started an instance.
+	EventInstanceStarted EventReason = "instanceStarted"
+	// EventInstanceRemoved indicates the server removed an instance it no longer wants.
+	EventInstanceRemoved EventReason = "instanceRemoved"
+	// EventPortsAbandoned indicates the server gave up host ports the workload held.
+	EventPortsAbandoned EventReason = "portsAbandoned"
+	// EventMountsRefreshed indicates the workload was signalled because a value it
+	// mounts changed.
+	EventMountsRefreshed EventReason = "mountsRefreshed"
+)
+
+// The reasons particular to a workload on a schedule.
+const (
+	// EventRunStarted indicates a scheduled run began.
+	EventRunStarted EventReason = "runStarted"
+	// EventRunFinished indicates a scheduled run ended.
+	EventRunFinished EventReason = "runFinished"
+	// EventOccurrenceSkipped indicates an occurrence was passed over because the run
+	// before it had not finished.
+	EventOccurrenceSkipped EventReason = "occurrenceSkipped"
+	// EventOccurrenceReplaced indicates an occurrence stopped a run that had not
+	// finished and took its place.
+	EventOccurrenceReplaced EventReason = "occurrenceReplaced"
+	// EventScheduleInvalid indicates the workload's schedule could not be read.
+	EventScheduleInvalid EventReason = "scheduleInvalid"
+)
+
+const (
+	// EventConvergeFailed indicates a pass over the workload did not finish.
+	EventConvergeFailed EventReason = "convergeFailed"
+)
+
 // Apply stores spec as the desired state for its name, reporting whether the
 // workload was newly created.
 //
@@ -321,6 +469,42 @@ func (c *Client) Get(ctx context.Context, name string) (Workload, error) {
 		return Workload{}, newError(http.StatusInternalServerError, resp.JSON500)
 	default:
 		return Workload{}, newError(resp.StatusCode(), nil)
+	}
+}
+
+// Events returns what the server recorded about the named workload while
+// converging it, most recently seen first, up to limit of them. Returns
+// ErrWorkloadNotFound when no such workload exists.
+//
+// A limit of zero asks for the server's default. The server caps what it will
+// return, so asking for more than the cap returns the cap rather than failing.
+func (c *Client) Events(ctx context.Context, name string, limit int) ([]Event, error) {
+	var params api.GetWorkloadEventsParams
+	if limit > 0 {
+		params.Limit = &limit
+	}
+
+	resp, err := c.api.GetWorkloadEventsWithResponse(ctx, name, &params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send the request: %w", err)
+	}
+
+	switch {
+	case resp.JSON200 != nil:
+		events := make([]Event, 0, len(resp.JSON200.Events))
+		for _, recorded := range resp.JSON200.Events {
+			events = append(events, newEvent(recorded))
+		}
+
+		return events, nil
+	case resp.JSON400 != nil:
+		return nil, newError(http.StatusBadRequest, resp.JSON400)
+	case resp.JSON404 != nil:
+		return nil, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
+	case resp.JSON500 != nil:
+		return nil, newError(http.StatusInternalServerError, resp.JSON500)
+	default:
+		return nil, newError(resp.StatusCode(), nil)
 	}
 }
 
@@ -898,6 +1082,37 @@ func newDryRun(result api.DryRunWorkloadResult) (DryRun, error) {
 	return run, nil
 }
 
+// newEvent maps an event the server reported onto the shape the client returns.
+func newEvent(e api.WorkloadEvent) Event {
+	event := Event{
+		Reason:    EventReason(e.Reason),
+		Message:   e.Message,
+		Count:     e.Count,
+		FirstSeen: e.FirstSeen,
+		LastSeen:  e.LastSeen,
+	}
+
+	if e.Data == nil {
+		return event
+	}
+
+	event.Data = EventData{
+		Reference: value(e.Data.Reference),
+		Name:      value(e.Data.Name),
+		Hash:      value(e.Data.Hash),
+		Previous:  value(e.Data.Previous),
+		Instance:  value(e.Data.Instance),
+		ExitCode:  e.Data.ExitCode,
+		Count:     value(e.Data.Count),
+		Delay:     time.Duration(value(e.Data.Delay)),
+		Schedule:  value(e.Data.Schedule),
+		Ports:     value(e.Data.Ports),
+		Error:     value(e.Data.Error),
+	}
+
+	return event
+}
+
 // newWorkload maps a workload the server reported onto the shape the client returns.
 //
 // It fails when the specification does not convert, which means the server sent one
@@ -928,12 +1143,6 @@ func newWorkload(w api.Workload) (Workload, error) {
 	}
 	if w.Suspended != nil {
 		workload.Suspended = *w.Suspended
-	}
-	if w.LastError != nil {
-		workload.LastError = *w.LastError
-	}
-	if w.LastErrorAt != nil {
-		workload.LastErrorAt = *w.LastErrorAt
 	}
 
 	if w.Ports != nil {

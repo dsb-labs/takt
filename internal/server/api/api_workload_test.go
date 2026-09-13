@@ -20,6 +20,7 @@ import (
 	generated "github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/server/api"
 	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/health"
 	"github.com/dsb-labs/takt/internal/server/middleware"
 	"github.com/dsb-labs/takt/internal/server/port"
@@ -778,44 +779,6 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		assert.Nil(t, (*got.Instances)[0].Health)
 	})
 
-	t.Run("reports why a workload is not converging", func(t *testing.T) {
-		svc := NewMockWorkloadService(t)
-
-		failing := workload("example", state.Pending)
-		failing.LastError = "failed to start workload: no such image"
-		failing.LastErrorAt = time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
-
-		svc.EXPECT().Get(mock.Anything, "example").Return(failing, nil).Once()
-
-		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
-		require.Equal(t, http.StatusOK, resp.Code)
-
-		var result generated.GetWorkloadResult
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
-
-		got := result.Workload
-
-		require.NotNil(t, got.LastError)
-		assert.Equal(t, failing.LastError, *got.LastError)
-		require.NotNil(t, got.LastErrorAt)
-		assert.Equal(t, failing.LastErrorAt, *got.LastErrorAt)
-	})
-
-	t.Run("reports no error for a converging workload", func(t *testing.T) {
-		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Get(mock.Anything, "example").
-			Return(workload("example", state.Running), nil).Once()
-
-		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example", nil)
-		require.Equal(t, http.StatusOK, resp.Code)
-
-		var result generated.GetWorkloadResult
-		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &result))
-
-		assert.Nil(t, result.Workload.LastError)
-		assert.Nil(t, result.Workload.LastErrorAt)
-	})
-
 	t.Run("reports a missing workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "nope").
@@ -1183,6 +1146,91 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 		// would sit watching forever.
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?follow=true&previous=true", nil)
 		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
+func TestWorkloadAPI_GetWorkloadEvents(t *testing.T) {
+	t.Parallel()
+
+	seen := time.Now().UTC().Truncate(time.Second)
+
+	t.Run("returns the events the service reports", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Events(mock.Anything, "example", 100).Return([]service.Event{
+			{
+				Reason:    event.ImagePulling,
+				Message:   "pulling image alpine:3",
+				Data:      event.Encode(event.Fields{Reference: "alpine:3"}),
+				Count:     4,
+				FirstSeen: seen,
+				LastSeen:  seen.Add(time.Minute),
+			},
+		}, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/events", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		var result generated.GetWorkloadEventsResult
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+		require.Len(t, result.Events, 1)
+
+		assert.Equal(t, generated.WorkloadEventReasonImagePulling, result.Events[0].Reason)
+		assert.Equal(t, "pulling image alpine:3", result.Events[0].Message)
+		assert.Equal(t, 4, result.Events[0].Count)
+
+		require.NotNil(t, result.Events[0].Data)
+		require.NotNil(t, result.Events[0].Data.Reference)
+		assert.Equal(t, "alpine:3", *result.Events[0].Data.Reference)
+	})
+
+	t.Run("honours the limit parameter", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Events(mock.Anything, "example", 5).Return(nil, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/events?limit=5", nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	// The server reads what it is asked to read, so an uncapped request would let a
+	// caller decide how much work it does.
+	t.Run("caps an unbounded limit", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Events(mock.Anything, "example", 1000).Return(nil, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/events?limit=100000", nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	// A reason carrying nothing beyond itself has no data, and an empty object on the
+	// wire would say it has a payload that happens to be empty.
+	t.Run("leaves out the data of an event that carries none", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Events(mock.Anything, "example", 100).
+			Return([]service.Event{{Reason: event.Applied, Message: "applied", Data: event.Encode(event.Fields{}), Count: 1}}, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/events", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+
+		var result generated.GetWorkloadEventsResult
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&result))
+		require.Len(t, result.Events, 1)
+		assert.Nil(t, result.Events[0].Data)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Events(mock.Anything, "nope", 100).Return(nil, service.ErrWorkloadNotFound).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/nope/events", nil)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
+	})
+
+	t.Run("reports a failure to read them", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Events(mock.Anything, "example", 100).Return(nil, errors.New("database is gone")).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/events", nil)
+		assert.Equal(t, http.StatusInternalServerError, resp.Code)
 	})
 }
 

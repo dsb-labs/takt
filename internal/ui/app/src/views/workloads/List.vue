@@ -126,11 +126,6 @@ await workloads.suspense().catch(() => {});
         </td>
         <td class="px-4 py-3">
           <StateBadge :state="workload.state" />
-          <span
-            v-if="workload.lastError"
-            class="ml-1.5 inline-block h-2 w-2 rounded-full bg-rose-500 align-middle"
-            :title="workload.lastError"
-          ></span>
         </td>
         <td class="hidden px-4 py-3 sm:table-cell">
           <span v-if="health(workload)" :class="health(workload)!.style">

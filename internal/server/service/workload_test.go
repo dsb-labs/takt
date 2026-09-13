@@ -25,6 +25,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/driver/docker"
 	"github.com/dsb-labs/takt/internal/server/driver/exec"
+	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/health"
 	"github.com/dsb-labs/takt/internal/server/port"
 	"github.com/dsb-labs/takt/internal/server/resolve"
@@ -1063,80 +1064,75 @@ func TestWorkloadService_Get_Health(t *testing.T) {
 	}
 }
 
-func TestWorkloadService_Get_LastError(t *testing.T) {
+func TestWorkloadService_Events(t *testing.T) {
 	t.Parallel()
 
-	when := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	first := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	last := first.Add(time.Minute)
 
-	tt := []struct {
-		Name     string
-		Message  string
-		At       time.Time
-		Recorded bool
-	}{
-		{
-			Name:     "a failing workload reports why",
-			Message:  "failed to start workload: no such image",
-			At:       when,
-			Recorded: true,
-		},
-		{
-			Name: "a converging workload reports nothing",
-		},
-	}
-
-	for _, tc := range tt {
-		t.Run(tc.Name, func(t *testing.T) {
-			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
-			rec := NewMockReconciler(t)
-
-			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-			ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
-			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
-
-			rec.EXPECT().LastError("example").Return(tc.Message, tc.At, tc.Recorded)
-
-			repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-
-			svc := service.NewWorkloadService(service.WorkloadServiceConfig{
-				Logger:     newTestLogger(t),
-				Drivers:    map[string]service.Driver{docker.Name: d},
-				Workloads:  repo,
-				Ports:      ports,
-				Claimer:    newTestClaimer(ports, allocatorStub{}),
-				Reconciler: rec,
-			})
-
-			got, err := svc.Get(t.Context(), "example")
-			require.NoError(t, err)
-
-			assert.Equal(t, tc.Message, got.LastError)
-			assert.Equal(t, tc.At, got.LastErrorAt)
-		})
-	}
-
-	t.Run("a service with no error source reports nothing", func(t *testing.T) {
-		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+	t.Run("renders the message from what was stored", func(t *testing.T) {
+		repo, events := NewMockWorkloadRepository(t), NewMockWorkloadEventRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
-		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
-
-		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		events.EXPECT().List(mock.Anything, "example", 10).Return([]database.WorkloadEvent{
+			{
+				Reason:    event.ImagePulling,
+				Data:      event.Encode(event.Fields{Reference: "alpine:3"}),
+				Count:     4,
+				FirstSeen: first,
+				LastSeen:  last,
+			},
+		}, nil).Once()
 
 		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 			Logger:    newTestLogger(t),
-			Drivers:   map[string]service.Driver{docker.Name: d},
 			Workloads: repo,
-			Ports:     ports,
-			Claimer:   newTestClaimer(ports, allocatorStub{}),
+			Events:    events,
 		})
 
-		got, err := svc.Get(t.Context(), "example")
+		got, err := svc.Events(t.Context(), "example", 10)
 		require.NoError(t, err)
+		require.Len(t, got, 1)
 
-		assert.Empty(t, got.LastError)
-		assert.True(t, got.LastErrorAt.IsZero())
+		// The reason and the data survive for a caller doing something with them,
+		// and the sentence is produced here rather than having been stored.
+		assert.Equal(t, event.ImagePulling, got[0].Reason)
+		assert.Equal(t, "pulling image alpine:3", got[0].Message)
+		assert.JSONEq(t, `{"reference":"alpine:3"}`, string(got[0].Data))
+		assert.Equal(t, 4, got[0].Count)
+		assert.Equal(t, first, got[0].FirstSeen)
+		assert.Equal(t, last, got[0].LastSeen)
+	})
+
+	t.Run("reports a workload that does not exist as missing", func(t *testing.T) {
+		repo := NewMockWorkloadRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "missing").Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Workloads: repo,
+		})
+
+		// A name nothing knows and a workload with nothing recorded are different
+		// answers, so the first is reported rather than read as an empty list.
+		_, err := svc.Events(t.Context(), "missing", 10)
+		require.ErrorIs(t, err, service.ErrWorkloadNotFound)
+	})
+
+	t.Run("reports no events when nothing records them", func(t *testing.T) {
+		repo := NewMockWorkloadRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Workloads: repo,
+		})
+
+		got, err := svc.Events(t.Context(), "example", 10)
+		require.NoError(t, err)
+		assert.Empty(t, got)
 	})
 }
 
@@ -2405,7 +2401,6 @@ func TestWorkloadService_Restart(t *testing.T) {
 		// instances, so the runtime is never touched from here.
 		rec.EXPECT().Restart("example").Return().Once()
 		rec.EXPECT().Notify().Return().Once()
-		rec.EXPECT().LastError(mock.Anything).Return("", time.Time{}, false).Maybe()
 
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
@@ -3596,7 +3591,6 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 	if notify != nil {
 		rec := NewMockReconciler(t)
 		rec.EXPECT().Notify().Run(notify).Return().Maybe()
-		rec.EXPECT().LastError(mock.Anything).Return("", time.Time{}, false).Maybe()
 
 		config.Reconciler = rec
 	}
