@@ -26,6 +26,7 @@ interval = "10s"
 bind = "0.0.0.0"
 min-port = 20000
 max-port = 32000
+max-events = 10
 allow-host-paths = []
 
 [exec]
@@ -150,11 +151,18 @@ how quickly takt notices something it was never told about.
 | `bind` | `0.0.0.0` | The address a workload's host ports are published on. |
 | `min-port` | `20000` | The lowest host port takt will allocate. |
 | `max-port` | `32000` | The highest host port takt will allocate. |
+| `max-events` | `10` | The most events kept for one workload. |
 | `allow-host-paths` | empty | The prefixes a path mount may sit beneath. |
 
 `min-port` and `max-port` are the range takt allocates from for a container port that
 names no host port. A port a manifest pins is used as given, whether or not it falls in
 this range.
+
+`max-events` bounds what one workload's event history can grow to. The oldest event is
+removed as a new one arrives, so the limit decides how far back the history reaches
+rather than how long an event survives. A busy workload therefore keeps a shorter
+history than a quiet one. Raise it on a host where a workload's history is worth more
+than the rows it costs.
 
 `bind` is which interfaces a workload can be reached on. Every interface by default,
 unlike the API: a published port exists to be reached, and one of the things reaching

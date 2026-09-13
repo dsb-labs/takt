@@ -1,8 +1,10 @@
 // Package database provides the SQLite-backed persistence layer for the takt server.
 //
-// The database stores desired state only — what the operator asked for. What is
-// actually running is observed from the driver on demand, so nothing here can go
-// stale against reality.
+// The database stores desired state — what the operator asked for — and the
+// events the server recorded while converging towards it. What is actually
+// running is observed from the driver on demand, so no row here describes the
+// present and none can go stale against reality. An event says what was true
+// when it was written, which is a claim about the past and stays true.
 package database
 
 import (
@@ -217,8 +219,18 @@ func newMigrator(db *sql.DB) (*migrate.Migrate, error) {
 	return m, nil
 }
 
+// formatTime renders a time for storage in a timestamp column.
+//
+// The fraction is written to a fixed nine digits rather than with RFC3339Nano,
+// which trims trailing zeros. A trimmed fraction makes the column sort wrongly
+// inside a single second, because "10:00:00Z" compares greater than
+// "10:00:00.5Z" — the separator is the shorter string's next character, and "."
+// orders before "Z". Every column holding one of these is compared as text, so
+// the width has to be constant for ORDER BY and range comparisons to mean what
+// they say. Reading is unaffected: RFC3339Nano parses a fixed fraction, so rows
+// written before this are still read correctly.
 func formatTime(t time.Time) string {
-	return t.UTC().Format(time.RFC3339Nano)
+	return t.UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
 }
 
 func marshalLabels(labels map[string]string) (string, error) {
