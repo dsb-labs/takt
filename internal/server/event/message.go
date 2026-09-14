@@ -102,7 +102,7 @@ func Message(reason Reason, data []byte) string {
 		return fmt.Sprintf("Replacing instance %d, which no longer publishes host %s %s",
 			fields.Instance, plural("port", len(fields.Ports)), ports(fields))
 	case HashMoved:
-		return fmt.Sprintf("Replacing instance %d, the specification hash moved to %s", fields.Instance, fields.Hash)
+		return fmt.Sprintf("Replacing instance %d, the specification hash moved to %s", fields.Instance, short(fields.Hash))
 	case SecretChanged:
 		return fmt.Sprintf("Secret %s changed", fields.Name)
 	case VariableChanged:
@@ -151,6 +151,20 @@ func Message(reason Reason, data []byte) string {
 	}
 
 	return string(reason)
+}
+
+// short renders a hash as the leading characters an operator reads it by, which is
+// how the rest of takt shows one.
+//
+// The stored event keeps the whole hash, so a caller matching on the data still has
+// it. Only the line written for a person is shortened, which is the point of
+// rendering at read time rather than at the call site.
+func short(hash string) string {
+	if len(hash) <= 12 {
+		return hash
+	}
+
+	return hash[:12]
 }
 
 // reference renders what an event names, describing it instead where the event knows
