@@ -50,6 +50,12 @@ func TestMessage(t *testing.T) {
 			Expected: "Replacing instance 2, the specification hash moved to abc123",
 		},
 		{
+			Name:     "shortens a hash to what an operator reads it by",
+			Reason:   event.HashMoved,
+			Fields:   event.Fields{Instance: 0, Hash: "96967d1ecfd32da63798ba8f85a4f7a0ef276e50336d91181aa0e223778fa23f"},
+			Expected: "Replacing instance 0, the specification hash moved to 96967d1ecfd3",
+		},
+		{
 			Name:     "counts consecutive health check failures",
 			Reason:   event.HealthCheckFailing,
 			Fields:   event.Fields{Count: 3, Error: "connection refused"},
