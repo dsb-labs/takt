@@ -30,6 +30,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/port"
 	"github.com/dsb-labs/takt/internal/server/resolve"
 	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/internal/server/spechash"
 	"github.com/dsb-labs/takt/internal/server/state"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
@@ -4048,6 +4049,64 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 		// event for each of those would bury the applies that explain something.
 		// The repository expects no call, so one would fail the test.
 		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
+		require.NoError(t, err)
+	})
+
+	t.Run("records the workloads a deletion leaves without an address", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events := NewMockWorkloadEventRepository(t)
+
+		// The hash the referencing workload holds is stale, so the rehash moves it.
+		api := storedWorkload("api")
+		api.SpecHash = "stale"
+
+		repo.EXPECT().ReferencedBy(mock.Anything, "postgres").Return([]string{"api"}, nil).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "postgres").Return(storedWorkload("postgres"), nil).Once()
+		repo.EXPECT().Get(mock.Anything, "api").Return(api, nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything).Return(api, false, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		// Recorded against the workload that reads the address rather than the one
+		// being deleted, since it is the one that will be replaced.
+		events.EXPECT().Record(mock.Anything, "api", event.AddressRemoved,
+			mock.MatchedBy(func(data []byte) bool {
+				return strings.Contains(string(data), `"name":"postgres"`)
+			})).Return(nil).Once()
+		events.EXPECT().Record(mock.Anything, "postgres", event.Deleted, mock.Anything).Return(nil).Once()
+
+		svc := newTestRecordingService(t, d, repo, ports, events)
+
+		_, err := svc.Delete(t.Context(), "postgres", true)
+		require.NoError(t, err)
+	})
+
+	t.Run("records nothing for a referencing workload whose hash did not move", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events := NewMockWorkloadEventRepository(t)
+
+		// The hash the referencing workload holds is the one the rehash computes,
+		// which is what every apply that leaves an address where it was looks like.
+		spec := containerSpec("api", "example/example:latest")
+		spec.Defaults()
+
+		_, hash, err := spechash.Compute(spec, spechash.Inputs{})
+		require.NoError(t, err)
+
+		api := storedWorkload("api")
+		api.SpecHash = hash
+
+		repo.EXPECT().ReferencedBy(mock.Anything, "postgres").Return([]string{"api"}, nil).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "postgres").Return(storedWorkload("postgres"), nil).Once()
+		repo.EXPECT().Get(mock.Anything, "api").Return(api, nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		// Nothing was replaced, so an event saying why would explain a replacement
+		// that did not happen. Only the deletion itself is recorded.
+		events.EXPECT().Record(mock.Anything, "postgres", event.Deleted, mock.Anything).Return(nil).Once()
+
+		svc := newTestRecordingService(t, d, repo, ports, events)
+
+		_, err = svc.Delete(t.Context(), "postgres", true)
 		require.NoError(t, err)
 	})
 

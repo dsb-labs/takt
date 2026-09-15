@@ -1192,7 +1192,7 @@ func (s *WorkloadService) Delete(ctx context.Context, name string, force bool) (
 	// Rehashed once the workload is on its way out, for the reason a deleted secret
 	// rehashes what read it: what those workloads were started against no longer
 	// describes what takt holds, and the hash is how that is reported.
-	s.rehashAll(ctx, name, referencing)
+	s.rehashAll(ctx, name, referencing, event.AddressRemoved)
 
 	s.logger.With("workload", name).Debug("workload marked for deletion")
 
@@ -1646,22 +1646,32 @@ func (s *WorkloadService) redeploy(ctx context.Context, name string) {
 		return
 	}
 
-	s.rehashAll(ctx, name, referencing)
+	s.rehashAll(ctx, name, referencing, event.AddressMoved)
 }
 
 // rehashAll rehashes each of the named workloads, which reference the workload whose
-// address may have moved.
+// address may have moved, recording the given reason against each one whose hash
+// did move.
 //
 // Separate from redeploy so that a caller which has already read the referencing
 // workloads — a deletion, which had to read them to refuse one — does not read them a
 // second time to act on them.
-func (s *WorkloadService) rehashAll(ctx context.Context, name string, referencing []string) {
+//
+// The event is recorded after the rehash rather than before it, because only the
+// rehash knows whether anything moved. Every apply of a workload rehashes what reads
+// it, and most of them leave the address where it was.
+func (s *WorkloadService) rehashAll(ctx context.Context, name string, referencing []string, reason event.Reason) {
 	for _, workload := range referencing {
-		s.record(ctx, workload, event.AddressMoved, event.Fields{Name: name})
-
-		if _, err := s.Rehash(ctx, workload); err != nil {
+		changed, err := s.Rehash(ctx, workload)
+		if err != nil {
 			s.logger.With("workload", workload, "references", name, "error", err).
 				Error("failed to rehash a workload referencing one whose address may have moved")
+
+			continue
+		}
+
+		if changed {
+			s.record(ctx, workload, reason, event.Fields{Name: name})
 		}
 	}
 }
