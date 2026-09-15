@@ -3188,9 +3188,11 @@ components:
         - secretChanged
         - variableChanged
         - addressMoved
+        - addressRemoved
         - healthCheckFailing
         - healthCheckRecovered
         - instanceExited
+        - instanceUnhealthy
         # The reasons naming something done to a workload.
         - applied
         - suspended
@@ -3234,6 +3236,9 @@ components:
         previous:
           type: string
           description: The specification hash the workload was at, where the event reports a move.
+        version:
+          type: integer
+          description: The version of the specification the event concerns.
         instance:
           type: integer
           description: The ordinal of the instance the event concerns, counting from zero.
