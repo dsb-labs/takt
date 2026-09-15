@@ -56,6 +56,30 @@ func TestMessage(t *testing.T) {
 			Expected: "Replacing instance 0, the specification hash moved to 96967d1ecfd3",
 		},
 		{
+			Name:     "names the version an apply created",
+			Reason:   event.Applied,
+			Fields:   event.Fields{Version: 1, Hash: "abc123"},
+			Expected: "Specification applied at version 1",
+		},
+		{
+			Name:     "names the version a change moved to",
+			Reason:   event.SpecificationModified,
+			Fields:   event.Fields{Version: 7, Hash: "abc123", Previous: "def456"},
+			Expected: "Specification changed to version 7",
+		},
+		{
+			Name:     "tells a failed check apart from an exit",
+			Reason:   event.InstanceUnhealthy,
+			Fields:   event.Fields{Instance: 1, Count: 3, Error: "connection refused"},
+			Expected: "Replacing instance 1, which failed its health check 3 times in a row: connection refused",
+		},
+		{
+			Name:     "names the workload a deletion took away",
+			Reason:   event.AddressRemoved,
+			Fields:   event.Fields{Name: "postgres"},
+			Expected: "Workload postgres was deleted and can no longer be addressed",
+		},
+		{
 			Name:     "counts consecutive health check failures",
 			Reason:   event.HealthCheckFailing,
 			Fields:   event.Fields{Count: 3, Error: "connection refused"},
@@ -118,7 +142,7 @@ func TestMessage(t *testing.T) {
 	t.Run("renders a reason carrying no data", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Equal(t, "Specification applied", event.Message(event.Applied, nil))
+		assert.Equal(t, "Workload suspended", event.Message(event.Suspended, nil))
 	})
 }
 

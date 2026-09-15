@@ -60,6 +60,9 @@ const (
 	// AddressMoved is recorded when a workload is rehashed because another workload
 	// it addresses moved.
 	AddressMoved Reason = "addressMoved"
+	// AddressRemoved is recorded when a workload is rehashed because another
+	// workload it addresses was deleted.
+	AddressRemoved Reason = "addressRemoved"
 	// HealthCheckFailing is recorded when a workload's health check fails, which is
 	// what tells a failed check apart from a crash.
 	HealthCheckFailing Reason = "healthCheckFailing"
@@ -67,6 +70,11 @@ const (
 	HealthCheckRecovered Reason = "healthCheckRecovered"
 	// InstanceExited is recorded when an instance ends on its own and is restarted.
 	InstanceExited Reason = "instanceExited"
+	// InstanceUnhealthy is recorded when an instance is replaced because it failed
+	// its health check while its runtime still reported it running. It is the
+	// ending a failed check causes, where InstanceExited is the ending a process
+	// causes.
+	InstanceUnhealthy Reason = "instanceUnhealthy"
 )
 
 // The reasons naming something done to a workload.
