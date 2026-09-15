@@ -20,11 +20,16 @@ type Reason string
 // operator has not chosen. Older events are removed as new ones arrive, which
 // bounds the storage by construction and needs no sweeper.
 //
-// It is small because the events worth reading are the recent ones: an operator
-// opens the card to learn why a workload looks the way it does now. A busy
-// workload loses its history sooner than a quiet one, which is the right way
-// round, because the quiet workload's last event is the one still worth reading.
-const DefaultMaxEvents = 10
+// The events worth reading are the recent ones: an operator opens the card to
+// learn why a workload looks the way it does now. A busy workload loses its
+// history sooner than a quiet one, which is the right way round, because the
+// quiet workload's last event is the one still worth reading.
+//
+// It is large enough to hold a restart loop beside the apply that started it.
+// Each paced restart is its own event, since the wait grows with each attempt,
+// and a workload deep in backoff writes ten of them before the wait stops
+// growing. A cap of ten lost the apply at exactly the point an operator looks.
+const DefaultMaxEvents = 50
 
 // The reasons a workload has not started yet.
 const (
