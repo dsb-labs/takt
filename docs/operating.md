@@ -587,7 +587,7 @@ different at a glance. A cause that recurs after a long enough gap starts its co
 again, which keeps the pair of times describing one episode rather than spanning two.
 
 The events kept per workload are capped, and the oldest go as new ones arrive. The cap
-defaults to ten and is set with `max-events` under `[workload]`. Raise it on a host
+defaults to fifty and is set with `max-events` under `[workload]`. Raise it on a host
 where a workload's history is worth more than the rows it costs.
 
 At `info` the server reports what changed — a workload started or deleted, an
