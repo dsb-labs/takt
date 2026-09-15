@@ -27,6 +27,8 @@ type Fields struct {
 	Hash string `json:"hash,omitempty"`
 	// The specification hash the workload was at, where the event reports a move.
 	Previous string `json:"previous,omitempty"`
+	// The version of the specification the event concerns.
+	Version int `json:"version,omitempty"`
 	// The ordinal of the instance the event concerns, counting from zero.
 	Instance int `json:"instance,omitempty"`
 	// The status an instance ended with. A pointer because zero is the code a
@@ -97,7 +99,7 @@ func Message(reason Reason, data []byte) string {
 		return fmt.Sprintf("Waiting for %s to resolve: %s", reference(fields), fields.Error)
 
 	case SpecificationModified:
-		return "Specification changed"
+		return fmt.Sprintf("Specification changed to version %d", fields.Version)
 	case PortsDrifted:
 		return fmt.Sprintf("Replacing instance %d, which no longer publishes host %s %s",
 			fields.Instance, plural("port", len(fields.Ports)), ports(fields))
@@ -109,15 +111,20 @@ func Message(reason Reason, data []byte) string {
 		return fmt.Sprintf("Variable %s changed", fields.Name)
 	case AddressMoved:
 		return fmt.Sprintf("Workload %s moved to a new address", fields.Name)
+	case AddressRemoved:
+		return fmt.Sprintf("Workload %s was deleted and can no longer be addressed", fields.Name)
 	case HealthCheckFailing:
 		return fmt.Sprintf("Health check failed %d times in a row: %s", fields.Count, fields.Error)
 	case HealthCheckRecovered:
 		return "Health check is passing again"
 	case InstanceExited:
 		return fmt.Sprintf("Instance %d exited with status %s", fields.Instance, exitCode(fields))
+	case InstanceUnhealthy:
+		return fmt.Sprintf("Replacing instance %d, which failed its health check %d times in a row: %s",
+			fields.Instance, fields.Count, fields.Error)
 
 	case Applied:
-		return "Specification applied"
+		return fmt.Sprintf("Specification applied at version %d", fields.Version)
 	case Suspended:
 		return "Workload suspended"
 	case Resumed:
