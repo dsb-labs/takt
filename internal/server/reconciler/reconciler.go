@@ -2516,8 +2516,16 @@ func (r *Reconciler) discardInstance(ctx context.Context, row database.Workload,
 		}
 	}
 
+	// Everything the pass remembered about the slot goes with it. A verdict left
+	// behind would have a later instance in the slot read as recovering from a
+	// failure it never had, and an ending left behind would go unrecorded if the
+	// runtime handed the identifier out again.
 	r.mux.Lock()
-	delete(r.backoff, slot{workload: row.Name, instance: index})
+	key := slot{workload: row.Name, instance: index}
+	delete(r.backoff, key)
+	delete(r.exits, key)
+	delete(r.verdicts, key)
+	delete(r.unhealthy, key)
 	r.mux.Unlock()
 
 	if r.checker != nil {
