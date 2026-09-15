@@ -26,6 +26,7 @@ import {
 } from "@/lib/format";
 import type { Instance } from "@/api/types";
 import { hostPaths, references } from "@/lib/references";
+import { useUsageSeries } from "@/composables/series";
 import { useSort } from "@/composables/sort";
 import { operator } from "@/composables/auth";
 
@@ -38,6 +39,15 @@ const name = route.params.name as string;
 
 const workload = useWorkload(() => name);
 const events = useWorkloadEvents(() => name);
+
+// The charts live on the instance page, and the history they draw is kept
+// outside any view. Feeding it from here as well means the readings this
+// page polls for are already on the chart when a reader clicks through,
+// rather than the chart starting empty at the moment they look at it.
+useUsageSeries(
+  () => name,
+  () => workload.data.value?.instances,
+);
 
 const router = useRouter();
 const stop = useWorkloadAction("stop", () => name);
