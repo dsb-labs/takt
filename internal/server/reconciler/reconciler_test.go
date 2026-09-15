@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -3593,9 +3594,16 @@ func specWithEnv(name string, env map[string]string) []byte {
 }
 
 func storedWorkload(name, hash string) database.Workload {
+	return storedWorkloadWithCount(name, hash, 1)
+}
+
+// storedWorkloadWithCount returns a stored workload asking for the given number of
+// instances.
+func storedWorkloadWithCount(name, hash string, count int) database.Workload {
 	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      name,
+		Count:     count,
 		Container: &manifest.Container{Image: "example/example:latest"},
 	})
 	if err != nil {
@@ -3772,6 +3780,96 @@ func TestReconciler_Run_RecordsWhatItObserved(t *testing.T) {
 		// instances ended.
 		assert.Equal(t, 1, recorder.count(event.InstanceExited))
 	})
+}
+
+func TestReconciler_Run_ForgetsADiscardedSlot(t *testing.T) {
+	t.Parallel()
+
+	d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
+	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+
+	// The count moves from two to one and back, so the second slot is discarded
+	// while its check is failing and later filled by an instance that passes.
+	passes := newCounter()
+	repo.EXPECT().List(mock.Anything).RunAndReturn(func(context.Context, ...database.Query) ([]database.Workload, error) {
+		passes.inc()
+
+		count := 2
+		if passes.get() == 2 {
+			count = 1
+		}
+
+		return []database.Workload{storedWorkloadWithCount("example", "hash-one", count)}, nil
+	})
+
+	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil)
+
+	d.EXPECT().Observe(mock.Anything).RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+		instances := []driver.Instance{
+			{ID: "container-zero", Workload: "example", Index: 0, SpecHash: "hash-one", State: driver.StateRunning},
+		}
+
+		// The third pass starts a fresh instance into the second slot, which the
+		// fourth is the first to observe.
+		if passes.get() != 3 {
+			instances = append(instances, driver.Instance{
+				ID: "container-one-" + strconv.Itoa(passes.get()), Workload: "example", Index: 1, SpecHash: "hash-one", State: driver.StateRunning,
+			})
+		}
+
+		return instances, nil
+	})
+
+	checker.EXPECT().Set(mock.Anything, mock.Anything, mock.Anything).Maybe()
+	checker.EXPECT().Forget("example").Maybe()
+	checker.EXPECT().ForgetInstance("example", mock.Anything).Return().Maybe()
+	checker.EXPECT().Result("example", 0).Return(health.Result{Status: health.StatusHealthy}, true)
+	checker.EXPECT().Result("example", 1).RunAndReturn(func(string, int) (health.Result, bool) {
+		if passes.get() <= 2 {
+			return health.Result{Status: health.StatusUnhealthy, Failures: 3}, true
+		}
+
+		return health.Result{Status: health.StatusHealthy}, true
+	})
+
+	d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 1).Return(nil).Maybe()
+	d.EXPECT().DiscardInstance(mock.Anything, mock.Anything, "example", 1).Return(nil).Once()
+	d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-one-started", nil).Maybe()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Checker:   checker,
+		Events:    recorder,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	for i := 1; i <= 4; i++ {
+		passes.wait(t, i)
+		awaitPasses(t, r, uint64(i))
+
+		r.Notify()
+	}
+
+	cancel()
+	require.NoError(t, <-done)
+
+	assert.Equal(t, 1, recorder.count(event.InstanceRemoved))
+
+	// The instance that filled the slot again passed its first check. It has not
+	// recovered from anything, so a verdict left behind by the discarded one must
+	// not have it read as though it had.
+	assert.Equal(t, 0, recorder.count(event.HealthCheckRecovered))
 }
 
 // The testRecorder type collects what a pass recorded, so a test can count the
