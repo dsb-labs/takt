@@ -92,7 +92,7 @@ func Message(reason Reason, data []byte) string {
 	case ImagePulling:
 		return fmt.Sprintf("Pulling image %s", fields.Reference)
 	case RestartPaced:
-		return fmt.Sprintf("Waiting %s before restart %d", fields.Delay, fields.Count)
+		return fmt.Sprintf("Waiting %s before restart %d%s", fields.Delay, fields.Count, because(fields))
 	case RestartGaveUp:
 		return fmt.Sprintf("Gave up restarting after %d attempts", fields.Count)
 	case ReferenceUnresolved:
@@ -182,6 +182,16 @@ func reference(fields Fields) string {
 	}
 
 	return fields.Reference
+}
+
+// because renders the failure an event reports as a clause on the end of its
+// message, and nothing where the event recorded none.
+func because(fields Fields) string {
+	if fields.Error == "" {
+		return ""
+	}
+
+	return ": " + fields.Error
 }
 
 // exitCode renders an instance's exit status, naming it as unknown when the event

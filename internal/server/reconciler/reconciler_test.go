@@ -1959,7 +1959,7 @@ func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
 func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 	t.Parallel()
 
-	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+	d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
 
 	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
 		storedWorkload("example", "hash-one"),
@@ -1985,6 +1985,7 @@ func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 		Logger:    newTestLogger(t),
 		Drivers:   map[string]reconciler.Driver{docker.Name: d},
 		Workloads: repo,
+		Events:    recorder,
 		Interval:  time.Hour,
 	})
 
@@ -2008,6 +2009,12 @@ func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 	require.NoError(t, <-done)
 
 	assert.Equal(t, 1, starts.get(), "a failing workload was retried inside its backoff window")
+
+	// The pacing names the failure it paces, so the pass that returns the same
+	// failure must not record it a second time under a vaguer reason.
+	require.Equal(t, 1, recorder.count(event.RestartPaced))
+	assert.Contains(t, string(recorder.data(event.RestartPaced)), `"error":"failed to start workload: no such image"`)
+	assert.Equal(t, 0, recorder.count(event.ConvergeFailed))
 }
 
 func TestReconciler_Run_SurvivesAHangingDriver(t *testing.T) {

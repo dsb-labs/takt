@@ -44,6 +44,12 @@ func TestMessage(t *testing.T) {
 			Expected: "Waiting 1m30s before restart 4",
 		},
 		{
+			Name:     "names the failure a backoff paces",
+			Reason:   event.RestartPaced,
+			Fields:   event.Fields{Delay: 10 * time.Second, Count: 1, Error: "failed to start workload: no such image"},
+			Expected: "Waiting 10s before restart 1: failed to start workload: no such image",
+		},
+		{
 			Name:     "says which hash a replacement is moving to",
 			Reason:   event.HashMoved,
 			Fields:   event.Fields{Instance: 2, Hash: "abc123"},

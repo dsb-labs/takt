@@ -368,6 +368,12 @@ type (
 	}
 )
 
+var (
+	// errPaced marks a start that failed and was paced, so the pass that reports
+	// the failure knows the pacing already recorded it.
+	errPaced = errors.New("start paced")
+)
+
 const (
 	// How long a pass will wait on the driver before giving up on it.
 	//
@@ -846,7 +852,13 @@ func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, 
 				// every converge failure passes through so no path has to remember
 				// to report its own. A failure that persists repeats every pass,
 				// which coalescing folds into one row with a climbing count.
-				r.record(ctx, row.Name, event.ConvergeFailed, event.Fields{Error: err.Error()})
+				//
+				// A start that was paced is the one failure already recorded, by
+				// the pacing that named the wait, so recording it here again would
+				// say the same thing twice.
+				if !errors.Is(err, errPaced) {
+					r.record(ctx, row.Name, event.ConvergeFailed, event.Fields{Error: err.Error()})
+				}
 			}
 		})
 	}
@@ -1833,9 +1845,9 @@ func (r *Reconciler) attempt(ctx context.Context, row database.Workload, index i
 
 	if err := r.start(ctx, row, index, event.InstanceStarted); err != nil {
 		state := r.hold(ctx, row.Name, index, restartPolicy(row))
-		r.paced(ctx, row.Name, state)
+		r.paced(ctx, row.Name, state, err)
 
-		return err
+		return fmt.Errorf("%w: %w", errPaced, err)
 	}
 
 	r.settle(row.Name, index)
@@ -1883,9 +1895,9 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, index i
 
 	if err := r.start(ctx, row, index, event.InstanceStarted); err != nil {
 		state := r.hold(ctx, row.Name, index, policy)
-		r.paced(ctx, row.Name, state)
+		r.paced(ctx, row.Name, state, err)
 
-		return err
+		return fmt.Errorf("%w: %w", errPaced, err)
 	}
 
 	state := r.hold(ctx, row.Name, index, policy)
@@ -2077,14 +2089,15 @@ func lastEnded(instances []driver.Instance) (driver.Instance, bool) {
 }
 
 // paced records that an instance's next attempt is being held off, naming the
-// wait and which attempt it paces.
+// wait, which attempt it paces, and the failure that earned it.
 //
 // Separate from hold, which does the pacing, because hold runs under r.mux and no
 // event may be recorded while that is held.
-func (r *Reconciler) paced(ctx context.Context, workload string, state backoff) {
+func (r *Reconciler) paced(ctx context.Context, workload string, state backoff, err error) {
 	r.record(ctx, workload, event.RestartPaced, event.Fields{
 		Count: state.attempts,
 		Delay: state.wait,
+		Error: err.Error(),
 	})
 }
 
