@@ -239,6 +239,14 @@ type (
 		// The health verdict already recorded against each slot, so that a check
 		// holding steady is not recorded on every pass that reads it.
 		verdicts map[slot]health.Status
+		// The instance the checker most recently failed in each slot, keyed by the
+		// instance's own identifier.
+		//
+		// A failed check rewrites a running instance to a failed one, and from then
+		// on the pass cannot tell it from a process that stopped. This is what lets
+		// the ending be recorded as the check's doing rather than as an exit the
+		// process never made.
+		unhealthy map[slot]string
 		// The workloads whose instances an operator asked to have replaced,
 		// consumed by the next pass over each. In memory rather than stored,
 		// because a request the server loses can simply be made again.
@@ -434,6 +442,7 @@ func New(config Config) *Reconciler {
 		backoff:      make(map[slot]backoff),
 		exits:        make(map[slot]string),
 		verdicts:     make(map[slot]health.Status),
+		unhealthy:    make(map[slot]string),
 		restarts:     make(map[string]struct{}),
 		observations: observations,
 		tracer:       telemetry.Tracer(config.TracerProvider, scope),
@@ -1562,6 +1571,8 @@ func (r *Reconciler) checked(ctx context.Context, instance driver.Instance) driv
 
 	switch result.Status {
 	case health.StatusUnhealthy:
+		r.failCheck(instance)
+
 		instance.State = driver.StateFailed
 	case health.StatusStarting:
 		instance.State = driver.StatePending
@@ -1986,7 +1997,9 @@ func (r *Reconciler) verdict(workload string, index int, status health.Status) (
 //
 // The reason is the caller's because the two answer different questions: a
 // scheduled workload ending is a run that finished, and a long-running one ending
-// is an instance that exited when it was meant to stay up.
+// is an instance that exited when it was meant to stay up. An instance the checker
+// failed is neither: its process is still running, so it is recorded as unhealthy
+// with what the check reported rather than with an exit status it does not have.
 //
 // Nothing is recorded for a slot with nothing ended, which is the ordinary case and
 // so is the first thing checked.
@@ -1996,9 +2009,39 @@ func (r *Reconciler) ended(ctx context.Context, row database.Workload, index int
 		return
 	}
 
+	if r.checkFailed(row.Name, index, last.ID) {
+		result, _ := r.checker.Result(row.Name, index)
+
+		r.record(ctx, row.Name, event.InstanceUnhealthy, event.Fields{
+			Instance: index,
+			Count:    result.Failures,
+			Error:    result.Error,
+		})
+
+		return
+	}
+
 	code := last.ExitCode
 
 	r.record(ctx, row.Name, reason, event.Fields{Instance: index, ExitCode: &code})
+}
+
+// failCheck remembers that the checker failed an instance, so the ending the pass
+// goes on to see is attributed to the check rather than to the process.
+func (r *Reconciler) failCheck(instance driver.Instance) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	r.unhealthy[slot{workload: instance.Workload, instance: instance.Index}] = instance.ID
+}
+
+// checkFailed reports whether an ended instance is one the checker failed rather
+// than one whose process stopped.
+func (r *Reconciler) checkFailed(workload string, index int, id string) bool {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	return r.unhealthy[slot{workload: workload, instance: index}] == id
 }
 
 // firstSighting reports whether an ended instance is one whose ending has not been
@@ -2104,6 +2147,12 @@ func (r *Reconciler) settleAll(workload string) {
 	for key := range r.verdicts {
 		if key.workload == workload {
 			delete(r.verdicts, key)
+		}
+	}
+
+	for key := range r.unhealthy {
+		if key.workload == workload {
+			delete(r.unhealthy, key)
 		}
 	}
 
