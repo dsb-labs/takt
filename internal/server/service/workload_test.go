@@ -3994,7 +3994,10 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 			}).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
-		events.EXPECT().Record(mock.Anything, "example", event.Applied, mock.Anything).Return(nil).Once()
+		events.EXPECT().Record(mock.Anything, "example", event.Applied,
+			mock.MatchedBy(func(data []byte) bool {
+				return strings.Contains(string(data), `"version":1`)
+			})).Return(nil).Once()
 
 		svc := newTestRecordingService(t, d, repo, ports, events)
 
@@ -4015,11 +4018,12 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 			}).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
-		// The hash the workload is moving to and the one it moved from, so an
-		// operator reading a replacement can tell which apply caused it.
+		// The version and hash the workload is moving to and the hash it moved from,
+		// so an operator reading a replacement can tell which apply caused it.
 		events.EXPECT().Record(mock.Anything, "example", event.SpecificationModified,
 			mock.MatchedBy(func(data []byte) bool {
-				return strings.Contains(string(data), `"previous":"hash-one"`)
+				return strings.Contains(string(data), `"previous":"hash-one"`) &&
+					strings.Contains(string(data), `"version":2`)
 			})).Return(nil).Once()
 
 		svc := newTestRecordingService(t, d, repo, ports, events)

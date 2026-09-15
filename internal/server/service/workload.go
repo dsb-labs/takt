@@ -644,9 +644,13 @@ func (s *WorkloadService) Apply(ctx context.Context, spec manifest.Spec) (Worklo
 	// first of those explains anything the reconciler goes on to do.
 	switch {
 	case created:
-		s.record(ctx, stored.Name, event.Applied, event.Fields{Hash: stored.SpecHash})
+		s.record(ctx, stored.Name, event.Applied, event.Fields{
+			Version: stored.Version,
+			Hash:    stored.SpecHash,
+		})
 	case stored.Version != resolved.existing.Version:
 		s.record(ctx, stored.Name, event.SpecificationModified, event.Fields{
+			Version:  stored.Version,
 			Hash:     stored.SpecHash,
 			Previous: resolved.existing.SpecHash,
 		})
