@@ -287,7 +287,7 @@ reads as one event counted forty times, rather than forty events. The `data` fie
 carries the values the message was rendered from, such as the image reference a pull
 is fetching, for a caller doing something with the event beyond showing it.
 
-The server keeps a bounded number of events per workload, ten by default. See
+The server keeps a bounded number of events per workload, fifty by default. See
 [operating](operating.md) for the cap and how to raise it.
 
 ## workload logs

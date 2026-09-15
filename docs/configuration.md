@@ -26,7 +26,7 @@ interval = "10s"
 bind = "0.0.0.0"
 min-port = 20000
 max-port = 32000
-max-events = 10
+max-events = 50
 allow-host-paths = []
 
 [exec]
@@ -151,7 +151,7 @@ how quickly takt notices something it was never told about.
 | `bind` | `0.0.0.0` | The address a workload's host ports are published on. |
 | `min-port` | `20000` | The lowest host port takt will allocate. |
 | `max-port` | `32000` | The highest host port takt will allocate. |
-| `max-events` | `10` | The most events kept for one workload. |
+| `max-events` | `50` | The most events kept for one workload. |
 | `allow-host-paths` | empty | The prefixes a path mount may sit beneath. |
 
 `min-port` and `max-port` are the range takt allocates from for a container port that
