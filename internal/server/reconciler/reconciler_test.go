@@ -542,6 +542,7 @@ func TestReconciler_Run_Health(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 			ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+			recorder := newTestRecorder(t)
 
 			row := storedWorkload("example", "hash-one")
 			row.ID = "workload-one"
@@ -587,6 +588,7 @@ func TestReconciler_Run_Health(t *testing.T) {
 				Workloads: repo,
 				Ports:     ports,
 				Checker:   checker,
+				Events:    recorder,
 				Interval:  time.Hour,
 			})
 
@@ -600,6 +602,17 @@ func TestReconciler_Run_Health(t *testing.T) {
 
 			cancel()
 			require.NoError(t, <-done)
+
+			// The process never stopped, so a replacement the check caused must not
+			// read as an exit. What it reads as instead is the check's own verdict.
+			assert.Equal(t, 0, recorder.count(event.InstanceExited))
+
+			if tc.ExpectRestart {
+				assert.Equal(t, 1, recorder.count(event.InstanceUnhealthy))
+				assert.JSONEq(t, `{"count":3}`, string(recorder.data(event.InstanceUnhealthy)))
+			} else {
+				assert.Equal(t, 0, recorder.count(event.InstanceUnhealthy))
+			}
 		})
 	}
 }
