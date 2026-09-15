@@ -1025,7 +1025,7 @@ func (r *Reconciler) convergeSlot(ctx context.Context, row database.Workload, in
 			return false, fmt.Errorf("failed to stop stale instance: %w", err)
 		}
 
-		return false, r.start(ctx, row, index)
+		return false, r.start(ctx, row, index, event.InstanceStarted)
 	}
 
 	if slices.ContainsFunc(instances, running) {
@@ -1074,7 +1074,7 @@ func countOf(row database.Workload) int {
 // startAll starts every slot of a workload, reporting the first failure.
 func (r *Reconciler) startAll(ctx context.Context, row database.Workload, count int) error {
 	for index := range count {
-		if err := r.start(ctx, row, index); err != nil {
+		if err := r.start(ctx, row, index, event.InstanceStarted); err != nil {
 			return err
 		}
 	}
@@ -1628,13 +1628,7 @@ func (r *Reconciler) occurrence(ctx context.Context, row database.Workload, inst
 
 	r.settleAll(row.Name)
 
-	if err := r.start(ctx, row, 0); err != nil {
-		return err
-	}
-
-	r.record(ctx, row.Name, event.RunStarted, event.Fields{})
-
-	return nil
+	return r.start(ctx, row, 0, event.RunStarted)
 }
 
 // between decides what to do with a scheduled workload when no occurrence is due.
@@ -1837,7 +1831,7 @@ func (r *Reconciler) attempt(ctx context.Context, row database.Workload, index i
 		return nil
 	}
 
-	if err := r.start(ctx, row, index); err != nil {
+	if err := r.start(ctx, row, index, event.InstanceStarted); err != nil {
 		state := r.hold(ctx, row.Name, index, restartPolicy(row))
 		r.paced(ctx, row.Name, state)
 
@@ -1887,7 +1881,7 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, index i
 		return fmt.Errorf("failed to clear stopped instance: %w", err)
 	}
 
-	if err := r.start(ctx, row, index); err != nil {
+	if err := r.start(ctx, row, index, event.InstanceStarted); err != nil {
 		state := r.hold(ctx, row.Name, index, policy)
 		r.paced(ctx, row.Name, state)
 
@@ -2163,7 +2157,10 @@ func (r *Reconciler) settleAll(workload string) {
 	}
 }
 
-func (r *Reconciler) start(ctx context.Context, row database.Workload, index int) error {
+// start runs one instance of a workload, recording it under the given reason: an
+// instance started for a long-running workload, or a run started for a scheduled
+// one. The caller names it because the same start answers both questions.
+func (r *Reconciler) start(ctx context.Context, row database.Workload, index int, reason event.Reason) error {
 	w, err := driver.NewWorkload(row)
 	if err != nil {
 		return err
@@ -2256,7 +2253,7 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 	}
 
 	r.logger.With("workload", row.Name, "id", id, "instance", index, "version", row.Version).Info("workload started")
-	r.record(ctx, row.Name, event.InstanceStarted, event.Fields{Instance: index})
+	r.record(ctx, row.Name, reason, event.Fields{Instance: index})
 
 	// After the start rather than before it. A replacement's files are written
 	// alongside those the instance being replaced is still reading, and sweeping them
