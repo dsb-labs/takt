@@ -109,6 +109,8 @@ type (
 		Hash string
 		// The specification hash the workload was at, where the event reports a move.
 		Previous string
+		// The version of the specification the event concerns.
+		Version int
 		// The ordinal of the instance the event concerns, counting from zero.
 		Instance int
 		// The status an instance ended with. Nil where the event did not record one,
@@ -325,6 +327,8 @@ const (
 	EventVariableChanged EventReason = "variableChanged"
 	// EventAddressMoved indicates another workload this one refers to moved.
 	EventAddressMoved EventReason = "addressMoved"
+	// EventAddressRemoved indicates another workload this one refers to was deleted.
+	EventAddressRemoved EventReason = "addressRemoved"
 	// EventHealthCheckFailing indicates the workload's health check has failed enough
 	// consecutive times to count against it.
 	EventHealthCheckFailing EventReason = "healthCheckFailing"
@@ -332,6 +336,9 @@ const (
 	EventHealthCheckRecovered EventReason = "healthCheckRecovered"
 	// EventInstanceExited indicates an instance ended on its own.
 	EventInstanceExited EventReason = "instanceExited"
+	// EventInstanceUnhealthy indicates an instance was replaced because it failed its
+	// health check while its runtime still reported it running.
+	EventInstanceUnhealthy EventReason = "instanceUnhealthy"
 )
 
 // The reasons naming something done to a workload.
@@ -1099,6 +1106,7 @@ func newEvent(e api.WorkloadEvent) Event {
 		Name:      value(e.Data.Name),
 		Hash:      value(e.Data.Hash),
 		Previous:  value(e.Data.Previous),
+		Version:   value(e.Data.Version),
 		Instance:  value(e.Data.Instance),
 		ExitCode:  e.Data.ExitCode,
 		Count:     value(e.Data.Count),

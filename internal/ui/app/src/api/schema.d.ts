@@ -2037,9 +2037,11 @@ export interface components {
       | "secretChanged"
       | "variableChanged"
       | "addressMoved"
+      | "addressRemoved"
       | "healthCheckFailing"
       | "healthCheckRecovered"
       | "instanceExited"
+      | "instanceUnhealthy"
       | "applied"
       | "suspended"
       | "resumed"
@@ -2075,6 +2077,8 @@ export interface components {
       hash?: string;
       /** @description The specification hash the workload was at, where the event reports a move. */
       previous?: string;
+      /** @description The version of the specification the event concerns. */
+      version?: number;
       /** @description The ordinal of the instance the event concerns, counting from zero. */
       instance?: number;
       /**

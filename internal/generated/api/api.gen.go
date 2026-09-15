@@ -343,6 +343,7 @@ func (e VolumeMountPropagation) Valid() bool {
 // Defines values for WorkloadEventReason.
 const (
 	WorkloadEventReasonAddressMoved          WorkloadEventReason = "addressMoved"
+	WorkloadEventReasonAddressRemoved        WorkloadEventReason = "addressRemoved"
 	WorkloadEventReasonApplied               WorkloadEventReason = "applied"
 	WorkloadEventReasonConvergeFailed        WorkloadEventReason = "convergeFailed"
 	WorkloadEventReasonDeleted               WorkloadEventReason = "deleted"
@@ -353,6 +354,7 @@ const (
 	WorkloadEventReasonInstanceExited        WorkloadEventReason = "instanceExited"
 	WorkloadEventReasonInstanceRemoved       WorkloadEventReason = "instanceRemoved"
 	WorkloadEventReasonInstanceStarted       WorkloadEventReason = "instanceStarted"
+	WorkloadEventReasonInstanceUnhealthy     WorkloadEventReason = "instanceUnhealthy"
 	WorkloadEventReasonMountsRefreshed       WorkloadEventReason = "mountsRefreshed"
 	WorkloadEventReasonOccurrenceReplaced    WorkloadEventReason = "occurrenceReplaced"
 	WorkloadEventReasonOccurrenceSkipped     WorkloadEventReason = "occurrenceSkipped"
@@ -377,6 +379,8 @@ func (e WorkloadEventReason) Valid() bool {
 	switch e {
 	case WorkloadEventReasonAddressMoved:
 		return true
+	case WorkloadEventReasonAddressRemoved:
+		return true
 	case WorkloadEventReasonApplied:
 		return true
 	case WorkloadEventReasonConvergeFailed:
@@ -396,6 +400,8 @@ func (e WorkloadEventReason) Valid() bool {
 	case WorkloadEventReasonInstanceRemoved:
 		return true
 	case WorkloadEventReasonInstanceStarted:
+		return true
+	case WorkloadEventReasonInstanceUnhealthy:
 		return true
 	case WorkloadEventReasonMountsRefreshed:
 		return true
@@ -2282,6 +2288,9 @@ type WorkloadEventData struct {
 
 	// Signal The signal sent to the workload, where the event reports one.
 	Signal *string `json:"signal,omitempty"`
+
+	// Version The version of the specification the event concerns.
+	Version *int `json:"version,omitempty"`
 }
 
 // WorkloadEventReason Why an event was recorded, as a stable code rather than a sentence.
