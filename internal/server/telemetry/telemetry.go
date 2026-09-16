@@ -74,7 +74,7 @@ func New(ctx context.Context, config Config) (*Telemetry, error) {
 		resource.WithHost(),
 		resource.WithAttributes(
 			semconv.ServiceName("takt"),
-			semconv.ServiceVersion(version()),
+			semconv.ServiceVersion(Version()),
 		),
 		// Last, so OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES override the
 		// values above.
@@ -229,9 +229,9 @@ func exporters(ctx context.Context, config Config) (sdktrace.SpanExporter, sdklo
 	return spans, logs, nil
 }
 
-// version reports the version of the running binary, matching what the CLI
-// reports as its own.
-func version() string {
+// Version reports the version of the running binary, which is what the CLI
+// prints as its own and what the traces and the node carry.
+func Version() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
 		return ""

@@ -8,7 +8,6 @@ import (
 	"context"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -25,6 +24,7 @@ import (
 	"github.com/dsb-labs/takt/cmd/volume"
 	"github.com/dsb-labs/takt/cmd/workload"
 	"github.com/dsb-labs/takt/internal/server/driver/exec"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
 	"github.com/dsb-labs/takt/pkg/cli"
 	"github.com/dsb-labs/takt/pkg/client"
 )
@@ -45,6 +45,7 @@ func main() {
 	cmd := &cobra.Command{
 		Use:          "takt",
 		Short:        "A single-node workload orchestrator",
+		Version:      telemetry.Version(),
 		SilenceUsage: true,
 		CompletionOptions: cobra.CompletionOptions{
 			DisableDefaultCmd: true,
@@ -91,10 +92,6 @@ func main() {
 	flags.StringVarP(&address, "address", "a", "", "URL of the takt server (env TAKT_ADDRESS, default "+cli.DefaultAddress+")")
 	flags.StringVar(&caCert, "ca-cert", "", "path to a PEM file holding the certificate authority to check the server against (env TAKT_CA_CERT)")
 	flags.StringVar(&configPath, "config", defaultConfigPath, "path of the client config file (env TAKT_CONFIG)")
-
-	if info, ok := debug.ReadBuildInfo(); ok {
-		cmd.Version = info.Main.Version
-	}
 
 	cmd.AddCommand(
 		serve.Command(),
