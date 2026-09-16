@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/server/driver"
@@ -521,72 +520,24 @@ type logsResponse struct {
 
 // VisitGetWorkloadLogsResponse writes the logs to w as plain text.
 //
-// A followed read is exempt from the server's write timeout and is flushed as it goes.
-// Both are needed for the same reason: the response is open for as long as the workload
-// runs, which is longer than any deadline a request should have and longer than a
-// caller can wait for a buffer to fill.
+// A followed read is kept open: exempt from the server's write timeout and
+// flushed as it goes, because the response lives for as long as the workload
+// does.
 func (r logsResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "text/plain")
 
 	out := io.Writer(w)
 
 	if r.follow {
-		// The deadline is set on the connection's own writer and the flushing is done
-		// through the handler's. Only the first can carry a deadline, and only the
-		// second counts what was written for the telemetry wrapped around it.
-		deadline := r.conn
-		if deadline == nil {
-			deadline = w
+		var err error
+		if out, err = keepOpen(w, r.conn); err != nil {
+			return err
 		}
-
-		// The zero time removes the deadline rather than extending it. A follow that
-		// hit one would end as a truncated stream at exactly the timeout, which reads
-		// as a workload that stopped talking rather than as a server that hung up.
-		//
-		// Nothing is left unbounded by this. The request's context ends the read when
-		// the caller disconnects, which is what actually limits how long a stream
-		// occupies the server.
-		//
-		// A writer with no deadline to clear says so, and there is nothing to do about
-		// that but carry on. The stream then lives as long as that writer allows, which
-		// is more than refusing to serve the request at all would give anybody.
-		err := http.NewResponseController(deadline).SetWriteDeadline(time.Time{})
-		if err != nil && !errors.Is(err, http.ErrNotSupported) {
-			return fmt.Errorf("failed to clear the write deadline: %w", err)
-		}
-
-		out = &flushWriter{inner: w, control: http.NewResponseController(w)}
 	}
 
 	w.WriteHeader(http.StatusOK)
 
 	return r.write(out)
-}
-
-// The flushWriter type pushes each write out to the client rather than letting it sit
-// in a buffer.
-//
-// Without this a followed read arrives in chunks whenever the buffer happens to fill,
-// which for a quiet workload may be a long time after the line was written. Watching a
-// workload start is the whole point of following it, so a line held back is a line that
-// did not arrive.
-type flushWriter struct {
-	inner   io.Writer
-	control *http.ResponseController
-}
-
-func (w *flushWriter) Write(p []byte) (int, error) {
-	n, err := w.inner.Write(p)
-	if err != nil {
-		return n, err
-	}
-
-	// A response that cannot be flushed is still a response. The output reaches the
-	// caller when the buffer fills, which is worse than immediately and better than
-	// failing the read over it.
-	_ = w.control.Flush()
-
-	return n, nil
 }
 
 // instanceHealth maps what takt established about a workload's health onto the wire

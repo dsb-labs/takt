@@ -2,11 +2,15 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/middleware"
 	"github.com/dsb-labs/takt/internal/server/service"
 	"github.com/dsb-labs/takt/internal/wire"
 	"github.com/dsb-labs/takt/pkg/manifest"
@@ -27,6 +31,10 @@ type (
 		// "path=value" queries, or every service the server holds when given
 		// none.
 		List(ctx context.Context, queries ...string) ([]service.Service, error)
+		// Stream should call fn with the services matching every one of the
+		// given queries at once, and again each time the set changes, until ctx
+		// ends or fn returns an error.
+		Stream(ctx context.Context, fn func([]service.Service) error, queries ...string) error
 		// Delete should remove the service with the given name.
 		Delete(ctx context.Context, name string) error
 	}
@@ -109,11 +117,22 @@ func (a *ServiceAPI) GetService(ctx context.Context, request api.GetServiceReque
 }
 
 // ListServices returns the services matching the request's queries, or every
-// service when it carries none.
+// service when it carries none. A followed list keeps the response open and
+// writes the set again each time it changes.
 func (a *ServiceAPI) ListServices(ctx context.Context, request api.ListServicesRequestObject) (api.ListServicesResponseObject, error) {
 	var queries []string
 	if request.Params.Query != nil {
 		queries = *request.Params.Query
+	}
+
+	if request.Params.Follow != nil && *request.Params.Follow {
+		return servicesStream{
+			logger: a.logger,
+			conn:   middleware.Connection(ctx),
+			stream: func(fn func([]service.Service) error) error {
+				return a.services.Stream(ctx, fn, queries...)
+			},
+		}, nil
 	}
 
 	services, err := a.services.List(ctx, queries...)
@@ -155,6 +174,71 @@ func (a *ServiceAPI) DeleteService(ctx context.Context, request api.DeleteServic
 	}
 
 	return api.DeleteService200JSONResponse{}, nil
+}
+
+// The servicesStream type writes the services to the client as a line of JSON
+// per change, for as long as the client stays connected.
+//
+// The generated response type for this content holds a reader, which would mean
+// something producing the lines ahead of the response reading them. This writes
+// each line as the service reports it instead, so nothing sits between a change
+// and the client hearing of it.
+type servicesStream struct {
+	logger *slog.Logger
+	// The connection's own writer, for the deadline the wrappers cannot carry.
+	conn   http.ResponseWriter
+	stream func(fn func([]service.Service) error) error
+}
+
+// VisitListServicesResponse writes the services to w as newline-delimited JSON.
+//
+// The status is written with the first line rather than up front, because the
+// first line is the first read of the services, and that read can be refused: a
+// malformed query is a 400 here as it is for a list, which it could not be once
+// a 200 had gone out. A failure after the first line ends the stream, which is
+// all that can be done for it.
+func (r servicesStream) VisitListServicesResponse(w http.ResponseWriter) error {
+	out, err := keepOpen(w, r.conn)
+	if err != nil {
+		return err
+	}
+
+	started := false
+	err = r.stream(func(services []service.Service) error {
+		if !started {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			w.WriteHeader(http.StatusOK)
+			started = true
+		}
+
+		return writeServices(out, services)
+	})
+
+	switch {
+	case started:
+		return err
+	case errors.Is(err, service.ErrInvalidQuery):
+		return api.ListServices400JSONResponse{Error: err.Error()}.VisitListServicesResponse(w)
+	case err != nil:
+		return api.ListServices500JSONResponse{
+			Error: internalError(r.logger, "list services", err),
+		}.VisitListServicesResponse(w)
+	default:
+		w.WriteHeader(http.StatusOK)
+
+		return nil
+	}
+}
+
+// writeServices writes one line carrying the services, in the shape a list
+// answers with, so that a consumer decodes a line and a list the same way.
+func writeServices(out io.Writer, services []service.Service) error {
+	line := api.ListServicesResult{Services: make([]api.Service, 0, len(services))}
+	for _, listed := range services {
+		line.Services = append(line.Services, newService(listed))
+	}
+
+	return json.NewEncoder(out).Encode(line)
 }
 
 // newService converts a service as the service layer reports it into its wire

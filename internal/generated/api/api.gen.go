@@ -2566,6 +2566,22 @@ type ListServicesParams struct {
 	// service must match all of them. A query can reach only the service's
 	// own labels, not its target's.
 	Query *[]string `form:"query,omitempty" json:"query,omitempty"`
+
+	// Follow Keep the response open and write the matching services again each
+	// time the set changes.
+	//
+	// The response is then newline-delimited JSON rather than one document.
+	// Each line is the whole set as a list would return it, so a consumer
+	// rebuilds what it knows from the latest line and nothing else: a
+	// service or backend that has gone is simply absent from it. The first
+	// line is written at once, and a line follows each change the server
+	// notices, which is as soon as the reconciler has looked at the fleet
+	// again. Nothing is written while the set holds still.
+	//
+	// The stream ends when the caller disconnects or the server stops. It
+	// carries no keepalive, so a consumer that loses the connection opens a
+	// new one and starts again from the first line.
+	Follow *bool `form:"follow,omitempty" json:"follow,omitempty"`
 }
 
 // ListVariablesParams defines parameters for ListVariables.
@@ -3137,6 +3153,10 @@ type ClientInterface interface {
 	//
 	// Repeating the `query` parameter narrows the result: a service is returned
 	// only when it satisfies every query given.
+	//
+	// Set `follow` to keep the response open and be told each time the set
+	// changes, which is what a balancer reading its backends from takt wants
+	// instead of polling.
 	//
 	// Corresponds with GET /api/v1/services (the `ListServices` operationId).
 	ListServices(ctx context.Context, params *ListServicesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -4281,6 +4301,10 @@ func (c *Client) SetSecret(ctx context.Context, name SecretName, body SetSecretJ
 //
 // Repeating the `query` parameter narrows the result: a service is returned
 // only when it satisfies every query given.
+//
+// Set `follow` to keep the response open and be told each time the set
+// changes, which is what a balancer reading its backends from takt wants
+// instead of polling.
 //
 // Corresponds with GET /api/v1/services (the `ListServices` operationId).
 func (c *Client) ListServices(ctx context.Context, params *ListServicesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -5931,6 +5955,18 @@ func NewListServicesRequest(server string, params *ListServicesParams) (*http.Re
 		if params.Query != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "query", *params.Query, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Follow != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "follow", *params.Follow, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -7635,6 +7671,10 @@ type ClientWithResponsesInterface interface {
 	//
 	// Repeating the `query` parameter narrows the result: a service is returned
 	// only when it satisfies every query given.
+	//
+	// Set `follow` to keep the response open and be told each time the set
+	// changes, which is what a balancer reading its backends from takt wants
+	// instead of polling.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -11434,6 +11474,10 @@ func (c *ClientWithResponses) SetSecretWithResponse(ctx context.Context, name Se
 // Repeating the `query` parameter narrows the result: a service is returned
 // only when it satisfies every query given.
 //
+// Set `follow` to keep the response open and be told each time the set
+// changes, which is what a balancer reading its backends from takt wants
+// instead of polling.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/v1/services (the `ListServices` operationId).
@@ -13120,6 +13164,9 @@ func ParseListServicesResponse(rsp *http.Response) (*ListServicesResponse, error
 			return nil, err
 		}
 		response.JSON500 = &dest
+
+	case rsp.StatusCode == 200:
+		// Content-type (application/x-ndjson) unsupported
 
 	}
 
@@ -15029,6 +15076,19 @@ func (siw *ServerInterfaceWrapper) ListServices(w http.ResponseWriter, r *http.R
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "query"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "query", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "follow" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "follow", r.URL.Query(), &params.Follow, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "follow"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "follow", Err: err})
 		}
 		return
 	}
@@ -17220,6 +17280,49 @@ func (response ListServices200JSONResponse) VisitListServicesResponse(w http.Res
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+type ListServices200ApplicationXNdjsonResponse struct {
+	Body          io.Reader
+	ContentLength int64
+}
+
+func (response ListServices200ApplicationXNdjsonResponse) VisitListServicesResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		// If w doesn't support flushing, fall back to io.Copy.
+		_, err := io.Copy(w, response.Body)
+		return err
+	}
+	// text/event-stream messages are typically small; use a
+	// modest buffer and flush after each chunk so clients see
+	// events immediately instead of waiting on OS buffering.
+	buf := make([]byte, 4096)
+	for {
+		n, err := response.Body.Read(buf)
+		if n > 0 {
+			if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
 }
 
 type ListServices400JSONResponse struct{ BadRequestJSONResponse }

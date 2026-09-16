@@ -8,8 +8,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/server/auth"
@@ -203,4 +207,68 @@ func authorize(f api.StrictHandlerFunc, _ string) api.StrictHandlerFunc {
 
 		return f(ctx, w, r, request)
 	}
+}
+
+// keepOpen prepares a response that stays open for as long as something keeps
+// writing to it, returning the writer to write through.
+//
+// Two things are needed for the same reason: the response is open for as long as
+// the thing it reports on lives, which is longer than any deadline a request
+// should have and longer than a caller can wait for a buffer to fill. So the
+// write deadline is cleared, and every write is flushed.
+//
+// The deadline is set on the connection's own writer and the flushing is done
+// through the handler's. Only the first can carry a deadline, and only the
+// second counts what was written for the telemetry wrapped around it. The
+// connection is nil when nothing put it there, and the deadline is then cleared
+// on the handler's writer, which is the best that can be done.
+//
+// The zero time removes the deadline rather than extending it. A stream that
+// hit one would end as a truncated response at exactly the timeout, which reads
+// as a thing that stopped talking rather than as a server that hung up.
+//
+// Nothing is left unbounded by this. The request's context ends the stream when
+// the caller disconnects, which is what actually limits how long it occupies
+// the server.
+//
+// A writer with no deadline to clear says so, and there is nothing to do about
+// that but carry on. The stream then lives as long as that writer allows, which
+// is more than refusing to serve the request at all would give anybody.
+func keepOpen(w, conn http.ResponseWriter) (io.Writer, error) {
+	if conn == nil {
+		conn = w
+	}
+
+	err := http.NewResponseController(conn).SetWriteDeadline(time.Time{})
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return nil, fmt.Errorf("failed to clear the write deadline: %w", err)
+	}
+
+	return &flushWriter{inner: w, control: http.NewResponseController(w)}, nil
+}
+
+// The flushWriter type pushes each write out to the client rather than letting it sit
+// in a buffer.
+//
+// Without this a stream arrives in chunks whenever the buffer happens to fill,
+// which for a quiet source may be a long time after the line was written. Watching
+// something happen is the whole point of a stream, so a line held back is a line
+// that did not arrive.
+type flushWriter struct {
+	inner   io.Writer
+	control *http.ResponseController
+}
+
+func (w *flushWriter) Write(p []byte) (int, error) {
+	n, err := w.inner.Write(p)
+	if err != nil {
+		return n, err
+	}
+
+	// A response that cannot be flushed is still a response. The output reaches the
+	// caller when the buffer fills, which is worse than immediately and better than
+	// failing the write over it.
+	_ = w.control.Flush()
+
+	return n, nil
 }
