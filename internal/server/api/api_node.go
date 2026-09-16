@@ -13,7 +13,7 @@ type (
 	// server runs on.
 	NodeService interface {
 		// Get should report the node as it stands now.
-		Get() (service.Node, error)
+		Get(ctx context.Context) (service.Node, error)
 	}
 
 	// The NodeAPI type exposes HTTP endpoints describing the node.
@@ -41,8 +41,8 @@ func NewNodeAPI(config NodeAPIConfig) *NodeAPI {
 }
 
 // GetNode returns the machine the server runs on.
-func (a *NodeAPI) GetNode(_ context.Context, _ api.GetNodeRequestObject) (api.GetNodeResponseObject, error) {
-	node, err := a.node.Get()
+func (a *NodeAPI) GetNode(ctx context.Context, _ api.GetNodeRequestObject) (api.GetNodeResponseObject, error) {
+	node, err := a.node.Get(ctx)
 	if err != nil {
 		return api.GetNode500JSONResponse{
 			Error: internalError(a.logger, "get node", err),
@@ -75,6 +75,12 @@ func newNode(node service.Node) api.Node {
 		Disks: api.NodeDisks{
 			Data:    newNodeDisk(node.Disks.Data),
 			Volumes: newNodeDisk(node.Disks.Volumes),
+		},
+		Allocated: api.NodeAllocation{
+			Memory:          node.Allocated.Memory,
+			CPU:             node.Allocated.CPU,
+			UnlimitedMemory: node.Allocated.UnlimitedMemory,
+			UnlimitedCPU:    node.Allocated.UnlimitedCPU,
 		},
 	}
 }

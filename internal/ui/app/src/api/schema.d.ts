@@ -929,6 +929,9 @@ export interface paths {
      *     for itself. Disk is reported for the data directory and the volumes
      *     directory, since a volume filling the disk is how a node is lost.
      *
+     *     Beside the capacity is what takt has promised against it: the limits
+     *     the running instances are held to, summed.
+     *
      *     The node is a resource beside workloads and volumes rather than a
      *     system route: the system routes answer a supervisor asking about the
      *     process, where this answers an operator asking about the machine.
@@ -2852,6 +2855,32 @@ export interface components {
       memory: components["schemas"]["NodeMemory"];
       load: components["schemas"]["NodeLoad"];
       disks: components["schemas"]["NodeDisks"];
+      allocated: components["schemas"]["NodeAllocation"];
+    };
+    /**
+     * @description What takt has promised: the limits every running instance is held to,
+     *     summed. This is the figure that answers whether another workload fits,
+     *     read against the node's capacity.
+     *
+     *     An instance naming no limit is bounded only by the host. It adds
+     *     nothing to the sum while consuming what it likes, so it is counted
+     *     instead, and a sum that reads empty on a full box says why.
+     *
+     *     Advisory rather than a budget. Takt runs beside whatever else is on
+     *     the host, and nothing refuses a workload for exceeding the capacity.
+     */
+    NodeAllocation: {
+      /** @description The memory the running instances may use between them, in bytes. */
+      memory: number;
+      /**
+       * Format: double
+       * @description The processors the running instances may use between them.
+       */
+      cpu: number;
+      /** @description How many running instances name no memory limit. */
+      unlimitedMemory: number;
+      /** @description How many running instances name no processor limit. */
+      unlimitedCpu: number;
     };
     /** @description The host's memory, in bytes. */
     NodeMemory: {
