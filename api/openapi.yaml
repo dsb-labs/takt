@@ -32,6 +32,8 @@ tags:
     description: Values a workload can read and an operator cannot.
   - name: variables
     description: Values both a workload and an operator can read.
+  - name: node
+    description: The machine the server runs on.
   - name: system
     description: Liveness, readiness and metrics for the server itself.
   - name: admin
@@ -1789,6 +1791,40 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/node:
+    get:
+      operationId: getNode
+      tags: [node]
+      security:
+        - bearer: [viewer]
+        - session: [viewer]
+      summary: Read the node
+      description: |
+        Returns the machine the server runs on: what it is, and what it has.
+
+        The capacity figures are the host's. Memory in use and the load
+        averages describe everything on the box, takt's workloads included,
+        rather than what those workloads consume, which each instance reports
+        for itself. Disk is reported for the data directory and the volumes
+        directory, since a volume filling the disk is how a node is lost.
+
+        The node is a resource beside workloads and volumes rather than a
+        system route: the system routes answer a supervisor asking about the
+        process, where this answers an operator asking about the machine.
+      responses:
+        "200":
+          description: The node.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetNodeResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -4189,6 +4225,139 @@ components:
           description: |
             The key they were sealed under before. The keyring keeps it, because it
             still opens the backups taken before this call.
+
+    GetNodeResult:
+      type: object
+      description: The body returned when reading the node.
+      required: [node]
+      properties:
+        node:
+          $ref: "#/components/schemas/Node"
+
+    Node:
+      type: object
+      description: |
+        The machine the server runs on. The identity says what is being talked
+        to; the capacity says what it has, as the host, not as takt's workloads
+        see it.
+      required:
+        [hostname, os, arch, kernel, cpus, version, startedAt, bootedAt, memory, load, disks]
+      properties:
+        hostname:
+          type: string
+          description: The host's name.
+          examples: ["node-1"]
+        os:
+          type: string
+          description: The operating system the binary was built for.
+          examples: ["linux"]
+        arch:
+          type: string
+          description: The processor architecture the binary was built for.
+          examples: ["amd64"]
+        kernel:
+          type: string
+          description: The kernel release.
+          examples: ["6.12.0-1-amd64"]
+        cpus:
+          type: integer
+          description: How many processors the host has.
+          minimum: 1
+        version:
+          type: string
+          description: |
+            The version of the takt binary serving the request, which is what a
+            client checks before relying on something newer than the server.
+          examples: ["v0.4.0"]
+        startedAt:
+          type: string
+          format: date-time
+          description: When the server process started.
+        bootedAt:
+          type: string
+          format: date-time
+          description: When the host booted.
+        memory:
+          $ref: "#/components/schemas/NodeMemory"
+        load:
+          $ref: "#/components/schemas/NodeLoad"
+        disks:
+          $ref: "#/components/schemas/NodeDisks"
+
+    NodeMemory:
+      type: object
+      description: The host's memory, in bytes.
+      required: [total, used]
+      properties:
+        total:
+          type: integer
+          description: How much memory the host has, in bytes.
+          minimum: 0
+        used:
+          type: integer
+          description: |
+            How much of it is in use, in bytes. This is the total less what the
+            kernel reports as available, so the page cache it reclaims before
+            refusing an allocation is not counted as spent.
+          minimum: 0
+
+    NodeLoad:
+      type: object
+      description: The host's load averages, as the kernel reports them.
+      required: [one, five, fifteen]
+      properties:
+        one:
+          type: number
+          format: double
+          description: The load averaged over the last minute.
+          minimum: 0
+        five:
+          type: number
+          format: double
+          description: The load averaged over the last five minutes.
+          minimum: 0
+        fifteen:
+          type: number
+          format: double
+          description: The load averaged over the last fifteen minutes.
+          minimum: 0
+
+    NodeDisks:
+      type: object
+      description: |
+        The filesystems under the directories takt writes to. Both describe one
+        filesystem unless the operator mounted something at the volumes
+        directory, which is the setup a box holding large volumes has.
+      required: [data, volumes]
+      properties:
+        data:
+          $ref: "#/components/schemas/NodeDisk"
+        volumes:
+          $ref: "#/components/schemas/NodeDisk"
+
+    NodeDisk:
+      type: object
+      description: The filesystem under a directory, in bytes.
+      required: [path, total, free]
+      properties:
+        path:
+          type: string
+          description: |
+            The directory the figures describe, as configured. Reported even
+            when the directory has not been created yet, since the filesystem
+            it will land on already exists.
+          examples: ["/var/lib/takt/volumes"]
+        total:
+          type: integer
+          description: The size of the filesystem, in bytes.
+          minimum: 0
+        free:
+          type: integer
+          description: |
+            How much of it an unprivileged writer can still use, in bytes. This
+            is less than what root could fill, since a filesystem keeps a
+            reserve for it.
+          minimum: 0
 
     GetHealthResult:
       type: object

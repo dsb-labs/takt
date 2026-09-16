@@ -1,0 +1,10 @@
+Show the node.
+
+Reports what the machine is: its hostname, kernel, processor count, the
+version of takt serving the request, and when the process started and the
+host booted. Reports what it has: memory, load averages, and the free space
+under the data directory and the volumes directory.
+
+The capacity figures are the host's. Memory in use and the load averages
+cover everything on the box, not only takt's workloads, which report their
+own usage on "takt workload get".

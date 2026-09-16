@@ -40,6 +40,8 @@ import (
 // Run starts the takt server using the given configuration and blocks until the
 // context is cancelled or the server stops with an error.
 func Run(ctx context.Context, config Config) error {
+	startedAt := time.Now()
+
 	if err := config.Validate(); err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
@@ -422,6 +424,13 @@ func Run(ctx context.Context, config Config) error {
 		Address: workloadAddress,
 	})
 
+	nodeSvc := service.NewNodeService(service.NodeServiceConfig{
+		DataDirectory:    config.Data.Directory,
+		VolumesDirectory: config.VolumesPath(),
+		Version:          telemetry.Version(),
+		StartedAt:        startedAt,
+	})
+
 	mux := http.NewServeMux()
 	api.New(api.Config{
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
@@ -429,6 +438,7 @@ func Run(ctx context.Context, config Config) error {
 		Services:  api.NewServiceAPI(api.ServiceAPIConfig{Logger: logger, Services: serviceSvc}),
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: secretSvc}),
 		Variables: api.NewVariableAPI(api.VariableAPIConfig{Logger: logger, Variables: variableSvc}),
+		Node:      api.NewNodeAPI(api.NodeAPIConfig{Logger: logger, Node: nodeSvc}),
 		System: api.NewSystemAPI(api.SystemAPIConfig{
 			Logger: logger,
 			DB:     db,

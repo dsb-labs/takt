@@ -46,6 +46,7 @@ type (
 		*ServiceAPI
 		*SecretAPI
 		*VariableAPI
+		*NodeAPI
 		*SystemAPI
 		*AdminAPI
 		*AuthAPI
@@ -65,6 +66,8 @@ type (
 		Secrets *SecretAPI
 		// The endpoints serving variables.
 		Variables *VariableAPI
+		// The endpoints describing the node the server runs on.
+		Node *NodeAPI
 		// The endpoints describing the server itself.
 		System *SystemAPI
 		// The endpoints acting on the node itself.
@@ -91,6 +94,7 @@ func New(config Config) *API {
 		ServiceAPI:  config.Services,
 		SecretAPI:   config.Secrets,
 		VariableAPI: config.Variables,
+		NodeAPI:     config.Node,
 		SystemAPI:   config.System,
 		AdminAPI:    config.Admin,
 		AuthAPI:     config.Auth,
