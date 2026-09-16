@@ -18,11 +18,13 @@ flowchart LR
     ticker["ticker, every interval"] --> loop
     notify["Notify: desired state changed"] --> loop
     events["driver events"] --> window["coalesce window, 500ms"]
+    verdicts["health verdicts"] --> window
     window --> loop["the pass loop"]
     loop --> pass["one pass"]
+    pass -- "observed, then done" --> subscribers["subscribers"]
 ```
 
-Three things wake the loop:
+Four things wake the loop:
 
 - **The ticker.** Every reconcile interval — ten seconds by default, set under
   `[reconcile]` in the [configuration](configuration.md). This is the guarantee:
@@ -35,11 +37,24 @@ Three things wake the loop:
   collected for half a second first, so a burst becomes one pass. A pass observes
   the whole runtime anyway, so the discarded events tell it nothing it will not
   see for itself.
+- **A health verdict.** The checker reports a check passing for the first time,
+  failing past its retries, or recovering. A verdict holding steady reports
+  nothing. The pass is held for the same window as a driver event, since the
+  instances of one workload tend to come up together.
 
 Passes never overlap. Everything is driven from one goroutine, and a wake-up that
 arrives during a pass coalesces into the next one. One pass also runs at startup,
 so a workload applied before a restart is running again without waiting for the
 first tick.
+
+A pass tells its subscribers twice: once it has observed the drivers, and again
+once it has finished acting on what it saw. The signal says only that the loop
+has looked at the fleet, and a subscriber reads what it wants to know for
+itself. A followed [services list](services.md#following-the-list) is one: it
+re-reads its services on each signal and writes a line when they changed. The
+first signal is what keeps it prompt, since acting on an observation can mean
+pulling an image. A service applied or deleted asks for a pass, so it reaches
+the same subscribers through the same signal.
 
 ## What a pass does
 

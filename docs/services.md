@@ -103,8 +103,34 @@ takt service get web | jq -r '.Backends[].Address'
 
 The backends move when the fleet does — a scale, a failed check, a reallocated
 port — so a balancer's configuration goes stale the same way a written-down host
-port does. Re-read the service after changing the workloads it selects. A streamed
-feed that pushes changes to a balancer plugin is planned but not built yet.
+port does. A balancer can poll, or it can follow the list and be told.
+
+### Following the list
+
+`GET /api/v1/services?follow=true` keeps the response open and writes the
+services again each time the set changes:
+
+```sh
+curl -N 'http://127.0.0.1:7373/api/v1/services?follow=true&query=$.labels.app%3Dweb'
+```
+
+The response is newline-delimited JSON. Each line is the whole set, in the shape
+a plain list answers with, so a consumer decodes a line and a list the same way
+and rebuilds what it knows from the latest line alone. A service or backend that
+has gone is absent from the next line. The first line is written at once, and
+nothing is written while the set holds still.
+
+A line follows each change the server notices, which is as soon as the
+[reconciler](reconciliation.md#when-a-pass-runs) has looked at the fleet again:
+at once for a service applied or deleted, within the coalesce window for an
+instance that died or a check whose verdict changed, and by the next scheduled
+pass for anything else. A followed list costs one read of the fleet per pass
+rather than one per poll.
+
+The stream ends when the caller disconnects or the server stops, and carries no
+keepalive. A consumer that loses the connection opens a new one and starts
+again from the first line. `StreamServices` on the Go client does this reading
+and reports each set to a callback.
 
 ## Labels on the service
 
