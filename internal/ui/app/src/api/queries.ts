@@ -163,6 +163,18 @@ export function useVolume(name: () => string) {
   });
 }
 
+export function useNode() {
+  return useQuery({
+    queryKey: ["node"],
+    refetchInterval: pollInterval,
+    queryFn: async () => {
+      const { data, error } = await client.GET("/api/v1/node");
+      if (error) throw new Error(error.error);
+      return data.node;
+    },
+  });
+}
+
 export function useReadiness() {
   return useQuery({
     queryKey: ["readiness"],

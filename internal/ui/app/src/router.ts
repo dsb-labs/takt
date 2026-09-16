@@ -12,6 +12,11 @@ export const router = createRouter({
       component: () => import("./views/login/View.vue"),
     },
     {
+      path: "/",
+      name: "node",
+      component: () => import("./views/node/Detail.vue"),
+    },
+    {
       path: "/workloads",
       name: "workloads",
       component: () => import("./views/workloads/List.vue"),
@@ -135,6 +140,7 @@ client.use({
 // A detail page names its resource and a list page names its section.
 const sections: Record<string, string> = {
   login: "Sign in",
+  node: "Node",
   workloads: "Workloads",
   graph: "Graph",
   secrets: "Secrets",
