@@ -606,7 +606,10 @@ workload's history.
 ## The web UI
 
 The server serves a web UI from the root of its listener. Open the server's address
-in a browser to reach it. The UI lists every workload with its state, instances,
+in a browser to reach it. A browser lands on the node page, which shows what the
+machine has and how much of it takt's workloads are permitted: bars of allocated
+memory and processors against the host's, and of used disk against the filesystem.
+The UI lists every workload with its state, instances,
 ports and next run, shows the events recorded against one, and shows what each
 workload references: the
 secrets, variables, volumes and workloads its specification names. It reads logs,
@@ -628,6 +631,34 @@ on what is already applied.
 A binary built without the bundle still serves the API, and answers every page
 request with a message saying the UI is not in the build. Build the bundle with
 `make ui` before building the binary. Released packages include it.
+
+## The node
+
+`takt node get` and the node page in the UI report the machine the server runs on.
+The identity says what is being talked to: the hostname, the kernel, the processor
+count and the version of takt serving the request. It also says when the process
+started and when the host booted. The capacity says what the box has: memory, load
+averages, and the free space under the data directory and the volumes directory.
+
+Disk is the figure to watch. Usage reporting covers what each instance consumes and
+says nothing about a volume quietly filling the disk, which is a way to lose a node.
+The two directories describe one filesystem unless something is mounted at the
+volumes directory, which is the setup a box holding large volumes has.
+
+Beside the capacity is what takt has promised against it: the limits every running
+instance is held to, summed. That is the figure that answers whether another
+workload fits. A workload naming no `resources` is bounded only by the host and adds
+nothing to the sum, so the running instances naming none are counted beside it. A
+box that is full under an empty figure is one running unlimited workloads.
+
+Allocation is advisory. Takt runs beside whatever else is on the host, and nothing
+refuses a workload for exceeding the capacity. The host's own figures, memory in use
+and the load averages, cover everything on the box rather than takt's workloads
+alone.
+
+The node is a resource at `/api/v1/node`, read with the `viewer` role like every
+other resource. A supervisor or a scraper keeps using the system endpoints below,
+which are the routes that answer a machine.
 
 ## Observability
 

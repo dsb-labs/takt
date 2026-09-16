@@ -24,6 +24,8 @@ takt service list                       List services                        (al
 takt service get <name>                 Show a single service
 takt service delete <name>              Delete a service                     (alias: rm)
 
+takt node get                           Show the node the server runs on
+
 takt secret set <name>                  Set a secret's value
 takt secret list                        List the secrets the server holds    (alias: ls)
 takt secret get <name>                  Get a single secret
@@ -544,6 +546,24 @@ takt service delete web
 
 The workloads the service selected keep running. What stops is the service reporting
 their addresses.
+
+## node get
+
+```sh
+takt node get
+```
+
+Prints the node: what the machine is, and what it has. The identity carries the
+hostname, the kernel, the processor count and the version of takt serving the
+request. It also carries when the process started and when the host booted. The
+capacity carries the host's memory, its load averages, and the free space under the
+data directory and the volumes directory. Beside the capacity is what takt has promised against it: the
+limits every running instance is held to, summed, with a count of the running
+instances naming none.
+
+The capacity figures are the host's. Memory in use and the load averages cover
+everything on the box, not only takt's workloads, which report their own usage on
+`takt workload get`.
 
 ## secret set
 

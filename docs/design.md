@@ -523,6 +523,33 @@ finer-grained belongs to the standard `OTEL_*` environment variables the SDK
 already reads. Nothing in takt's configuration describes the consumers of the
 telemetry, because which dashboard reads a scrape is not the server's decision.
 
+## The node is a resource, not a system route
+
+`/api/v1/node` reports the machine the server runs on, and it sits beside
+workloads, volumes and services rather than under `/api/v1/system`. The
+difference is who asks. The system routes answer a machine asking about the
+process: a supervisor probing liveness, a scraper collecting metrics. The node
+answers an operator asking about the box, who reads it the way they read a
+workload, through the CLI and the UI with the `viewer` role. Keeping it a resource
+leaves room for node-level operations and for more than one node.
+
+The figures come from the kernel rather than from the docker daemon. The daemon
+reports totals of its own, but they describe one driver's share of the box, and
+reading them would widen the docker client interface and its mocks for a question
+the kernel answers directly. Reading `/proc` and the filesystem describes the whole
+host, which is what takt shares with whatever else runs there.
+
+The node reports instants rather than uptimes: when the process started, and when
+the host booted. A reader derives an age from an instant. The CLI prints JSON meant
+for a pipe, and a duration that changes on every call is a figure nothing can
+compare.
+
+Allocation is summed on the server rather than in the browser. The limit a workload
+names is written as a size such as `512m`, and the rule that turns it into bytes
+lives in one place. A second parser in the UI would drift from it. The sum walks
+the workloads as they stand rather than reading a cached figure, because what is
+promised is the limit of each running instance now.
+
 ## The caller is authenticated, not the network path
 
 Without an `[auth]` block in the configuration, reaching the listener is the
