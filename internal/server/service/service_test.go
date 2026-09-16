@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"testing"
@@ -17,16 +18,32 @@ import (
 )
 
 // newServiceService constructs a ServiceService over the given mocks, reporting
-// backends at the test host address.
+// backends at the test host address and following no reconciler.
 func newServiceService(t *testing.T, repo *MockServiceRepository, workloads *MockWorkloadLister) *service.ServiceService {
 	t.Helper()
 
-	return service.NewServiceService(service.ServiceServiceConfig{
+	return newStreamingServiceService(t, repo, workloads, nil)
+}
+
+// newStreamingServiceService constructs a ServiceService over the given mocks
+// that follows the given reconciler's passes.
+func newStreamingServiceService(t *testing.T, repo *MockServiceRepository, workloads *MockWorkloadLister, passes *MockPasses) *service.ServiceService {
+	t.Helper()
+
+	config := service.ServiceServiceConfig{
 		Logger:    slog.New(slog.DiscardHandler),
 		Services:  repo,
 		Workloads: workloads,
 		Address:   "203.0.113.10",
-	})
+	}
+
+	// Left nil rather than set to a nil pointer, which would satisfy the interface
+	// and then be called.
+	if passes != nil {
+		config.Passes = passes
+	}
+
+	return service.NewServiceService(config)
 }
 
 // storedService returns a service row as the repository would report it,
@@ -412,4 +429,169 @@ func TestServiceService_Delete(t *testing.T) {
 
 		assert.ErrorIs(t, svc.Delete(t.Context(), "nope"), service.ErrServiceNotFound)
 	})
+}
+
+func TestServiceService_Stream(t *testing.T) {
+	t.Parallel()
+
+	t.Run("refuses a malformed query before subscribing", func(t *testing.T) {
+		t.Parallel()
+
+		svc := newStreamingServiceService(t, NewMockServiceRepository(t), NewMockWorkloadLister(t), NewMockPasses(t))
+
+		err := svc.Stream(t.Context(), func([]service.Service) error {
+			t.Fatal("nothing should be reported for a query the server refuses")
+			return nil
+		}, "no-equals")
+		assert.ErrorIs(t, err, service.ErrInvalidQuery)
+	})
+
+	t.Run("reports the set on subscribing and again when it changes", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockServiceRepository(t)
+		repo.EXPECT().List(mock.Anything).Return([]database.Service{storedService()}, nil)
+
+		// One instance, then the same instance again, then two. The read that
+		// finds nothing new must not be reported.
+		fleets := [][]service.Workload{
+			{targetedWorkload("web", driver.Instance{Index: 0, State: driver.StateRunning})},
+			{targetedWorkload("web", driver.Instance{Index: 0, State: driver.StateRunning})},
+			{targetedWorkload("web",
+				driver.Instance{Index: 0, State: driver.StateRunning},
+				driver.Instance{Index: 1, State: driver.StateRunning},
+			)},
+		}
+
+		reads := 0
+		workloads := NewMockWorkloadLister(t)
+		workloads.EXPECT().List(mock.Anything).RunAndReturn(func(context.Context, ...string) ([]service.Workload, error) {
+			fleet := fleets[reads]
+			reads++
+
+			return fleet, nil
+		}).Times(3)
+
+		passes := make(chan struct{})
+		reconciler := NewMockPasses(t)
+		reconciler.EXPECT().Subscribe(mock.Anything).Return(passes).Once()
+
+		svc := newStreamingServiceService(t, repo, workloads, reconciler)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		reported := make(chan []service.Backend, 3)
+		done := make(chan error, 1)
+
+		go func() {
+			done <- svc.Stream(ctx, func(services []service.Service) error {
+				reported <- services[0].Backends
+				return nil
+			})
+		}()
+
+		assert.Equal(t, []service.Backend{
+			{Workload: "web", Instance: 0, Address: "203.0.113.10:20000"},
+		}, <-reported)
+
+		// Two passes: the first finds the same fleet, the second a bigger one.
+		// Each send is a synchronous handoff, so the second read has happened
+		// before the third pass is offered.
+		passes <- struct{}{}
+		passes <- struct{}{}
+
+		assert.Equal(t, []service.Backend{
+			{Workload: "web", Instance: 0, Address: "203.0.113.10:20000"},
+			{Workload: "web", Instance: 1, Address: "203.0.113.10:20001"},
+		}, <-reported)
+
+		cancel()
+		assert.NoError(t, <-done)
+		assert.Empty(t, reported, "the unchanged read was reported")
+	})
+
+	t.Run("ends with the caller's error", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockServiceRepository(t)
+		repo.EXPECT().List(mock.Anything).Return(nil, nil).Once()
+
+		reconciler := NewMockPasses(t)
+		reconciler.EXPECT().Subscribe(mock.Anything).Return(nil).Once()
+
+		svc := newStreamingServiceService(t, repo, NewMockWorkloadLister(t), reconciler)
+
+		err := svc.Stream(t.Context(), func([]service.Service) error {
+			return errors.New("hung up")
+		})
+		assert.EqualError(t, err, "hung up")
+	})
+
+	t.Run("ends with the read that failed", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockServiceRepository(t)
+		repo.EXPECT().List(mock.Anything).Return(nil, nil).Once()
+		repo.EXPECT().List(mock.Anything).Return(nil, errors.New("database is gone")).Once()
+
+		passes := make(chan struct{}, 1)
+		passes <- struct{}{}
+
+		reconciler := NewMockPasses(t)
+		reconciler.EXPECT().Subscribe(mock.Anything).Return(passes).Once()
+
+		svc := newStreamingServiceService(t, repo, NewMockWorkloadLister(t), reconciler)
+
+		err := svc.Stream(t.Context(), func([]service.Service) error { return nil })
+		assert.ErrorContains(t, err, "database is gone")
+	})
+
+	t.Run("reports once and waits when there is no reconciler to follow", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockServiceRepository(t)
+		repo.EXPECT().List(mock.Anything).Return(nil, nil).Once()
+
+		svc := newServiceService(t, repo, NewMockWorkloadLister(t))
+
+		ctx, cancel := context.WithCancel(t.Context())
+
+		calls := 0
+		err := svc.Stream(ctx, func([]service.Service) error {
+			calls++
+			cancel()
+
+			return nil
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, 1, calls)
+	})
+}
+
+func TestServiceService_AsksForAPassWhenAServiceChanges(t *testing.T) {
+	t.Parallel()
+
+	repo := NewMockServiceRepository(t)
+	repo.EXPECT().Upsert(mock.Anything, mock.Anything).Return(storedService(), true, nil).Once()
+	repo.EXPECT().Delete(mock.Anything, "example").Return(nil).Once()
+
+	workloads := NewMockWorkloadLister(t)
+	workloads.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+	// Once per change. A stream learns of a service arriving or going through
+	// the pass this asks for.
+	reconciler := NewMockPasses(t)
+	reconciler.EXPECT().Notify().Twice()
+
+	svc := newStreamingServiceService(t, repo, workloads, reconciler)
+
+	_, _, err := svc.Apply(t.Context(), manifest.Service{
+		Version: "v1",
+		Name:    "example",
+		Target:  manifest.ServiceTarget{Labels: map[string]string{"app": "web"}, Port: 8080},
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.Delete(t.Context(), "example"))
 }

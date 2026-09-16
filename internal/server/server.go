@@ -416,7 +416,10 @@ func Run(ctx context.Context, config Config) error {
 		// question about observed instances, which only the hydrated listing
 		// answers.
 		Workloads: svc,
-		Address:   workloadAddress,
+		// A stream of services follows the reconciler's passes, since a pass is
+		// what notices the fleet moving.
+		Passes:  reconcile,
+		Address: workloadAddress,
 	})
 
 	mux := http.NewServeMux()
