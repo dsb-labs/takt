@@ -89,6 +89,9 @@ type (
 		// Signals that the set of checks has changed, so that the loop recomputes
 		// when it is next needed rather than sleeping on a stale answer.
 		wake chan struct{}
+		// Signals that an instance's verdict has changed, for whoever acts on
+		// one. Buffered by one for the reason wake is.
+		changed chan struct{}
 		// The meters probe results are recorded into.
 		instruments instruments
 		// The tracer probes are traced from.
@@ -150,7 +153,8 @@ func New(config Config) *Checker {
 		checks:      make(map[subject]*check),
 		// Buffered so that registering a check never blocks on the loop: a
 		// recomputation is already pending, which is all the signal conveys.
-		wake: make(chan struct{}, 1),
+		wake:    make(chan struct{}, 1),
+		changed: make(chan struct{}, 1),
 		// Redirects are not followed: a health endpoint answering 302 is telling us
 		// something other than "I am working", and following it would check a
 		// different address than the one asked for.
@@ -205,6 +209,19 @@ func (c *Checker) notify() {
 	case c.wake <- struct{}{}:
 	default:
 	}
+}
+
+// Changed returns a channel that receives a value when an instance's verdict
+// changes: a check passing for the first time, failing past its retries, or
+// recovering. A verdict holding steady sends nothing.
+//
+// This is how a verdict reaches whoever acts on one sooner than they would next
+// look. The reconciler restarts an instance that failed, and a service counts an
+// instance as a backend once its check passes; both read verdicts on a pass, and
+// without this a verdict waits for the next scheduled one. The channel holds one
+// pending signal at most, since a reader looks at every verdict when it looks.
+func (c *Checker) Changed() <-chan struct{} {
+	return c.changed
 }
 
 // Forget drops every check for a workload, which the caller does once the workload
@@ -447,6 +464,16 @@ func (c *Checker) record(key subject, probe uint64, err error) {
 	registered.inflight = false
 
 	registered.result.CheckedAt = time.Now()
+
+	previous := registered.result.Status
+	defer func() {
+		if registered.result.Status != previous {
+			select {
+			case c.changed <- struct{}{}:
+			default:
+			}
+		}
+	}()
 
 	if err == nil {
 		registered.result.Status = StatusHealthy

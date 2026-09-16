@@ -1642,6 +1642,52 @@ func (_m *MockChecker) EXPECT() *MockChecker_Expecter {
 	return &MockChecker_Expecter{mock: &_m.Mock}
 }
 
+// Changed provides a mock function for the type MockChecker
+func (_mock *MockChecker) Changed() <-chan struct{} {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Changed")
+	}
+
+	var r0 <-chan struct{}
+	if returnFunc, ok := ret.Get(0).(func() <-chan struct{}); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(<-chan struct{})
+		}
+	}
+	return r0
+}
+
+// MockChecker_Changed_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Changed'
+type MockChecker_Changed_Call struct {
+	*mock.Call
+}
+
+// Changed is a helper method to define mock.On call
+func (_e *MockChecker_Expecter) Changed() *MockChecker_Changed_Call {
+	return &MockChecker_Changed_Call{Call: _e.mock.On("Changed")}
+}
+
+func (_c *MockChecker_Changed_Call) Run(run func()) *MockChecker_Changed_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockChecker_Changed_Call) Return(valCh <-chan struct{}) *MockChecker_Changed_Call {
+	_c.Call.Return(valCh)
+	return _c
+}
+
+func (_c *MockChecker_Changed_Call) RunAndReturn(run func() <-chan struct{}) *MockChecker_Changed_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Forget provides a mock function for the type MockChecker
 func (_mock *MockChecker) Forget(workload string) {
 	_mock.Called(workload)

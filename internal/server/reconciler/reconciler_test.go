@@ -564,6 +564,41 @@ func TestReconciler_Run_TellsSubscribersWhenItLooks(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_ReconcilesWhenAVerdictChanges(t *testing.T) {
+	t.Parallel()
+
+	d, repo, checker := newMockDriver(t), NewMockWorkloadRepository(t), NewMockChecker(t)
+
+	repo.EXPECT().List(mock.Anything).Return(nil, nil)
+	d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+	d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+	verdicts := make(chan struct{}, 1)
+	checker.EXPECT().Changed().Return(verdicts).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Checker:   checker,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	awaitPasses(t, r, 1)
+
+	// A verdict changing is a reason to look again, without waiting for the tick.
+	verdicts <- struct{}{}
+	awaitPasses(t, r, 2)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_Health(t *testing.T) {
 	t.Parallel()
 
@@ -603,7 +638,7 @@ func TestReconciler_Run_Health(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
 			d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
-			ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+			ports, checker := NewMockPortRepository(t), newMockChecker(t)
 			recorder := newTestRecorder(t)
 
 			row := storedWorkload("example", "hash-one")
@@ -683,7 +718,7 @@ func TestReconciler_Run_RegistersChecks(t *testing.T) {
 	t.Parallel()
 
 	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
-	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+	ports, checker := NewMockPortRepository(t), newMockChecker(t)
 
 	checked := storedWorkload("example", "hash-one")
 	checked.ID = "workload-one"
@@ -820,7 +855,7 @@ func TestReconciler_Run_ProbesThePublishedAddress(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			repo := NewMockWorkloadRepository(t)
 			ports := NewMockPortRepository(t)
-			checker := NewMockChecker(t)
+			checker := newMockChecker(t)
 			d := NewMockDriver(t)
 
 			checked := storedWorkload("example", "hash-one")
@@ -890,7 +925,7 @@ func TestReconciler_Run_ForgetsChecksOnReplacement(t *testing.T) {
 	t.Parallel()
 
 	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
-	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+	ports, checker := NewMockPortRepository(t), newMockChecker(t)
 
 	row := storedWorkload("example", "hash-one")
 	row.ID = "workload-one"
@@ -963,7 +998,7 @@ func TestReconciler_Run_ForgetsChecksOnTeardown(t *testing.T) {
 	t.Parallel()
 
 	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
-	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+	ports, checker := NewMockPortRepository(t), newMockChecker(t)
 
 	// A workload on its way out is not worth probing, and results for one nothing
 	// runs any more would otherwise accumulate for the life of the server.
@@ -1031,7 +1066,7 @@ func TestReconciler_Run_ForgetsChecksOfASuspendedWorkload(t *testing.T) {
 	t.Parallel()
 
 	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
-	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+	ports, checker := NewMockPortRepository(t), newMockChecker(t)
 
 	// A suspended workload is deliberately down. Probing it would accrue failures
 	// against something that is exactly as down as it was asked to be, and report
@@ -1868,7 +1903,7 @@ func TestReconciler_Run_ForgetsChecksOfARetiredWorkload(t *testing.T) {
 	t.Parallel()
 
 	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
-	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+	ports, checker := NewMockPortRepository(t), newMockChecker(t)
 
 	row := storedWorkload("example", "hash-one")
 	row.ID = "workload-one"
@@ -2902,7 +2937,7 @@ func TestReconciler_Run_RevokesWorkloadTokens(t *testing.T) {
 
 	t.Run("revokes an instance's tokens when it is replaced", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
-		ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+		ports, checker := NewMockPortRepository(t), newMockChecker(t)
 		tokens := NewMockTokens(t)
 		tokens.EXPECT().RevokeSuperseded(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
@@ -3696,6 +3731,17 @@ func newTestLogger(t *testing.T) *slog.Logger {
 
 // newMockDriver returns a driver mock that already answers Name, which every consumer
 // calls to report which runtime it is talking about.
+// newMockChecker returns a checker mock whose verdicts never change, which is
+// what every test that is not about verdicts wants of the loop.
+func newMockChecker(t *testing.T) *MockChecker {
+	t.Helper()
+
+	checker := NewMockChecker(t)
+	checker.EXPECT().Changed().Return(nil).Maybe()
+
+	return checker
+}
+
 func newMockDriver(t *testing.T) *MockDriver {
 	t.Helper()
 
@@ -3847,7 +3893,7 @@ func TestReconciler_Run_ForgetsADiscardedSlot(t *testing.T) {
 	t.Parallel()
 
 	d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
-	ports, checker := NewMockPortRepository(t), NewMockChecker(t)
+	ports, checker := NewMockPortRepository(t), newMockChecker(t)
 
 	// The count moves from two to one and back, so the second slot is discarded
 	// while its check is failing and later filled by an instance that passes.
