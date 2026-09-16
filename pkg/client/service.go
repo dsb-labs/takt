@@ -2,7 +2,10 @@ package client
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -141,6 +144,63 @@ func (c *Client) ListServices(ctx context.Context, queries ...string) ([]Service
 		return nil, newError(http.StatusInternalServerError, resp.JSON500)
 	default:
 		return nil, newError(resp.StatusCode(), nil)
+	}
+}
+
+// StreamServices calls fn with the services matching every one of the given
+// queries as soon as the server answers, and again each time the set changes,
+// until ctx is cancelled, fn returns an error, or the server ends the stream.
+//
+// Each call carries the whole set, so fn replaces what it knows rather than
+// applying a change to it: a service or backend that has gone is absent from
+// the next call. Cancellation is not reported as a failure, since it is how a
+// caller ends a stream. A server ending it is reported as nil too, and a caller
+// that wants to keep following opens a new stream and starts again from the
+// first set.
+func (c *Client) StreamServices(ctx context.Context, fn func([]Service) error, queries ...string) error {
+	params := api.ListServicesParams{Follow: new(true)}
+	if len(queries) > 0 {
+		params.Query = &queries
+	}
+
+	// A stream legitimately outlives the client's timeout, so it goes out over the
+	// client that has none. What ends it is the caller's context.
+	resp, err := c.stream.ListServices(ctx, &params)
+	if err != nil {
+		return fmt.Errorf("failed to send the request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body := errorBody(resp)
+
+		return newError(resp.StatusCode, &body)
+	}
+
+	decoder := json.NewDecoder(resp.Body)
+	for {
+		var line api.ListServicesResult
+
+		err = decoder.Decode(&line)
+		switch {
+		case errors.Is(err, io.EOF):
+			return nil
+		case err != nil && ctx.Err() != nil:
+			// A caller who cancelled already knows why the stream stopped, and the
+			// read fails in whatever way the transport noticed first.
+			return nil
+		case err != nil:
+			return fmt.Errorf("failed to read the response body: %w", err)
+		}
+
+		services := make([]Service, 0, len(line.Services))
+		for _, listed := range line.Services {
+			services = append(services, newService(listed))
+		}
+
+		if err = fn(services); err != nil {
+			return err
+		}
 	}
 }
 

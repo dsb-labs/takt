@@ -10,8 +10,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"time"
@@ -284,6 +286,19 @@ func hasStatus(err error, status int) bool {
 // newError builds an Error from a response the server didn't handle successfully.
 // The body is decoded for the server's own message where one is present, since it
 // describes the failure better than the status text can.
+// errorBody decodes the server's message from an unsuccessful response, for the
+// responses the client reads itself rather than through the generated parser.
+//
+// The body is read under a limit: an error message is a sentence, and something
+// answering a streamed endpoint with an endless one should cost the caller a
+// failed request rather than its memory.
+func errorBody(resp *http.Response) api.ErrorResponse {
+	var body api.ErrorResponse
+	_ = json.NewDecoder(io.LimitReader(resp.Body, maxErrorBody)).Decode(&body)
+
+	return body
+}
+
 func newError(status int, message *api.ErrorResponse) error {
 	err := Error{Status: status}
 	if message != nil {
