@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -42,10 +43,11 @@ func storedService() database.Service {
 	}
 }
 
-// targetedWorkload returns a hydrated workload publishing 8080/tcp for each of
-// the given instances, each mapped to a host port of 20000 plus its index.
+// targetedWorkload returns a hydrated workload labelled app=web, which is what
+// storedService targets, publishing 8080/tcp for each of the given instances,
+// each mapped to a host port of 20000 plus its index.
 func targetedWorkload(name string, instances ...driver.Instance) service.Workload {
-	workload := service.Workload{Name: name}
+	workload := service.Workload{Name: name, Labels: map[string]string{"app": "web"}}
 
 	for _, instance := range instances {
 		workload.Instances = append(workload.Instances, service.Instance{Instance: instance})
@@ -256,8 +258,11 @@ func TestServiceService_List(t *testing.T) {
 		repo := NewMockServiceRepository(t)
 		repo.EXPECT().List(mock.Anything).Return([]database.Service{storedService()}, nil).Once()
 
+		// The whole fleet, read once with no query. Selecting happens here rather
+		// than in the database, because a read observes the host and one per
+		// service would observe it once per service.
 		workloads := NewMockWorkloadLister(t)
-		workloads.EXPECT().List(mock.Anything, []string{`$.labels."app"=web`}).
+		workloads.EXPECT().List(mock.Anything).
 			Return([]service.Workload{
 				targetedWorkload("web", driver.Instance{Index: 0, State: driver.StateRunning}),
 			}, nil).Once()
@@ -271,6 +276,106 @@ func TestServiceService_List(t *testing.T) {
 		assert.Equal(t, []service.Backend{
 			{Workload: "web", Instance: 0, Address: "203.0.113.10:20000"},
 		}, got[0].Backends)
+	})
+
+	t.Run("reads the fleet once however many services it resolves", func(t *testing.T) {
+		t.Parallel()
+
+		web := storedService()
+
+		api := storedService()
+		api.ID, api.Name, api.TargetLabels = "svc-2", "api", map[string]string{"app": "api", "tier": "backend"}
+
+		repo := NewMockServiceRepository(t)
+		repo.EXPECT().List(mock.Anything).Return([]database.Service{api, web}, nil).Once()
+
+		apiWorkload := targetedWorkload("api", driver.Instance{Index: 0, State: driver.StateRunning})
+		apiWorkload.Labels = map[string]string{"app": "api", "tier": "backend", "team": "platform"}
+
+		// Carries one of the two labels the api service wants, which is not
+		// enough to be selected by it, and none that the web service wants.
+		worker := targetedWorkload("worker", driver.Instance{Index: 0, State: driver.StateRunning})
+		worker.Labels = map[string]string{"tier": "backend"}
+
+		workloads := NewMockWorkloadLister(t)
+		workloads.EXPECT().List(mock.Anything).
+			Return([]service.Workload{
+				apiWorkload,
+				targetedWorkload("web", driver.Instance{Index: 0, State: driver.StateRunning}),
+				worker,
+			}, nil).Once()
+
+		svc := newServiceService(t, repo, workloads)
+
+		got, err := svc.List(t.Context())
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+
+		// A workload carrying more labels than the target names is still
+		// selected, and one missing any of them is not.
+		assert.Equal(t, "api", got[0].Name)
+		assert.Equal(t, []service.Backend{
+			{Workload: "api", Instance: 0, Address: "203.0.113.10:20000"},
+		}, got[0].Backends)
+
+		assert.Equal(t, "example", got[1].Name)
+		assert.Equal(t, []service.Backend{
+			{Workload: "web", Instance: 0, Address: "203.0.113.10:20000"},
+		}, got[1].Backends)
+	})
+
+	t.Run("selects every workload for a target naming no labels", func(t *testing.T) {
+		t.Parallel()
+
+		everything := storedService()
+		everything.TargetLabels = nil
+
+		repo := NewMockServiceRepository(t)
+		repo.EXPECT().List(mock.Anything).Return([]database.Service{everything}, nil).Once()
+
+		unlabelled := targetedWorkload("plain", driver.Instance{Index: 0, State: driver.StateRunning})
+		unlabelled.Labels = nil
+
+		// An empty target selects everything, as the empty query the database
+		// would have been asked does.
+		workloads := NewMockWorkloadLister(t)
+		workloads.EXPECT().List(mock.Anything).Return([]service.Workload{unlabelled}, nil).Once()
+
+		svc := newServiceService(t, repo, workloads)
+
+		got, err := svc.List(t.Context())
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Len(t, got[0].Backends, 1)
+	})
+
+	t.Run("does not observe the host when there are no services", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockServiceRepository(t)
+		repo.EXPECT().List(mock.Anything).Return(nil, nil).Once()
+
+		// The lister expects no call, so one would fail the test.
+		svc := newServiceService(t, repo, NewMockWorkloadLister(t))
+
+		got, err := svc.List(t.Context())
+		require.NoError(t, err)
+		assert.Empty(t, got)
+	})
+
+	t.Run("reports a fleet that cannot be read", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockServiceRepository(t)
+		repo.EXPECT().List(mock.Anything).Return([]database.Service{storedService()}, nil).Once()
+
+		workloads := NewMockWorkloadLister(t)
+		workloads.EXPECT().List(mock.Anything).Return(nil, errors.New("database is closed")).Once()
+
+		svc := newServiceService(t, repo, workloads)
+
+		_, err := svc.List(t.Context())
+		assert.Error(t, err)
 	})
 
 	t.Run("reports a malformed query", func(t *testing.T) {

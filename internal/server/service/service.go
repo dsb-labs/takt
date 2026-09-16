@@ -46,6 +46,10 @@ type (
 	// workloads carry their observed instances with health folded into each
 	// instance's state and retained instances already removed — which is exactly
 	// the question a backend answers.
+	//
+	// A list is read once per request, however many services it resolves,
+	// because every read observes the whole host: asking per service turned a
+	// list of services into an observation per service.
 	WorkloadLister interface {
 		// List should return the workloads matching every one of the given
 		// "path=value" queries, with observed state merged in.
@@ -137,12 +141,12 @@ func (s *ServiceService) Apply(ctx context.Context, spec manifest.Service) (Serv
 		return Service{}, false, fmt.Errorf("failed to store service: %w", err)
 	}
 
-	service, err := s.hydrate(ctx, stored)
+	selected, err := s.selected(ctx, stored)
 	if err != nil {
 		return Service{}, false, err
 	}
 
-	return service, created, nil
+	return s.hydrate(stored, selected), created, nil
 }
 
 // Get returns the service with the given name with its backends resolved,
@@ -156,7 +160,12 @@ func (s *ServiceService) Get(ctx context.Context, name string) (Service, error) 
 		return Service{}, fmt.Errorf("failed to get service: %w", err)
 	}
 
-	return s.hydrate(ctx, stored)
+	selected, err := s.selected(ctx, stored)
+	if err != nil {
+		return Service{}, err
+	}
+
+	return s.hydrate(stored, selected), nil
 }
 
 // List returns the services matching every one of the given queries with their
@@ -165,6 +174,12 @@ func (s *ServiceService) Get(ctx context.Context, name string) (Service, error) 
 // Each query is a "path=value" string reaching the service's labels under
 // $.labels, as a workload query does. Returns ErrInvalidQuery when one is
 // malformed.
+//
+// The fleet is read once and each service selects from it in memory. A read
+// observes every driver on the host, so reading per service cost a listing of
+// the host for each row: the lab measured ten services at ten times the
+// observation. The fleet is the same for every row, and selecting from it is a
+// loop over a slice takt already holds.
 func (s *ServiceService) List(ctx context.Context, queries ...string) ([]Service, error) {
 	parsed, err := parseQueries(queries)
 	if err != nil {
@@ -181,13 +196,17 @@ func (s *ServiceService) List(ctx context.Context, queries ...string) ([]Service
 	}
 
 	services := make([]Service, 0, len(rows))
-	for _, row := range rows {
-		service, err := s.hydrate(ctx, row)
-		if err != nil {
-			return nil, err
-		}
+	if len(rows) == 0 {
+		return services, nil
+	}
 
-		services = append(services, service)
+	fleet, err := s.workloads.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workloads: %w", err)
+	}
+
+	for _, row := range rows {
+		services = append(services, s.hydrate(row, fleet))
 	}
 
 	return services, nil
@@ -210,14 +229,21 @@ func (s *ServiceService) Delete(ctx context.Context, name string) error {
 	}
 }
 
-// hydrate maps a stored service row to the caller-facing type, resolving its
-// backends.
-func (s *ServiceService) hydrate(ctx context.Context, row database.Service) (Service, error) {
-	backends, err := s.backends(ctx, row)
+// selected reads the workloads one service's target selects, for the paths
+// that resolve a single service. The database does the matching for one row,
+// and one read costs the same observation whether it is filtered or not.
+func (s *ServiceService) selected(ctx context.Context, row database.Service) ([]Workload, error) {
+	selected, err := s.workloads.List(ctx, targetQueries(row.TargetLabels)...)
 	if err != nil {
-		return Service{}, err
+		return nil, fmt.Errorf("failed to list targeted workloads: %w", err)
 	}
 
+	return selected, nil
+}
+
+// hydrate maps a stored service row to the caller-facing type, resolving its
+// backends from the given workloads.
+func (s *ServiceService) hydrate(row database.Service, workloads []Workload) Service {
 	return Service{
 		Name:   row.Name,
 		Labels: row.Labels,
@@ -226,14 +252,14 @@ func (s *ServiceService) hydrate(ctx context.Context, row database.Service) (Ser
 			Port:     row.TargetPort,
 			Protocol: manifest.Protocol(row.TargetProtocol),
 		},
-		Backends:  backends,
+		Backends:  s.backends(row, workloads),
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
-	}, nil
+	}
 }
 
 // backends resolves the addresses of the instances the service's target
-// selects that are fit to serve.
+// selects, from the given workloads, that are fit to serve.
 //
 // A workload is selected when it carries every target label. An instance
 // counts when it is observed running — health is folded into the observed
@@ -242,15 +268,10 @@ func (s *ServiceService) hydrate(ctx context.Context, row database.Service) (Ser
 // workload being deleted contributes nothing: its instances keep serving until
 // the teardown reaches them, but a balancer told about them would keep sending
 // requests to addresses about to vanish.
-func (s *ServiceService) backends(ctx context.Context, row database.Service) ([]Backend, error) {
-	selected, err := s.workloads.List(ctx, targetQueries(row.TargetLabels)...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list targeted workloads: %w", err)
-	}
-
+func (s *ServiceService) backends(row database.Service, workloads []Workload) []Backend {
 	var backends []Backend
-	for _, workload := range selected {
-		if workload.Deleting {
+	for _, workload := range workloads {
+		if workload.Deleting || !selects(workload.Labels, row.TargetLabels) {
 			continue
 		}
 
@@ -282,7 +303,25 @@ func (s *ServiceService) backends(ctx context.Context, row database.Service) ([]
 		return cmp.Compare(a.Instance, b.Instance)
 	})
 
-	return backends, nil
+	return backends
+}
+
+// selects reports whether a workload carrying the given labels is one the
+// target's labels select: every target key is present with the same value.
+//
+// This is the in-memory twin of the query targetQueries builds, which compares
+// each label as text. Both sides are strings here, so equality is the same rule,
+// and an empty target selects everything as an empty query does. The two have
+// to agree, because a list selects from the fleet with this and a get asks the
+// database with the query.
+func selects(labels, target map[string]string) bool {
+	for key, value := range target {
+		if labels[key] != value {
+			return false
+		}
+	}
+
+	return true
 }
 
 // targetPort finds the instance's host port mapping for the service's target
