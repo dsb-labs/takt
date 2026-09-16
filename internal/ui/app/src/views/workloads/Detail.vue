@@ -183,7 +183,7 @@ await workload.suspense().catch(() => {});
 <template>
   <DetailPage
     section="Workloads"
-    section-to="/"
+    section-to="/workloads"
     :name="name"
     :error="
       workload.isError.value
@@ -329,7 +329,7 @@ await workload.suspense().catch(() => {});
           </dl>
         </DetailCard>
 
-        <LabelsCard :labels="spec?.labels" target="/" />
+        <LabelsCard :labels="spec?.labels" target="/workloads" />
       </div>
 
       <div class="mt-6 grid gap-6 xl:grid-cols-2">

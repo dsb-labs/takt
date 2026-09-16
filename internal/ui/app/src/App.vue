@@ -24,11 +24,8 @@ async function signOut() {
 }
 
 // active reports whether a section owns the current page, so a detail page
-// keeps its section highlighted. Workload pages live under the root.
+// keeps its section highlighted.
 function active(to: string): boolean {
-  if (to === "/") {
-    return route.path === "/" || route.path.startsWith("/workloads");
-  }
   return route.path.startsWith(to);
 }
 
@@ -40,7 +37,7 @@ const displayVersion = version === "0.0.0" ? "dev" : `v${version}`;
 // which is what its endpoints require, so nobody is offered a page that
 // answers 403.
 const navigation = computed(() => [
-  { name: "Workloads", to: "/" },
+  { name: "Workloads", to: "/workloads" },
   { name: "Secrets", to: "/secrets" },
   { name: "Variables", to: "/variables" },
   { name: "Volumes", to: "/volumes" },
