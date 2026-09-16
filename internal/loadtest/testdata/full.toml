@@ -34,3 +34,4 @@ get = 1
 logs = 1
 restart = 1
 get-service = 1
+list-services = 1
