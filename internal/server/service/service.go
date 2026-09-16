@@ -56,6 +56,23 @@ type (
 		List(ctx context.Context, queries ...string) ([]Workload, error)
 	}
 
+	// The Passes interface describes what the service asks of the reconciler:
+	// to be told when it has observed the host again, and to look again when a
+	// service changes.
+	//
+	// A service's backends are a function of the fleet, and the reconciler is
+	// what watches the fleet: a driver event, a health verdict and a tick all
+	// end in a pass. Listening for the end of one is how a stream learns that
+	// the answer may have moved without observing the host itself.
+	Passes interface {
+		// Subscribe should return a channel that receives a value each time a
+		// pass completes, until ctx ends.
+		Subscribe(ctx context.Context) <-chan struct{}
+		// Notify should ask for a pass to run as soon as possible, and never
+		// block.
+		Notify()
+	}
+
 	// The Backend type describes one address a service balances requests across.
 	Backend struct {
 		// The name of the workload the instance belongs to.
@@ -89,6 +106,7 @@ type (
 		logger    *slog.Logger
 		services  ServiceRepository
 		workloads WorkloadLister
+		passes    Passes
 		address   string
 	}
 
@@ -101,6 +119,10 @@ type (
 		Services ServiceRepository
 		// The source of the workloads a target selects.
 		Workloads WorkloadLister
+		// The loop that observes the fleet, which a stream of services follows.
+		// May be nil, in which case Stream reports the services once and waits
+		// for ctx to end.
+		Passes Passes
 		// The address a backend is reached at, joined with each instance's
 		// published host port. The same address workload references resolve to.
 		Address string
@@ -113,6 +135,7 @@ func NewServiceService(config ServiceServiceConfig) *ServiceService {
 		logger:    config.Logger.With("component", "service"),
 		services:  config.Services,
 		workloads: config.Workloads,
+		passes:    config.Passes,
 		address:   config.Address,
 	}
 }
@@ -140,6 +163,8 @@ func (s *ServiceService) Apply(ctx context.Context, spec manifest.Service) (Serv
 	if err != nil {
 		return Service{}, false, fmt.Errorf("failed to store service: %w", err)
 	}
+
+	s.changed()
 
 	selected, err := s.selected(ctx, stored)
 	if err != nil {
@@ -186,7 +211,13 @@ func (s *ServiceService) List(ctx context.Context, queries ...string) ([]Service
 		return nil, err
 	}
 
-	rows, err := s.services.List(ctx, parsed...)
+	return s.list(ctx, parsed)
+}
+
+// list resolves the services matching the parsed queries, for List and for
+// each read a Stream makes.
+func (s *ServiceService) list(ctx context.Context, queries []database.Query) ([]Service, error) {
+	rows, err := s.services.List(ctx, queries...)
 	if err != nil {
 		if errors.Is(err, database.ErrInvalidQueryPath) {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
@@ -224,9 +255,97 @@ func (s *ServiceService) Delete(ctx context.Context, name string) error {
 		return fmt.Errorf("%w: %s", ErrServiceNotFound, name)
 	case err != nil:
 		return fmt.Errorf("failed to delete service: %w", err)
-	default:
-		return nil
 	}
+
+	s.changed()
+
+	return nil
+}
+
+// changed asks the reconciler for a pass, so that a stream of services sees a
+// service arrive or go through the same signal that tells it the fleet moved.
+//
+// The pass observes the host and converges nothing new, which is a cost paid
+// only when an operator applies or deletes a service. A signal of the service's
+// own would spare it, at the price of a stream listening to two sources rather
+// than one.
+func (s *ServiceService) changed() {
+	if s.passes != nil {
+		s.passes.Notify()
+	}
+}
+
+// Stream calls fn with the services matching every one of the given queries as
+// soon as it is subscribed to the fleet, and again each time the set changes,
+// until ctx ends or fn returns an error. Returns ErrInvalidQuery before fn is
+// ever called when one is malformed, and nil when ctx ends.
+//
+// The set is re-read after every reconciler pass and reported only when it
+// differs from what fn last saw, so a fleet holding still costs the caller
+// nothing. The subscription is taken before the first read, so a pass that
+// completes between the two is not missed.
+//
+// A read failing mid-stream ends it with the error. A caller cannot tell an
+// ended stream from a set that stopped changing without being told, and would
+// otherwise wait on a stream reporting nothing.
+func (s *ServiceService) Stream(ctx context.Context, fn func([]Service) error, queries ...string) error {
+	parsed, err := parseQueries(queries)
+	if err != nil {
+		return err
+	}
+
+	var passes <-chan struct{}
+	if s.passes != nil {
+		passes = s.passes.Subscribe(ctx)
+	}
+
+	last, err := s.list(ctx, parsed)
+	if err != nil {
+		return err
+	}
+
+	if err = fn(last); err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-passes:
+		}
+
+		next, err := s.list(ctx, parsed)
+		if err != nil {
+			return err
+		}
+
+		if equalServices(last, next) {
+			continue
+		}
+
+		if err = fn(next); err != nil {
+			return err
+		}
+
+		last = next
+	}
+}
+
+// equalServices reports whether two listings describe the same services with
+// the same backends. Both are ordered — services by name, backends by workload
+// and instance — so the comparison is positional.
+func equalServices(a, b []Service) bool {
+	return slices.EqualFunc(a, b, func(a, b Service) bool {
+		return a.Name == b.Name &&
+			a.Target.Port == b.Target.Port &&
+			a.Target.Protocol == b.Target.Protocol &&
+			a.CreatedAt.Equal(b.CreatedAt) &&
+			a.UpdatedAt.Equal(b.UpdatedAt) &&
+			maps.Equal(a.Labels, b.Labels) &&
+			maps.Equal(a.Target.Labels, b.Target.Labels) &&
+			slices.Equal(a.Backends, b.Backends)
+	})
 }
 
 // selected reads the workloads one service's target selects, for the paths
