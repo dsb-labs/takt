@@ -60,7 +60,17 @@ const chrome = computed(() => route.name !== "login");
       v-if="chrome"
       class="flex shrink-0 flex-col border-b border-slate-200 bg-white sm:min-h-screen sm:w-56 sm:border-r sm:border-b-0 dark:border-slate-800 dark:bg-slate-900"
     >
-      <RouterLink to="/" class="flex items-center gap-2.5 px-4 py-4">
+      <!-- The brand link is the way to the node page, and reads as the
+           current section the way a nav item does when it is. -->
+      <RouterLink
+        to="/"
+        class="flex items-center gap-2.5 px-4 py-4"
+        :class="
+          route.path === '/'
+            ? 'bg-pulse-50 dark:bg-pulse-950'
+            : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+        "
+      >
         <img src="/takt.svg" alt="" class="h-7 w-7" />
         <span class="text-lg font-semibold tracking-tight">takt</span>
         <span class="mt-0.5 text-xs text-slate-400 dark:text-slate-500">{{

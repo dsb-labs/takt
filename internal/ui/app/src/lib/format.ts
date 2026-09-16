@@ -65,6 +65,13 @@ export function cores(count: number): string {
   return String(Number(count.toFixed(2)));
 }
 
+// percent renders a share of a whole as a whole-number percentage: "42%".
+// Nothing of nothing is nothing, rather than a division by zero.
+export function percent(part: number, whole: number): string {
+  if (whole <= 0) return "0%";
+  return `${Math.round((part / whole) * 100)}%`;
+}
+
 // usageStyles colours a figure by how close it is to the limit it answers
 // to, so a workload about to be killed reads as such before it is. A figure
 // with no limit, or one with room left, keeps the muted colour the rest of
