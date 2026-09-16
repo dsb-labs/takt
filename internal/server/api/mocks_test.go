@@ -1357,6 +1357,78 @@ func (_c *MockServiceService_List_Call) RunAndReturn(run func(ctx context.Contex
 	return _c
 }
 
+// Stream provides a mock function for the type MockServiceService
+func (_mock *MockServiceService) Stream(ctx context.Context, fn func([]service.Service) error, queries ...string) error {
+	var tmpRet mock.Arguments
+	if len(queries) > 0 {
+		tmpRet = _mock.Called(ctx, fn, queries)
+	} else {
+		tmpRet = _mock.Called(ctx, fn)
+	}
+	ret := tmpRet
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stream")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, func([]service.Service) error, ...string) error); ok {
+		r0 = returnFunc(ctx, fn, queries...)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockServiceService_Stream_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stream'
+type MockServiceService_Stream_Call struct {
+	*mock.Call
+}
+
+// Stream is a helper method to define mock.On call
+//   - ctx context.Context
+//   - fn func([]service.Service) error
+//   - queries ...string
+func (_e *MockServiceService_Expecter) Stream(ctx any, fn any, queries ...any) *MockServiceService_Stream_Call {
+	return &MockServiceService_Stream_Call{Call: _e.mock.On("Stream",
+		append([]any{ctx, fn}, queries...)...)}
+}
+
+func (_c *MockServiceService_Stream_Call) Run(run func(ctx context.Context, fn func([]service.Service) error, queries ...string)) *MockServiceService_Stream_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 func([]service.Service) error
+		if args[1] != nil {
+			arg1 = args[1].(func([]service.Service) error)
+		}
+		var arg2 []string
+		var variadicArgs []string
+		if len(args) > 2 {
+			variadicArgs = args[2].([]string)
+		}
+		arg2 = variadicArgs
+		run(
+			arg0,
+			arg1,
+			arg2...,
+		)
+	})
+	return _c
+}
+
+func (_c *MockServiceService_Stream_Call) Return(err error) *MockServiceService_Stream_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockServiceService_Stream_Call) RunAndReturn(run func(ctx context.Context, fn func([]service.Service) error, queries ...string) error) *MockServiceService_Stream_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockPinger creates a new instance of MockPinger. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockPinger(t interface {

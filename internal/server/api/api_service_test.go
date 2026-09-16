@@ -2,8 +2,10 @@ package api_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -236,6 +238,70 @@ func TestServiceAPI_ListServices(t *testing.T) {
 
 		resp := doService(t, svc, http.MethodGet, "/api/v1/services?query=nope", nil)
 		require.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("follows the services as a line per change", func(t *testing.T) {
+		t.Parallel()
+
+		withBackend := testServiceResult()
+
+		withoutBackend := testServiceResult()
+		withoutBackend.Backends = nil
+
+		svc := NewMockServiceService(t)
+		svc.EXPECT().Stream(mock.Anything, mock.Anything, []string{"$.labels.app=web"}).
+			RunAndReturn(func(_ context.Context, fn func([]service.Service) error, _ ...string) error {
+				if err := fn([]service.Service{withBackend}); err != nil {
+					return err
+				}
+
+				return fn([]service.Service{withoutBackend})
+			}).Once()
+
+		resp := doService(t, svc, http.MethodGet, "/api/v1/services?follow=true&query=%24.labels.app%3Dweb", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, "application/x-ndjson", resp.Header().Get("Content-Type"))
+
+		lines := bytes.Split(bytes.TrimSuffix(resp.Body.Bytes(), []byte("\n")), []byte("\n"))
+		require.Len(t, lines, 2)
+
+		// Each line is what a list would have answered at that moment, so a
+		// consumer decodes both the same way.
+		var first, second generated.ListServicesResult
+		require.NoError(t, json.Unmarshal(lines[0], &first))
+		require.NoError(t, json.Unmarshal(lines[1], &second))
+
+		require.Len(t, first.Services, 1)
+		require.NotNil(t, first.Services[0].Backends)
+		assert.Len(t, *first.Services[0].Backends, 1)
+
+		require.Len(t, second.Services, 1)
+		assert.Nil(t, second.Services[0].Backends)
+	})
+
+	t.Run("refuses to follow a malformed query", func(t *testing.T) {
+		t.Parallel()
+
+		// Refused before anything is written, so the refusal is still a status
+		// code rather than a stream that ended.
+		svc := NewMockServiceService(t)
+		svc.EXPECT().Stream(mock.Anything, mock.Anything, []string{"nope"}).
+			Return(fmt.Errorf("%w: nope", service.ErrInvalidQuery)).Once()
+
+		resp := doService(t, svc, http.MethodGet, "/api/v1/services?follow=true&query=nope", nil)
+		require.Equal(t, http.StatusBadRequest, resp.Code)
+		assert.Contains(t, resp.Header().Get("Content-Type"), "json")
+	})
+
+	t.Run("reports a follow that failed before its first line", func(t *testing.T) {
+		t.Parallel()
+
+		svc := NewMockServiceService(t)
+		svc.EXPECT().Stream(mock.Anything, mock.Anything).
+			Return(errors.New("database is gone")).Once()
+
+		resp := doService(t, svc, http.MethodGet, "/api/v1/services?follow=true", nil)
+		require.Equal(t, http.StatusInternalServerError, resp.Code)
 	})
 }
 
