@@ -114,6 +114,49 @@ func TestChecker_Run(t *testing.T) {
 	})
 }
 
+func TestChecker_Changed(t *testing.T) {
+	t.Parallel()
+
+	var healthy atomic.Bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if !healthy.Load() {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	checker := run(t)
+	changed := checker.Changed()
+
+	checker.Set("example", 0, check(server.Listener.Addr().String(), "/healthz"))
+
+	// Starting to unhealthy is the first verdict, and it is announced.
+	awaitSignal(t, changed)
+	awaitStatus(t, checker, "example", health.StatusUnhealthy)
+
+	// The check keeps failing, and a verdict holding steady says nothing: the
+	// signal is about the verdict changing, not about the probe running.
+	require.Eventually(t, func() bool {
+		result, ok := checker.Result("example", 0)
+
+		return ok && result.Failures >= 3
+	}, 10*time.Second, 50*time.Millisecond)
+
+	select {
+	case <-changed:
+		t.Fatal("a verdict holding steady was announced")
+	default:
+	}
+
+	healthy.Store(true)
+	awaitSignal(t, changed)
+	awaitStatus(t, checker, "example", health.StatusHealthy)
+}
+
 func TestChecker_Run_StartPeriod(t *testing.T) {
 	t.Parallel()
 
@@ -488,6 +531,16 @@ func check(address, path string) health.Check {
 		Interval: 50 * time.Millisecond,
 		Timeout:  50 * time.Millisecond,
 		Retries:  1,
+	}
+}
+
+func awaitSignal(t *testing.T, changed <-chan struct{}) {
+	t.Helper()
+
+	select {
+	case <-changed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no verdict change was announced")
 	}
 }
 

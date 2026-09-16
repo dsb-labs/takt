@@ -174,6 +174,9 @@ type (
 		// Result should return the most recent outcome for one instance of a
 		// workload, reporting false when it has no check registered.
 		Result(workload string, instance int) (health.Result, bool)
+		// Changed should return a channel that receives a value when an
+		// instance's verdict changes.
+		Changed() <-chan struct{}
 	}
 
 	// The Recorder interface describes how the reconciler records what it observed
@@ -528,11 +531,12 @@ func (r *Reconciler) Notify() {
 
 // Run reconciles until ctx is cancelled, returning nil on a clean shutdown.
 //
-// Passes run on a ticker, when the driver reports a change, and when Notify is
-// called. Passes never overlap: each is driven from this one goroutine. A driver
-// event does not run a pass alone — the events behind it are collected for a
-// short window first, so a burst coalesces into one pass rather than queueing
-// one each.
+// Passes run on a ticker, when the driver reports a change, when a health check's
+// verdict changes, and when Notify is called. Passes never overlap: each is
+// driven from this one goroutine. A driver event does not run a pass alone — the
+// events behind it are collected for a short window first, so a burst coalesces
+// into one pass rather than queueing one each. A verdict is held for the same
+// window, since the instances of one workload tend to come up together.
 func (r *Reconciler) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -540,6 +544,12 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	events, err := r.watch(ctx)
 	if err != nil {
 		return err
+	}
+
+	// Nil without a checker, which a select never receives from.
+	var verdicts <-chan struct{}
+	if r.checker != nil {
+		verdicts = r.checker.Changed()
 	}
 
 	// Converge once at startup so that a workload applied before the server was
@@ -553,6 +563,10 @@ func (r *Reconciler) Run(ctx context.Context) error {
 		case <-ticker.C:
 			r.reconcile(ctx)
 		case <-r.nudge:
+			r.reconcile(ctx)
+		case <-verdicts:
+			r.logger.Debug("reconciling after a health verdict changed")
+			coalesce(ctx, events)
 			r.reconcile(ctx)
 		case event, ok := <-events:
 			if !ok {
