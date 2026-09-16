@@ -1,0 +1,6 @@
+Inspect the node the server runs on.
+
+A node is the machine serving the API: the box takt's workloads share with
+whatever else runs there. It sits beside workloads, volumes and services as
+something an operator reads, where the system routes answer a supervisor
+asking about the process.
