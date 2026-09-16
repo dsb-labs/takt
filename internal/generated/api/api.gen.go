@@ -1177,6 +1177,18 @@ type MountSignal string
 // to; the capacity says what it has, as the host, not as takt's workloads
 // see it.
 type Node struct {
+	// Allocated What takt has promised: the limits every running instance is held to,
+	// summed. This is the figure that answers whether another workload fits,
+	// read against the node's capacity.
+	//
+	// An instance naming no limit is bounded only by the host. It adds
+	// nothing to the sum while consuming what it likes, so it is counted
+	// instead, and a sum that reads empty on a full box says why.
+	//
+	// Advisory rather than a budget. Takt runs beside whatever else is on
+	// the host, and nothing refuses a workload for exceeding the capacity.
+	Allocated NodeAllocation `json:"allocated"`
+
 	// Arch The processor architecture the binary was built for.
 	//
 	// Examples: amd64
@@ -1223,6 +1235,30 @@ type Node struct {
 	//
 	// Examples: v0.4.0
 	Version string `json:"version"`
+}
+
+// NodeAllocation What takt has promised: the limits every running instance is held to,
+// summed. This is the figure that answers whether another workload fits,
+// read against the node's capacity.
+//
+// An instance naming no limit is bounded only by the host. It adds
+// nothing to the sum while consuming what it likes, so it is counted
+// instead, and a sum that reads empty on a full box says why.
+//
+// Advisory rather than a budget. Takt runs beside whatever else is on
+// the host, and nothing refuses a workload for exceeding the capacity.
+type NodeAllocation struct {
+	// CPU The processors the running instances may use between them.
+	CPU float64 `json:"cpu"`
+
+	// Memory The memory the running instances may use between them, in bytes.
+	Memory int `json:"memory"`
+
+	// UnlimitedCPU How many running instances name no processor limit.
+	UnlimitedCPU int `json:"unlimitedCpu"`
+
+	// UnlimitedMemory How many running instances name no memory limit.
+	UnlimitedMemory int `json:"unlimitedMemory"`
 }
 
 // NodeDisk The filesystem under a directory, in bytes.
@@ -3193,6 +3229,9 @@ type ClientInterface interface {
 	// for itself. Disk is reported for the data directory and the volumes
 	// directory, since a volume filling the disk is how a node is lost.
 	//
+	// Beside the capacity is what takt has promised against it: the limits
+	// the running instances are held to, summed.
+	//
 	// The node is a resource beside workloads and volumes rather than a
 	// system route: the system routes answer a supervisor asking about the
 	// process, where this answers an operator asking about the machine.
@@ -4307,6 +4346,9 @@ func (c *Client) OidcLogin(ctx context.Context, reqEditors ...RequestEditorFn) (
 // rather than what those workloads consume, which each instance reports
 // for itself. Disk is reported for the data directory and the volumes
 // directory, since a volume filling the disk is how a node is lost.
+//
+// Beside the capacity is what takt has promised against it: the limits
+// the running instances are held to, summed.
 //
 // The node is a resource beside workloads and volumes rather than a
 // system route: the system routes answer a supervisor asking about the
@@ -7775,6 +7817,9 @@ type ClientWithResponsesInterface interface {
 	// rather than what those workloads consume, which each instance reports
 	// for itself. Disk is reported for the data directory and the volumes
 	// directory, since a volume filling the disk is how a node is lost.
+	//
+	// Beside the capacity is what takt has promised against it: the limits
+	// the running instances are held to, summed.
 	//
 	// The node is a resource beside workloads and volumes rather than a
 	// system route: the system routes answer a supervisor asking about the
@@ -11635,6 +11680,9 @@ func (c *ClientWithResponses) OidcLoginWithResponse(ctx context.Context, reqEdit
 // rather than what those workloads consume, which each instance reports
 // for itself. Disk is reported for the data directory and the volumes
 // directory, since a volume filling the disk is how a node is lost.
+//
+// Beside the capacity is what takt has promised against it: the limits
+// the running instances are held to, summed.
 //
 // The node is a resource beside workloads and volumes rather than a
 // system route: the system routes answer a supervisor asking about the

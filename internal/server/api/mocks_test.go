@@ -769,8 +769,8 @@ func (_m *MockNodeService) EXPECT() *MockNodeService_Expecter {
 }
 
 // Get provides a mock function for the type MockNodeService
-func (_mock *MockNodeService) Get() (service.Node, error) {
-	ret := _mock.Called()
+func (_mock *MockNodeService) Get(ctx context.Context) (service.Node, error) {
+	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Get")
@@ -778,16 +778,16 @@ func (_mock *MockNodeService) Get() (service.Node, error) {
 
 	var r0 service.Node
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func() (service.Node, error)); ok {
-		return returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (service.Node, error)); ok {
+		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func() service.Node); ok {
-		r0 = returnFunc()
+	if returnFunc, ok := ret.Get(0).(func(context.Context) service.Node); ok {
+		r0 = returnFunc(ctx)
 	} else {
 		r0 = ret.Get(0).(service.Node)
 	}
-	if returnFunc, ok := ret.Get(1).(func() error); ok {
-		r1 = returnFunc()
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = returnFunc(ctx)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -800,13 +800,20 @@ type MockNodeService_Get_Call struct {
 }
 
 // Get is a helper method to define mock.On call
-func (_e *MockNodeService_Expecter) Get() *MockNodeService_Get_Call {
-	return &MockNodeService_Get_Call{Call: _e.mock.On("Get")}
+//   - ctx context.Context
+func (_e *MockNodeService_Expecter) Get(ctx any) *MockNodeService_Get_Call {
+	return &MockNodeService_Get_Call{Call: _e.mock.On("Get", ctx)}
 }
 
-func (_c *MockNodeService_Get_Call) Run(run func()) *MockNodeService_Get_Call {
+func (_c *MockNodeService_Get_Call) Run(run func(ctx context.Context)) *MockNodeService_Get_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		run(
+			arg0,
+		)
 	})
 	return _c
 }
@@ -816,7 +823,7 @@ func (_c *MockNodeService_Get_Call) Return(node service.Node, err error) *MockNo
 	return _c
 }
 
-func (_c *MockNodeService_Get_Call) RunAndReturn(run func() (service.Node, error)) *MockNodeService_Get_Call {
+func (_c *MockNodeService_Get_Call) RunAndReturn(run func(ctx context.Context) (service.Node, error)) *MockNodeService_Get_Call {
 	_c.Call.Return(run)
 	return _c
 }

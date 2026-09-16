@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	generated "github.com/dsb-labs/takt/internal/generated/api"
@@ -25,7 +26,7 @@ func TestNodeAPI_GetNode(t *testing.T) {
 		node := testNode()
 
 		svc := NewMockNodeService(t)
-		svc.EXPECT().Get().Return(node, nil).Once()
+		svc.EXPECT().Get(mock.Anything).Return(node, nil).Once()
 
 		resp := doNode(t, svc)
 		require.Equal(t, http.StatusOK, resp.Code)
@@ -50,11 +51,15 @@ func TestNodeAPI_GetNode(t *testing.T) {
 		assert.Equal(t, node.Disks.Data.Free, result.Node.Disks.Data.Free)
 		assert.Equal(t, node.Disks.Volumes.Path, result.Node.Disks.Volumes.Path)
 		assert.Equal(t, node.Disks.Volumes.Total, result.Node.Disks.Volumes.Total)
+		assert.Equal(t, node.Allocated.Memory, result.Node.Allocated.Memory)
+		assert.InDelta(t, node.Allocated.CPU, result.Node.Allocated.CPU, 0)
+		assert.Equal(t, node.Allocated.UnlimitedMemory, result.Node.Allocated.UnlimitedMemory)
+		assert.Equal(t, node.Allocated.UnlimitedCPU, result.Node.Allocated.UnlimitedCPU)
 	})
 
 	t.Run("answers 500 when the node cannot be read", func(t *testing.T) {
 		svc := NewMockNodeService(t)
-		svc.EXPECT().Get().Return(service.Node{}, errors.New("meminfo is gone")).Once()
+		svc.EXPECT().Get(mock.Anything).Return(service.Node{}, errors.New("meminfo is gone")).Once()
 
 		resp := doNode(t, svc)
 		require.Equal(t, http.StatusInternalServerError, resp.Code)
@@ -103,5 +108,6 @@ func testNode() service.Node {
 			Data:    service.NodeDisk{Path: "/var/lib/takt", Total: 500 << 30, Free: 320 << 30},
 			Volumes: service.NodeDisk{Path: "/var/lib/takt/volumes", Total: 500 << 30, Free: 320 << 30},
 		},
+		Allocated: service.NodeAllocation{Memory: 6 << 30, CPU: 3.5, UnlimitedMemory: 2, UnlimitedCPU: 1},
 	}
 }

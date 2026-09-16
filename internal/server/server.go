@@ -425,6 +425,10 @@ func Run(ctx context.Context, config Config) error {
 	})
 
 	nodeSvc := service.NewNodeService(service.NodeServiceConfig{
+		// The workload service rather than the repository: what is promised
+		// is the limit of each running instance, which only the hydrated
+		// listing knows.
+		Workloads:        svc,
 		DataDirectory:    config.Data.Directory,
 		VolumesDirectory: config.VolumesPath(),
 		Version:          telemetry.Version(),
