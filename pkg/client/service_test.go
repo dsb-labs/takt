@@ -1,6 +1,9 @@
 package client_test
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -196,6 +199,91 @@ func TestClient_ListServices(t *testing.T) {
 		})
 
 		_, err := c.ListServices(t.Context(), "nope")
+		assert.Error(t, err)
+		assert.True(t, client.IsBadRequest(err))
+	})
+}
+
+func TestClient_StreamServices(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports each set the server writes", func(t *testing.T) {
+		t.Parallel()
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, http.MethodGet, r.Method)
+			assert.Equal(t, "/api/v1/services", r.URL.Path)
+			assert.Equal(t, "true", r.URL.Query().Get("follow"))
+			assert.Equal(t, []string{"$.labels.app=web"}, r.URL.Query()["query"])
+
+			w.Header().Set("Content-Type", "application/x-ndjson")
+
+			encoder := json.NewEncoder(w)
+			require.NoError(t, encoder.Encode(api.ListServicesResult{Services: []api.Service{apiService("example")}}))
+			require.NoError(t, encoder.Encode(api.ListServicesResult{Services: []api.Service{}}))
+		})
+
+		var sets [][]client.Service
+		err := c.StreamServices(t.Context(), func(services []client.Service) error {
+			sets = append(sets, services)
+			return nil
+		}, "$.labels.app=web")
+		require.NoError(t, err)
+
+		// The server ending the stream is not a failure: the caller reconnects if
+		// it wants more.
+		require.Len(t, sets, 2)
+		require.Len(t, sets[0], 1)
+		assert.Equal(t, "example", sets[0][0].Name)
+		assert.Empty(t, sets[1])
+	})
+
+	t.Run("ends with the caller's error", func(t *testing.T) {
+		t.Parallel()
+
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			require.NoError(t, json.NewEncoder(w).Encode(api.ListServicesResult{Services: []api.Service{}}))
+		})
+
+		err := c.StreamServices(t.Context(), func([]client.Service) error {
+			return errors.New("seen enough")
+		})
+		assert.EqualError(t, err, "seen enough")
+	})
+
+	t.Run("treats cancellation as the end", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			require.NoError(t, json.NewEncoder(w).Encode(api.ListServicesResult{Services: []api.Service{}}))
+			http.NewResponseController(w).Flush()
+
+			// Held open until the caller hangs up, as a quiet fleet would hold it.
+			<-r.Context().Done()
+		})
+
+		err := c.StreamServices(ctx, func([]client.Service) error {
+			cancel()
+			return nil
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("reports a malformed query", func(t *testing.T) {
+		t.Parallel()
+
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusBadRequest, api.ErrorResponse{Error: "invalid query"})
+		})
+
+		err := c.StreamServices(t.Context(), func([]client.Service) error {
+			t.Fatal("nothing should be reported for a query the server refused")
+			return nil
+		}, "nope")
 		assert.Error(t, err)
 		assert.True(t, client.IsBadRequest(err))
 	})
