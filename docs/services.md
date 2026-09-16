@@ -88,7 +88,9 @@ with the host port allocated to that instance, so it is the same address a
 `${workload:name:port}` reference resolves to.
 
 Backends are computed when they are read. Nothing is stored, so a reallocated port,
-a health change or a scale is reflected the next time the service is read.
+a health change or a scale is reflected the next time the service is read. Listing
+services observes the host once, however many services there are, and resolves every
+service from that one observation.
 
 ## Feeding a balancer
 
