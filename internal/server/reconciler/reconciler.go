@@ -262,6 +262,13 @@ type (
 		// name. Seeded with a zero value per driver so a driver that has never
 		// answered reads as not ready rather than as absent.
 		observations map[string]Observation
+
+		// Guards subscribers, separately from mux for the reason obsMux is.
+		subMux sync.Mutex
+		// The channels told when a pass completes, each buffered by one so that
+		// a subscriber which has not caught up holds one pending signal rather
+		// than a queue of them.
+		subscribers map[chan struct{}]struct{}
 	}
 
 	// The Config type contains fields used to construct a Reconciler.
@@ -451,6 +458,7 @@ func New(config Config) *Reconciler {
 		unhealthy:    make(map[slot]string),
 		restarts:     make(map[string]struct{}),
 		observations: observations,
+		subscribers:  make(map[chan struct{}]struct{}),
 		tracer:       telemetry.Tracer(config.TracerProvider, scope),
 		instruments:  newInstruments(telemetry.Meter(config.MeterProvider, scope)),
 		// Buffered so that a caller signalling a change never blocks: a pass is
@@ -595,6 +603,58 @@ func (r *Reconciler) Passes() uint64 {
 	return r.passes.Load()
 }
 
+// Subscribe returns a channel that receives a value each time the loop has
+// looked at the fleet, until ctx ends. It is the push form of Passes, for a
+// caller that wants to act on what a pass found rather than count them.
+//
+// A pass signals twice: once it has observed the drivers, and again once it has
+// finished acting on what it saw. The first is what makes a subscriber prompt.
+// A pass acting on a new workload pulls its image, and a subscriber waiting for
+// the end of that would learn of a change that had nothing to do with the pull
+// only once the pull was done. The second is what reports the pass's own work,
+// since starting and stopping instances is what most changes the fleet.
+//
+// The signal says "look again" and nothing more. What such a caller wants is the
+// hydrated view of the fleet — health folded in, ports resolved, retained
+// instances removed — which the workload service already builds from a fresh
+// observation, so a pass hands out no view of its own. That keeps the signal
+// correct however a pass ended: one that failed to observe still completes, and
+// the subscriber's own read reports whatever the drivers say now.
+//
+// A subscriber that has not drained its channel holds one pending signal rather
+// than a queue of them. It reads the whole fleet when it looks, so the signals
+// it missed told it nothing the next read will not.
+func (r *Reconciler) Subscribe(ctx context.Context) <-chan struct{} {
+	subscriber := make(chan struct{}, 1)
+
+	r.subMux.Lock()
+	r.subscribers[subscriber] = struct{}{}
+	r.subMux.Unlock()
+
+	context.AfterFunc(ctx, func() {
+		r.subMux.Lock()
+		defer r.subMux.Unlock()
+
+		delete(r.subscribers, subscriber)
+	})
+
+	return subscriber
+}
+
+// looked tells every subscriber that the loop has looked at the fleet. It never
+// blocks: a subscriber already holding a signal has all this one would tell it.
+func (r *Reconciler) looked() {
+	r.subMux.Lock()
+	defer r.subMux.Unlock()
+
+	for subscriber := range r.subscribers {
+		select {
+		case subscriber <- struct{}{}:
+		default:
+		}
+	}
+}
+
 // Observations reports how the most recent attempt to observe each driver ended,
 // keyed by runtime name. A driver that has never been asked reports a zero
 // Observation.
@@ -633,6 +693,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 		r.instruments.passDuration.Record(ctx, time.Since(started).Seconds(), set)
 
 		r.passes.Add(1)
+		r.looked()
 	}()
 
 	rows, err := r.workloads.List(ctx)
@@ -659,6 +720,10 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	}
 
 	span.SetAttributes(attribute.Int("takt.instances", len(instances)))
+
+	// Before acting on the observation, so a subscriber is not kept waiting on
+	// whatever acting on it takes.
+	r.looked()
 
 	// Two views of the same observation, because two questions are being asked of it.
 	//

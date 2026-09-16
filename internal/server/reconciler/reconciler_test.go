@@ -503,6 +503,67 @@ func TestReconciler_Run_CoalescesDriverEvents(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_TellsSubscribersWhenItLooks(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return(nil, nil)
+	d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+	d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	awaitPasses(t, r, 1)
+
+	subscribed := r.Subscribe(ctx)
+
+	// Nothing has happened since subscribing, so nothing is pending.
+	select {
+	case <-subscribed:
+		t.Fatal("a subscriber was told about a pass that completed before it subscribed")
+	default:
+	}
+
+	// A pass asked for is a pass completed, and the subscriber hears about it.
+	r.Notify()
+
+	select {
+	case <-subscribed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the subscriber was not told about the pass")
+	}
+
+	// Several passes while the subscriber is not listening leave one signal
+	// waiting, not one per pass, and not the two each pass sends.
+	for range 3 {
+		passes := r.Passes()
+		r.Notify()
+		awaitPasses(t, r, passes+1)
+	}
+
+	<-subscribed
+
+	select {
+	case <-subscribed:
+		t.Fatal("the subscriber was told about the same passes twice")
+	default:
+	}
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_Health(t *testing.T) {
 	t.Parallel()
 
