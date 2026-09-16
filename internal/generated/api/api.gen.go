@@ -784,6 +784,14 @@ type GetHealthResult struct {
 // GetHealthResultStatus Always "ok". The response arriving is the answer.
 type GetHealthResultStatus string
 
+// GetNodeResult The body returned when reading the node.
+type GetNodeResult struct {
+	// Node The machine the server runs on. The identity says what is being talked
+	// to; the capacity says what it has, as the host, not as takt's workloads
+	// see it.
+	Node Node `json:"node"`
+}
+
 // GetOIDCResult The body returned when the OIDC configuration is read.
 type GetOIDCResult struct {
 	// ClientID The client identifier registered with the issuer.
@@ -1164,6 +1172,111 @@ type LogoutResult = map[string]interface{}
 // whatever the workload puts there, so there is no change the server could
 // report.
 type MountSignal string
+
+// Node The machine the server runs on. The identity says what is being talked
+// to; the capacity says what it has, as the host, not as takt's workloads
+// see it.
+type Node struct {
+	// Arch The processor architecture the binary was built for.
+	//
+	// Examples: amd64
+	Arch string `json:"arch"`
+
+	// BootedAt When the host booted.
+	BootedAt time.Time `json:"bootedAt"`
+
+	// Cpus How many processors the host has.
+	Cpus int `json:"cpus"`
+
+	// Disks The filesystems under the directories takt writes to. Both describe one
+	// filesystem unless the operator mounted something at the volumes
+	// directory, which is the setup a box holding large volumes has.
+	Disks NodeDisks `json:"disks"`
+
+	// Hostname The host's name.
+	//
+	// Examples: node-1
+	Hostname string `json:"hostname"`
+
+	// Kernel The kernel release.
+	//
+	// Examples: 6.12.0-1-amd64
+	Kernel string `json:"kernel"`
+
+	// Load The host's load averages, as the kernel reports them.
+	Load NodeLoad `json:"load"`
+
+	// Memory The host's memory, in bytes.
+	Memory NodeMemory `json:"memory"`
+
+	// Os The operating system the binary was built for.
+	//
+	// Examples: linux
+	Os string `json:"os"`
+
+	// StartedAt When the server process started.
+	StartedAt time.Time `json:"startedAt"`
+
+	// Version The version of the takt binary serving the request, which is what a
+	// client checks before relying on something newer than the server.
+	//
+	//
+	// Examples: v0.4.0
+	Version string `json:"version"`
+}
+
+// NodeDisk The filesystem under a directory, in bytes.
+type NodeDisk struct {
+	// Free How much of it an unprivileged writer can still use, in bytes. This
+	// is less than what root could fill, since a filesystem keeps a
+	// reserve for it.
+	Free int `json:"free"`
+
+	// Path The directory the figures describe, as configured. Reported even
+	// when the directory has not been created yet, since the filesystem
+	// it will land on already exists.
+	//
+	//
+	// Examples: /var/lib/takt/volumes
+	Path string `json:"path"`
+
+	// Total The size of the filesystem, in bytes.
+	Total int `json:"total"`
+}
+
+// NodeDisks The filesystems under the directories takt writes to. Both describe one
+// filesystem unless the operator mounted something at the volumes
+// directory, which is the setup a box holding large volumes has.
+type NodeDisks struct {
+	// Data The filesystem under a directory, in bytes.
+	Data NodeDisk `json:"data"`
+
+	// Volumes The filesystem under a directory, in bytes.
+	Volumes NodeDisk `json:"volumes"`
+}
+
+// NodeLoad The host's load averages, as the kernel reports them.
+type NodeLoad struct {
+	// Fifteen The load averaged over the last fifteen minutes.
+	Fifteen float64 `json:"fifteen"`
+
+	// Five The load averaged over the last five minutes.
+	Five float64 `json:"five"`
+
+	// One The load averaged over the last minute.
+	One float64 `json:"one"`
+}
+
+// NodeMemory The host's memory, in bytes.
+type NodeMemory struct {
+	// Total How much memory the host has, in bytes.
+	Total int `json:"total"`
+
+	// Used How much of it is in use, in bytes. This is the total less what the
+	// kernel reports as available, so the page cache it reclaims before
+	// refusing an allocation is not counted as spent.
+	Used int `json:"used"`
+}
 
 // OverlapPolicy What the server does when an occurrence comes due and the previous run has not
 // finished.
@@ -3070,6 +3183,23 @@ type ClientInterface interface {
 	// Corresponds with GET /api/v1/auth/oidc/login (the `OidcLogin` operationId).
 	OidcLogin(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetNode Read the node
+	//
+	// Returns the machine the server runs on: what it is, and what it has.
+	//
+	// The capacity figures are the host's. Memory in use and the load
+	// averages describe everything on the box, takt's workloads included,
+	// rather than what those workloads consume, which each instance reports
+	// for itself. Disk is reported for the data directory and the volumes
+	// directory, since a volume filling the disk is how a node is lost.
+	//
+	// The node is a resource beside workloads and volumes rather than a
+	// system route: the system routes answer a supervisor asking about the
+	// process, where this answers an operator asking about the machine.
+	//
+	// Corresponds with GET /api/v1/node (the `GetNode` operationId).
+	GetNode(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListSecrets List secrets
 	//
 	// Returns the secrets the server holds, each with the workloads currently
@@ -4158,6 +4288,33 @@ func (c *Client) OidcCallback(ctx context.Context, params *OidcCallbackParams, r
 // Corresponds with GET /api/v1/auth/oidc/login (the `OidcLogin` operationId).
 func (c *Client) OidcLogin(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewOidcLoginRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetNode Read the node
+//
+// Returns the machine the server runs on: what it is, and what it has.
+//
+// The capacity figures are the host's. Memory in use and the load
+// averages describe everything on the box, takt's workloads included,
+// rather than what those workloads consume, which each instance reports
+// for itself. Disk is reported for the data directory and the volumes
+// directory, since a volume filling the disk is how a node is lost.
+//
+// The node is a resource beside workloads and volumes rather than a
+// system route: the system routes answer a supervisor asking about the
+// process, where this answers an operator asking about the machine.
+//
+// Corresponds with GET /api/v1/node (the `GetNode` operationId).
+func (c *Client) GetNode(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetNodeRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -5711,6 +5868,33 @@ func NewOidcLoginRequest(server string) (*http.Request, error) {
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/auth/oidc/login")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetNodeRequest constructs an http.Request for the GetNode method
+func NewGetNodeRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/node")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -7582,6 +7766,25 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/auth/oidc/login (the `OidcLogin` operationId).
 	OidcLoginWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*OidcLoginResponse, error)
 
+	// GetNodeWithResponse Read the node
+	//
+	// Returns the machine the server runs on: what it is, and what it has.
+	//
+	// The capacity figures are the host's. Memory in use and the load
+	// averages describe everything on the box, takt's workloads included,
+	// rather than what those workloads consume, which each instance reports
+	// for itself. Disk is reported for the data directory and the volumes
+	// directory, since a volume filling the disk is how a node is lost.
+	//
+	// The node is a resource beside workloads and volumes rather than a
+	// system route: the system routes answer a supervisor asking about the
+	// process, where this answers an operator asking about the machine.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/node (the `GetNode` operationId).
+	GetNodeWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetNodeResponse, error)
+
 	// ListSecretsWithResponse List secrets
 	//
 	// Returns the secrets the server holds, each with the workloads currently
@@ -9011,6 +9214,75 @@ func (r OidcLoginResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r OidcLoginResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// GetNodeResponse401Headers the declared response headers of an HTTP 401 response for GetNode
+type GetNodeResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type GetNodeResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GetNodeResult
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *GetNodeResponse401Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetNodeResponse) GetJSON200() *GetNodeResult {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetNodeResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetNodeResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r GetNodeResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r GetNodeResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetNodeResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetNodeResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetNodeResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -11354,6 +11626,31 @@ func (c *ClientWithResponses) OidcLoginWithResponse(ctx context.Context, reqEdit
 	return ParseOidcLoginResponse(rsp)
 }
 
+// GetNodeWithResponse Read the node
+//
+// Returns the machine the server runs on: what it is, and what it has.
+//
+// The capacity figures are the host's. Memory in use and the load
+// averages describe everything on the box, takt's workloads included,
+// rather than what those workloads consume, which each instance reports
+// for itself. Disk is reported for the data directory and the volumes
+// directory, since a volume filling the disk is how a node is lost.
+//
+// The node is a resource beside workloads and volumes rather than a
+// system route: the system routes answer a supervisor asking about the
+// process, where this answers an operator asking about the machine.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/node (the `GetNode` operationId).
+func (c *ClientWithResponses) GetNodeWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetNodeResponse, error) {
+	rsp, err := c.GetNode(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetNodeResponse(rsp)
+}
+
 // ListSecretsWithResponse List secrets
 //
 // Returns the secrets the server holds, each with the workloads currently
@@ -12956,6 +13253,66 @@ func ParseOidcLoginResponse(rsp *http.Response) (*OidcLoginResponse, error) {
 	return response, nil
 }
 
+// ParseGetNodeResponse parses an HTTP response from a GetNodeWithResponse call
+func ParseGetNodeResponse(rsp *http.Response) (*GetNodeResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetNodeResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GetNodeResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 401:
+		var headers GetNodeResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
+	}
+
+	return response, nil
+}
+
 // ParseListSecretsResponse parses an HTTP response from a ListSecretsWithResponse call
 func ParseListSecretsResponse(rsp *http.Response) (*ListSecretsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -14486,6 +14843,9 @@ type ServerInterface interface {
 	// OidcLogin Start the browser OIDC flow
 	// (GET /api/v1/auth/oidc/login)
 	OidcLogin(w http.ResponseWriter, r *http.Request)
+	// GetNode Read the node
+	// (GET /api/v1/node)
+	GetNode(w http.ResponseWriter, r *http.Request)
 	// ListSecrets List secrets
 	// (GET /api/v1/secrets)
 	ListSecrets(w http.ResponseWriter, r *http.Request, params ListSecretsParams)
@@ -14882,6 +15242,28 @@ func (siw *ServerInterfaceWrapper) OidcLogin(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.OidcLogin(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNode operation middleware
+func (siw *ServerInterfaceWrapper) GetNode(w http.ResponseWriter, r *http.Request) {
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"viewer"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"viewer"})
+
+	r = r.WithContext(ctx)
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNode(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16281,6 +16663,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/tokens", wrapper.ListTokens)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/tokens", wrapper.CreateToken)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/tokens/{id}", wrapper.DeleteToken)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/node", wrapper.GetNode)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/system/health", wrapper.GetHealth)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/system/ready", wrapper.GetReadiness)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/system/metrics", wrapper.GetMetrics)
@@ -17011,6 +17394,74 @@ type OidcLogin500JSONResponse struct {
 }
 
 func (response OidcLogin500JSONResponse) VisitOidcLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNodeRequestObject struct {
+}
+
+type GetNodeResponseObject interface {
+	VisitGetNodeResponse(w http.ResponseWriter) error
+}
+
+type GetNode200JSONResponse GetNodeResult
+
+func (response GetNode200JSONResponse) VisitGetNodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNode401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetNode401JSONResponse) VisitGetNodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNode403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetNode403JSONResponse) VisitGetNodeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetNode500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response GetNode500JSONResponse) VisitGetNodeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -19123,6 +19574,9 @@ type StrictServerInterface interface {
 	// OidcLogin Start the browser OIDC flow
 	// (GET /api/v1/auth/oidc/login)
 	OidcLogin(ctx context.Context, request OidcLoginRequestObject) (OidcLoginResponseObject, error)
+	// GetNode Read the node
+	// (GET /api/v1/node)
+	GetNode(ctx context.Context, request GetNodeRequestObject) (GetNodeResponseObject, error)
 	// ListSecrets List secrets
 	// (GET /api/v1/secrets)
 	ListSecrets(ctx context.Context, request ListSecretsRequestObject) (ListSecretsResponseObject, error)
@@ -19554,6 +20008,30 @@ func (sh *strictHandler) OidcLogin(w http.ResponseWriter, r *http.Request) {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(OidcLoginResponseObject); ok {
 		if err := validResponse.VisitOidcLoginResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetNode operation middleware
+func (sh *strictHandler) GetNode(w http.ResponseWriter, r *http.Request) {
+	var request GetNodeRequestObject
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetNode(ctx, request.(GetNodeRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetNode")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetNodeResponseObject); ok {
+		if err := validResponse.VisitGetNodeResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -912,6 +912,36 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/node": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read the node
+     * @description Returns the machine the server runs on: what it is, and what it has.
+     *
+     *     The capacity figures are the host's. Memory in use and the load
+     *     averages describe everything on the box, takt's workloads included,
+     *     rather than what those workloads consume, which each instance reports
+     *     for itself. Disk is reported for the data directory and the volumes
+     *     directory, since a volume filling the disk is how a node is lost.
+     *
+     *     The node is a resource beside workloads and volumes rather than a
+     *     system route: the system routes answer a supervisor asking about the
+     *     process, where this answers an operator asking about the machine.
+     */
+    get: operations["getNode"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/system/health": {
     parameters: {
       query?: never;
@@ -2771,6 +2801,114 @@ export interface components {
        */
       previousKeyId: string;
     };
+    /** @description The body returned when reading the node. */
+    GetNodeResult: {
+      node: components["schemas"]["Node"];
+    };
+    /**
+     * @description The machine the server runs on. The identity says what is being talked
+     *     to; the capacity says what it has, as the host, not as takt's workloads
+     *     see it.
+     */
+    Node: {
+      /**
+       * @description The host's name.
+       * @example node-1
+       */
+      hostname: string;
+      /**
+       * @description The operating system the binary was built for.
+       * @example linux
+       */
+      os: string;
+      /**
+       * @description The processor architecture the binary was built for.
+       * @example amd64
+       */
+      arch: string;
+      /**
+       * @description The kernel release.
+       * @example 6.12.0-1-amd64
+       */
+      kernel: string;
+      /** @description How many processors the host has. */
+      cpus: number;
+      /**
+       * @description The version of the takt binary serving the request, which is what a
+       *     client checks before relying on something newer than the server.
+       * @example v0.4.0
+       */
+      version: string;
+      /**
+       * Format: date-time
+       * @description When the server process started.
+       */
+      startedAt: string;
+      /**
+       * Format: date-time
+       * @description When the host booted.
+       */
+      bootedAt: string;
+      memory: components["schemas"]["NodeMemory"];
+      load: components["schemas"]["NodeLoad"];
+      disks: components["schemas"]["NodeDisks"];
+    };
+    /** @description The host's memory, in bytes. */
+    NodeMemory: {
+      /** @description How much memory the host has, in bytes. */
+      total: number;
+      /**
+       * @description How much of it is in use, in bytes. This is the total less what the
+       *     kernel reports as available, so the page cache it reclaims before
+       *     refusing an allocation is not counted as spent.
+       */
+      used: number;
+    };
+    /** @description The host's load averages, as the kernel reports them. */
+    NodeLoad: {
+      /**
+       * Format: double
+       * @description The load averaged over the last minute.
+       */
+      one: number;
+      /**
+       * Format: double
+       * @description The load averaged over the last five minutes.
+       */
+      five: number;
+      /**
+       * Format: double
+       * @description The load averaged over the last fifteen minutes.
+       */
+      fifteen: number;
+    };
+    /**
+     * @description The filesystems under the directories takt writes to. Both describe one
+     *     filesystem unless the operator mounted something at the volumes
+     *     directory, which is the setup a box holding large volumes has.
+     */
+    NodeDisks: {
+      data: components["schemas"]["NodeDisk"];
+      volumes: components["schemas"]["NodeDisk"];
+    };
+    /** @description The filesystem under a directory, in bytes. */
+    NodeDisk: {
+      /**
+       * @description The directory the figures describe, as configured. Reported even
+       *     when the directory has not been created yet, since the filesystem
+       *     it will land on already exists.
+       * @example /var/lib/takt/volumes
+       */
+      path: string;
+      /** @description The size of the filesystem, in bytes. */
+      total: number;
+      /**
+       * @description How much of it an unprivileged writer can still use, in bytes. This
+       *     is less than what root could fill, since a filesystem keeps a
+       *     reserve for it.
+       */
+      free: number;
+    };
     /** @description The body returned when the server is alive. */
     GetHealthResult: {
       /**
@@ -4303,6 +4441,29 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  getNode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The node. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GetNodeResult"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
