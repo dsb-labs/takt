@@ -197,6 +197,26 @@ teardown and removes the desired state last.
 Nothing races the reconciler for the same containers. A failure part way through
 leaves a workload that gets torn down again, rather than containers nothing records.
 
+## A stream is a subscriber to passes, not an event bus
+
+A balancer following the services list is told when the set changes. What tells it
+is a reconciler pass, because a pass is already what notices the fleet moving: a
+driver event, a health verdict, an apply and the ticker all end in one. A pass
+signals once it has observed the drivers and again once it has acted, so a
+subscriber is not kept waiting on an image pull for news that had nothing to do
+with it.
+
+The signal carries no view of the fleet. A pass says "look again" and the stream
+reads the hydrated listing the workload service builds, with health folded in and
+ports resolved. Handing out the pass's own observation would mean a second copy of
+that hydration, and a stream that saw the fleet as the reconciler does rather than
+as a list reports it.
+
+A service applied or deleted asks for a pass rather than signalling streams itself.
+The pass observes the host and converges nothing new, which is a cost paid only on
+an operator's action. In return a stream listens to one source. An event bus would
+serve the same purpose and is a larger thing than the endpoint it would serve.
+
 ## The driver boundary
 
 A driver turns a workload into running work, reports what it has, and stops it again.

@@ -372,6 +372,10 @@ export interface paths {
      *
      *     Repeating the `query` parameter narrows the result: a service is returned
      *     only when it satisfies every query given.
+     *
+     *     Set `follow` to keep the response open and be told each time the set
+     *     changes, which is what a balancer reading its backends from takt wants
+     *     instead of polling.
      */
     get: operations["listServices"];
     put?: never;
@@ -3470,6 +3474,23 @@ export interface operations {
          *     own labels, not its target's.
          */
         query?: string[];
+        /**
+         * @description Keep the response open and write the matching services again each
+         *     time the set changes.
+         *
+         *     The response is then newline-delimited JSON rather than one document.
+         *     Each line is the whole set as a list would return it, so a consumer
+         *     rebuilds what it knows from the latest line and nothing else: a
+         *     service or backend that has gone is simply absent from it. The first
+         *     line is written at once, and a line follows each change the server
+         *     notices, which is as soon as the reconciler has looked at the fleet
+         *     again. Nothing is written while the set holds still.
+         *
+         *     The stream ends when the caller disconnects or the server stops. It
+         *     carries no keepalive, so a consumer that loses the connection opens a
+         *     new one and starts again from the first line.
+         */
+        follow?: boolean;
       };
       header?: never;
       path?: never;
@@ -3477,13 +3498,17 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description The matching services. */
+      /**
+       * @description The matching services. One document, or one line per change when
+       *     `follow` is set.
+       */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           "application/json": components["schemas"]["ListServicesResult"];
+          "application/x-ndjson": components["schemas"]["ListServicesResult"];
         };
       };
       400: components["responses"]["BadRequest"];
