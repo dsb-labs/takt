@@ -3073,6 +3073,39 @@ func (s *Suite) TestObservability() {
 	s.Contains(metrics.String(), "takt_workloads")
 }
 
+// TestNode covers the read an operator takes of the machine itself: what the
+// server is, and what the host has.
+func (s *Suite) TestNode() {
+	node, err := s.client.GetNode(s.ctx())
+	s.Require().NoError(err)
+
+	hostname, err := os.Hostname()
+	s.Require().NoError(err)
+	s.Equal(hostname, node.Hostname)
+	s.Positive(node.CPUs)
+	s.NotEmpty(node.Kernel)
+
+	// The version is whatever the build carries, which for a server started
+	// inside the test process is not a release, so only its presence is
+	// asserted.
+	s.NotEmpty(node.Version)
+
+	// The instants are read from the kernel and recorded at startup rather
+	// than derived from the clock, so their order is the check.
+	s.False(node.StartedAt.IsZero())
+	s.True(node.BootedAt.Before(node.StartedAt))
+
+	s.Positive(node.Memory.Total)
+	s.LessOrEqual(node.Memory.Used, node.Memory.Total)
+
+	// The directories are the configured ones, reported whether or not the
+	// first volume has created the volumes directory yet.
+	s.Equal(s.directory, node.Disks.Data.Path)
+	s.Equal(filepath.Join(s.directory, "volumes"), node.Disks.Volumes.Path)
+	s.Positive(node.Disks.Data.Total)
+	s.LessOrEqual(node.Disks.Data.Free, node.Disks.Data.Total)
+}
+
 // TestDebugBundle proves every test leaves the server's spans and logs on disk,
 // which is what a failed run is diagnosed from.
 func (s *Suite) TestDebugBundle() {
