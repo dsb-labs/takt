@@ -8,9 +8,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestNodeService_Get(t *testing.T) {
@@ -39,15 +42,19 @@ func TestNodeService_Get(t *testing.T) {
 				require.NoError(t, os.Mkdir(volumesDirectory, 0o700))
 			}
 
+			workloads := NewMockWorkloadLister(t)
+			workloads.EXPECT().List(mock.Anything).Return(testFleet(), nil).Once()
+
 			startedAt := time.Now().Add(-time.Minute)
 			svc := service.NewNodeService(service.NodeServiceConfig{
+				Workloads:        workloads,
 				DataDirectory:    dataDirectory,
 				VolumesDirectory: volumesDirectory,
 				Version:          "v1.2.3",
 				StartedAt:        startedAt,
 			})
 
-			node, err := svc.Get()
+			node, err := svc.Get(t.Context())
 			require.NoError(t, err)
 
 			hostname, err := os.Hostname()
@@ -82,10 +89,39 @@ func TestNodeService_Get(t *testing.T) {
 			assert.Equal(t, volumesDirectory, node.Disks.Volumes.Path)
 			assert.Equal(t, node.Disks.Data.Total, node.Disks.Volumes.Total)
 
+			// Two running instances at 512m and half a processor, one running
+			// with no limits, and one exited that promised nothing. The memory
+			// is the figure the runtimes enforce, so the manifest's size is
+			// summed as bytes.
+			assert.Equal(t, 2*512<<20, node.Allocated.Memory)
+			assert.InDelta(t, 1.0, node.Allocated.CPU, 0)
+			assert.Equal(t, 1, node.Allocated.UnlimitedMemory)
+			assert.Equal(t, 1, node.Allocated.UnlimitedCPU)
+
 			if !tc.VolumesCreated {
 				_, err := os.Stat(volumesDirectory)
 				assert.ErrorIs(t, err, os.ErrNotExist)
 			}
 		})
+	}
+}
+
+func testFleet() []service.Workload {
+	return []service.Workload{
+		{
+			Name: "limited",
+			Spec: manifest.Spec{Resources: &manifest.Resources{Memory: "512m", CPU: 0.5}},
+			Instances: []service.Instance{
+				{Instance: driver.Instance{ID: "a", State: driver.StateRunning}},
+				{Instance: driver.Instance{ID: "b", State: driver.StateRunning}},
+				{Instance: driver.Instance{ID: "c", State: driver.StateExited}},
+			},
+		},
+		{
+			Name: "unlimited",
+			Instances: []service.Instance{
+				{Instance: driver.Instance{ID: "d", State: driver.StateRunning}},
+			},
+		},
 	}
 }

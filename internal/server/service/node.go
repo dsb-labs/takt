@@ -3,6 +3,7 @@ package service
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/dsb-labs/takt/internal/server/driver"
 )
 
 // Where the kernel reports the host's memory, load and boot time. Read on
@@ -53,6 +56,27 @@ type (
 		Load NodeLoad
 		// The filesystems takt writes to.
 		Disks NodeDisks
+		// What takt's running instances are permitted between them.
+		Allocated NodeAllocation
+	}
+
+	// The NodeAllocation type sums what takt has promised: the limits every
+	// running instance is held to, which is the figure that answers whether
+	// another workload fits. An instance naming no limit is bounded only by
+	// the host, so it adds nothing to the sum while consuming what it likes,
+	// and is counted instead so a sum that reads empty on a full box says why.
+	//
+	// Advisory rather than a budget: takt runs beside whatever else is on the
+	// host, and nothing refuses a workload for exceeding the capacity.
+	NodeAllocation struct {
+		// The memory the running instances may use between them, in bytes.
+		Memory int
+		// The processors the running instances may use between them.
+		CPU float64
+		// How many running instances name no memory limit.
+		UnlimitedMemory int
+		// How many running instances name no processor limit.
+		UnlimitedCPU int
 	}
 
 	// The NodeMemory type describes the host's memory, in bytes.
@@ -98,6 +122,7 @@ type (
 
 	// The NodeService type reports the machine the server runs on.
 	NodeService struct {
+		workloads        WorkloadLister
 		dataDirectory    string
 		volumesDirectory string
 		version          string
@@ -107,6 +132,8 @@ type (
 	// The NodeServiceConfig type contains fields used to construct a
 	// NodeService.
 	NodeServiceConfig struct {
+		// The workloads whose running instances the allocation sums.
+		Workloads WorkloadLister
 		// The directory takt keeps its state in.
 		DataDirectory string
 		// The directory holding every volume.
@@ -121,6 +148,7 @@ type (
 // NewNodeService returns a new instance of the NodeService type.
 func NewNodeService(config NodeServiceConfig) *NodeService {
 	return &NodeService{
+		workloads:        config.Workloads,
 		dataDirectory:    config.DataDirectory,
 		volumesDirectory: config.VolumesDirectory,
 		version:          config.Version,
@@ -130,9 +158,16 @@ func NewNodeService(config NodeServiceConfig) *NodeService {
 
 // Get reports the machine the server runs on as it stands now.
 //
-// The figures are read from the kernel rather than from a runtime's daemon,
-// so they describe the whole box rather than one driver's share of it.
-func (s *NodeService) Get() (Node, error) {
+// The host's figures are read from the kernel rather than from a runtime's
+// daemon, so they describe the whole box rather than one driver's share of
+// it. The allocation is a walk over the workloads as they stand, since the
+// promise is the limit each running instance is held to now.
+func (s *NodeService) Get(ctx context.Context) (Node, error) {
+	workloads, err := s.workloads.List(ctx)
+	if err != nil {
+		return Node{}, fmt.Errorf("failed to list workloads: %w", err)
+	}
+
 	hostname, err := os.Hostname()
 	if err != nil {
 		return Node{}, fmt.Errorf("failed to read hostname: %w", err)
@@ -180,7 +215,39 @@ func (s *NodeService) Get() (Node, error) {
 		Memory:    memory,
 		Load:      load,
 		Disks:     NodeDisks{Data: data, Volumes: volumes},
+		Allocated: allocation(workloads),
 	}, nil
+}
+
+// allocation sums the limits the running instances are held to. The limits
+// are read from each specification the way a usage reading's are, so the sum
+// is of the figures the runtimes enforce.
+func allocation(workloads []Workload) NodeAllocation {
+	var allocated NodeAllocation
+
+	for _, workload := range workloads {
+		limits := usageLimits(workload.Spec.Resources)
+
+		for _, instance := range workload.Instances {
+			if instance.State != driver.StateRunning {
+				continue
+			}
+
+			if limits.MemoryLimit > 0 {
+				allocated.Memory += int(limits.MemoryLimit)
+			} else {
+				allocated.UnlimitedMemory++
+			}
+
+			if limits.CPULimit > 0 {
+				allocated.CPU += limits.CPULimit
+			} else {
+				allocated.UnlimitedCPU++
+			}
+		}
+	}
+
+	return allocated
 }
 
 // readProc opens a procfs file and hands it to a parser.
