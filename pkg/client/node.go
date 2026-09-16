@@ -40,6 +40,23 @@ type (
 		Load NodeLoad
 		// The filesystems takt writes to.
 		Disks NodeDisks
+		// What takt's running instances are permitted between them, read
+		// against the capacity above to answer whether another workload fits.
+		Allocated NodeAllocation
+	}
+
+	// The NodeAllocation type sums the limits every running instance is held
+	// to. An instance naming no limit is bounded only by the host and adds
+	// nothing to the sum, so it is counted instead.
+	NodeAllocation struct {
+		// The memory the running instances may use between them, in bytes.
+		Memory int
+		// The processors the running instances may use between them.
+		CPU float64
+		// How many running instances name no memory limit.
+		UnlimitedMemory int
+		// How many running instances name no processor limit.
+		UnlimitedCPU int
 	}
 
 	// The NodeMemory type describes the host's memory, in bytes.
@@ -124,6 +141,12 @@ func newNode(node api.Node) Node {
 		Disks: NodeDisks{
 			Data:    newNodeDisk(node.Disks.Data),
 			Volumes: newNodeDisk(node.Disks.Volumes),
+		},
+		Allocated: NodeAllocation{
+			Memory:          node.Allocated.Memory,
+			CPU:             node.Allocated.CPU,
+			UnlimitedMemory: node.Allocated.UnlimitedMemory,
+			UnlimitedCPU:    node.Allocated.UnlimitedCPU,
 		},
 	}
 }

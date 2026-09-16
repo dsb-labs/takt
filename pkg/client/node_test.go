@@ -29,6 +29,7 @@ func TestClient_GetNode(t *testing.T) {
 			Data:    api.NodeDisk{Path: "/var/lib/takt", Total: 500 << 30, Free: 320 << 30},
 			Volumes: api.NodeDisk{Path: "/var/lib/takt/volumes", Total: 500 << 30, Free: 320 << 30},
 		},
+		Allocated: api.NodeAllocation{Memory: 6 << 30, CPU: 3.5, UnlimitedMemory: 2, UnlimitedCPU: 1},
 	}
 
 	tt := []struct {
@@ -78,6 +79,10 @@ func TestClient_GetNode(t *testing.T) {
 			assert.InDelta(t, node.Load.Fifteen, result.Load.Fifteen, 0)
 			assert.Equal(t, node.Disks.Data.Path, result.Disks.Data.Path)
 			assert.Equal(t, node.Disks.Volumes.Free, result.Disks.Volumes.Free)
+			assert.Equal(t, node.Allocated.Memory, result.Allocated.Memory)
+			assert.InDelta(t, node.Allocated.CPU, result.Allocated.CPU, 0)
+			assert.Equal(t, node.Allocated.UnlimitedMemory, result.Allocated.UnlimitedMemory)
+			assert.Equal(t, node.Allocated.UnlimitedCPU, result.Allocated.UnlimitedCPU)
 		})
 	}
 }

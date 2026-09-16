@@ -3104,6 +3104,30 @@ func (s *Suite) TestNode() {
 	s.Equal(filepath.Join(s.directory, "volumes"), node.Disks.Volumes.Path)
 	s.Positive(node.Disks.Data.Total)
 	s.LessOrEqual(node.Disks.Data.Free, node.Disks.Data.Total)
+
+	// A workload naming limits adds them to what the node has promised once
+	// it runs, and one naming none is counted rather than summed.
+	limited := s.workloadName() + "-limited"
+	unlimited := s.workloadName() + "-unlimited"
+	s.T().Cleanup(func() { s.cleanup(limited) })
+	s.T().Cleanup(func() { s.cleanup(unlimited) })
+
+	spec := s.containerSpec(limited)
+	spec.Resources = &manifest.Resources{Memory: "64m", CPU: 0.25}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+	_, _, err = s.client.Apply(s.ctx(), s.containerSpec(unlimited))
+	s.Require().NoError(err)
+	s.awaitState(limited, client.WorkloadStateRunning)
+	s.awaitState(unlimited, client.WorkloadStateRunning)
+
+	after, err := s.client.GetNode(s.ctx())
+	s.Require().NoError(err)
+	s.Equal(node.Allocated.Memory+64<<20, after.Allocated.Memory)
+	s.InDelta(node.Allocated.CPU+0.25, after.Allocated.CPU, 0.001)
+	s.Equal(node.Allocated.UnlimitedMemory+1, after.Allocated.UnlimitedMemory)
+	s.Equal(node.Allocated.UnlimitedCPU+1, after.Allocated.UnlimitedCPU)
 }
 
 // TestDebugBundle proves every test leaves the server's spans and logs on disk,
