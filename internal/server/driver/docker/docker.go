@@ -10,21 +10,19 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/strslice"
-	"github.com/docker/docker/pkg/stdcopy"
-	"github.com/docker/go-connections/nat"
 	"github.com/docker/go-units"
+	"github.com/moby/moby/api/pkg/stdcopy"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/metric"
@@ -209,7 +207,10 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", err
 	}
 
-	exposed, bindings := portBindings(d.bind, w.Ports)
+	exposed, bindings, err := portBindings(d.bind, w.Ports)
+	if err != nil {
+		return "", err
+	}
 
 	// A host-networked container shares the host's network namespace, so docker
 	// makes no port mapping and the process binds the host port itself. The
@@ -275,11 +276,11 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
 
-	if err = d.client.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil {
+	if err = d.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		// The container exists but won't run. Remove it so the next reconcile
 		// starts from a clean slate rather than finding a created-but-dead
 		// container it would have to reason about.
-		if removeErr := d.client.ContainerRemove(ctx, created.ID, container.RemoveOptions{Force: true}); removeErr != nil {
+		if removeErr := d.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true}); removeErr != nil {
 			d.logger.With("workload", w.Name, "error", removeErr).Error("failed to remove container after failed start")
 		}
 
@@ -347,7 +348,7 @@ func (d *Driver) stop(ctx context.Context, workload string, containers []contain
 
 	unstopped := make(map[string]struct{}, len(containers))
 	for _, c := range containers {
-		if err := d.client.ContainerStop(ctx, c.ID, container.StopOptions{}); err != nil {
+		if err := d.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{}); err != nil {
 			failed = append(failed, fmt.Errorf("failed to stop container: %w", err))
 			unstopped[c.ID] = struct{}{}
 
@@ -416,7 +417,7 @@ func (d *Driver) discard(ctx context.Context, workload string, containers []cont
 	var failed []error
 
 	for _, c := range containers {
-		if err := d.client.ContainerStop(ctx, c.ID, container.StopOptions{}); err != nil {
+		if err := d.client.ContainerStop(ctx, c.ID, client.ContainerStopOptions{}); err != nil {
 			failed = append(failed, fmt.Errorf("failed to stop container: %w", err))
 
 			continue
@@ -435,7 +436,7 @@ func (d *Driver) discard(ctx context.Context, workload string, containers []cont
 }
 
 func (d *Driver) remove(ctx context.Context, id string) error {
-	if err := d.client.ContainerRemove(ctx, id, container.RemoveOptions{Force: true}); err != nil {
+	if err := d.client.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true}); err != nil {
 		return fmt.Errorf("failed to remove container: %w", err)
 	}
 
@@ -633,14 +634,14 @@ func (d *Driver) Usage(ctx context.Context, _, name string) (map[string]driver.U
 // otherwise waits for one to compute a processor rate, and the caller computes
 // that rate from its own readings anyway.
 func (d *Driver) stats(ctx context.Context, id string) (driver.Usage, error) {
-	response, err := d.client.ContainerStatsOneShot(ctx, id)
+	body, err := d.client.ContainerStatsOneShot(ctx, id)
 	if err != nil {
 		return driver.Usage{}, fmt.Errorf("failed to read container stats: %w", err)
 	}
-	defer response.Body.Close()
+	defer body.Close()
 
 	var stats container.StatsResponse
-	if err = json.NewDecoder(response.Body).Decode(&stats); err != nil {
+	if err = json.NewDecoder(body).Decode(&stats); err != nil {
 		return driver.Usage{}, fmt.Errorf("failed to decode container stats: %w", err)
 	}
 
@@ -676,11 +677,10 @@ func memoryUsage(stats container.MemoryStats) uint64 {
 // on its next pass, so a failed stream degrades responsiveness rather than
 // correctness.
 func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
-	messages, errs := d.client.Events(ctx, events.ListOptions{
-		Filters: filters.NewArgs(
-			filters.Arg("type", "container"),
-			filters.Arg("label", LabelWorkload),
-		),
+	messages, errs := d.client.Events(ctx, client.EventsListOptions{
+		Filters: client.Filters{}.
+			Add("type", "container").
+			Add("label", LabelWorkload),
 	})
 
 	out := make(chan driver.Event)
@@ -771,7 +771,7 @@ func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, optio
 }
 
 func (d *Driver) containerLogs(ctx context.Context, out io.Writer, id string, options driver.LogOptions) error {
-	request := container.LogsOptions{
+	request := client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Tail:       strconv.Itoa(options.Tail),
@@ -818,9 +818,9 @@ func (d *Driver) containers(ctx context.Context, workload string) ([]container.S
 		label = LabelWorkload + "=" + workload
 	}
 
-	containers, err := d.client.ContainerList(ctx, container.ListOptions{
+	containers, err := d.client.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
-		Filters: filters.NewArgs(filters.Arg("label", label)),
+		Filters: client.Filters{}.Add("label", label),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
@@ -890,7 +890,7 @@ func (d *Driver) inspection(ctx context.Context, instance *driver.Instance) (ins
 	answer := inspection{exitCode: details.State.ExitCode}
 
 	if details.State.Health != nil {
-		answer.health = details.State.Health.Status
+		answer.health = string(details.State.Health.Status)
 	}
 
 	if startedAt, err := time.Parse(time.RFC3339Nano, details.State.StartedAt); err == nil {
@@ -941,8 +941,8 @@ func (d *Driver) forget(containers []container.Summary) {
 // failure is returned exactly once, and a success falls through to the start.
 func (d *Driver) ensureImage(ctx context.Context, workload, ref string, policy manifest.PullPolicy) error {
 	if policy != manifest.PullAlways {
-		images, err := d.client.ImageList(ctx, image.ListOptions{
-			Filters: filters.NewArgs(filters.Arg("reference", ref)),
+		images, err := d.client.ImageList(ctx, client.ImageListOptions{
+			Filters: client.Filters{}.Add("reference", ref),
 		})
 		if err != nil {
 			return fmt.Errorf("failed to list images: %w", err)
@@ -1039,7 +1039,7 @@ func (d *Driver) fetch(ctx context.Context, ref string, requester trace.Link) er
 			metric.WithAttributes(attribute.String("image", ref)))
 	}()
 
-	body, err := d.client.ImagePull(ctx, ref, image.PullOptions{RegistryAuth: auth})
+	body, err := d.client.ImagePull(ctx, ref, client.ImagePullOptions{RegistryAuth: auth})
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -1117,7 +1117,7 @@ func state(status container.ContainerState) driver.State {
 
 // instancePorts reports the published ports docker says a container has, which is the
 // observed counterpart to the allocation the server recorded.
-func instancePorts(ports []container.Port) []driver.Port {
+func instancePorts(ports []container.PortSummary) []driver.Port {
 	if len(ports) == 0 {
 		return nil
 	}
@@ -1179,13 +1179,18 @@ func mounts(volumes []driver.Volume) []mount.Mount {
 // The address is what decides who can reach the workload, so it comes from the
 // server's configuration rather than being fixed here. Publishing on every interface
 // is a thing an operator can ask for and not a thing a driver assumes.
-func portBindings(bind string, ports []driver.Port) (nat.PortSet, nat.PortMap) {
+func portBindings(bind string, ports []driver.Port) (network.PortSet, network.PortMap, error) {
 	if len(ports) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	exposed := make(nat.PortSet, len(ports))
-	bindings := make(nat.PortMap, len(ports))
+	address, err := netip.ParseAddr(bind)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid bind address %q: %w", bind, err)
+	}
+
+	exposed := make(network.PortSet, len(ports))
+	bindings := make(network.PortMap, len(ports))
 
 	for _, port := range ports {
 		// A port that names no protocol is a TCP one, which is what every port was
@@ -1197,16 +1202,19 @@ func portBindings(bind string, ports []driver.Port) (nat.PortSet, nat.PortMap) {
 			protocol = "tcp"
 		}
 
-		key := nat.Port(strconv.Itoa(port.Container) + "/" + protocol)
+		key, err := network.ParsePort(strconv.Itoa(port.Container) + "/" + protocol)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid port: %w", err)
+		}
 
 		exposed[key] = struct{}{}
-		bindings[key] = []nat.PortBinding{{
-			HostIP:   bind,
+		bindings[key] = []network.PortBinding{{
+			HostIP:   address,
 			HostPort: strconv.Itoa(port.Host),
 		}}
 	}
 
-	return exposed, bindings
+	return exposed, bindings, nil
 }
 
 func environment(env map[string]string) []string {
@@ -1332,14 +1340,14 @@ func supersededBy(containers []container.Summary) map[string]bool {
 	return superseded
 }
 
-// capabilities converts a specification's capability list into the type docker
-// expects, or nil when the specification names none.
-func capabilities(names []string) strslice.StrSlice {
+// capabilities returns a specification's capability list, or nil when the
+// specification names none so docker sees no list rather than an empty one.
+func capabilities(names []string) []string {
 	if len(names) == 0 {
 		return nil
 	}
 
-	return strslice.StrSlice(names)
+	return names
 }
 
 // resources converts a specification's resource limits into the cgroup settings

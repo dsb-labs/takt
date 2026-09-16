@@ -7,7 +7,8 @@ import (
 
 	"github.com/distribution/reference"
 	"github.com/docker/cli/cli/config"
-	"github.com/docker/docker/api/types/registry"
+	"github.com/moby/moby/api/pkg/authconfig"
+	"github.com/moby/moby/api/types/registry"
 )
 
 // The key docker's credential file stores Docker Hub logins under. The file
@@ -86,7 +87,7 @@ func (d *Driver) registryAuth(ref string) (string, error) {
 
 	d.logger.With("registry", key).Debug("resolved registry credentials")
 
-	encoded, err := registry.EncodeAuthConfig(resolved)
+	encoded, err := authconfig.Encode(resolved)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode registry credentials: %w", err)
 	}
