@@ -3713,6 +3713,88 @@ func (s *Suite) TestServiceReportsBackends() {
 	s.Require().NoError(err, "deleting the service must leave the workload")
 }
 
+// TestServiceStreamsBackends checks that a followed services list reports the
+// backends as they arrive and as they go, without being asked again.
+func (s *Suite) TestServiceStreamsBackends() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// The service first, so the stream is open before anything it selects
+	// exists and the arrival is something it has to notice. Labelled, since
+	// the stream is narrowed by a query over the service's own labels.
+	_, err := s.client.ApplyService(s.ctx(), manifest.Service{
+		Version: "v1",
+		Name:    name,
+		Labels:  map[string]string{"service-e2e": name},
+		Target: manifest.ServiceTarget{
+			Labels: map[string]string{"service-e2e": name},
+			Port:   80,
+		},
+	})
+	s.Require().NoError(err)
+	s.T().Cleanup(func() {
+		if s.client != nil {
+			_ = s.client.DeleteService(context.Background(), name)
+		}
+	})
+
+	ctx, cancel := context.WithCancel(s.ctx())
+	defer cancel()
+
+	sets := make(chan []client.ServiceBackend, 64)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- s.client.StreamServices(ctx, func(services []client.Service) error {
+			for _, service := range services {
+				if service.Name == name {
+					sets <- service.Backends
+				}
+			}
+
+			return nil
+		}, `$.labels."service-e2e"=`+name)
+	}()
+
+	// awaitSet reads sets until one carries the given number of backends.
+	// Intermediate sets are allowed: two instances may come up in two passes.
+	awaitSet := func(count int) []client.ServiceBackend {
+		for {
+			select {
+			case backends := <-sets:
+				if len(backends) == count {
+					return backends
+				}
+			case <-time.After(convergeTimeout):
+				s.Require().Failf("the stream stalled", "service %q never reported %d backends", name, count)
+			}
+		}
+	}
+
+	// The first line is written at once, and nothing is running yet.
+	s.Empty(awaitSet(0))
+
+	spec := s.containerSpec(name, manifest.Port{To: 80})
+	spec.Count = 2
+	spec.Labels = map[string]string{"service-e2e": name}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	backends := awaitSet(2)
+	for _, backend := range backends {
+		s.Equal(name, backend.Workload)
+	}
+
+	// Stopping drains the backends, and the stream says so.
+	_, err = s.client.Stop(s.ctx(), name, client.WithWait())
+	s.Require().NoError(err)
+	s.Empty(awaitSet(0))
+
+	cancel()
+	s.NoError(<-done)
+}
+
 // testPolicy is the document the auth tests apply: one principal per role,
 // and a group the fake identity provider asserts.
 var testPolicy = manifest.Policy{
