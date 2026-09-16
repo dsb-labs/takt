@@ -78,7 +78,7 @@ await workload.suspense().catch(() => {});
 <template>
   <DetailPage
     section="Workloads"
-    section-to="/"
+    section-to="/workloads"
     :trail="[{ label: name, to: `/workloads/${name}` }, { label: 'Instances' }]"
     :name="`${name} instance ${index}`"
     :crumb="String(index)"
