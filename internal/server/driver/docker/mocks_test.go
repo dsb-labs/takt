@@ -8,11 +8,12 @@ import (
 	"context"
 	"io"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/registry"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/events"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/api/types/registry"
+	"github.com/moby/moby/client"
 	"github.com/opencontainers/image-spec/specs-go/v1"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -308,7 +309,7 @@ func (_c *MockClient_ContainerKill_Call) RunAndReturn(run func(ctx context.Conte
 }
 
 // ContainerList provides a mock function for the type MockClient
-func (_mock *MockClient) ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+func (_mock *MockClient) ContainerList(ctx context.Context, options client.ContainerListOptions) ([]container.Summary, error) {
 	ret := _mock.Called(ctx, options)
 
 	if len(ret) == 0 {
@@ -317,17 +318,17 @@ func (_mock *MockClient) ContainerList(ctx context.Context, options container.Li
 
 	var r0 []container.Summary
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, container.ListOptions) ([]container.Summary, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, client.ContainerListOptions) ([]container.Summary, error)); ok {
 		return returnFunc(ctx, options)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, container.ListOptions) []container.Summary); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, client.ContainerListOptions) []container.Summary); ok {
 		r0 = returnFunc(ctx, options)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]container.Summary)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, container.ListOptions) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, client.ContainerListOptions) error); ok {
 		r1 = returnFunc(ctx, options)
 	} else {
 		r1 = ret.Error(1)
@@ -342,20 +343,20 @@ type MockClient_ContainerList_Call struct {
 
 // ContainerList is a helper method to define mock.On call
 //   - ctx context.Context
-//   - options container.ListOptions
+//   - options client.ContainerListOptions
 func (_e *MockClient_Expecter) ContainerList(ctx any, options any) *MockClient_ContainerList_Call {
 	return &MockClient_ContainerList_Call{Call: _e.mock.On("ContainerList", ctx, options)}
 }
 
-func (_c *MockClient_ContainerList_Call) Run(run func(ctx context.Context, options container.ListOptions)) *MockClient_ContainerList_Call {
+func (_c *MockClient_ContainerList_Call) Run(run func(ctx context.Context, options client.ContainerListOptions)) *MockClient_ContainerList_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 container.ListOptions
+		var arg1 client.ContainerListOptions
 		if args[1] != nil {
-			arg1 = args[1].(container.ListOptions)
+			arg1 = args[1].(client.ContainerListOptions)
 		}
 		run(
 			arg0,
@@ -370,13 +371,13 @@ func (_c *MockClient_ContainerList_Call) Return(summarys []container.Summary, er
 	return _c
 }
 
-func (_c *MockClient_ContainerList_Call) RunAndReturn(run func(ctx context.Context, options container.ListOptions) ([]container.Summary, error)) *MockClient_ContainerList_Call {
+func (_c *MockClient_ContainerList_Call) RunAndReturn(run func(ctx context.Context, options client.ContainerListOptions) ([]container.Summary, error)) *MockClient_ContainerList_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // ContainerLogs provides a mock function for the type MockClient
-func (_mock *MockClient) ContainerLogs(ctx context.Context, id string, options container.LogsOptions) (io.ReadCloser, error) {
+func (_mock *MockClient) ContainerLogs(ctx context.Context, id string, options client.ContainerLogsOptions) (io.ReadCloser, error) {
 	ret := _mock.Called(ctx, id, options)
 
 	if len(ret) == 0 {
@@ -385,17 +386,17 @@ func (_mock *MockClient) ContainerLogs(ctx context.Context, id string, options c
 
 	var r0 io.ReadCloser
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, container.LogsOptions) (io.ReadCloser, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, client.ContainerLogsOptions) (io.ReadCloser, error)); ok {
 		return returnFunc(ctx, id, options)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, container.LogsOptions) io.ReadCloser); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, client.ContainerLogsOptions) io.ReadCloser); ok {
 		r0 = returnFunc(ctx, id, options)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(io.ReadCloser)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, container.LogsOptions) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, client.ContainerLogsOptions) error); ok {
 		r1 = returnFunc(ctx, id, options)
 	} else {
 		r1 = ret.Error(1)
@@ -411,12 +412,12 @@ type MockClient_ContainerLogs_Call struct {
 // ContainerLogs is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-//   - options container.LogsOptions
+//   - options client.ContainerLogsOptions
 func (_e *MockClient_Expecter) ContainerLogs(ctx any, id any, options any) *MockClient_ContainerLogs_Call {
 	return &MockClient_ContainerLogs_Call{Call: _e.mock.On("ContainerLogs", ctx, id, options)}
 }
 
-func (_c *MockClient_ContainerLogs_Call) Run(run func(ctx context.Context, id string, options container.LogsOptions)) *MockClient_ContainerLogs_Call {
+func (_c *MockClient_ContainerLogs_Call) Run(run func(ctx context.Context, id string, options client.ContainerLogsOptions)) *MockClient_ContainerLogs_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -426,9 +427,9 @@ func (_c *MockClient_ContainerLogs_Call) Run(run func(ctx context.Context, id st
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 container.LogsOptions
+		var arg2 client.ContainerLogsOptions
 		if args[2] != nil {
-			arg2 = args[2].(container.LogsOptions)
+			arg2 = args[2].(client.ContainerLogsOptions)
 		}
 		run(
 			arg0,
@@ -444,13 +445,13 @@ func (_c *MockClient_ContainerLogs_Call) Return(readCloser io.ReadCloser, err er
 	return _c
 }
 
-func (_c *MockClient_ContainerLogs_Call) RunAndReturn(run func(ctx context.Context, id string, options container.LogsOptions) (io.ReadCloser, error)) *MockClient_ContainerLogs_Call {
+func (_c *MockClient_ContainerLogs_Call) RunAndReturn(run func(ctx context.Context, id string, options client.ContainerLogsOptions) (io.ReadCloser, error)) *MockClient_ContainerLogs_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // ContainerRemove provides a mock function for the type MockClient
-func (_mock *MockClient) ContainerRemove(ctx context.Context, id string, options container.RemoveOptions) error {
+func (_mock *MockClient) ContainerRemove(ctx context.Context, id string, options client.ContainerRemoveOptions) error {
 	ret := _mock.Called(ctx, id, options)
 
 	if len(ret) == 0 {
@@ -458,7 +459,7 @@ func (_mock *MockClient) ContainerRemove(ctx context.Context, id string, options
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, container.RemoveOptions) error); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, client.ContainerRemoveOptions) error); ok {
 		r0 = returnFunc(ctx, id, options)
 	} else {
 		r0 = ret.Error(0)
@@ -474,12 +475,12 @@ type MockClient_ContainerRemove_Call struct {
 // ContainerRemove is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-//   - options container.RemoveOptions
+//   - options client.ContainerRemoveOptions
 func (_e *MockClient_Expecter) ContainerRemove(ctx any, id any, options any) *MockClient_ContainerRemove_Call {
 	return &MockClient_ContainerRemove_Call{Call: _e.mock.On("ContainerRemove", ctx, id, options)}
 }
 
-func (_c *MockClient_ContainerRemove_Call) Run(run func(ctx context.Context, id string, options container.RemoveOptions)) *MockClient_ContainerRemove_Call {
+func (_c *MockClient_ContainerRemove_Call) Run(run func(ctx context.Context, id string, options client.ContainerRemoveOptions)) *MockClient_ContainerRemove_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -489,9 +490,9 @@ func (_c *MockClient_ContainerRemove_Call) Run(run func(ctx context.Context, id 
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 container.RemoveOptions
+		var arg2 client.ContainerRemoveOptions
 		if args[2] != nil {
-			arg2 = args[2].(container.RemoveOptions)
+			arg2 = args[2].(client.ContainerRemoveOptions)
 		}
 		run(
 			arg0,
@@ -507,13 +508,13 @@ func (_c *MockClient_ContainerRemove_Call) Return(err error) *MockClient_Contain
 	return _c
 }
 
-func (_c *MockClient_ContainerRemove_Call) RunAndReturn(run func(ctx context.Context, id string, options container.RemoveOptions) error) *MockClient_ContainerRemove_Call {
+func (_c *MockClient_ContainerRemove_Call) RunAndReturn(run func(ctx context.Context, id string, options client.ContainerRemoveOptions) error) *MockClient_ContainerRemove_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // ContainerStart provides a mock function for the type MockClient
-func (_mock *MockClient) ContainerStart(ctx context.Context, id string, options container.StartOptions) error {
+func (_mock *MockClient) ContainerStart(ctx context.Context, id string, options client.ContainerStartOptions) error {
 	ret := _mock.Called(ctx, id, options)
 
 	if len(ret) == 0 {
@@ -521,7 +522,7 @@ func (_mock *MockClient) ContainerStart(ctx context.Context, id string, options 
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, container.StartOptions) error); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, client.ContainerStartOptions) error); ok {
 		r0 = returnFunc(ctx, id, options)
 	} else {
 		r0 = ret.Error(0)
@@ -537,12 +538,12 @@ type MockClient_ContainerStart_Call struct {
 // ContainerStart is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-//   - options container.StartOptions
+//   - options client.ContainerStartOptions
 func (_e *MockClient_Expecter) ContainerStart(ctx any, id any, options any) *MockClient_ContainerStart_Call {
 	return &MockClient_ContainerStart_Call{Call: _e.mock.On("ContainerStart", ctx, id, options)}
 }
 
-func (_c *MockClient_ContainerStart_Call) Run(run func(ctx context.Context, id string, options container.StartOptions)) *MockClient_ContainerStart_Call {
+func (_c *MockClient_ContainerStart_Call) Run(run func(ctx context.Context, id string, options client.ContainerStartOptions)) *MockClient_ContainerStart_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -552,9 +553,9 @@ func (_c *MockClient_ContainerStart_Call) Run(run func(ctx context.Context, id s
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 container.StartOptions
+		var arg2 client.ContainerStartOptions
 		if args[2] != nil {
-			arg2 = args[2].(container.StartOptions)
+			arg2 = args[2].(client.ContainerStartOptions)
 		}
 		run(
 			arg0,
@@ -570,28 +571,30 @@ func (_c *MockClient_ContainerStart_Call) Return(err error) *MockClient_Containe
 	return _c
 }
 
-func (_c *MockClient_ContainerStart_Call) RunAndReturn(run func(ctx context.Context, id string, options container.StartOptions) error) *MockClient_ContainerStart_Call {
+func (_c *MockClient_ContainerStart_Call) RunAndReturn(run func(ctx context.Context, id string, options client.ContainerStartOptions) error) *MockClient_ContainerStart_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // ContainerStatsOneShot provides a mock function for the type MockClient
-func (_mock *MockClient) ContainerStatsOneShot(ctx context.Context, id string) (container.StatsResponseReader, error) {
+func (_mock *MockClient) ContainerStatsOneShot(ctx context.Context, id string) (io.ReadCloser, error) {
 	ret := _mock.Called(ctx, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ContainerStatsOneShot")
 	}
 
-	var r0 container.StatsResponseReader
+	var r0 io.ReadCloser
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (container.StatsResponseReader, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (io.ReadCloser, error)); ok {
 		return returnFunc(ctx, id)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) container.StatsResponseReader); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) io.ReadCloser); ok {
 		r0 = returnFunc(ctx, id)
 	} else {
-		r0 = ret.Get(0).(container.StatsResponseReader)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(io.ReadCloser)
+		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
 		r1 = returnFunc(ctx, id)
@@ -631,18 +634,18 @@ func (_c *MockClient_ContainerStatsOneShot_Call) Run(run func(ctx context.Contex
 	return _c
 }
 
-func (_c *MockClient_ContainerStatsOneShot_Call) Return(statsResponseReader container.StatsResponseReader, err error) *MockClient_ContainerStatsOneShot_Call {
-	_c.Call.Return(statsResponseReader, err)
+func (_c *MockClient_ContainerStatsOneShot_Call) Return(readCloser io.ReadCloser, err error) *MockClient_ContainerStatsOneShot_Call {
+	_c.Call.Return(readCloser, err)
 	return _c
 }
 
-func (_c *MockClient_ContainerStatsOneShot_Call) RunAndReturn(run func(ctx context.Context, id string) (container.StatsResponseReader, error)) *MockClient_ContainerStatsOneShot_Call {
+func (_c *MockClient_ContainerStatsOneShot_Call) RunAndReturn(run func(ctx context.Context, id string) (io.ReadCloser, error)) *MockClient_ContainerStatsOneShot_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // ContainerStop provides a mock function for the type MockClient
-func (_mock *MockClient) ContainerStop(ctx context.Context, id string, options container.StopOptions) error {
+func (_mock *MockClient) ContainerStop(ctx context.Context, id string, options client.ContainerStopOptions) error {
 	ret := _mock.Called(ctx, id, options)
 
 	if len(ret) == 0 {
@@ -650,7 +653,7 @@ func (_mock *MockClient) ContainerStop(ctx context.Context, id string, options c
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, container.StopOptions) error); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, client.ContainerStopOptions) error); ok {
 		r0 = returnFunc(ctx, id, options)
 	} else {
 		r0 = ret.Error(0)
@@ -666,12 +669,12 @@ type MockClient_ContainerStop_Call struct {
 // ContainerStop is a helper method to define mock.On call
 //   - ctx context.Context
 //   - id string
-//   - options container.StopOptions
+//   - options client.ContainerStopOptions
 func (_e *MockClient_Expecter) ContainerStop(ctx any, id any, options any) *MockClient_ContainerStop_Call {
 	return &MockClient_ContainerStop_Call{Call: _e.mock.On("ContainerStop", ctx, id, options)}
 }
 
-func (_c *MockClient_ContainerStop_Call) Run(run func(ctx context.Context, id string, options container.StopOptions)) *MockClient_ContainerStop_Call {
+func (_c *MockClient_ContainerStop_Call) Run(run func(ctx context.Context, id string, options client.ContainerStopOptions)) *MockClient_ContainerStop_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -681,9 +684,9 @@ func (_c *MockClient_ContainerStop_Call) Run(run func(ctx context.Context, id st
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 container.StopOptions
+		var arg2 client.ContainerStopOptions
 		if args[2] != nil {
-			arg2 = args[2].(container.StopOptions)
+			arg2 = args[2].(client.ContainerStopOptions)
 		}
 		run(
 			arg0,
@@ -699,7 +702,7 @@ func (_c *MockClient_ContainerStop_Call) Return(err error) *MockClient_Container
 	return _c
 }
 
-func (_c *MockClient_ContainerStop_Call) RunAndReturn(run func(ctx context.Context, id string, options container.StopOptions) error) *MockClient_ContainerStop_Call {
+func (_c *MockClient_ContainerStop_Call) RunAndReturn(run func(ctx context.Context, id string, options client.ContainerStopOptions) error) *MockClient_ContainerStop_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -777,7 +780,7 @@ func (_c *MockClient_DistributionInspect_Call) RunAndReturn(run func(ctx context
 }
 
 // Events provides a mock function for the type MockClient
-func (_mock *MockClient) Events(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error) {
+func (_mock *MockClient) Events(ctx context.Context, options client.EventsListOptions) (<-chan events.Message, <-chan error) {
 	ret := _mock.Called(ctx, options)
 
 	if len(ret) == 0 {
@@ -786,17 +789,17 @@ func (_mock *MockClient) Events(ctx context.Context, options events.ListOptions)
 
 	var r0 <-chan events.Message
 	var r1 <-chan error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, events.ListOptions) (<-chan events.Message, <-chan error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, client.EventsListOptions) (<-chan events.Message, <-chan error)); ok {
 		return returnFunc(ctx, options)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, events.ListOptions) <-chan events.Message); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, client.EventsListOptions) <-chan events.Message); ok {
 		r0 = returnFunc(ctx, options)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(<-chan events.Message)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, events.ListOptions) <-chan error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, client.EventsListOptions) <-chan error); ok {
 		r1 = returnFunc(ctx, options)
 	} else {
 		if ret.Get(1) != nil {
@@ -813,20 +816,20 @@ type MockClient_Events_Call struct {
 
 // Events is a helper method to define mock.On call
 //   - ctx context.Context
-//   - options events.ListOptions
+//   - options client.EventsListOptions
 func (_e *MockClient_Expecter) Events(ctx any, options any) *MockClient_Events_Call {
 	return &MockClient_Events_Call{Call: _e.mock.On("Events", ctx, options)}
 }
 
-func (_c *MockClient_Events_Call) Run(run func(ctx context.Context, options events.ListOptions)) *MockClient_Events_Call {
+func (_c *MockClient_Events_Call) Run(run func(ctx context.Context, options client.EventsListOptions)) *MockClient_Events_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 events.ListOptions
+		var arg1 client.EventsListOptions
 		if args[1] != nil {
-			arg1 = args[1].(events.ListOptions)
+			arg1 = args[1].(client.EventsListOptions)
 		}
 		run(
 			arg0,
@@ -841,13 +844,13 @@ func (_c *MockClient_Events_Call) Return(messageCh <-chan events.Message, errCh 
 	return _c
 }
 
-func (_c *MockClient_Events_Call) RunAndReturn(run func(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error)) *MockClient_Events_Call {
+func (_c *MockClient_Events_Call) RunAndReturn(run func(ctx context.Context, options client.EventsListOptions) (<-chan events.Message, <-chan error)) *MockClient_Events_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // ImageList provides a mock function for the type MockClient
-func (_mock *MockClient) ImageList(ctx context.Context, options image.ListOptions) ([]image.Summary, error) {
+func (_mock *MockClient) ImageList(ctx context.Context, options client.ImageListOptions) ([]image.Summary, error) {
 	ret := _mock.Called(ctx, options)
 
 	if len(ret) == 0 {
@@ -856,17 +859,17 @@ func (_mock *MockClient) ImageList(ctx context.Context, options image.ListOption
 
 	var r0 []image.Summary
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, image.ListOptions) ([]image.Summary, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, client.ImageListOptions) ([]image.Summary, error)); ok {
 		return returnFunc(ctx, options)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, image.ListOptions) []image.Summary); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, client.ImageListOptions) []image.Summary); ok {
 		r0 = returnFunc(ctx, options)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]image.Summary)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, image.ListOptions) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, client.ImageListOptions) error); ok {
 		r1 = returnFunc(ctx, options)
 	} else {
 		r1 = ret.Error(1)
@@ -881,20 +884,20 @@ type MockClient_ImageList_Call struct {
 
 // ImageList is a helper method to define mock.On call
 //   - ctx context.Context
-//   - options image.ListOptions
+//   - options client.ImageListOptions
 func (_e *MockClient_Expecter) ImageList(ctx any, options any) *MockClient_ImageList_Call {
 	return &MockClient_ImageList_Call{Call: _e.mock.On("ImageList", ctx, options)}
 }
 
-func (_c *MockClient_ImageList_Call) Run(run func(ctx context.Context, options image.ListOptions)) *MockClient_ImageList_Call {
+func (_c *MockClient_ImageList_Call) Run(run func(ctx context.Context, options client.ImageListOptions)) *MockClient_ImageList_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 image.ListOptions
+		var arg1 client.ImageListOptions
 		if args[1] != nil {
-			arg1 = args[1].(image.ListOptions)
+			arg1 = args[1].(client.ImageListOptions)
 		}
 		run(
 			arg0,
@@ -909,13 +912,13 @@ func (_c *MockClient_ImageList_Call) Return(summarys []image.Summary, err error)
 	return _c
 }
 
-func (_c *MockClient_ImageList_Call) RunAndReturn(run func(ctx context.Context, options image.ListOptions) ([]image.Summary, error)) *MockClient_ImageList_Call {
+func (_c *MockClient_ImageList_Call) RunAndReturn(run func(ctx context.Context, options client.ImageListOptions) ([]image.Summary, error)) *MockClient_ImageList_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // ImagePull provides a mock function for the type MockClient
-func (_mock *MockClient) ImagePull(ctx context.Context, ref string, options image.PullOptions) (io.ReadCloser, error) {
+func (_mock *MockClient) ImagePull(ctx context.Context, ref string, options client.ImagePullOptions) (io.ReadCloser, error) {
 	ret := _mock.Called(ctx, ref, options)
 
 	if len(ret) == 0 {
@@ -924,17 +927,17 @@ func (_mock *MockClient) ImagePull(ctx context.Context, ref string, options imag
 
 	var r0 io.ReadCloser
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, image.PullOptions) (io.ReadCloser, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, client.ImagePullOptions) (io.ReadCloser, error)); ok {
 		return returnFunc(ctx, ref, options)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, image.PullOptions) io.ReadCloser); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, client.ImagePullOptions) io.ReadCloser); ok {
 		r0 = returnFunc(ctx, ref, options)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(io.ReadCloser)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, image.PullOptions) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, client.ImagePullOptions) error); ok {
 		r1 = returnFunc(ctx, ref, options)
 	} else {
 		r1 = ret.Error(1)
@@ -950,12 +953,12 @@ type MockClient_ImagePull_Call struct {
 // ImagePull is a helper method to define mock.On call
 //   - ctx context.Context
 //   - ref string
-//   - options image.PullOptions
+//   - options client.ImagePullOptions
 func (_e *MockClient_Expecter) ImagePull(ctx any, ref any, options any) *MockClient_ImagePull_Call {
 	return &MockClient_ImagePull_Call{Call: _e.mock.On("ImagePull", ctx, ref, options)}
 }
 
-func (_c *MockClient_ImagePull_Call) Run(run func(ctx context.Context, ref string, options image.PullOptions)) *MockClient_ImagePull_Call {
+func (_c *MockClient_ImagePull_Call) Run(run func(ctx context.Context, ref string, options client.ImagePullOptions)) *MockClient_ImagePull_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -965,9 +968,9 @@ func (_c *MockClient_ImagePull_Call) Run(run func(ctx context.Context, ref strin
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 image.PullOptions
+		var arg2 client.ImagePullOptions
 		if args[2] != nil {
-			arg2 = args[2].(image.PullOptions)
+			arg2 = args[2].(client.ImagePullOptions)
 		}
 		run(
 			arg0,
@@ -983,7 +986,7 @@ func (_c *MockClient_ImagePull_Call) Return(readCloser io.ReadCloser, err error)
 	return _c
 }
 
-func (_c *MockClient_ImagePull_Call) RunAndReturn(run func(ctx context.Context, ref string, options image.PullOptions) (io.ReadCloser, error)) *MockClient_ImagePull_Call {
+func (_c *MockClient_ImagePull_Call) RunAndReturn(run func(ctx context.Context, ref string, options client.ImagePullOptions) (io.ReadCloser, error)) *MockClient_ImagePull_Call {
 	_c.Call.Return(run)
 	return _c
 }

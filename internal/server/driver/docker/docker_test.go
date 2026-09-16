@@ -17,10 +17,13 @@ import (
 	"testing/iotest"
 	"time"
 
-	dockercontainer "github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/registry"
+	"github.com/moby/moby/api/pkg/authconfig"
+	dockercontainer "github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/api/types/registry"
+	dockerclient "github.com/moby/moby/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -53,13 +56,13 @@ func TestDriver_Start(t *testing.T) {
 
 				c.EXPECT().ContainerCreate(mock.Anything,
 					mock.MatchedBy(func(config *dockercontainer.Config) bool {
-						_, exposed := config.ExposedPorts["53/udp"]
+						_, exposed := config.ExposedPorts[network.MustParsePort("53/udp")]
 						return exposed
 					}),
 					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
 						// Publishing 53/tcp instead would leave the workload
 						// unreachable at the address takt reports for it.
-						bindings := host.PortBindings["53/udp"]
+						bindings := host.PortBindings[network.MustParsePort("53/udp")]
 
 						return len(bindings) == 1 && bindings[0].HostPort == "20000" &&
 							len(host.PortBindings) == 1
@@ -94,12 +97,12 @@ func TestDriver_Start(t *testing.T) {
 							len(config.Env) == 1 && config.Env[0] == "EXAMPLE=EXAMPLE"
 					}),
 					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
-						bindings := host.PortBindings["8080/tcp"]
+						bindings := host.PortBindings[network.MustParsePort("8080/tcp")]
 
 						// A driver told nothing about where to publish uses loopback,
 						// so forgetting to say never exposes a workload to the network.
 						return len(bindings) == 1 && bindings[0].HostPort == "4141" &&
-							bindings[0].HostIP == "127.0.0.1"
+							bindings[0].HostIP.String() == "127.0.0.1"
 					}),
 					mock.Anything, mock.Anything, "takt-example-2-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
@@ -687,8 +690,8 @@ func TestDriver_Start_PublishAddress(t *testing.T) {
 
 			client.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
 				mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
-					bindings := host.PortBindings["8080/tcp"]
-					return len(bindings) == 1 && bindings[0].HostIP == tc.ExpectIP
+					bindings := host.PortBindings[network.MustParsePort("8080/tcp")]
+					return len(bindings) == 1 && bindings[0].HostIP.String() == tc.ExpectIP
 				}),
 				mock.Anything, mock.Anything, mock.Anything,
 			).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
@@ -773,7 +776,7 @@ func TestDriver_Stop(t *testing.T) {
 		// unforced remove fails with "container is running" and leaves the
 		// container behind for every later pass to trip over.
 		client.EXPECT().ContainerRemove(mock.Anything, "container-one",
-			mock.MatchedBy(func(options dockercontainer.RemoveOptions) bool {
+			mock.MatchedBy(func(options dockerclient.ContainerRemoveOptions) bool {
 				return options.Force
 			})).Return(nil).Once()
 
@@ -1012,10 +1015,10 @@ func TestDriver_ObserveWorkload(t *testing.T) {
 	t.Run("asks the daemon for one workload's containers", func(t *testing.T) {
 		client := NewMockClient(t)
 
-		var asked dockercontainer.ListOptions
+		var asked dockerclient.ContainerListOptions
 
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, options dockercontainer.ListOptions) ([]dockercontainer.Summary, error) {
+			RunAndReturn(func(_ context.Context, options dockerclient.ContainerListOptions) ([]dockercontainer.Summary, error) {
 				asked = options
 
 				return []dockercontainer.Summary{
@@ -1039,7 +1042,7 @@ func TestDriver_ObserveWorkload(t *testing.T) {
 
 		// The filter is the point. Listing everything and discarding the rest is what
 		// this exists to stop, so the label has to carry the name.
-		assert.Contains(t, asked.Filters.Get("label"), docker.LabelWorkload+"=example")
+		assert.True(t, asked.Filters["label"][docker.LabelWorkload+"=example"])
 	})
 
 	t.Run("inspects a running health-checked container for its verdict", func(t *testing.T) {
@@ -1055,11 +1058,9 @@ func TestDriver_ObserveWorkload(t *testing.T) {
 		}, nil).Once()
 
 		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
-			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-				State: &dockercontainer.State{
-					Status: dockercontainer.StateRunning,
-					Health: &dockercontainer.Health{Status: "healthy"},
-				},
+			State: &dockercontainer.State{
+				Status: dockercontainer.StateRunning,
+				Health: &dockercontainer.Health{Status: "healthy"},
 			},
 		}, nil).Once()
 
@@ -1122,14 +1123,14 @@ func TestDriver_Usage(t *testing.T) {
 
 	read := time.Date(2026, time.September, 13, 10, 0, 0, 0, time.UTC)
 
-	stats := func(id string, response dockercontainer.StatsResponse) dockercontainer.StatsResponseReader {
+	stats := func(id string, response dockercontainer.StatsResponse) io.ReadCloser {
 		response.ID = id
 		response.Read = read
 
 		body, err := json.Marshal(response)
 		require.NoError(t, err)
 
-		return dockercontainer.StatsResponseReader{Body: io.NopCloser(bytes.NewReader(body))}
+		return io.NopCloser(bytes.NewReader(body))
 	}
 
 	t.Run("reports what each running container consumes", func(t *testing.T) {
@@ -1263,7 +1264,7 @@ func TestDriver_Usage(t *testing.T) {
 		}, nil).Once()
 
 		client.EXPECT().ContainerStatsOneShot(mock.Anything, "container-one").
-			Return(dockercontainer.StatsResponseReader{}, errors.New("no such container")).Once()
+			Return(nil, errors.New("no such container")).Once()
 
 		client.EXPECT().ContainerStatsOneShot(mock.Anything, "container-two").
 			Return(stats("container-two", dockercontainer.StatsResponse{PidsStats: dockercontainer.PidsStats{Current: 3}}), nil).Once()
@@ -1360,12 +1361,10 @@ func TestDriver_Observe(t *testing.T) {
 		}, nil).Once()
 
 		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
-			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-				State: &dockercontainer.State{
-					Status:    dockercontainer.StateExited,
-					ExitCode:  137,
-					StartedAt: "2026-08-18T12:00:00Z",
-				},
+			State: &dockercontainer.State{
+				Status:    dockercontainer.StateExited,
+				ExitCode:  137,
+				StartedAt: "2026-08-18T12:00:00Z",
 			},
 		}, nil).Once()
 
@@ -1397,12 +1396,10 @@ func TestDriver_Observe(t *testing.T) {
 		// Once, deliberately: how an ended container ended cannot change, so the
 		// second pass must reuse the first pass's answer.
 		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
-			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-				State: &dockercontainer.State{
-					Status:    dockercontainer.StateExited,
-					ExitCode:  137,
-					StartedAt: "2026-08-18T12:00:00Z",
-				},
+			State: &dockercontainer.State{
+				Status:    dockercontainer.StateExited,
+				ExitCode:  137,
+				StartedAt: "2026-08-18T12:00:00Z",
 			},
 		}, nil).Once()
 
@@ -1439,9 +1436,7 @@ func TestDriver_Observe(t *testing.T) {
 			Return([]dockercontainer.Summary{summary}, nil).Once()
 
 		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
-			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-				State: &dockercontainer.State{Status: dockercontainer.StateExited, ExitCode: 1},
-			},
+			State: &dockercontainer.State{Status: dockercontainer.StateExited, ExitCode: 1},
 		}, nil).Times(2)
 
 		d := testDriver(t, client)
@@ -1464,9 +1459,7 @@ func TestDriver_Observe(t *testing.T) {
 		}, nil).Once()
 
 		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
-			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-				State: &dockercontainer.State{Status: dockercontainer.StateExited, ExitCode: 0},
-			},
+			State: &dockercontainer.State{Status: dockercontainer.StateExited, ExitCode: 0},
 		}, nil).Once()
 
 		d := testDriver(t, client)
@@ -1515,9 +1508,7 @@ func TestDriver_Observe(t *testing.T) {
 		}, nil).Once()
 
 		client.EXPECT().ContainerInspect(mock.Anything, "container-one").Return(dockercontainer.InspectResponse{
-			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-				State: &dockercontainer.State{Status: dockercontainer.StateDead},
-			},
+			State: &dockercontainer.State{Status: dockercontainer.StateDead},
 		}, nil).Once()
 
 		d := testDriver(t, client)
@@ -1559,9 +1550,7 @@ func TestDriver_Observe(t *testing.T) {
 		}, nil).Once()
 
 		client.EXPECT().ContainerInspect(mock.Anything, "retained").Return(dockercontainer.InspectResponse{
-			ContainerJSONBase: &dockercontainer.ContainerJSONBase{
-				State: &dockercontainer.State{Status: dockercontainer.StateExited, ExitCode: 1},
-			},
+			State: &dockercontainer.State{Status: dockercontainer.StateExited, ExitCode: 1},
 		}, nil).Once()
 
 		d := testDriver(t, client)
@@ -1696,7 +1685,7 @@ func TestDriver_Logs(t *testing.T) {
 			{ID: "container-one"},
 		}, nil).Once()
 
-		client.EXPECT().ContainerLogs(mock.Anything, "container-one", mock.MatchedBy(func(options dockercontainer.LogsOptions) bool {
+		client.EXPECT().ContainerLogs(mock.Anything, "container-one", mock.MatchedBy(func(options dockerclient.ContainerLogsOptions) bool {
 			return options.ShowStdout && options.ShowStderr && options.Tail == "20"
 		})).Return(io.NopCloser(strings.NewReader(multiplexed("hello world\n"))), nil).Once()
 
@@ -1774,7 +1763,7 @@ func TestDriver_Logs(t *testing.T) {
 
 		// The daemon timestamps every line it holds, so the filtering happens there
 		// rather than over a stream the driver would have to parse.
-		client.EXPECT().ContainerLogs(mock.Anything, "container-one", mock.MatchedBy(func(options dockercontainer.LogsOptions) bool {
+		client.EXPECT().ContainerLogs(mock.Anything, "container-one", mock.MatchedBy(func(options dockerclient.ContainerLogsOptions) bool {
 			return options.Follow && options.Since == since.Format(time.RFC3339Nano)
 		})).Return(io.NopCloser(strings.NewReader(multiplexed("still going\n"))), nil).Once()
 
@@ -1975,7 +1964,7 @@ func TestDriver_Start_RegistryAuth(t *testing.T) {
 	client.EXPECT().ImageList(mock.Anything, mock.Anything).Return(nil, nil)
 
 	client.EXPECT().ImagePull(mock.Anything, "registry.example.com/app:latest",
-		mock.MatchedBy(func(options image.PullOptions) bool {
+		mock.MatchedBy(func(options dockerclient.ImagePullOptions) bool {
 			return sentCredentials("some-user", "some-password")(options.RegistryAuth)
 		}),
 	).Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
@@ -2064,7 +2053,7 @@ func credentialFile(t *testing.T, registry, username, password string) string {
 // the login inside it rather than comparing encodings byte for byte.
 func sentCredentials(username, password string) func(string) bool {
 	return func(encoded string) bool {
-		auth, err := registry.DecodeAuthConfig(encoded)
+		auth, err := authconfig.Decode(encoded)
 		if err != nil {
 			return false
 		}
