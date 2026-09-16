@@ -55,6 +55,7 @@ func TestParseScenario(t *testing.T) {
 						Logs:           1,
 						Restart:        1,
 						GetService:     1,
+						ListServices:   1,
 					},
 				},
 			},

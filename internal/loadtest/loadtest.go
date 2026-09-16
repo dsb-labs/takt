@@ -378,6 +378,10 @@ func perform(ctx context.Context, config Config, collected *collector, names Nam
 			_, err := c.GetService(ctx, choose(names.Services, rng))
 
 			return err
+		case "service.list":
+			_, err := c.ListServices(ctx)
+
+			return err
 		default:
 			return fmt.Errorf("unknown operation %q", op)
 		}
@@ -396,6 +400,7 @@ func weighted(weights Weights) []string {
 		"workload.logs":    weights.Logs,
 		"workload.restart": weights.Restart,
 		"service.get":      weights.GetService,
+		"service.list":     weights.ListServices,
 	}
 
 	var choices []string

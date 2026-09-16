@@ -146,6 +146,10 @@ type (
 		// Reading one service, which observes the fleet and resolves a backend
 		// for every running instance the target selects.
 		GetService int `toml:"get-service"`
+		// Listing every service, which observes the fleet once and resolves the
+		// backends of every service from it. This is what a balancer's feed
+		// polls.
+		ListServices int `toml:"list-services"`
 	}
 )
 
@@ -240,6 +244,10 @@ func (s Scenario) readable() error {
 	// none created would measure choosing from an empty list.
 	if s.Churn.Weights.GetService > 0 && s.Resources.Services == 0 {
 		return fmt.Errorf("%w: get-service needs at least one service", ErrInvalidScenario)
+	}
+
+	if s.Churn.Weights.ListServices > 0 && s.Resources.Services == 0 {
+		return fmt.Errorf("%w: list-services needs at least one service", ErrInvalidScenario)
 	}
 
 	// An address is the host port takt published for a container, so a fleet with
@@ -343,6 +351,7 @@ func (w Weights) each() map[string]int {
 		"logs":            w.Logs,
 		"restart":         w.Restart,
 		"get-service":     w.GetService,
+		"list-services":   w.ListServices,
 	}
 }
 

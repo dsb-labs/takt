@@ -4,7 +4,8 @@ description = "Services resolving backends across a fleet while restarts move th
 # A service's backends are computed on every read: the fleet is observed, the
 # target's labels are matched, and every running instance publishing the port
 # becomes an address. Reading services while restarts replace instances measures
-# that resolution under the churn a balancer's feed would see.
+# that resolution under the churn a balancer's feed would see. A list resolves
+# every service from one observation, which is the read a balancer polls.
 
 [fleet]
 containers = 40
@@ -22,6 +23,7 @@ workers = 8
 
 [churn.weights]
 get-service = 4
+list-services = 2
 restart = 2
 list = 1
 get = 1
