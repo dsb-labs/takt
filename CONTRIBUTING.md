@@ -27,6 +27,7 @@ together.
 ```sh
 make test                  # unit tests, no Docker needed
 make e2e                   # the end-to-end suite, needs a Docker daemon
+make test-ui               # the web UI's tests, needs node and yarn
 go tool staticcheck ./...
 ```
 
@@ -187,6 +188,10 @@ answers page requests with a message saying the UI is not in the build.
 For working on the UI itself, run `make dev-ui` beside `make dev`. It starts the
 Vite dev server with hot reload and proxies API requests to the server on
 localhost:7373.
+
+The logic behind the views is tested with Vitest. A module's tests sit beside it, in
+`format.test.ts` next to `format.ts`, the way a Go package's tests do. `make test-ui`
+runs them. The views themselves are not tested, so keep the logic in modules that are.
 
 The request and response types are generated from `api/openapi.yaml` into
 `src/api/schema.d.ts` and committed. After changing the spec, run `yarn generate`
