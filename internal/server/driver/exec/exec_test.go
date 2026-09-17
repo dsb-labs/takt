@@ -5,6 +5,8 @@ package exec_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base32"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -56,7 +58,7 @@ func TestDriver_Start(t *testing.T) {
 	t.Run("runs a command and reports it exited", func(t *testing.T) {
 		d, root := newDriver(t)
 
-		id, err := d.Start(t.Context(), workload("example", 1, "hash-one", "exit 0"))
+		id, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "exit 0"))
 		require.NoError(t, err)
 		assert.NotEmpty(t, id)
 
@@ -66,7 +68,7 @@ func TestDriver_Start(t *testing.T) {
 
 		// Its own directory, and only the owner's: a workload's environment reaches
 		// its command line and its output.
-		info, err := os.Stat(filepath.Join(root, "workloads", testID, "0", "1"))
+		info, err := os.Stat(filepath.Join(root, "workloads", idOf(t), "0", "1"))
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
 	})
@@ -74,7 +76,7 @@ func TestDriver_Start(t *testing.T) {
 	t.Run("reports a command that failed", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "exit 7"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "exit 7"))
 		require.NoError(t, err)
 
 		// Waiting on the state alone is not enough: a process that has died but whose
@@ -97,7 +99,7 @@ func TestDriver_Start(t *testing.T) {
 	t.Run("refuses a workload that is not a command", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		w := workload("example", 1, "hash-one", "exit 0")
+		w := workload(t, "example", 1, "hash-one", "exit 0")
 		w.Spec.Exec = nil
 
 		_, err := d.Start(t.Context(), w)
@@ -112,7 +114,7 @@ func TestDriver_Start(t *testing.T) {
 		// holds, which may include credentials.
 		require.NotEmpty(t, os.Getenv("HOME"), "this test needs an inherited variable to check against")
 
-		w := workload("example", 1, "hash-one", `echo "[$HOME][$EXAMPLE][$PATH]"`)
+		w := workload(t, "example", 1, "hash-one", `echo "[$HOME][$EXAMPLE][$PATH]"`)
 		w.Env = map[string]string{"EXAMPLE": "EXAMPLE"}
 
 		_, err := d.Start(t.Context(), w)
@@ -188,7 +190,7 @@ func TestDriver_Observe(t *testing.T) {
 	t.Run("reports a long-running process as running", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "sleep 300"))
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
 
@@ -293,7 +295,7 @@ func TestDriver_Observe(t *testing.T) {
 		// modification time back, so its identity is unchanged while its content
 		// is unreadable. A second observation reporting the record anyway proves
 		// it was answered from memory rather than from the file.
-		path := filepath.Join(root, "state", testID, "0", "1", "state.json")
+		path := filepath.Join(root, "state", idOf(t), "0", "1", "state.json")
 
 		info, err := os.Stat(path)
 		require.NoError(t, err)
@@ -345,7 +347,7 @@ func TestDriver_Observe(t *testing.T) {
 		d, root := newDriver(t)
 
 		// A half-created directory, which describes nothing that can be converged.
-		require.NoError(t, os.MkdirAll(filepath.Join(root, "state", testID, "1"), 0o700))
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "state", idOf(t), "1"), 0o700))
 
 		instances, err := d.Observe(t.Context())
 		require.NoError(t, err)
@@ -359,7 +361,7 @@ func TestDriver_Stop(t *testing.T) {
 	t.Run("stops a running process and keeps its output", func(t *testing.T) {
 		d, root := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo working; sleep 300"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "echo working; sleep 300"))
 		require.NoError(t, err)
 
 		// Waited for before the stop, or the test races the shell writing it and proves
@@ -377,14 +379,14 @@ func TestDriver_Stop(t *testing.T) {
 		// The directory the process ran in does not. It holds the symlinks to the
 		// workload's volumes and whatever the command wrote beside them, none of which
 		// has a reader once the process has ended.
-		_, err = os.Stat(filepath.Join(root, "workloads", testID, "0", "1", "cwd"))
+		_, err = os.Stat(filepath.Join(root, "workloads", idOf(t), "0", "1", "cwd"))
 		assert.True(t, os.IsNotExist(err), "the working directory outlived the process")
 	})
 
 	t.Run("reports the instance it kept as retained", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "sleep 300"))
 		require.NoError(t, err)
 
 		require.NoError(t, d.Stop(t.Context(), "", "example"))
@@ -405,20 +407,20 @@ func TestDriver_Stop(t *testing.T) {
 		// behind. Keeping all of them would be a disk leak on a workload that crashes
 		// in a loop.
 		for version := 1; version <= 3; version++ {
-			_, err := d.Start(t.Context(), workload("example", version, "hash-one", "echo version; sleep 300"))
+			_, err := d.Start(t.Context(), workload(t, "example", version, "hash-one", "echo version; sleep 300"))
 			require.NoError(t, err)
 
 			require.NoError(t, d.Stop(t.Context(), "", "example"))
 		}
 
 		for _, version := range []string{"1", "2"} {
-			_, err := os.Stat(filepath.Join(root, "workloads", testID, "0", version))
+			_, err := os.Stat(filepath.Join(root, "workloads", idOf(t), "0", version))
 			assert.Truef(t, os.IsNotExist(err), "version %s outlived the version that replaced it", version)
 		}
 
 		// Set aside as the previous attempt's rather than left where it was, so that a
 		// restart at this version opens a file of its own instead of appending to it.
-		_, err := os.Stat(filepath.Join(root, "workloads", testID, "0", "3", "previous.log"))
+		_, err := os.Stat(filepath.Join(root, "workloads", idOf(t), "0", "3", "previous.log"))
 		assert.NoError(t, err, "the most recent version's output was not kept")
 	})
 
@@ -427,7 +429,7 @@ func TestDriver_Stop(t *testing.T) {
 
 		// The command's own child, which a signal to the process alone would leave
 		// running. The group is what makes stopping a workload reach all of it.
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300 & echo $! > child.pid; wait"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "sleep 300 & echo $! > child.pid; wait"))
 		require.NoError(t, err)
 
 		child := awaitChildPID(t, root, "example", 1)
@@ -452,7 +454,7 @@ func TestDriver_Discard(t *testing.T) {
 	t.Run("removes both trees including the output a stop kept", func(t *testing.T) {
 		d, root := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo working; sleep 300"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "echo working; sleep 300"))
 		require.NoError(t, err)
 
 		// Stopped first, so what is discarded is a workload that has already been
@@ -465,7 +467,7 @@ func TestDriver_Discard(t *testing.T) {
 		assert.Empty(t, instances)
 
 		for _, tree := range []string{"state", "workloads"} {
-			_, err = os.Stat(filepath.Join(root, tree, testID))
+			_, err = os.Stat(filepath.Join(root, tree, idOf(t)))
 			assert.Truef(t, os.IsNotExist(err), "the workload's %s directory outlived it", tree)
 		}
 	})
@@ -473,7 +475,7 @@ func TestDriver_Discard(t *testing.T) {
 	t.Run("stops a running process before removing it", func(t *testing.T) {
 		d, root := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300 & echo $! > child.pid; wait"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "sleep 300 & echo $! > child.pid; wait"))
 		require.NoError(t, err)
 
 		child := awaitChildPID(t, root, "example", 1)
@@ -502,7 +504,7 @@ func TestDriver_Signal(t *testing.T) {
 		// signal arrived at the process rather than merely being sent somewhere. It
 		// announces its trap first: a signal is only handled once a handler exists, and
 		// SIGHUP before then ends the process rather than being caught.
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one",
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one",
 			`trap 'echo reloaded > reloaded.txt' HUP; touch trapped.txt; while true; do sleep 0.05; done`))
 		require.NoError(t, err)
 
@@ -511,7 +513,7 @@ func TestDriver_Signal(t *testing.T) {
 		// leaves another.
 		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
 
-		cwd := filepath.Join(root, "workloads", testID, "0", "1", "cwd")
+		cwd := filepath.Join(root, "workloads", idOf(t), "0", "1", "cwd")
 
 		require.Eventually(t, func() bool {
 			_, err := os.Stat(filepath.Join(cwd, "trapped.txt"))
@@ -519,7 +521,7 @@ func TestDriver_Signal(t *testing.T) {
 			return err == nil
 		}, 10*time.Second, 50*time.Millisecond, "the process never installed its handler")
 
-		require.NoError(t, d.Signal(t.Context(), testID, "example", "SIGHUP"))
+		require.NoError(t, d.Signal(t.Context(), idOf(t), "example", "SIGHUP"))
 
 		require.Eventually(t, func() bool {
 			_, err := os.Stat(filepath.Join(cwd, "reloaded.txt"))
@@ -544,7 +546,7 @@ func TestDriver_Signal(t *testing.T) {
 		// fork, so a child of a shell that ignored SIGHUP would survive a signal to the
 		// whole group and prove nothing. A handler is not inherited, so this child takes
 		// the default action and dies if the group is signalled.
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one",
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one",
 			`trap 'echo reloaded > reloaded.txt' HUP; sleep 300 & echo $! > child.pid; `+
 				`touch trapped.txt; while true; do sleep 0.05; done`))
 		require.NoError(t, err)
@@ -553,7 +555,7 @@ func TestDriver_Signal(t *testing.T) {
 		// parent. Both outlive the test binary otherwise.
 		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
 
-		cwd := filepath.Join(root, "workloads", testID, "0", "1", "cwd")
+		cwd := filepath.Join(root, "workloads", idOf(t), "0", "1", "cwd")
 		child := awaitChildPID(t, root, "example", 1)
 
 		require.Eventually(t, func() bool {
@@ -562,7 +564,7 @@ func TestDriver_Signal(t *testing.T) {
 			return err == nil
 		}, 10*time.Second, 50*time.Millisecond, "the process never installed its handler")
 
-		require.NoError(t, d.Signal(t.Context(), testID, "example", "SIGHUP"))
+		require.NoError(t, d.Signal(t.Context(), idOf(t), "example", "SIGHUP"))
 
 		// The workload itself was told, so the signal did arrive somewhere.
 		require.Eventually(t, func() bool {
@@ -582,7 +584,7 @@ func TestDriver_Signal(t *testing.T) {
 		// Whether a workload runs is the reconciler's decision, so a driver that could
 		// be asked to kill a process would be taking it.
 		for _, signal := range []string{"SIGKILL", "SIGTERM", "SIGINT", "HUP", "1", ""} {
-			err := d.Signal(t.Context(), testID, "example", signal)
+			err := d.Signal(t.Context(), idOf(t), "example", signal)
 			assert.ErrorIs(t, err, exec.ErrUnknownSignal, "accepted the signal %q", signal)
 		}
 	})
@@ -597,14 +599,14 @@ func TestDriver_Signal(t *testing.T) {
 	t.Run("does nothing for a workload that has ended", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "exit 0"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "exit 0"))
 		require.NoError(t, err)
 
 		awaitState(t, d, "example", driver.StateExited)
 
 		// There is no process left to reload, and the pid may since have been reused by
 		// something that has nothing to do with takt.
-		assert.NoError(t, d.Signal(t.Context(), testID, "example", "SIGHUP"))
+		assert.NoError(t, d.Signal(t.Context(), idOf(t), "example", "SIGHUP"))
 	})
 }
 
@@ -671,7 +673,7 @@ func TestDriver_RefusesAnIdentifierThatIsNotADirectory(t *testing.T) {
 		err := d.Stop(t.Context(), id, "example")
 		assert.ErrorIs(t, err, exec.ErrInvalidWorkloadID, "accepted the identifier %q", id)
 
-		w := workload("example", 1, "hash-one", "exit 0")
+		w := workload(t, "example", 1, "hash-one", "exit 0")
 		w.ID = id
 
 		_, err = d.Start(t.Context(), w)
@@ -680,7 +682,7 @@ func TestDriver_RefusesAnIdentifierThatIsNotADirectory(t *testing.T) {
 
 	// Start refuses an empty identifier as well, since a workload it is asked to run
 	// always has one.
-	empty := workload("example", 1, "hash-one", "exit 0")
+	empty := workload(t, "example", 1, "hash-one", "exit 0")
 	empty.ID = ""
 
 	_, err := d.Start(t.Context(), empty)
@@ -722,7 +724,7 @@ func TestDriver_Logs(t *testing.T) {
 	t.Run("combines both streams in the order they were written", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", `echo first; echo second 1>&2; echo third`))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", `echo first; echo second 1>&2; echo third`))
 		require.NoError(t, err)
 
 		awaitState(t, d, "example", driver.StateExited)
@@ -735,7 +737,7 @@ func TestDriver_Logs(t *testing.T) {
 	t.Run("returns only the lines asked for", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "seq 1 100"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "seq 1 100"))
 		require.NoError(t, err)
 
 		awaitState(t, d, "example", driver.StateExited)
@@ -758,14 +760,14 @@ func TestDriver_Logs(t *testing.T) {
 
 		// The first attempt, then the replacement, which is what the reconciler does to
 		// a workload whose specification changed or whose process died.
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo first attempt; sleep 300"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "echo first attempt; sleep 300"))
 		require.NoError(t, err)
 
 		awaitOutput(t, d, "example", "first attempt")
 
 		require.NoError(t, d.Stop(t.Context(), "", "example"))
 
-		_, err = d.Start(t.Context(), workload("example", 2, "hash-two", "echo second attempt; sleep 300"))
+		_, err = d.Start(t.Context(), workload(t, "example", 2, "hash-two", "echo second attempt; sleep 300"))
 		require.NoError(t, err)
 
 		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
@@ -799,14 +801,14 @@ func TestDriver_Logs(t *testing.T) {
 		// output ends up in, which is what makes this the case retention gets wrong most
 		// easily: appending to one file would leave nothing able to say where the first
 		// attempt ended and the second began.
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo first attempt; sleep 300"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "echo first attempt; sleep 300"))
 		require.NoError(t, err)
 
 		awaitOutput(t, d, "example", "first attempt")
 
 		require.NoError(t, d.Stop(t.Context(), "", "example"))
 
-		_, err = d.Start(t.Context(), workload("example", 1, "hash-one", "echo second attempt; sleep 300"))
+		_, err = d.Start(t.Context(), workload(t, "example", 1, "hash-one", "echo second attempt; sleep 300"))
 		require.NoError(t, err)
 
 		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
@@ -829,12 +831,12 @@ func TestDriver_Logs(t *testing.T) {
 		// The record for the replaced attempt is marked kept, and the replacement reuses
 		// its directory. A mark left in place would report the running process as one
 		// held only for its output, and the reconciler would never see it running.
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "sleep 300"))
 		require.NoError(t, err)
 
 		require.NoError(t, d.Stop(t.Context(), "", "example"))
 
-		_, err = d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
+		_, err = d.Start(t.Context(), workload(t, "example", 1, "hash-one", "sleep 300"))
 		require.NoError(t, err)
 
 		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
@@ -850,7 +852,7 @@ func TestDriver_Logs(t *testing.T) {
 	t.Run("writes nothing for a previous attempt that does not exist", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo only attempt"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "echo only attempt"))
 		require.NoError(t, err)
 
 		awaitState(t, d, "example", driver.StateExited)
@@ -871,7 +873,7 @@ func TestDriver_Logs_Follow(t *testing.T) {
 
 		// The second line is written a second in, so the tail the follow opens with
 		// cannot hold it. Anything that arrives is proof the follow is doing the work.
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo started; sleep 1; echo later; sleep 300"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "echo started; sleep 1; echo later; sleep 300"))
 		require.NoError(t, err)
 
 		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
@@ -906,7 +908,7 @@ func TestDriver_Logs_Follow(t *testing.T) {
 	t.Run("ends the read when the process ends", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo started; sleep 1; echo done"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "echo started; sleep 1; echo done"))
 		require.NoError(t, err)
 
 		// Returns of its own accord. What the caller asked to watch has finished, so
@@ -928,7 +930,7 @@ func TestDriver_Watch(t *testing.T) {
 	events, err := d.Watch(t.Context())
 	require.NoError(t, err)
 
-	_, err = d.Start(t.Context(), workload("example", 1, "hash-one", "exit 0"))
+	_, err = d.Start(t.Context(), workload(t, "example", 1, "hash-one", "exit 0"))
 	require.NoError(t, err)
 
 	// A process ending is what the driver has instead of an event stream, and is what
@@ -946,7 +948,7 @@ func TestDriver_Release(t *testing.T) {
 
 	d, _ := newDriver(t)
 
-	_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 300"))
+	_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "sleep 300"))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
 
@@ -1034,15 +1036,31 @@ func withAllowedPaths(paths ...string) option {
 	return func(c *exec.Config) { c.AllowPaths = paths }
 }
 
-// The identifier the tests use for their workload. Directories are named for the
-// identifier rather than the name, so a test that looks on disk looks here.
-const testID = "cvhs0dq0kqj4c9r8m1a0"
+// idOf returns the identifier a test uses for its workload, derived from the test's
+// name. Directories are named for the identifier rather than the name, so a test that
+// looks on disk looks here.
+//
+// One per test rather than one for the suite, because every workload runs in a cgroup
+// named for its identifier and the tests share one delegated subtree: two tests
+// using the same identifier would share a cgroup, and the first to stop its
+// workload would kill the other's.
+func idOf(t *testing.T) string {
+	t.Helper()
+
+	// The shape the driver accepts: twenty characters of [0-9a-v], which is what
+	// the hex variant of base32 produces once lowercased.
+	sum := sha256.Sum256([]byte(t.Name()))
+
+	return strings.ToLower(base32.HexEncoding.EncodeToString(sum[:]))[:20]
+}
 
 // workload returns a workload running the given shell script, which is the smallest
 // way to get a command that does something observable.
-func workload(name string, version int, hash, script string) driver.Workload {
+func workload(t *testing.T, name string, version int, hash, script string) driver.Workload {
+	t.Helper()
+
 	return driver.Workload{
-		ID:       testID,
+		ID:       idOf(t),
 		Name:     name,
 		Version:  version,
 		SpecHash: hash,
@@ -1061,9 +1079,9 @@ func TestDriver_Instances(t *testing.T) {
 		d, root := newDriver(t)
 		ctx := t.Context()
 
-		first := workload("example", 1, "hash", "sleep 60")
+		first := workload(t, "example", 1, "hash", "sleep 60")
 
-		second := workload("example", 1, "hash", "sleep 60")
+		second := workload(t, "example", 1, "hash", "sleep 60")
 		second.Instance = 1
 
 		_, err := d.Start(ctx, first)
@@ -1072,11 +1090,11 @@ func TestDriver_Instances(t *testing.T) {
 		_, err = d.Start(ctx, second)
 		require.NoError(t, err)
 
-		defer func() { require.NoError(t, d.Discard(context.Background(), testID, "example")) }()
+		defer func() { require.NoError(t, d.Discard(context.Background(), idOf(t), "example")) }()
 
 		// Two instances are two currents: neither replaces the other, so neither
 		// reads as retained.
-		instances, err := d.ObserveWorkload(ctx, testID, "example")
+		instances, err := d.ObserveWorkload(ctx, idOf(t), "example")
 		require.NoError(t, err)
 		require.Len(t, instances, 2)
 
@@ -1091,15 +1109,15 @@ func TestDriver_Instances(t *testing.T) {
 		assert.False(t, byIndex[1].Retained)
 
 		for _, instance := range []string{"0", "1"} {
-			_, err = os.Stat(filepath.Join(root, "workloads", testID, instance, "1", "cwd"))
+			_, err = os.Stat(filepath.Join(root, "workloads", idOf(t), instance, "1", "cwd"))
 			assert.NoError(t, err)
 		}
 
 		// Stopping one instance leaves the other running.
-		require.NoError(t, d.StopInstance(ctx, testID, "example", 1))
+		require.NoError(t, d.StopInstance(ctx, idOf(t), "example", 1))
 
 		require.Eventually(t, func() bool {
-			instances, err = d.ObserveWorkload(ctx, testID, "example")
+			instances, err = d.ObserveWorkload(ctx, idOf(t), "example")
 			if err != nil || len(instances) != 2 {
 				return false
 			}
@@ -1116,9 +1134,9 @@ func TestDriver_Instances(t *testing.T) {
 		d, root := newDriver(t)
 		ctx := t.Context()
 
-		first := workload("example", 1, "hash", "sleep 60")
+		first := workload(t, "example", 1, "hash", "sleep 60")
 
-		second := workload("example", 1, "hash", "sleep 60")
+		second := workload(t, "example", 1, "hash", "sleep 60")
 		second.Instance = 1
 
 		_, err := d.Start(ctx, first)
@@ -1127,16 +1145,16 @@ func TestDriver_Instances(t *testing.T) {
 		_, err = d.Start(ctx, second)
 		require.NoError(t, err)
 
-		defer func() { require.NoError(t, d.Discard(context.Background(), testID, "example")) }()
+		defer func() { require.NoError(t, d.Discard(context.Background(), idOf(t), "example")) }()
 
-		require.NoError(t, d.DiscardInstance(ctx, testID, "example", 1))
+		require.NoError(t, d.DiscardInstance(ctx, idOf(t), "example", 1))
 
-		instances, err := d.ObserveWorkload(ctx, testID, "example")
+		instances, err := d.ObserveWorkload(ctx, idOf(t), "example")
 		require.NoError(t, err)
 		require.Len(t, instances, 1)
 		assert.Equal(t, 0, instances[0].Index)
 
-		_, err = os.Stat(filepath.Join(root, "state", testID, "1"))
+		_, err = os.Stat(filepath.Join(root, "state", idOf(t), "1"))
 		assert.True(t, os.IsNotExist(err), "the discarded instance's records remain")
 	})
 }
@@ -1210,7 +1228,7 @@ func output(t *testing.T, d *exec.Driver, workload string) string {
 func awaitChildPID(t *testing.T, root, workload string, version int) int {
 	t.Helper()
 
-	path := filepath.Join(root, "workloads", testID, "0", strconv.Itoa(version), "cwd", "child.pid")
+	path := filepath.Join(root, "workloads", idOf(t), "0", strconv.Itoa(version), "cwd", "child.pid")
 
 	var pid int
 
@@ -1237,7 +1255,7 @@ func writeInstance(t *testing.T, root, workload string, version int, recorded ma
 	// directory named for the identifier. The name is inside the record.
 	recorded["workload"] = workload
 
-	dir := filepath.Join(root, "state", testID, "0", strconv.Itoa(version))
+	dir := filepath.Join(root, "state", idOf(t), "0", strconv.Itoa(version))
 	require.NoError(t, os.MkdirAll(dir, 0o700))
 
 	data, err := json.Marshal(recorded)
@@ -1247,7 +1265,7 @@ func writeInstance(t *testing.T, root, workload string, version int, recorded ma
 }
 
 // writeInstanceFor writes a record under a chosen identifier, for a test that needs
-// more than one workload in the tree. writeInstance keys everything on testID.
+// more than one workload in the tree. writeInstance keys everything on idOf.
 func writeInstanceFor(t *testing.T, root, id, workload string, version int, recorded map[string]any) {
 	t.Helper()
 
@@ -1322,7 +1340,7 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 		// The command writes through a relative path. The working directory is where
 		// the volume was placed, and an absolute path in a command reaches the host's
 		// root rather than the workload's.
-		w := workload("example", 1, "hash-one", "echo written > var/lib/example/file")
+		w := workload(t, "example", 1, "hash-one", "echo written > var/lib/example/file")
 		w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: "/var/lib/example"}}
 
 		_, err := d.Start(t.Context(), w)
@@ -1335,7 +1353,7 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "written\n", string(contents))
 
-		link := filepath.Join(root, "workloads", testID, "0", "1", "cwd", "var", "lib", "example")
+		link := filepath.Join(root, "workloads", idOf(t), "0", "1", "cwd", "var", "lib", "example")
 		target, err := os.Readlink(link)
 		require.NoError(t, err, "the volume was not linked into the working directory")
 		assert.Equal(t, volume, target)
@@ -1347,13 +1365,13 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 		d, root := newDriver(t)
 		volume := newVolume(t, "example-data")
 
-		w := workload("example", 1, "hash-one", "exit 0")
+		w := workload(t, "example", 1, "hash-one", "exit 0")
 		w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: "/a/b/c/deep"}}
 
 		_, err := d.Start(t.Context(), w)
 		require.NoError(t, err)
 
-		_, err = os.Lstat(filepath.Join(root, "workloads", testID, "0", "1", "cwd", "a", "b", "c", "deep"))
+		_, err = os.Lstat(filepath.Join(root, "workloads", idOf(t), "0", "1", "cwd", "a", "b", "c", "deep"))
 		assert.NoError(t, err)
 	})
 
@@ -1366,10 +1384,10 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 		d, root := newDriver(t)
 		volume := newVolume(t, "example-data")
 
-		cwd := filepath.Join(root, "workloads", testID, "0", "1", "cwd")
+		cwd := filepath.Join(root, "workloads", idOf(t), "0", "1", "cwd")
 
 		for _, target := range []string{"/../../escape", "../../escape", "/./x", "/a/../b"} {
-			w := workload("example", 1, "hash-one", "exit 0")
+			w := workload(t, "example", 1, "hash-one", "exit 0")
 			w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: target}}
 
 			_, err := d.Start(t.Context(), w)
@@ -1386,7 +1404,7 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 			// running leaves it logging into a finished subtest.
 			awaitState(t, d, "example", driver.StateExited)
 
-			require.NoError(t, d.Stop(t.Context(), testID, "example"))
+			require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
 
 			// The volume itself survived, wherever the target pointed.
 			_, err = os.Stat(volume)
@@ -1412,7 +1430,7 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "SEALED", string(contents), "this test needs a file the user can read")
 
-		_, err = d.Start(t.Context(), workload("example", 1, "hash-one", "cat "+secret+" 2>&1; exit 0"))
+		_, err = d.Start(t.Context(), workload(t, "example", 1, "hash-one", "cat "+secret+" 2>&1; exit 0"))
 		require.NoError(t, err)
 
 		awaitState(t, d, "example", driver.StateExited)
@@ -1425,12 +1443,12 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 	t.Run("allows the working directory it was given", func(t *testing.T) {
 		d, root := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "echo written > file"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "echo written > file"))
 		require.NoError(t, err)
 
 		awaitState(t, d, "example", driver.StateExited)
 
-		contents, err := os.ReadFile(filepath.Join(root, "workloads", testID, "0", "1", "cwd", "file"))
+		contents, err := os.ReadFile(filepath.Join(root, "workloads", idOf(t), "0", "1", "cwd", "file"))
 		require.NoError(t, err, "a confined workload could not write its own working directory")
 		assert.Equal(t, "written\n", string(contents))
 	})
@@ -1442,7 +1460,7 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 		d, _ := newDriver(t)
 		volume := newVolume(t, "example-data")
 
-		w := workload("example", 1, "hash-one", "echo written > var/lib/example/file")
+		w := workload(t, "example", 1, "hash-one", "echo written > var/lib/example/file")
 		w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: "/var/lib/example"}}
 
 		_, err := d.Start(t.Context(), w)
@@ -1469,7 +1487,7 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 		theirs := filepath.Join(dir, "secret-theirs")
 		require.NoError(t, os.WriteFile(theirs, []byte("THEIRS"), 0o444))
 
-		w := workload("example", 1, "hash-one", "cat token 2>&1; cat "+theirs+" 2>&1; exit 0")
+		w := workload(t, "example", 1, "hash-one", "cat token 2>&1; cat "+theirs+" 2>&1; exit 0")
 		w.Volumes = []driver.Volume{{Name: "secret-mine", Host: mine, Target: "/token"}}
 
 		_, err := d.Start(t.Context(), w)
@@ -1493,7 +1511,7 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 
 		// Both attempts run in a subshell: a redirection the kernel refuses ends the
 		// shell that tried it, and the second attempt is the one this test is about.
-		w := workload("example", 1, "hash-one",
+		w := workload(t, "example", 1, "hash-one",
 			"(echo overwrite > token) 2>&1; (: > token) 2>&1; exit 0")
 		w.Volumes = []driver.Volume{{Name: "secret-token", Host: value, Target: "/token"}}
 
@@ -1516,7 +1534,7 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 
 		pid := orphan(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one",
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one",
 			"cat /proc/"+strconv.Itoa(pid)+"/environ 2>&1; exit 0"))
 		require.NoError(t, err)
 
@@ -1531,7 +1549,7 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 		// This is what says confinement is strict rather than useless.
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one",
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one",
 			`cat /etc/hostname > /dev/null && echo read-etc; echo discarded > /dev/null && echo wrote-devnull`))
 		require.NoError(t, err)
 
@@ -1551,7 +1569,7 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 
 		d, _ := newDriver(t, withAllowedPaths(dir))
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one",
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one",
 			"cat "+filepath.Join(dir, "runtime")+" 2>&1; echo denied > "+filepath.Join(dir, "written")+" 2>&1; exit 0"))
 		require.NoError(t, err)
 
@@ -1571,10 +1589,10 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 		// that cannot be found is not a workload that ran and failed.
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 1, "hash-one", "exit 0"))
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "exit 0"))
 		require.NoError(t, err)
 
-		w := workload("missing", 1, "hash-one", "exit 0")
+		w := workload(t, "missing", 1, "hash-one", "exit 0")
 		w.Spec.Exec.Command = []string{"definitely-not-a-command-on-this-host"}
 
 		_, err = d.Start(t.Context(), w)
@@ -1593,7 +1611,7 @@ func TestDriver_Stop_LeavesVolumeContentsAlone(t *testing.T) {
 	d, _ := newDriver(t)
 	volume := newVolume(t, "example-data")
 
-	w := workload("example", 1, "hash-one", "echo precious > var/lib/example/file")
+	w := workload(t, "example", 1, "hash-one", "echo precious > var/lib/example/file")
 	w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: "/var/lib/example"}}
 
 	_, err := d.Start(t.Context(), w)
@@ -1601,7 +1619,7 @@ func TestDriver_Stop_LeavesVolumeContentsAlone(t *testing.T) {
 
 	awaitState(t, d, "example", driver.StateExited)
 
-	require.NoError(t, d.Stop(t.Context(), testID, "example"))
+	require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
 
 	contents, err := os.ReadFile(filepath.Join(volume, "file"))
 	require.NoError(t, err, "stopping the workload destroyed the volume's contents")
