@@ -255,8 +255,9 @@ there. An instance that is not running reports no usage at all.
 The server reads usage from the runtime each time you ask for a workload, so a read
 costs a call to the runtime. `workload list` does not report it.
 
-An `exec` workload that names no limits has no cgroup of its own to be measured in, so
-it reports no usage. Give it a `resources` block and it reports like any other.
+An `exec` workload is measured in a cgroup of its own, which needs the host to
+delegate a subtree to takt. On a host that does not, one naming no limits still runs
+but reports no usage. See [operating](operating.md#delegation) for the delegation.
 
 A workload that names a schedule also reports when it next runs.
 
