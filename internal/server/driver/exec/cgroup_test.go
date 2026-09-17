@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -109,7 +110,7 @@ func TestDriver_ResourceLimits(t *testing.T) {
 		assert.True(t, os.IsNotExist(err))
 	})
 
-	t.Run("a workload asking for no limits runs outside any workload cgroup", func(t *testing.T) {
+	t.Run("runs a workload asking for no limits in a cgroup carrying none", func(t *testing.T) {
 		d, _ := newDriver(t)
 
 		pid, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "sleep 60"))
@@ -117,19 +118,43 @@ func TestDriver_ResourceLimits(t *testing.T) {
 
 		awaitState(t, d, "example", driver.StateRunning)
 
-		// The unlimited path has to keep working on a host with no delegation at
-		// all: the command inherits whatever cgroup the server runs in, exactly
-		// as before limits existed.
-		assert.NotContains(t, filepath.Base(cgroupOf(t, pid)), "takt-"+idOf(t))
+		// A cgroup of its own, so its usage can be read, with every limit left at
+		// the kernel's default: nothing about what the workload may consume
+		// changes for being measured.
+		path := cgroupOf(t, pid)
+		assert.Equal(t, "takt-"+idOf(t)+"-0-1", filepath.Base(path))
+		assert.Equal(t, "max", limitOf(t, path, "memory.max"))
+		assert.Equal(t, "max", limitOf(t, path, "memory.swap.max"))
+		assert.Equal(t, "max 100000", limitOf(t, path, "cpu.max"))
+		assert.Equal(t, "max", limitOf(t, path, "pids.max"))
 
 		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
+
+		_, err = os.Stat(path)
+		assert.True(t, os.IsNotExist(err))
+	})
+
+	// Stopping signals the process group, which a child that made a session of its
+	// own has left. The cgroup is what still holds it, and killing the cgroup is
+	// what reaches it — for every workload, now that every workload has one.
+	t.Run("stopping a workload asking for no limits reaches a child that left its group", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		w := workload(t, "example", 1, "hash-one", "setsid sleep 300 & echo $! > child.pid; sleep 300")
+
+		_, err := d.Start(t.Context(), w)
+		require.NoError(t, err)
+
+		child := awaitChildPID(t, root, "example", 1)
+
+		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
+
+		assert.Eventually(t, func() bool {
+			return syscall.Kill(child, 0) != nil
+		}, 10*time.Second, 50*time.Millisecond, "a process that left the group outlived the workload")
 	})
 }
 
-// A cgroup is named for the workload's identifier, instance and version, and every
-// test here shares the first two. The versions differ from those the tests beside
-// this one use, so that two tests running in parallel cannot end up sharing a
-// cgroup — removing one ends whatever it holds, which would be the other's process.
 func TestDriver_Usage(t *testing.T) {
 	t.Parallel()
 
@@ -167,20 +192,29 @@ func TestDriver_Usage(t *testing.T) {
 		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
 	})
 
-	// An unlimited workload runs in the server's own cgroup, so the only counters
-	// there describe the server. Reporting those as the workload's would be worse
-	// than reporting nothing.
-	t.Run("reports nothing for a workload asking for no limits", func(t *testing.T) {
+	// A workload asking for no limits runs in a cgroup of its own all the same, so
+	// its counters describe it and nothing else.
+	t.Run("reports what a workload asking for no limits is consuming", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload(t, "example", 8, "hash-one", "sleep 60"))
+		pid, err := d.Start(t.Context(), workload(t, "example", 8, "hash-one", "while :; do :; done"))
 		require.NoError(t, err)
 
 		awaitState(t, d, "example", driver.StateRunning)
 
-		usage, err := d.Usage(t.Context(), idOf(t), "example")
-		require.NoError(t, err)
-		assert.Empty(t, usage)
+		var usage driver.Usage
+
+		require.Eventually(t, func() bool {
+			readings, err := d.Usage(t.Context(), idOf(t), "example")
+			require.NoError(t, err)
+
+			usage = readings[pid]
+
+			return usage.CPU > 0
+		}, time.Second*5, time.Millisecond*50)
+
+		assert.Positive(t, usage.Memory)
+		assert.GreaterOrEqual(t, usage.Pids, 1)
 
 		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
 	})
