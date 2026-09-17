@@ -42,10 +42,15 @@ jobs:
           yarn build
           git checkout -- package.json
 
+      # Outside the checkout, since goreleaser refuses a working tree with
+      # anything untracked in it.
+      - name: Write the release notes
+        run: ./scripts/changelog.sh "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
+
       - name: Run goreleaser
         uses: goreleaser/goreleaser-action@v7
         with:
-          args: release --clean
+          args: release --clean --release-notes ${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
