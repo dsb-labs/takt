@@ -61,8 +61,19 @@ export function bytes(count: number): string {
 }
 
 // cores renders a processor figure the way a limit is written: "0.35", "2".
+// It keeps two decimals, or two significant figures when the figure is
+// smaller than that, so an idle process using thousandths of a core reads
+// "0.0031" rather than "0". An axis over such a process has its ticks a few
+// ten-thousandths apart, and two figures are enough to tell them apart: the
+// chart only ever steps its ticks by 1, 2 or 5 of some power of ten. Below a
+// billionth of a core the figure is noise, and toFixed has a ceiling anyway.
 export function cores(count: number): string {
-  return String(Number(count.toFixed(2)));
+  const decimals =
+    count > 0
+      ? Math.min(10, Math.max(2, 1 - Math.floor(Math.log10(count))))
+      : 2;
+
+  return String(Number(count.toFixed(decimals)));
 }
 
 // percent renders a share of a whole as a whole-number percentage: "42%".
