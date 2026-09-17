@@ -43,6 +43,9 @@ jobs:
       - name: Check formatting
         run: yarn format:check
 
+      - name: Run tests
+        run: yarn test
+
       - name: Run generators
         run: |
           yarn generate
