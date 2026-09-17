@@ -162,9 +162,10 @@ func Run(ctx context.Context, config Config) error {
 
 	// Reported at startup for the reason confinement is, and separately from it:
 	// a host can confine without delegating a cgroup subtree, and only workloads
-	// asking for resource limits are refused by the answer here.
+	// asking for resource limits are refused by the answer here. The rest still
+	// run, but without a cgroup there is nothing to read their usage from.
 	if err = exec.Enforceable(); err != nil {
-		logger.With("error", err).Warn("exec resource limits cannot be enforced on this host and will be refused")
+		logger.With("error", err).Warn("exec resource limits cannot be enforced on this host and will be refused, and exec workloads will report no usage")
 	}
 
 	// The exec driver keeps its own trees under the data directory, beside the
