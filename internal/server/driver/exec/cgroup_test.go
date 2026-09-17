@@ -35,7 +35,7 @@ func TestDriver_ResourceLimits(t *testing.T) {
 	t.Run("runs a limited workload in a cgroup carrying its limits", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		w := workload("example", 1, "hash-one", "sleep 60")
+		w := workload(t, "example", 1, "hash-one", "sleep 60")
 		w.Spec.Resources = &manifest.Resources{Memory: "32m", CPU: 0.5, Pids: 5}
 
 		pid, err := d.Start(t.Context(), w)
@@ -46,13 +46,13 @@ func TestDriver_ResourceLimits(t *testing.T) {
 		// Read through the process rather than through the driver's internals, so
 		// what is asserted is what the kernel is actually enforcing on the command.
 		path := cgroupOf(t, pid)
-		assert.Equal(t, "takt-"+testID+"-0-1", filepath.Base(path))
+		assert.Equal(t, "takt-"+idOf(t)+"-0-1", filepath.Base(path))
 		assert.Equal(t, strconv.Itoa(32*1024*1024), limitOf(t, path, "memory.max"))
 		assert.Equal(t, "0", limitOf(t, path, "memory.swap.max"))
 		assert.Equal(t, "50000 100000", limitOf(t, path, "cpu.max"))
 		assert.Equal(t, "5", limitOf(t, path, "pids.max"))
 
-		require.NoError(t, d.Stop(t.Context(), testID, "example"))
+		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
 
 		// The cgroup goes with the workload. One left behind would accumulate per
 		// stopped workload until the subtree filled with empty directories.
@@ -74,7 +74,7 @@ func TestDriver_ResourceLimits(t *testing.T) {
 		// fork ahead of it — the driver's trampoline allowance covers that moment.
 		// Builtins only until then: reading through redirection forks nothing, so
 		// the check cannot be refused by the limit it waits for.
-		w := workload("example", 1, "hash-one",
+		w := workload(t, "example", 1, "hash-one",
 			`read line < /proc/self/cgroup
 			limit="/sys/fs/cgroup${line#0::}/pids.max"
 			while read max < "$limit"; [ "$max" != "2" ]; do sleep 0.1; done
@@ -87,13 +87,13 @@ func TestDriver_ResourceLimits(t *testing.T) {
 
 		awaitOutput(t, d, "example", "fork")
 
-		require.NoError(t, d.Stop(t.Context(), testID, "example"))
+		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
 	})
 
 	t.Run("removes the cgroup when a workload is discarded", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		w := workload("example", 1, "hash-one", "sleep 60")
+		w := workload(t, "example", 1, "hash-one", "sleep 60")
 		w.Spec.Resources = &manifest.Resources{Pids: 5}
 
 		pid, err := d.Start(t.Context(), w)
@@ -103,7 +103,7 @@ func TestDriver_ResourceLimits(t *testing.T) {
 
 		path := cgroupOf(t, pid)
 
-		require.NoError(t, d.Discard(t.Context(), testID, "example"))
+		require.NoError(t, d.Discard(t.Context(), idOf(t), "example"))
 
 		_, err = os.Stat(path)
 		assert.True(t, os.IsNotExist(err))
@@ -112,7 +112,7 @@ func TestDriver_ResourceLimits(t *testing.T) {
 	t.Run("a workload asking for no limits runs outside any workload cgroup", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		pid, err := d.Start(t.Context(), workload("example", 1, "hash-one", "sleep 60"))
+		pid, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "sleep 60"))
 		require.NoError(t, err)
 
 		awaitState(t, d, "example", driver.StateRunning)
@@ -120,9 +120,9 @@ func TestDriver_ResourceLimits(t *testing.T) {
 		// The unlimited path has to keep working on a host with no delegation at
 		// all: the command inherits whatever cgroup the server runs in, exactly
 		// as before limits existed.
-		assert.NotContains(t, filepath.Base(cgroupOf(t, pid)), "takt-"+testID)
+		assert.NotContains(t, filepath.Base(cgroupOf(t, pid)), "takt-"+idOf(t))
 
-		require.NoError(t, d.Stop(t.Context(), testID, "example"))
+		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
 	})
 }
 
@@ -139,7 +139,7 @@ func TestDriver_Usage(t *testing.T) {
 		// A shell busying itself, so there is processor time to report as well as
 		// memory. Read from the kernel's own counters, so what is asserted is what
 		// the limits are enforced against.
-		w := workload("example", 7, "hash-one", "while :; do :; done")
+		w := workload(t, "example", 7, "hash-one", "while :; do :; done")
 		w.Spec.Resources = &manifest.Resources{Memory: "32m", CPU: 0.5, Pids: 5}
 
 		pid, err := d.Start(t.Context(), w)
@@ -152,7 +152,7 @@ func TestDriver_Usage(t *testing.T) {
 		var usage driver.Usage
 
 		require.Eventually(t, func() bool {
-			readings, err := d.Usage(t.Context(), testID, "example")
+			readings, err := d.Usage(t.Context(), idOf(t), "example")
 			require.NoError(t, err)
 
 			usage = readings[pid]
@@ -164,7 +164,7 @@ func TestDriver_Usage(t *testing.T) {
 		assert.GreaterOrEqual(t, usage.Pids, 1)
 		assert.False(t, usage.At.IsZero())
 
-		require.NoError(t, d.Stop(t.Context(), testID, "example"))
+		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
 	})
 
 	// An unlimited workload runs in the server's own cgroup, so the only counters
@@ -173,31 +173,31 @@ func TestDriver_Usage(t *testing.T) {
 	t.Run("reports nothing for a workload asking for no limits", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		_, err := d.Start(t.Context(), workload("example", 8, "hash-one", "sleep 60"))
+		_, err := d.Start(t.Context(), workload(t, "example", 8, "hash-one", "sleep 60"))
 		require.NoError(t, err)
 
 		awaitState(t, d, "example", driver.StateRunning)
 
-		usage, err := d.Usage(t.Context(), testID, "example")
+		usage, err := d.Usage(t.Context(), idOf(t), "example")
 		require.NoError(t, err)
 		assert.Empty(t, usage)
 
-		require.NoError(t, d.Stop(t.Context(), testID, "example"))
+		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
 	})
 
 	t.Run("reports nothing for a workload that has stopped", func(t *testing.T) {
 		d, _ := newDriver(t)
 
-		w := workload("example", 9, "hash-one", "sleep 60")
+		w := workload(t, "example", 9, "hash-one", "sleep 60")
 		w.Spec.Resources = &manifest.Resources{Pids: 5}
 
 		_, err := d.Start(t.Context(), w)
 		require.NoError(t, err)
 
 		awaitState(t, d, "example", driver.StateRunning)
-		require.NoError(t, d.Stop(t.Context(), testID, "example"))
+		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
 
-		usage, err := d.Usage(t.Context(), testID, "example")
+		usage, err := d.Usage(t.Context(), idOf(t), "example")
 		require.NoError(t, err)
 		assert.Empty(t, usage)
 	})
