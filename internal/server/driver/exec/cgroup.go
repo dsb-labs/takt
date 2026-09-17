@@ -62,8 +62,9 @@ const (
 	controllers = "+memory +cpu +pids"
 )
 
-// The cgroup type is the directory a limited workload runs in, held open so the
-// process can be placed into it as it is created.
+// The cgroup type is the directory a workload runs in, held open so the process can
+// be placed into it as it is created. It carries the workload's limits when the
+// manifest named some, and is what its usage is read from either way.
 type cgroup struct {
 	// Where the cgroup is, which is what the record keeps and cleanup removes.
 	path string
@@ -170,8 +171,8 @@ func ownCgroup() (string, error) {
 	return "", errors.New("this process is not in a cgroup2 hierarchy")
 }
 
-// Guards preparation of the delegated subtree, which the first limited workload
-// does for the life of the process. A flag rather than sync.Once, because a failed
+// Guards preparation of the delegated subtree, which the first exec workload does
+// for the life of the process. A flag rather than sync.Once, because a failed
 // attempt has to be retried by the next workload rather than remembered forever —
 // what fails here is a race with processes coming and going, not a fact about the
 // host.
@@ -180,10 +181,10 @@ var (
 	prepareDone bool
 )
 
-// prepared makes the delegated subtree able to hold limited workloads, once.
+// prepared makes the delegated subtree able to hold workload cgroups, once.
 //
 // Deferred to the first workload that needs it rather than done at startup, so a
-// host that never limits anything is left exactly as it was.
+// host that never runs an exec workload is left exactly as it was.
 func prepared() error {
 	prepareMux.Lock()
 	defer prepareMux.Unlock()
@@ -206,12 +207,13 @@ func prepared() error {
 //
 // The vacating is what makes the second step legal: the kernel refuses controllers
 // to a cgroup's children while the cgroup holds processes of its own, and the root
-// holds at least the server — plus every unlimited workload it started, which
-// inherited its cgroup. All of them move to the server's leaf, where nothing limits
-// them and the same is true of anything they start afterwards, since a child
+// holds at least the server — plus any workload cloned into its cgroup, which is
+// what a server that could not make one does, and what every server did before
+// each workload got its own. All of them move to the server's leaf, where nothing
+// limits them and the same is true of anything they start afterwards, since a child
 // inherits the cgroup of its parent.
 //
-// The two steps race with unlimited workloads still being started, whose processes
+// The two steps race with such workloads still being started, whose processes
 // appear in the root between the vacating and the enabling. The kernel reports
 // that, so the pair is retried rather than ordered.
 //
@@ -280,8 +282,8 @@ func vacate(root, leaf string) error {
 // between creating one and recording it leaves behind.
 //
 // Best effort, and deliberately so. A cgroup that refuses removal is one with
-// processes still in it — a limited workload adopted from an earlier server — and
-// the record naming it is what removes it when the workload stops.
+// processes still in it — a workload adopted from an earlier server — and the
+// record naming it is what removes it when the workload stops.
 //
 // A young cgroup is left alone. Two processes can share one delegation — the test
 // suites run that way — and another's cgroup is empty for the moment between its
@@ -307,19 +309,38 @@ func sweep(root string) {
 	}
 }
 
-// limit creates the cgroup a workload's resource limits are enforced by, returning
-// nil for a workload that asked for none.
+// limit creates the cgroup a workload runs in, carrying its resource limits when it
+// named some.
+//
+// A workload naming limits requires the cgroup, since it is what enforces them, and
+// a failure to make one fails the start. A workload naming none merely prefers it:
+// the cgroup is what its usage is read from, but nothing it promised depends on it,
+// so a host that cannot make one — no delegated subtree, most often — runs the
+// workload as it would have anyway and reports no usage for it. The failure is
+// logged rather than returned, at debug when the host does not delegate, which
+// startup already warned about, and as a warning otherwise.
+func (d *Driver) limit(w driver.Workload) (*cgroup, error) {
+	group, err := create(w)
+	switch {
+	case err == nil || w.Spec.Resources != nil:
+		return group, err
+	case errors.Is(err, ErrNotEnforceable):
+		d.logger.With("workload", w.Name, "instance", w.Instance, "error", err).Debug("running the workload without a cgroup")
+	default:
+		d.logger.With("workload", w.Name, "instance", w.Instance, "error", err).Warn("running the workload without a cgroup")
+	}
+
+	return nil, nil
+}
+
+// create makes a workload's cgroup, writing its limits when the specification names
+// some.
 //
 // The limits are written before the directory is handed back, so by the time a
 // process can be placed in it every limit already applies. The identifier reaching
 // the path was checked by the caller resolving the workload's directories, which
 // happens before any of this.
-func (d *Driver) limit(w driver.Workload) (*cgroup, error) {
-	resources := w.Spec.Resources
-	if resources == nil {
-		return nil, nil
-	}
-
+func create(w driver.Workload) (*cgroup, error) {
 	if err := prepared(); err != nil {
 		return nil, fmt.Errorf("failed to prepare the cgroup subtree: %w", err)
 	}
@@ -330,26 +351,32 @@ func (d *Driver) limit(w driver.Workload) (*cgroup, error) {
 	}
 
 	// The instance is part of the name so that a workload's instances get cgroups
-	// of their own: two sharing one would share the limits it enforces.
+	// of their own: two sharing one would share the limits it enforces, and a
+	// reading of one would describe both.
 	path := filepath.Join(root, cgroupPrefix+w.ID+"-"+strconv.Itoa(w.Instance)+"-"+strconv.Itoa(w.Version))
 	if err = os.Mkdir(path, 0o755); err != nil && !os.IsExist(err) {
 		return nil, fmt.Errorf("failed to create the workload's cgroup: %w", pathless(err))
 	}
 
-	if err = limits(path, resources); err != nil {
-		_ = os.Remove(path)
+	group := &cgroup{path: path}
 
-		return nil, err
+	if resources := w.Spec.Resources; resources != nil {
+		if err = limits(path, resources); err != nil {
+			_ = os.Remove(path)
+
+			return nil, err
+		}
+
+		group.pids = resources.Pids
 	}
 
-	dir, err := os.Open(path)
-	if err != nil {
+	if group.dir, err = os.Open(path); err != nil {
 		_ = os.Remove(path)
 
 		return nil, fmt.Errorf("failed to open the workload's cgroup: %w", pathless(err))
 	}
 
-	return &cgroup{path: path, dir: dir, pids: resources.Pids}, nil
+	return group, nil
 }
 
 // limits writes a workload's resource limits into its cgroup. A limit the

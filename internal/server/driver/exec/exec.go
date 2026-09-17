@@ -205,9 +205,11 @@ func (d *Driver) Name() string {
 // volumes it mounts, the values it mounts and the host's own files. A host whose kernel
 // cannot do that is refused here rather than running the workload unconfined.
 //
-// A workload naming resource limits runs in a cgroup of its own that enforces them,
-// which takes a delegated subtree. A host without one refuses the workload rather than
-// running it unlimited, for the reason a host that cannot confine refuses it.
+// It runs in a cgroup of its own, which is what its usage is read from and what
+// enforces its resource limits when it named some. Making one takes a delegated
+// subtree. A host without one refuses a workload naming limits rather than running it
+// unlimited, for the reason a host that cannot confine refuses it, and runs one naming
+// none as it would have anyway — without a cgroup, and so without a reading.
 func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	spec := w.Spec.Exec
 	if spec == nil {
@@ -1107,12 +1109,13 @@ func instance(workload string, index int, recorded state, retained bool) driver.
 // Usage reports what each running process of one workload is consuming, keyed by
 // the identifier its instance is reported under.
 //
-// Only a workload with resource limits is reported on. Its limits are enforced by a
-// cgroup of its own, and the counters kept beside them are the reading. A workload
-// that asked for no limits shares whichever cgroup the server runs in, so there is
-// nothing there that describes the workload rather than the server, and reporting
-// the server's own consumption as the workload's would be worse than reporting
-// nothing.
+// The reading is the counters the kernel keeps in the process's cgroup, beside the
+// limits it enforces there when the workload named some. A process with no cgroup
+// of its own — one started on a host that could not make one, or by a server that
+// predates every workload getting one — shares whichever cgroup the server runs in,
+// so there is nothing there that describes the workload rather than the server, and
+// reporting the server's own consumption as the workload's would be worse than
+// reporting nothing.
 //
 // A retained process has ended and consumes nothing, so it is left out, as is a
 // record whose cgroup cannot be read: one workload's missing reading should not hide
