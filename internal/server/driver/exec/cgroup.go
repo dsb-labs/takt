@@ -580,9 +580,15 @@ func (c *cgroup) discard() {
 // waits briefly for the kernel to notice the deaths, since a cgroup is only
 // removable once it is empty. A cgroup already gone is fine — the caller is asking
 // for it to not exist, and it does not.
+//
+// Gone can be reported two ways. A path that no longer resolves is not found. A
+// cgroup removed between opening the file and writing it is a dead one, which the
+// kernel reports as no such device. The second is a race with the supervisor, which
+// removes the cgroup itself once the process it watched has ended, and the stop
+// that got here has just asked that process to end.
 func discardCgroup(path string) error {
 	err := os.WriteFile(filepath.Join(path, "cgroup.kill"), []byte("1"), 0o644)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil && !os.IsNotExist(err) && !errors.Is(err, syscall.ENODEV) {
 		return fmt.Errorf("failed to kill the workload's cgroup: %w", pathless(err))
 	}
 
