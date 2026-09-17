@@ -13,8 +13,8 @@ import {
 import { computed, onUnmounted, ref } from "vue";
 import { Line } from "vue-chartjs";
 
-import { pollInterval } from "@/api/queries";
-import type { Point, Series } from "@/composables/series";
+import type { Series } from "@/composables/series";
+import { ago, broken, extent, marks } from "@/lib/chart";
 
 // Only the pieces a line chart draws with, so the bundle carries the chart
 // types this page uses rather than every chart the library can draw.
@@ -97,61 +97,6 @@ const data = computed<ChartData<"line">>(() => {
 
   return { datasets: lines };
 });
-
-// broken joins the points a chart draws, with a gap left wherever the page
-// stopped polling — a hidden tab, or a request that failed. Without it the
-// line is drawn straight across the pause, which reads as a slow climb or
-// fall the instance never made.
-function broken(points: Point[]): (Point | { x: number; y: null })[] {
-  const gap = pollInterval * 3;
-
-  return points.flatMap((point, at) => {
-    const previous = points[at - 1];
-    if (previous && point.x - previous.x > gap) {
-      return [{ x: previous.x + gap / 2, y: null }, point];
-    }
-
-    return [point];
-  });
-}
-
-// extent reports the first and last instant any series has a reading at,
-// which is how far the limit line has to reach.
-function extent(series: Series[]): [number, number] | null {
-  const instants = series.flatMap((line) => line.points.map((p) => p.x));
-  if (!instants.length) return null;
-
-  return [Math.min(...instants), Math.max(...instants)];
-}
-
-// ago writes an instant as how long before the latest reading it was, which is
-// what a rolling window wants on its axis: "now", "2m ago".
-function ago(instant: number, latest: number): string {
-  const seconds = Math.round((latest - instant) / 1000);
-  if (seconds < 5) return "now";
-  if (seconds < 60) return `${seconds}s ago`;
-
-  return `${Math.round(seconds / 60)}m ago`;
-}
-
-// marks places a tick every so often back from the latest reading, rather
-// than leaving the library to pick round numbers of milliseconds. Two of
-// those can land inside the same second of history and both read "1m ago",
-// and the ticks it adds past the ends leave the lines short of the walls.
-function marks(span: [number, number]): number[] {
-  const [oldest, latest] = span;
-  const step =
-    latest - oldest <= 60_000
-      ? 15_000
-      : latest - oldest <= 180_000
-        ? 30_000
-        : 60_000;
-
-  const ticks: number[] = [];
-  for (let at = latest; at >= oldest; at -= step) ticks.push(at);
-
-  return ticks.reverse();
-}
 
 const options = computed<ChartOptions<"line">>(() => {
   // The axis runs from the first reading to the last, so the lines reach both
