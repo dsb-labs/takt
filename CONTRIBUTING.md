@@ -270,3 +270,48 @@ A change below the HTTP API works on `manifest.Spec`. Importing
 Commits are `<scope>: <description>`, where the scope is the directory path being
 changed. The body opens with "This commit" and says what changed and why. Sign off with
 `git commit -s`.
+
+## The changelog
+
+`CHANGELOG.md` says what each release changed for the people running takt, and a
+release's section becomes its notes on GitHub. A pull request that changes something
+an operator, an API client or a reader of the UI would notice adds a line to it. A
+refactor, a test, a CI change, a dependency bump or a docs-only change does not,
+unless the behaviour moved with it.
+
+The line goes under `## Unreleased`, in one of four subsections:
+
+| Subsection | What goes there |
+|---|---|
+| `### Added` | Something new: a manifest field, a command, an endpoint, a view. |
+| `### Changed` | Existing behaviour that now does something different, defaults included. |
+| `### Fixed` | A bug, said in terms of what went wrong rather than what the fix did. |
+| `### Removed` | Something that no longer exists. |
+
+Add a subsection when the first line needs it, and keep them in that order. A line is
+one sentence describing the change from the reader's side, with the pull request
+linked at the end, and the issue too when one exists:
+
+```markdown
+### Fixed
+
+- An `exec` workload naming no `resources` reported no usage
+  ([#49](https://github.com/dsb-labs/takt/issues/49),
+  [#68](https://github.com/dsb-labs/takt/pull/68)).
+```
+
+Name what a reader would search for — the manifest field, the command, the page —
+rather than the package that changed. The commit scope already says where.
+
+### Cutting a release
+
+1. Rename `## Unreleased` to `## vX.Y.Z - YYYY-MM-DD` and add an empty
+   `## Unreleased` above it.
+2. Commit that as `CHANGELOG: cut vX.Y.Z` and merge it.
+3. Tag the merge commit `vX.Y.Z` and push the tag.
+
+The release workflow runs `scripts/changelog.sh` against the tag, which prints the
+tag's section for goreleaser to publish. It fails the release when the tag has no
+section or when anything is still listed under Unreleased, so a tag cut before the
+file was brought up to date fails before anything ships. Delete the tag, fix the
+file and tag again.
