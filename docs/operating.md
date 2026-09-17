@@ -432,11 +432,12 @@ a command at it.
 
 ## Delegation
 
-An `exec` workload naming `resources:` runs in a cgroup of its own, which is what
-enforces the limits. Writing below `/sys/fs/cgroup` needs either root or a subtree
-delegated to takt's user, so enforcement needs the host's help where confinement does
-not. takt derives the subtree from the cgroup it was started in — there is nothing to
-configure.
+An `exec` workload runs in a cgroup of its own. The cgroup enforces the limits a
+manifest names in `resources:`, and it is where takt reads the workload's usage from
+whether the manifest named any or not. Writing below `/sys/fs/cgroup` needs either
+root or a subtree delegated to takt's user, so both need the host's help where
+confinement does not. takt derives the subtree from the cgroup it was started in —
+there is nothing to configure.
 
 Running the server under systemd with `Delegate=yes` on its unit grants a subtree.
 Setting `DelegateSubgroup=main` as well is recommended: it places the server in a
@@ -450,25 +451,27 @@ confinement has none: a limit that did nothing on some hosts would be a guarante
 nobody could rely on. In particular takt does not fall back to rlimits — they cap
 address space rather than memory used and count the user's processes rather than the
 workload's, so the same manifest field would mean something different per runtime.
-Container workloads are unaffected, and so is every `exec` workload naming no limits.
+Container workloads are unaffected. An `exec` workload naming no limits still runs on
+such a host, in whatever cgroup the server sits in, but it reports no usage.
 
-Inside the subtree, takt keeps a `main` cgroup holding the server and every unlimited
-workload, and one `takt-<id>-<instance>-<version>` cgroup per limited instance, so a
-workload's instances get cgroups of their own. The limits are
-written before the command starts, so it never runs outside them, and the cgroup is
-removed when the workload stops.
+Inside the subtree, takt keeps a `main` cgroup holding the server, and one
+`takt-<id>-<instance>-<version>` cgroup per instance, so a workload's instances get
+cgroups of their own. The limits are written before the command starts, so it never
+runs outside them, and the cgroup is removed when the workload stops. Stopping kills
+everything the cgroup holds, which reaches a process that left the workload's process
+group by making a session of its own.
 
 takt reads the usage figures from that cgroup too, so an `exec` workload reports what
-it is consuming exactly when it is limited. An unlimited one shares the `main` cgroup
-with the server and every other unlimited workload. A reading of that would describe
-the lot of them rather than the workload, so an unlimited workload reports nothing.
-takt reads a container workload from its runtime, which reports either way.
+it is consuming on any host that delegates a subtree, limited or not. A workload
+started without a cgroup shares the server's, where a reading would describe the
+server and every other such workload rather than the one asked about, so it reports
+nothing. takt reads a container workload from its runtime, which reports either way.
 
-One interaction with the service manager is worth knowing. A limited workload's
+One interaction with the service manager is worth knowing. An `exec` workload's
 processes necessarily live inside the unit's subtree, and systemd's default
-`KillMode=control-group` kills everything in it when the unit stops. A limited
+`KillMode=control-group` kills everything in it when the unit stops. An `exec`
 workload outlives a server restart only under `KillMode=process`, which signals the
-server alone. An unlimited workload is unaffected by the limits work either way.
+server alone.
 
 ## Volumes
 
