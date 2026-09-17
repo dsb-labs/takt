@@ -8,6 +8,8 @@ describes how an entry is written.
 
 ## Unreleased
 
+## v0.8.0 - 2026-09-17
+
 ### Added
 
 - `GET /api/v1/node` and `takt node get` report the machine the server runs
