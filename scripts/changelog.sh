@@ -20,9 +20,17 @@ fi
 # The section is everything between the tag's heading and the next release
 # heading. The heading itself is left out, since the release is already
 # titled with the tag.
+#
+# The file is wrapped for reading, and GitHub renders a newline inside a
+# release body as a line break, so a wrapped entry would show every wrap
+# point. A line that starts neither an entry, a heading nor a paragraph
+# continues the one above it and is joined back onto it.
 section=$(awk -v tag="$tag" '
-	/^## / { active = ($2 == tag) ; next }
-	active { print }
+	/^## / { if (held != "") print held; held = ""; active = ($2 == tag); next }
+	!active { next }
+	held != "" && $0 != "" && !/^(- |#)/ { sub(/^[ \t]+/, ""); held = held " " $0; next }
+	{ if (held != "") print held; held = $0 }
+	END { if (held != "") print held }
 ' CHANGELOG.md | sed '/./,$!d')
 
 if [ -z "$(printf %s "$section" | tr -d '[:space:]')" ]; then
