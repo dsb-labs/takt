@@ -2,7 +2,7 @@
 # cgroup subtree, which is what lets takt enforce resource limits on exec
 # workloads — see the "Delegation" section of docs/operating.md.
 
-.PHONY: test e2e dev lint generate ui dev-ui
+.PHONY: test e2e dev lint generate ui dev-ui test-ui
 
 test:
 	./scripts/delegated.sh go test -short -race ./...
@@ -32,6 +32,12 @@ ui:
 dev-ui:
 	yarn --cwd internal/ui/app install --frozen-lockfile
 	yarn --cwd internal/ui/app dev
+
+# The UI's own tests, which cover the logic behind the views rather than the
+# views themselves.
+test-ui:
+	yarn --cwd internal/ui/app install --frozen-lockfile
+	yarn --cwd internal/ui/app test
 
 generate:
 	go generate ./...
