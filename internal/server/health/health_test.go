@@ -68,6 +68,26 @@ func TestChecker_Run(t *testing.T) {
 		awaitStatus(t, checker, "example", health.StatusUnhealthy)
 	})
 
+	t.Run("probes the instance whatever host the path names", func(t *testing.T) {
+		var requested atomic.Value
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requested.Store(r.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		}))
+		t.Cleanup(server.Close)
+
+		checker := run(t)
+
+		// Appended to the address as text, this path would put a user part in
+		// front of a host of its own and send the probe there. The manifest refuses
+		// it, and the checker holds the line for a spec that arrives another way.
+		checker.Set("example", 0, check(server.Listener.Addr().String(), "@203.0.113.5/admin"))
+
+		awaitStatus(t, checker, "example", health.StatusHealthy)
+		assert.Equal(t, "/@203.0.113.5/admin", requested.Load())
+	})
+
 	t.Run("checks a connection when no path is given", func(t *testing.T) {
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)

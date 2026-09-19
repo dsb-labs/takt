@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -522,9 +523,17 @@ func (c *Checker) probeTCP(ctx context.Context, address string) error {
 }
 
 func (c *Checker) probeHTTP(ctx context.Context, address, path string) error {
-	url := "http://" + address + path
+	// The path is parsed on its own and the address set afterwards, so nothing the
+	// path carries can name a host of its own. The manifest refuses such a path, and
+	// this holds the line for a spec that reached here another way.
+	target, err := url.Parse(path)
+	if err != nil {
+		return fmt.Errorf("failed to parse path: %w", err)
+	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	target.Scheme, target.Host, target.User = "http", address, nil
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to construct request: %w", err)
 	}
