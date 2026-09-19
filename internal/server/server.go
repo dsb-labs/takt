@@ -476,6 +476,9 @@ func Run(ctx context.Context, config Config) error {
 	// to it.
 	mux.Handle("GET /", webUI)
 
+	requests, endRequests := context.WithCancel(context.Background())
+	defer endRequests()
+
 	server := &http.Server{
 		Addr: config.HTTP.Address,
 		// Outermost on purpose, outside even the middleware: a request the
@@ -506,7 +509,15 @@ func Run(ctx context.Context, config Config) error {
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      5 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
+		// Every request's context descends from this one, and it is cancelled as
+		// the server begins shutting down. Shutdown waits for every response to
+		// end, and a followed read or a service stream ends only when its context
+		// does, so without this a shutdown would sit behind one open tail until
+		// its deadline and then report a failure.
+		BaseContext: func(net.Listener) context.Context { return requests },
 	}
+
+	server.RegisterOnShutdown(endRequests)
 
 	if config.HTTP.TLSEnabled() {
 		// Loaded here rather than at the first handshake, so a pair the server
@@ -583,7 +594,18 @@ func Run(ctx context.Context, config Config) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		return server.Shutdown(shutdownCtx)
+		// A response still open at the deadline is closed under it. That is a
+		// client that did not go when asked rather than a failure of the server,
+		// so it is reported and the stop still counts as clean.
+		if err := server.Shutdown(shutdownCtx); errors.Is(err, context.DeadlineExceeded) {
+			logger.Warn("http server shutdown timed out, closing open connections")
+
+			return server.Close()
+		} else if err != nil {
+			return err
+		}
+
+		return nil
 	})
 
 	logger.With("address", config.HTTP.Address, "tls", config.HTTP.TLSEnabled()).Info("takt server listening")
