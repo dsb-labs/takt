@@ -206,14 +206,17 @@ allow-host-paths = ["/mnt/media", "/var/run/docker.sock"]
 ```
 
 Each prefix must be absolute. Comparison respects path boundaries, so `/mnt/media`
-does not cover `/mnt/media-cache`.
+does not cover `/mnt/media-cache`. Symbolic links are followed on both sides before
+the comparison, so a link beneath an allowed directory cannot carry a mount outside
+it, and a prefix that is itself a link — `/var/run` on most hosts — covers what it
+points at.
 
 There is no manifest equivalent, for the reason the exec `allow-paths` list has none.
 A host path reaches outside takt-managed state — the docker socket in particular is
 control of the daemon — so which paths are opened is the operator's decision. The
-list is checked when a manifest is applied. A workload already stored keeps its
-mounts if the list later narrows, the way an exec workload keeps the paths it was
-started with.
+list is checked when a manifest is applied, and again each time an instance starts,
+since the tree can change in between. A workload whose path no longer resolves
+under a prefix fails to start and says so in its events.
 
 ## exec
 

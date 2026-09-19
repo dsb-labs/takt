@@ -8,6 +8,21 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Changed
+
+- `allow-host-paths` is checked again each time an instance starts, not only when
+  the manifest is applied. A stored workload whose path no longer sits under a
+  prefix fails to start and says so in its events
+  ([#74](https://github.com/dsb-labs/takt/issues/74),
+  [#95](https://github.com/dsb-labs/takt/pull/95)).
+
+### Fixed
+
+- A symbolic link beneath an allowed host path carried a path mount wherever it
+  pointed. Links are now followed on both sides before the path is compared to
+  the prefixes ([#74](https://github.com/dsb-labs/takt/issues/74),
+  [#95](https://github.com/dsb-labs/takt/pull/95)).
+
 ## v0.8.0 - 2026-09-17
 
 ### Added
