@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"path"
 	"slices"
 	"strconv"
@@ -1192,6 +1193,10 @@ func validateHealth(spec Spec, runtime Runtime) error {
 		return errors.New("invalid health: only one of http or tcp may be specified")
 	case health.HTTP == "" && !health.TCP:
 		return errors.New("invalid health: one of http or tcp is required")
+	case health.HTTP != "" && !rootedPath(health.HTTP):
+		// The path is appended to the instance's address to make the probe URL, so
+		// one that parses as anything but a path would redirect the probe elsewhere.
+		return errors.New("invalid health: http must be a path starting with /")
 	}
 
 	// A check is performed against an address, so the question is whether the workload
@@ -1236,6 +1241,18 @@ func validateHealthPort(health Health, ports []Port) error {
 	}
 
 	return nil
+}
+
+// rootedPath reports whether value parses as a path alone, starting with a slash and
+// carrying no scheme, host or user part. A query is allowed.
+func rootedPath(value string) bool {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+
+	return parsed.Scheme == "" && parsed.Host == "" && parsed.User == nil &&
+		strings.HasPrefix(parsed.Path, "/")
 }
 
 // RuntimeOf reports which runtime spec describes, which is determined by the block
