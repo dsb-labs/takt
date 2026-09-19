@@ -16,6 +16,11 @@ describes how an entry is written.
 
 ### Fixed
 
+- A driver's event stream ending, as it does when the Docker daemon restarts,
+  left the server converging on the interval alone until it was restarted. The
+  stream is now watched again
+  ([#81](https://github.com/dsb-labs/takt/issues/81),
+  [#97](https://github.com/dsb-labs/takt/pull/97)).
 - The packaged unit refused to start on a host without the Docker socket, which
   a server running only `exec` workloads has no need of
   ([#85](https://github.com/dsb-labs/takt/issues/85),
