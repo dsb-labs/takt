@@ -25,6 +25,10 @@ describes how an entry is written.
   created rather than when the manifest was applied
   ([#86](https://github.com/dsb-labs/takt/issues/86),
   [#96](https://github.com/dsb-labs/takt/pull/96)).
+- A pinned host port that something outside takt already listened on was
+  accepted at apply and failed the start
+  ([#86](https://github.com/dsb-labs/takt/issues/86),
+  [#96](https://github.com/dsb-labs/takt/pull/96)).
 - A driver's event stream ending, as it does when the Docker daemon restarts,
   left the server converging on the interval alone until it was restarted. The
   stream is now watched again
