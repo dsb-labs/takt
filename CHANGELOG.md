@@ -21,6 +21,12 @@ describes how an entry is written.
   stream is now watched again
   ([#81](https://github.com/dsb-labs/takt/issues/81),
   [#97](https://github.com/dsb-labs/takt/pull/97)).
+- An instance failing its health check under `restart.policy: on-failure` was
+  never replaced, and its verdict flapped on every pass. Under `never` the
+  verdict flapped the same way. A workload declaring a check under `on-failure`
+  also had the check forgotten on every pass while healthy
+  ([#79](https://github.com/dsb-labs/takt/issues/79),
+  [#98](https://github.com/dsb-labs/takt/pull/98)).
 - The packaged unit refused to start on a host without the Docker socket, which
   a server running only `exec` workloads has no need of
   ([#85](https://github.com/dsb-labs/takt/issues/85),
