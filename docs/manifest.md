@@ -149,7 +149,7 @@ container:
 
 | Field | Required | Description |
 |---|---|---|
-| `image` | yes | The image reference to run. |
+| `image` | yes | The image reference to run, in the form `docker pull` accepts. |
 | `pull` | no | When the image is pulled: `always`, `missing` or `never`. Defaults to `missing`. |
 | `command` | no | Replaces the command the image declares. |
 | `user` | no | The user to run as, replacing the one the image declares. |
@@ -359,6 +359,9 @@ env:
 
 A workload starts with only what `env` names. It does not inherit the server's
 environment, which may hold credentials the workload has no business reading.
+
+A name is letters, digits and underscores, and does not start with a digit. A value
+is free text without a NUL byte.
 
 ### Reading a secret
 
