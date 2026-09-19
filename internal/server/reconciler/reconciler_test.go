@@ -2053,6 +2053,52 @@ func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
 		"a workload whose container exits at once was restarted on every pass")
 }
 
+func TestReconciler_Run_WatchesADriverAgainWhenItsStreamEnds(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return(nil, nil)
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(nil, nil)
+
+	// The daemon behind a driver restarting ends its stream. The driver is watched
+	// again rather than left to the ticker, and a pass is asked for once it is,
+	// since whatever the driver reported in between is gone.
+	first := make(chan driver.Event)
+	second := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(first, nil).Once()
+	d.EXPECT().Watch(mock.Anything).Return(second, nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+
+	close(first)
+
+	// The pass asked for on resubscribing is the second one, and the ticker cannot
+	// account for it within the hour.
+	passes.wait(t, 2)
+
+	// The new stream is live: an event on it wakes a pass.
+	second <- driver.Event{Workload: "example"}
+	passes.wait(t, 3)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 	t.Parallel()
 
