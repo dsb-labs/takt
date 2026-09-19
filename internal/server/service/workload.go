@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -1796,9 +1795,11 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec manifest.Spec
 
 		switch kind {
 		case manifest.MountPath:
-			if !s.hostPathAllowed(mount.Path) {
-				return spec, fmt.Errorf("%w: host path %q is not under a prefix this server's "+
-					"workload allow-host-paths configuration names", ErrInvalidSpec, mount.Path)
+			// The path is stored as written. It is resolved again as each instance
+			// starts, since the tree can change in between, and the driver is handed
+			// what that resolution reaches.
+			if _, err := driver.ResolveHostPath(mount.Path, s.hostPaths); err != nil {
+				return spec, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 			}
 
 			mounts = append(mounts, mount)
@@ -1834,27 +1835,6 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec manifest.Spec
 	spec.Volumes = mounts
 
 	return spec, nil
-}
-
-// hostPathAllowed reports whether the configuration opens the given host path to
-// path mounts: the path is one of the allowed prefixes, or sits beneath one.
-//
-// Both sides are cleaned before comparing, so a trailing slash in either place
-// cannot turn "/mnt/media-cache" into something "/mnt/media" appears to cover.
-func (s *WorkloadService) hostPathAllowed(mount string) bool {
-	cleaned := filepath.Clean(mount)
-
-	return slices.ContainsFunc(s.hostPaths, func(prefix string) bool {
-		prefix = filepath.Clean(prefix)
-
-		// The root as a prefix opens everything, and the general form below
-		// would double the separator and open nothing.
-		if prefix == string(filepath.Separator) {
-			return true
-		}
-
-		return cleaned == prefix || strings.HasPrefix(cleaned, prefix+string(filepath.Separator))
-	})
 }
 
 // resolveReferences returns what the specification's environment references, along
