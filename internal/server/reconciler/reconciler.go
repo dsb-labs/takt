@@ -1452,7 +1452,7 @@ func (r *Reconciler) register(rows []database.Workload, observed map[string][]dr
 				// that cannot be resolved now means the two have diverged rather
 				// than that the operator made a mistake.
 				r.logger.With("workload", row.Name, "instance", index, "error", err).Error("failed to resolve health check")
-			case ok && row.DeletedAt.IsZero() && row.SuspendedAt.IsZero() && !retired(restartPolicy(row), byIndex[index]):
+			case ok && row.DeletedAt.IsZero() && row.SuspendedAt.IsZero() && r.checkable(row, index, byIndex[index]):
 				r.checker.Set(row.Name, index, check)
 			default:
 				// The workload declares no check, or is on its way out, or is
@@ -1463,6 +1463,28 @@ func (r *Reconciler) register(rows []database.Workload, observed map[string][]dr
 			}
 		}
 	}
+}
+
+// checkable reports whether a slot is worth probing: something in it may yet run,
+// or the policy will bring something back.
+//
+// A slot whose instances have all stopped, under a policy that asks for nothing
+// further, is not. Nor would probing it tell anything: a finished instance reads
+// as unhealthy for no longer answering.
+//
+// An instance the checker failed is not one that stopped. The runtime still reports
+// it running, and forgetting its check would have the next pass read it as running
+// again, register the check again, and fail it again: a verdict flapping every pass
+// for a workload whose policy said to leave it. The check stays so the verdict
+// stays.
+func (r *Reconciler) checkable(row database.Workload, index int, instances []driver.Instance) bool {
+	if !retired(restartPolicy(row), instances) {
+		return true
+	}
+
+	return slices.ContainsFunc(instances, func(instance driver.Instance) bool {
+		return r.checkFailed(row.Name, index, instance.ID)
+	})
 }
 
 // schedule reads when a stored workload should run, reporting nil when it runs
@@ -1559,18 +1581,46 @@ func imageOf(spec manifest.Spec) string {
 //
 // A workload with nothing observed at all is not retired. It has yet to run, and
 // treating an empty driver as a finished job would mean a workload never started.
+// Nor is one with an instance still up: the policy describes what happens when
+// work ends, and that work has not.
 func retired(restart *manifest.Restart, instances []driver.Instance) bool {
 	if len(instances) == 0 {
 		return false
 	}
 
 	for _, instance := range instances {
-		if restart.Policy.Restarts(instance.ExitCode) {
+		if running(instance) || restart.Policy.Restarts(failureOf(instance)) {
 			return false
 		}
 	}
 
 	return true
+}
+
+// failureOf reports the exit code a restart policy judges an instance by.
+//
+// An instance the checker failed is still running, so it carries the exit code of a
+// process that never exited, and a policy reading the code alone would see a clean
+// exit and retire it. The state says what happened: a failed instance is a failure
+// whatever number it carries.
+func failureOf(instance driver.Instance) int {
+	if failed(instance) && instance.ExitCode == 0 {
+		return 1
+	}
+
+	return instance.ExitCode
+}
+
+// failureCodeOf reports the first exit code among the instances that a restart
+// policy would read as a failure, or zero when there is none.
+func failureCodeOf(instances []driver.Instance) int {
+	for _, instance := range instances {
+		if code := failureOf(instance); code != 0 {
+			return code
+		}
+	}
+
+	return 0
 }
 
 // healthCheck resolves a stored workload's health check into something probeable,
@@ -1951,7 +2001,7 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, index i
 
 	// An instance told to give up gives up. It is left exactly as it ended, so the
 	// outcome stays readable, and changing the specification starts it again.
-	if !policy.Restarts(exitCodeOf(instances), r.attempts(row.Name, index)) {
+	if !policy.Restarts(failureCodeOf(instances), r.attempts(row.Name, index)) {
 		// Inside the branch that reports the decision as new, not beside the log
 		// line below: giving up repeats on every pass over an instance that stays
 		// down, and an event recorded out here would go on being seen forever.

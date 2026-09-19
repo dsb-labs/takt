@@ -714,6 +714,125 @@ func TestReconciler_Run_Health(t *testing.T) {
 	}
 }
 
+func TestReconciler_Run_HealthUnderRestartPolicy(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name          string
+		Policy        manifest.RestartPolicy
+		ExpectRestart bool
+	}{
+		{
+			// An instance failing its check is a failure, whatever exit code a
+			// process that never exited carries.
+			Name:          "replaces an unhealthy instance under on-failure",
+			Policy:        manifest.RestartOnFailure,
+			ExpectRestart: true,
+		},
+		{
+			// The policy says to leave it, and it is left. The check is not
+			// forgotten though: the runtime still reports the instance running, and
+			// a forgotten check would be registered and failed again every pass.
+			Name:   "leaves an unhealthy instance under never, and keeps its check",
+			Policy: manifest.RestartNever,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+			ports, checker := NewMockPortRepository(t), newMockChecker(t)
+			recorder := newTestRecorder(t)
+
+			row := storedWorkload("example", "hash-one")
+			row.ID = "workload-one"
+			row.Spec = specWithHealthAndRestart("example", tc.Policy)
+
+			repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+			ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+				"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+			}, nil)
+
+			// The replacement, once started, is reported running and the checker
+			// has no verdict on it yet. The old instance stays unhealthy for as long
+			// as it is the one observed.
+			var replaced atomic.Bool
+
+			checker.EXPECT().Set("example", 0, mock.Anything).Return()
+			checker.EXPECT().Result("example", 0).RunAndReturn(func(string, int) (health.Result, bool) {
+				if replaced.Load() {
+					return health.Result{}, false
+				}
+
+				return health.Result{Status: health.StatusUnhealthy, Failures: 3}, true
+			})
+
+			if tc.ExpectRestart {
+				// Stopping the instance forgets its check, and the replacement
+				// registers one of its own.
+				checker.EXPECT().ForgetInstance("example", 0).Return().Once()
+				d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil).Once()
+				d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
+					return w.Name == "example"
+				})).Run(func(context.Context, driver.Workload) { replaced.Store(true) }).
+					Return("container-two", nil).Once()
+			}
+
+			events := make(chan driver.Event)
+			d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+			passes := newCounter()
+			d.EXPECT().Observe(mock.Anything).
+				RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+					passes.inc()
+
+					id := "container-one"
+					if replaced.Load() {
+						id = "container-two"
+					}
+
+					return []driver.Instance{{
+						ID:       id,
+						Workload: "example",
+						SpecHash: "hash-one",
+						State:    driver.StateRunning,
+					}}, nil
+				})
+
+			r := reconciler.New(reconciler.Config{
+				Logger:    newTestLogger(t),
+				Drivers:   map[string]reconciler.Driver{docker.Name: d},
+				Workloads: repo,
+				Ports:     ports,
+				Checker:   checker,
+				Events:    recorder,
+				Interval:  time.Hour,
+			})
+
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+
+			go func() { done <- r.Run(ctx) }()
+
+			// Several passes, so a check forgotten and registered again would show
+			// as a ForgetInstance call the mock was not told to expect.
+			for i := 1; i <= 3; i++ {
+				passes.wait(t, i)
+				awaitPasses(t, r, uint64(i))
+				r.Notify()
+			}
+
+			cancel()
+			require.NoError(t, <-done)
+
+			if tc.ExpectRestart {
+				assert.Equal(t, 1, recorder.count(event.InstanceUnhealthy))
+			}
+		})
+	}
+}
+
 func TestReconciler_Run_RegistersChecks(t *testing.T) {
 	t.Parallel()
 
@@ -3645,6 +3764,23 @@ func specWithHealth(name string) []byte {
 	spec, err := json.Marshal(manifest.Spec{
 		Version:   "v1",
 		Name:      name,
+		Container: &manifest.Container{Image: "example/example:latest"},
+		Health:    &manifest.Health{HTTP: "/healthz"},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return spec
+}
+
+// specWithHealthAndRestart returns a stored specification declaring a check and a
+// restart policy together.
+func specWithHealthAndRestart(name string, policy manifest.RestartPolicy) []byte {
+	spec, err := json.Marshal(manifest.Spec{
+		Version:   "v1",
+		Name:      name,
+		Restart:   &manifest.Restart{Policy: policy},
 		Container: &manifest.Container{Image: "example/example:latest"},
 		Health:    &manifest.Health{HTTP: "/healthz"},
 	})
