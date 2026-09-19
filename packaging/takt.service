@@ -31,8 +31,10 @@ ProtectHome=yes
 PrivateTmp=yes
 
 # Connecting to the docker socket needs a writable path, which
-# ProtectSystem=strict otherwise removes.
-ReadWritePaths=/run/docker.sock
+# ProtectSystem=strict otherwise removes. The dash lets the unit start on a
+# host without the socket, since a server running only exec workloads
+# needs no daemon.
+ReadWritePaths=-/run/docker.sock
 
 # CAP_DAC_OVERRIDE lets the server delete volume files a container wrote as
 # another user. CAP_CHOWN lets it assign a volume's directory to the user a

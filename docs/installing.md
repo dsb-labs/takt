@@ -107,7 +107,15 @@ you.
    ```
 
    Put it at `/etc/takt/config.toml`. Every other key has a default —
-   [Configuration](configuration.md) lists them.
+   [Configuration](configuration.md) lists them. Make the file readable by
+   root and the `takt` user only, since it may come to hold an OIDC client
+   secret:
+
+   ```sh
+   sudo chgrp takt /etc/takt /etc/takt/config.toml
+   sudo chmod 0750 /etc/takt
+   sudo chmod 0640 /etc/takt/config.toml
+   ```
 
 5. **Grant the Docker socket.** `sudo usermod -aG docker takt`, weighed as the
    apt section describes.

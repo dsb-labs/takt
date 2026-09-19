@@ -8,8 +8,18 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Changed
+
+- The package makes `/etc/takt/config.toml` readable by root and the `takt` user
+  only ([#85](https://github.com/dsb-labs/takt/issues/85),
+  [#94](https://github.com/dsb-labs/takt/pull/94)).
+
 ### Fixed
 
+- The packaged unit refused to start on a host without the Docker socket, which
+  a server running only `exec` workloads has no need of
+  ([#85](https://github.com/dsb-labs/takt/issues/85),
+  [#94](https://github.com/dsb-labs/takt/pull/94)).
 - A health check's `http` path could name a host of its own, and the server
   probed that host rather than the instance. The manifest now refuses a path
   that does not start with `/`
