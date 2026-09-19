@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -691,6 +692,38 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Ports:          ports,
 			Claimer:        newTestClaimer(ports, allocatorStub{}),
 			AllowHostPaths: []string{"/mnt/media"},
+		})
+
+		_, _, err := svc.Apply(t.Context(), pathSpec)
+		assert.ErrorIs(t, err, service.ErrInvalidSpec)
+	})
+
+	t.Run("refuses a host path reaching outside the prefixes through a link", func(t *testing.T) {
+		t.Parallel()
+
+		// The path sits under the prefix as text, but a link beneath the allowed
+		// directory points at its parent, so what the mount reaches does not.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		root := t.TempDir()
+		require.NoError(t, os.Mkdir(filepath.Join(root, "media"), 0o755))
+		require.NoError(t, os.Symlink(root, filepath.Join(root, "media", "escape")))
+
+		pathSpec := containerSpec("example", "example/example:latest")
+		pathSpec.Volumes = []manifest.VolumeMount{{Path: filepath.Join(root, "media", "escape"), To: "/host"}}
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:         newTestLogger(t),
+			Drivers:        map[string]service.Driver{docker.Name: d},
+			Workloads:      repo,
+			Ports:          ports,
+			Claimer:        newTestClaimer(ports, allocatorStub{}),
+			AllowHostPaths: []string{filepath.Join(root, "media")},
 		})
 
 		_, _, err := svc.Apply(t.Context(), pathSpec)
