@@ -16,6 +16,15 @@ describes how an entry is written.
 
 ### Fixed
 
+- An `env` key holding `=` set a variable other than the one the manifest named,
+  and a value holding a NUL byte failed the start rather than the apply. The
+  manifest now refuses both
+  ([#86](https://github.com/dsb-labs/takt/issues/86),
+  [#96](https://github.com/dsb-labs/takt/pull/96)).
+- A container `image` docker would refuse was reported when the container was
+  created rather than when the manifest was applied
+  ([#86](https://github.com/dsb-labs/takt/issues/86),
+  [#96](https://github.com/dsb-labs/takt/pull/96)).
 - A driver's event stream ending, as it does when the Docker daemon restarts,
   left the server converging on the interval alone until it was restarted. The
   stream is now watched again
