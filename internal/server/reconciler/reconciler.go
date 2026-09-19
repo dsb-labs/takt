@@ -806,6 +806,13 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 
 	r.convergeAll(ctx, rows, observed, indexes)
 
+	// A pass cut short by shutdown stops here. The sweep and the prune would run
+	// against a cancelled context, and every failure they reported would be the
+	// cancellation rather than anything about the workloads.
+	if ctx.Err() != nil {
+		return
+	}
+
 	// Anything a driver holds that nothing asked for is an orphan — most often the
 	// remnant of a workload deleted while the server was down.
 	for workload := range held {
