@@ -21,6 +21,11 @@ describes how an entry is written.
 
 ### Fixed
 
+- Stopping the server while a client held a followed log or a service stream
+  open waited thirty seconds and then exited with an error. The server now ends
+  open responses as it shuts down, and a second interrupt ends the process at
+  once ([#82](https://github.com/dsb-labs/takt/issues/82),
+  [#99](https://github.com/dsb-labs/takt/pull/99)).
 - An `exec` workload naming a memory limit smaller than the process takt starts
   it through could be killed before its command ran, and then read as running
   ([#101](https://github.com/dsb-labs/takt/issues/101),
