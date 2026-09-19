@@ -81,6 +81,38 @@ func TestWorkloadRepository_Upsert(t *testing.T) {
 		assert.Equal(t, created.CreatedAt, updated.CreatedAt)
 		assert.False(t, updated.UpdatedAt.Before(created.UpdatedAt))
 	})
+
+	t.Run("refuses to write over a workload marked for deletion", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := t.Context()
+
+		_, _, err := repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{"name":"example","image":"one"}`),
+			SpecHash: "hash-one",
+		})
+		require.NoError(t, err)
+
+		_, _, err = repo.MarkDeleting(ctx, "example", false)
+		require.NoError(t, err)
+
+		// The caller checks for a deletion before it resolves the specification,
+		// and a delete can land between that read and this write. The row is on
+		// its way out, and a version written over it would go with it.
+		_, _, err = repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{"name":"example","image":"two"}`),
+			SpecHash: "hash-two",
+		})
+		assert.ErrorIs(t, err, database.ErrWorkloadDeleting)
+
+		stored, err := repo.Get(ctx, "example")
+		require.NoError(t, err)
+		assert.Equal(t, 1, stored.Version)
+		assert.Equal(t, "hash-one", stored.SpecHash)
+	})
 }
 
 func TestWorkloadRepository_Get(t *testing.T) {
@@ -271,7 +303,7 @@ func TestWorkloadRepository_MarkDeleting(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		marked, err := repo.MarkDeleting(ctx, "example")
+		marked, _, err := repo.MarkDeleting(ctx, "example", false)
 		require.NoError(t, err)
 		assert.False(t, marked.DeletedAt.IsZero())
 
@@ -294,10 +326,10 @@ func TestWorkloadRepository_MarkDeleting(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		first, err := repo.MarkDeleting(ctx, "example")
+		first, _, err := repo.MarkDeleting(ctx, "example", false)
 		require.NoError(t, err)
 
-		second, err := repo.MarkDeleting(ctx, "example")
+		second, _, err := repo.MarkDeleting(ctx, "example", false)
 		require.NoError(t, err)
 
 		// A repeated delete must not restart the clock, or a caller retrying could
@@ -308,8 +340,37 @@ func TestWorkloadRepository_MarkDeleting(t *testing.T) {
 	t.Run("reports a missing workload", func(t *testing.T) {
 		repo := newTestRepository(t)
 
-		_, err := repo.MarkDeleting(t.Context(), "nope")
+		_, _, err := repo.MarkDeleting(t.Context(), "nope", false)
 		assert.ErrorIs(t, err, database.ErrWorkloadNotFound)
+	})
+
+	t.Run("refuses a referenced workload and names what references it", func(t *testing.T) {
+		repo := newTestRepository(t)
+		ctx := t.Context()
+
+		store(t, repo, "postgres")
+		store(t, repo, "api", "postgres")
+
+		_, referencing, err := repo.MarkDeleting(ctx, "postgres", false)
+		assert.ErrorIs(t, err, database.ErrWorkloadReferenced)
+		assert.Equal(t, []string{"api"}, referencing)
+
+		// Nothing was written: the row is still there and not on its way out.
+		stored, err := repo.Get(ctx, "postgres")
+		require.NoError(t, err)
+		assert.True(t, stored.DeletedAt.IsZero())
+	})
+
+	t.Run("marks a referenced workload when forced, and names what references it", func(t *testing.T) {
+		repo := newTestRepository(t)
+
+		store(t, repo, "postgres")
+		store(t, repo, "api", "postgres")
+
+		marked, referencing, err := repo.MarkDeleting(t.Context(), "postgres", true)
+		require.NoError(t, err)
+		assert.False(t, marked.DeletedAt.IsZero())
+		assert.Equal(t, []string{"api"}, referencing)
 	})
 }
 
@@ -463,19 +524,6 @@ func TestWorkloadRepository_Delete(t *testing.T) {
 func TestWorkloadRepository_ReferencedBy(t *testing.T) {
 	t.Parallel()
 
-	store := func(t *testing.T, repo *database.WorkloadRepository, name string, references ...string) {
-		t.Helper()
-
-		_, _, err := repo.Upsert(t.Context(), database.Workload{
-			Name:      name,
-			Runtime:   "container",
-			Spec:      []byte(`{}`),
-			SpecHash:  "hash-" + name,
-			Workloads: references,
-		})
-		require.NoError(t, err)
-	}
-
 	t.Run("names the workloads referencing the workload", func(t *testing.T) {
 		repo := newTestRepository(t)
 
@@ -549,4 +597,19 @@ func newTestLogger(t *testing.T) *slog.Logger {
 		AddSource: testing.Verbose(),
 		Level:     level,
 	}))
+}
+
+// store writes a workload referencing the given workload names, so a test can set
+// up the references a delete has to see.
+func store(t *testing.T, repo *database.WorkloadRepository, name string, references ...string) {
+	t.Helper()
+
+	_, _, err := repo.Upsert(t.Context(), database.Workload{
+		Name:      name,
+		Runtime:   "container",
+		Spec:      []byte(`{}`),
+		SpecHash:  "hash-" + name,
+		Workloads: references,
+	})
+	require.NoError(t, err)
 }

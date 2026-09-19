@@ -314,7 +314,7 @@ func TestVolumeRepository_UsedBy(t *testing.T) {
 
 		storeWorkload(t, db, "going", `{"volumes":[{"name":"shared","to":"/g"}]}`)
 
-		_, err := workloads.MarkDeleting(t.Context(), "going")
+		_, _, err := workloads.MarkDeleting(t.Context(), "going", false)
 		require.NoError(t, err)
 
 		got, err := volumes.UsedBy(t.Context(), "shared")

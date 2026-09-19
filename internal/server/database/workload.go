@@ -13,6 +13,12 @@ import (
 var (
 	// ErrWorkloadNotFound is returned when no workload exists with the requested name.
 	ErrWorkloadNotFound = errors.New("workload not found")
+	// ErrWorkloadDeleting is returned when a write reaches a workload that is
+	// marked for deletion.
+	ErrWorkloadDeleting = errors.New("workload is being deleted")
+	// ErrWorkloadReferenced is returned when a delete is refused because another
+	// workload references the one being deleted.
+	ErrWorkloadReferenced = errors.New("workload is referenced")
 )
 
 type (
@@ -116,6 +122,12 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Po
 			created = true
 		case err != nil:
 			return err
+		case !existing.DeletedAt.IsZero():
+			// Checked here, under the write lock, as well as by the caller. A delete
+			// landing between the caller's read and this write would otherwise be
+			// written over, and the teardown that follows would remove the row the
+			// apply had just been told succeeded.
+			return ErrWorkloadDeleting
 		case existing.SpecHash == w.SpecHash:
 			// Nothing about the specification changed, so the row is left alone. The
 			// ports are still reclaimed below, since an allocation may have been
@@ -167,7 +179,11 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Po
 // it is not something a change to that workload has to redeploy: it is already being
 // rewritten by whatever moved it.
 func (r *WorkloadRepository) ReferencedBy(ctx context.Context, name string) ([]string, error) {
-	const q = `
+	return referencedBy(ctx, r.db, name)
+}
+
+func referencedBy(ctx context.Context, q querier, name string) ([]string, error) {
+	const query = `
 		SELECT w.name
 		FROM workload_reference AS r
 		INNER JOIN workload AS w ON w.id = r.workload_id
@@ -175,7 +191,7 @@ func (r *WorkloadRepository) ReferencedBy(ctx context.Context, name string) ([]s
 		ORDER BY w.name ASC
 	`
 
-	rows, err := r.db.QueryContext(ctx, q, name, name)
+	rows, err := q.QueryContext(ctx, query, name, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query workload references: %w", err)
 	}
@@ -285,6 +301,7 @@ func (r *WorkloadRepository) Get(ctx context.Context, name string) (Workload, er
 // so Upsert can check for an existing workload without leaving the transaction it is
 // about to write in.
 type querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
@@ -366,38 +383,61 @@ func (r *WorkloadRepository) List(ctx context.Context, queries ...Query) ([]Work
 }
 
 // MarkDeleting records that the workload with the given name should be deleted,
-// returning the marked workload.
+// returning the marked workload and the names of the workloads that reference it.
 //
 // The row is deliberately kept: the reconciler is the only thing that stops
 // running work, so the desired state has to survive long enough for it to notice
 // and act. Marking is idempotent — a workload already marked keeps its original
 // timestamp — so a repeated request neither fails nor restarts the clock. Returns
 // ErrWorkloadNotFound when no such workload exists.
-func (r *WorkloadRepository) MarkDeleting(ctx context.Context, name string) (Workload, error) {
+//
+// The references are read in the same transaction as the mark, so a reference
+// written between the two cannot slip past. Unless force is set, a workload another
+// one references is left unmarked and ErrWorkloadReferenced is returned, with the
+// referencing names beside it so the caller can say which.
+func (r *WorkloadRepository) MarkDeleting(ctx context.Context, name string, force bool) (Workload, []string, error) {
 	const q = `
 		UPDATE workload
 		SET deleted_at = ?
 		WHERE name = ? AND deleted_at = ''
 	`
 
-	existing, err := r.Get(ctx, name)
+	var existing Workload
+	var referencing []string
+
+	err := transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		if existing, err = get(ctx, tx, name); err != nil {
+			return err
+		}
+
+		if referencing, err = referencedBy(ctx, tx, name); err != nil {
+			return err
+		}
+
+		if len(referencing) > 0 && !force {
+			return ErrWorkloadReferenced
+		}
+
+		if !existing.DeletedAt.IsZero() {
+			return nil
+		}
+
+		now := time.Now().UTC()
+
+		if _, err = tx.ExecContext(ctx, q, formatTime(now), name); err != nil {
+			return fmt.Errorf("failed to mark workload for deletion: %w", err)
+		}
+
+		existing.DeletedAt = now
+
+		return nil
+	})
 	if err != nil {
-		return Workload{}, err
+		return Workload{}, referencing, err
 	}
 
-	if !existing.DeletedAt.IsZero() {
-		return existing, nil
-	}
-
-	now := time.Now().UTC()
-
-	if _, err = r.db.ExecContext(ctx, q, formatTime(now), name); err != nil {
-		return Workload{}, fmt.Errorf("failed to mark workload for deletion: %w", err)
-	}
-
-	existing.DeletedAt = now
-
-	return existing, nil
+	return existing, referencing, nil
 }
 
 // Suspend records that the workload with the given name should not run,
