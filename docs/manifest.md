@@ -264,8 +264,8 @@ takt workload get example | jq '.Ports'
 
 An allocated port is sticky. It stays the same across restarts and image changes, so
 anything pointing at it keeps working. Pin `from` when something outside takt has to
-know the address up front. Pinning a port another workload holds is rejected when you
-apply the manifest.
+know the address up front. Pinning a port another workload holds, or one something
+else on the host already listens on, is rejected when you apply the manifest.
 
 A workload running more than one instance publishes each port once per instance, at
 a host port of its own. `takt workload get` reports every mapping, with `Instance`
