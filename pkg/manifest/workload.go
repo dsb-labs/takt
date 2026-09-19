@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/distribution/reference"
 	"github.com/docker/go-units"
 	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v3"
@@ -1276,6 +1277,12 @@ func RuntimeOf(spec Spec) (Runtime, error) {
 func validateContainer(spec Container) error {
 	if spec.Image == "" {
 		return errors.New("invalid container: image is required")
+	}
+
+	// Parsed the way docker parses it, so a malformed reference is reported here
+	// rather than when the container is created.
+	if _, err := reference.ParseNormalizedNamed(spec.Image); err != nil {
+		return fmt.Errorf("invalid container: image %q: %w", spec.Image, err)
 	}
 
 	if err := validCommand(spec.Command); err != nil {

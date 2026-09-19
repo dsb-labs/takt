@@ -111,6 +111,13 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// Parsed the way docker parses it, so a reference docker would refuse is
+			// refused at apply rather than when the container is created.
+			Name:         "rejects an image reference docker would refuse",
+			File:         "container_image_invalid.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:         "rejects an exec command with an empty element",
 			File:         "exec_empty_command.yaml",
 			ExpectsError: true,
