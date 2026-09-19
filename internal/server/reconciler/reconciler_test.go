@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -2051,6 +2053,61 @@ func TestReconciler_Run_PacesAContainerThatExitsAtOnce(t *testing.T) {
 
 	assert.LessOrEqual(t, starts.Load(), int64(2),
 		"a workload whose container exits at once was restarted on every pass")
+}
+
+func TestReconciler_Run_RefusesHostPathReachingOutsideThePrefixes(t *testing.T) {
+	t.Parallel()
+
+	d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
+
+	// The path was a directory when the workload was applied, and a link to the
+	// tree's root has been swapped in since. The start is what binds it, so the
+	// start is where it has to be caught, and the driver must never see it.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(filepath.Join(root, "media"), 0o755))
+	require.NoError(t, os.Symlink(root, filepath.Join(root, "media", "escape")))
+
+	row := storedWorkload("example", "hash-one")
+	row.Spec, err = json.Marshal(manifest.Spec{
+		Version:   "v1",
+		Name:      "example",
+		Container: &manifest.Container{Image: "example/example:latest"},
+		Volumes:   []manifest.VolumeMount{{Path: filepath.Join(root, "media", "escape"), To: "/host"}},
+	})
+	require.NoError(t, err)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+	d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:         newTestLogger(t),
+		Drivers:        map[string]reconciler.Driver{docker.Name: d},
+		Workloads:      repo,
+		Events:         recorder,
+		Interval:       time.Hour,
+		AllowHostPaths: []string{filepath.Join(root, "media")},
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	// Refused the way any failed start is, so the retries are paced and the
+	// operator reads why under the workload's events.
+	require.Eventually(t, func() bool {
+		return recorder.count(event.RestartPaced) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+
+	cancel()
+	require.NoError(t, <-done)
+
+	assert.Contains(t, string(recorder.data(event.RestartPaced)), "host path not allowed")
 }
 
 func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
