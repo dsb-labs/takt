@@ -11,20 +11,30 @@ package driver
 
 import (
 	"errors"
+	"fmt"
+	"io/fs"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
-// ErrImagePulling is returned by a driver's Start when the workload's image is
-// being fetched and the instance cannot start until it arrives.
-//
-// It is a waiting state rather than a failure: the caller should leave the
-// instance pending and try again on a later pass, keeping its ports and its
-// restart pacing untouched. The pull itself runs in the driver's background,
-// so returning this is what keeps a slow registry out of the reconcile pass.
-var ErrImagePulling = errors.New("image pull in progress")
+var (
+	// ErrImagePulling is returned by a driver's Start when the workload's image is
+	// being fetched and the instance cannot start until it arrives.
+	//
+	// It is a waiting state rather than a failure: the caller should leave the
+	// instance pending and try again on a later pass, keeping its ports and its
+	// restart pacing untouched. The pull itself runs in the driver's background,
+	// so returning this is what keeps a slow registry out of the reconcile pass.
+	ErrImagePulling = errors.New("image pull in progress")
+
+	// ErrHostPathDenied is returned when a path mount reaches outside every prefix
+	// the server's configuration allows.
+	ErrHostPathDenied = errors.New("host path not allowed")
+)
 
 // The State type describes the state of a single instance as reported by its driver.
 type State string
@@ -269,7 +279,13 @@ type (
 // The runtime block is left in Spec rather than pulled apart here: which block matters
 // is the driver's business, and a server that understood each of them would have to
 // change every time a runtime was added.
-func NewWorkload(row database.Workload) (Workload, error) {
+//
+// hostPaths is the list of prefixes a path mount may sit beneath. Each path mount
+// is checked against it again here, and the driver is handed the path with its
+// links followed, so what a driver binds is what was checked. The tree can change
+// between an apply and a start, and a link swapped in beneath an allowed prefix
+// would otherwise carry the mount wherever it pointed.
+func NewWorkload(row database.Workload, hostPaths []string) (Workload, error) {
 	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return Workload{}, err
@@ -334,12 +350,14 @@ func NewWorkload(row database.Workload) (Workload, error) {
 					ReadOnly: mount.ReadOnly,
 				})
 			case manifest.MountPath:
-				// The path already says where the data is, so there is nothing for
-				// the server to resolve. Whether the host allows the path was
-				// settled when the specification was accepted.
+				host, err := ResolveHostPath(mount.Path, hostPaths)
+				if err != nil {
+					return Workload{}, err
+				}
+
 				w.Volumes = append(w.Volumes, Volume{
 					Name:        mount.Path,
-					Host:        mount.Path,
+					Host:        host,
 					Target:      mount.To,
 					ReadOnly:    mount.ReadOnly,
 					Propagation: mount.Propagation,
@@ -349,4 +367,66 @@ func NewWorkload(row database.Workload) (Workload, error) {
 	}
 
 	return w, nil
+}
+
+// ResolveHostPath reports where a path mount reaches once every symbolic link in it
+// is followed, and refuses one that reaches outside the given prefixes.
+//
+// Both the path and each prefix are resolved before they are compared, so a link
+// beneath an allowed directory cannot carry a mount outside it, and a prefix that is
+// itself a link — /var/run on most hosts — still covers what it points at. A path
+// that does not exist yet is resolved as far as it does, since a mount may name
+// something that appears later. A prefix of / opens everything.
+//
+// Returns ErrHostPathDenied when the path sits under no prefix.
+func ResolveHostPath(path string, prefixes []string) (string, error) {
+	resolved, err := resolve(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve host path %q: %w", path, err)
+	}
+
+	for _, prefix := range prefixes {
+		root, err := resolve(prefix)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve allowed host path %q: %w", prefix, err)
+		}
+
+		if root == string(filepath.Separator) || resolved == root ||
+			strings.HasPrefix(resolved, root+string(filepath.Separator)) {
+			return resolved, nil
+		}
+	}
+
+	if resolved != filepath.Clean(path) {
+		return "", fmt.Errorf("%w: %q reaches %q, which is not under a prefix this server's "+
+			"workload allow-host-paths configuration names", ErrHostPathDenied, path, resolved)
+	}
+
+	return "", fmt.Errorf("%w: %q is not under a prefix this server's workload "+
+		"allow-host-paths configuration names", ErrHostPathDenied, path)
+}
+
+// resolve follows every symbolic link in path. The part of the path that does not
+// exist is carried across unchanged beneath the deepest ancestor that does.
+func resolve(path string) (string, error) {
+	path = filepath.Clean(path)
+
+	var rest string
+	for {
+		resolved, err := filepath.EvalSymlinks(path)
+		switch {
+		case err == nil:
+			return filepath.Join(resolved, rest), nil
+		case !errors.Is(err, fs.ErrNotExist):
+			return "", err
+		}
+
+		parent := filepath.Dir(path)
+		if parent == path {
+			return "", err
+		}
+
+		rest = filepath.Join(filepath.Base(path), rest)
+		path = parent
+	}
 }
