@@ -36,7 +36,9 @@ Four things wake the loop:
   process ending. An event does not run a pass alone — the events behind it are
   collected for half a second first, so a burst becomes one pass. A pass observes
   the whole runtime anyway, so the discarded events tell it nothing it will not
-  see for itself.
+  see for itself. A stream that ends — the Docker daemon restarting is the usual
+  cause — is watched again, with a wait that grows from a second to a minute
+  between attempts, and a pass is asked for once it is back.
 - **A health verdict.** The checker reports a check passing for the first time,
   failing past its retries, or recovering. A verdict holding steady reports
   nothing. The pass is held for the same window as a driver event, since the
