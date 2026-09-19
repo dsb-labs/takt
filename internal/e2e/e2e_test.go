@@ -3852,6 +3852,52 @@ func (s *Suite) TestServiceStreamsBackends() {
 	s.NoError(<-done)
 }
 
+// TestShutdownEndsOpenStreams checks that stopping the server does not wait on a
+// client holding a followed response open. Shutdown waits for every response to
+// end, and a stream ends only when its context does, so the server has to end
+// them itself or sit at its deadline and report a failure.
+func (s *Suite) TestShutdownEndsOpenStreams() {
+	ctx, cancel := context.WithCancel(s.ctx())
+	defer cancel()
+
+	// A stream over the whole list, which the server writes to at once and then
+	// holds open. Nothing has to exist for it to be open.
+	first := make(chan struct{}, 1)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- s.client.StreamServices(ctx, func([]client.Service) error {
+			select {
+			case first <- struct{}{}:
+			default:
+			}
+
+			return nil
+		})
+	}()
+
+	select {
+	case <-first:
+	case <-time.After(convergeTimeout):
+		s.Require().Fail("the stream never wrote its first line")
+	}
+
+	started := time.Now()
+	s.stop()
+
+	// Well inside the thirty seconds Shutdown would otherwise wait, and stop has
+	// already checked the server exited without error.
+	s.Less(time.Since(started), 10*time.Second, "shutdown waited on the open stream")
+
+	// The server ends the stream as its own context ends, which the client reads
+	// as the list closing rather than as a failure.
+	select {
+	case <-done:
+	case <-time.After(convergeTimeout):
+		s.Require().Fail("the stream outlived the server")
+	}
+}
+
 // testPolicy is the document the auth tests apply: one principal per role,
 // and a group the fake identity provider asserts.
 var testPolicy = manifest.Policy{
