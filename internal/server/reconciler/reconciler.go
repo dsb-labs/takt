@@ -411,6 +411,14 @@ const (
 	// The delay before the first restart of a failed instance, doubled on each
 	// consecutive failure up to maxBackoff.
 	baseBackoff = time.Second
+
+	// The wait before a driver's event stream is watched again after it ends,
+	// doubled on each consecutive failure up to maxRewatchDelay. A daemon
+	// restarting is the usual cause, and comes back in seconds.
+	baseRewatchDelay = time.Second
+
+	// The ceiling on the wait between attempts to watch a driver again.
+	maxRewatchDelay = time.Minute
 	// The ceiling on restart backoff, so a persistently broken workload is still
 	// retried periodically.
 	maxBackoff = 2 * time.Minute
@@ -570,10 +578,8 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			r.reconcile(ctx)
 		case event, ok := <-events:
 			if !ok {
-				// The driver's event stream ended. The ticker still guarantees
-				// convergence, so carry on with reduced responsiveness rather
-				// than bringing the server down.
-				r.logger.Debug("driver event stream closed, relying on periodic reconciliation")
+				// The merged stream closes only once ctx has ended and every
+				// forwarder has returned, so there is nothing left to select on.
 				events = nil
 
 				continue
@@ -2443,33 +2449,36 @@ func (r *Reconciler) recordObservation(name string, err error) {
 // watch merges every driver's events into one channel, so the loop selects on a single
 // source however many runtimes there are.
 //
-// The merged channel closes once every driver's has. The loop treats that as the end of
-// events and falls back to the ticker, which is the same thing it already did when a
-// single driver's stream ended.
+// A driver's stream ending is not the end of its events. The daemon behind it may
+// have restarted, and a server that stopped listening would sit at the interval's
+// latency until it was itself restarted. So each stream is watched again when it
+// ends, with a growing wait between attempts, and a pass is asked for once it is
+// back to cover whatever happened in between. The merged channel closes only when
+// ctx does.
+//
+// The first watch of each driver is made here rather than in the forwarder, so a
+// runtime that cannot be watched at all fails the server at startup.
 func (r *Reconciler) watch(ctx context.Context) (<-chan driver.Event, error) {
-	streams := make([]<-chan driver.Event, 0, len(r.drivers))
+	type stream struct {
+		driver Driver
+		events <-chan driver.Event
+	}
+
+	streams := make([]stream, 0, len(r.drivers))
 	for _, d := range r.drivers {
 		events, err := d.Watch(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to watch the %s runtime: %w", d.Name(), err)
 		}
 
-		streams = append(streams, events)
+		streams = append(streams, stream{driver: d, events: events})
 	}
 
 	merged := make(chan driver.Event)
 
 	var wg sync.WaitGroup
-	for _, stream := range streams {
-		wg.Go(func() {
-			for event := range stream {
-				select {
-				case merged <- event:
-				case <-ctx.Done():
-					return
-				}
-			}
-		})
+	for _, s := range streams {
+		wg.Go(func() { r.forward(ctx, s.driver, s.events, merged) })
 	}
 
 	go func() {
@@ -2478,6 +2487,51 @@ func (r *Reconciler) watch(ctx context.Context) (<-chan driver.Event, error) {
 	}()
 
 	return merged, nil
+}
+
+// forward copies one driver's events onto merged until ctx ends, watching the
+// driver again each time its stream closes.
+func (r *Reconciler) forward(ctx context.Context, d Driver, events <-chan driver.Event, merged chan<- driver.Event) {
+	delay := baseRewatchDelay
+
+	for {
+		for event := range events {
+			select {
+			case merged <- event:
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		if ctx.Err() != nil {
+			return
+		}
+
+		r.logger.With("driver", d.Name(), "delay", delay).Warn("driver event stream ended, watching again")
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+
+		var err error
+		if events, err = d.Watch(ctx); err != nil {
+			r.logger.With("driver", d.Name(), "error", err).Warn("failed to watch driver again")
+			events = nil
+			delay = min(delay*2, maxRewatchDelay)
+
+			continue
+		}
+
+		// Anything the driver reported while nothing was listening is gone, and
+		// the next pass observes the whole runtime, so one is asked for now rather
+		// than left to the ticker.
+		r.logger.With("driver", d.Name()).Info("driver event stream restored")
+		r.Notify()
+
+		delay = baseRewatchDelay
+	}
 }
 
 // abandonPorts gives up the host ports takt chose for a workload, so that the next
