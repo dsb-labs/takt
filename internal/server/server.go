@@ -297,6 +297,7 @@ func Run(ctx context.Context, config Config) error {
 			return svc.ReallocateInstance(ctx, workload, instance)
 		},
 		Interval:       config.Reconcile.Interval,
+		AllowHostPaths: config.Workload.AllowHostPaths,
 		MeterProvider:  tel.MeterProvider(),
 		TracerProvider: tel.TracerProvider(),
 	})

@@ -213,6 +213,7 @@ type (
 		reallocate  func(ctx context.Context, workload string, instance int) (bool, error)
 		now         func() time.Time
 		interval    time.Duration
+		hostPaths   []string
 		nudge       chan struct{}
 		tracer      trace.Tracer
 		instruments instruments
@@ -316,6 +317,10 @@ type (
 		Reallocate func(ctx context.Context, workload string, instance int) (bool, error)
 		// How often a full reconciliation pass runs regardless of events.
 		Interval time.Duration
+		// The prefixes a path mount may sit beneath. Each path mount is resolved
+		// against them as an instance starts, so a link swapped in after the apply
+		// cannot carry the mount elsewhere.
+		AllowHostPaths []string
 		// Reports the current time, which every timing decision a pass makes reads
 		// from. May be nil, in which case the wall clock is used.
 		//
@@ -463,6 +468,7 @@ func New(config Config) *Reconciler {
 		reallocate:   config.Reallocate,
 		now:          clock(config.Now),
 		interval:     config.Interval,
+		hostPaths:    config.AllowHostPaths,
 		backoff:      make(map[slot]backoff),
 		exits:        make(map[slot]string),
 		verdicts:     make(map[slot]health.Status),
@@ -2309,7 +2315,7 @@ func (r *Reconciler) settleAll(workload string) {
 // instance started for a long-running workload, or a run started for a scheduled
 // one. The caller names it because the same start answers both questions.
 func (r *Reconciler) start(ctx context.Context, row database.Workload, index int, reason event.Reason) error {
-	w, err := driver.NewWorkload(row)
+	w, err := driver.NewWorkload(row, r.hostPaths)
 	if err != nil {
 		return err
 	}
