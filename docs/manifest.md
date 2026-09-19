@@ -649,8 +649,9 @@ what is there is what the workload gets, and starting fails if it is not there.
 A host path reaches outside takt-managed state, so the server refuses every path
 mount until its configuration says otherwise. `allow-host-paths` in the `[workload]`
 section lists the prefixes a path mount may sit beneath — see
-[Configuration](configuration.md). The gate runs when a manifest is applied, so a
-workload already stored keeps its mounts if the list later narrows.
+[Configuration](configuration.md). The gate runs when a manifest is applied and again
+each time an instance starts, with symbolic links followed, so a link swapped in
+beneath an allowed directory cannot carry the mount elsewhere.
 
 The `to` rules are the volume's: written the same for either runtime, and reached by
 the relative path in an exec workload. A path mount cannot name a `signal`, for the
