@@ -137,7 +137,9 @@ Each release publishes a `.deb` and an `.rpm` package. A package installs:
 - the `takt` binary, at `/usr/bin/takt`.
 - a systemd unit, `takt.service`.
 - a sysusers entry that creates the `takt` system user.
-- `/etc/takt/config.toml`, which an upgrade never overwrites.
+- `/etc/takt/config.toml`, which an upgrade never overwrites. Root and the `takt`
+  user can read it and nobody else can, since the file may hold an OIDC client
+  secret.
 
 The unit runs `takt serve /etc/takt/config.toml` as the `takt` user, with the data
 directory at `/var/lib/takt`. systemd creates that directory, owned by the `takt`
