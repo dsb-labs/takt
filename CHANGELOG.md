@@ -10,12 +10,21 @@ describes how an entry is written.
 
 ### Changed
 
+- `allow-host-paths` is checked again each time an instance starts, not only when
+  the manifest is applied. A stored workload whose path no longer sits under a
+  prefix fails to start and says so in its events
+  ([#74](https://github.com/dsb-labs/takt/issues/74),
+  [#95](https://github.com/dsb-labs/takt/pull/95)).
 - The package makes `/etc/takt/config.toml` readable by root and the `takt` user
   only ([#85](https://github.com/dsb-labs/takt/issues/85),
   [#94](https://github.com/dsb-labs/takt/pull/94)).
 
 ### Fixed
 
+- A symbolic link beneath an allowed host path carried a path mount wherever it
+  pointed. Links are now followed on both sides before the path is compared to
+  the prefixes ([#74](https://github.com/dsb-labs/takt/issues/74),
+  [#95](https://github.com/dsb-labs/takt/pull/95)).
 - An apply that raced a delete of the same workload could report success and
   then have its row removed by the teardown, and a delete that raced an apply
   referencing it could leave that reference dangling. Both checks now run
