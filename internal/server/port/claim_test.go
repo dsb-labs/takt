@@ -21,6 +21,7 @@ func TestClaimer_Resolve(t *testing.T) {
 		Held       []port.Claim
 		Mappings   []manifest.Port
 		Count      int
+		Probe      func(port.Protocol, int) bool
 		SetupMocks func(*MockRepository)
 		Assert     func(*testing.T, []port.Claim)
 		ExpectErr  error
@@ -157,6 +158,34 @@ func TestClaimer_Resolve(t *testing.T) {
 			},
 		},
 		{
+			// A daemon outside takt already listens there, so the start would fail.
+			// Refusing at apply names the port while the operator can still change it.
+			Name:     "refuses a pinned port something on the host holds",
+			Mappings: []manifest.Port{{To: 8080, From: 4141}},
+			Probe:    func(port.Protocol, int) bool { return false },
+			SetupMocks: func(ports *MockRepository) {
+				ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Once()
+				ports.EXPECT().HolderOf(mock.Anything, 4141, "tcp").Return("", false, nil).Once()
+			},
+			ExpectErr: port.ErrHostPortTaken,
+		},
+		{
+			// The workload's own running instance is what binds the port, which is
+			// not a conflict, so the host is not asked. A probe that refuses
+			// everything proves it was never consulted.
+			Name:     "does not probe a pinned port this workload holds",
+			Mappings: []manifest.Port{{To: 8080, From: 4141}},
+			Probe:    func(port.Protocol, int) bool { return false },
+			SetupMocks: func(ports *MockRepository) {
+				ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Once()
+				ports.EXPECT().HolderOf(mock.Anything, 4141, "tcp").Return("example", true, nil).Once()
+			},
+			Assert: func(t *testing.T, claims []port.Claim) {
+				require.Len(t, claims, 1)
+				assert.Equal(t, 4141, claims[0].Host)
+			},
+		},
+		{
 			Name:     "refuses a pinned port another workload holds",
 			Mappings: []manifest.Port{{To: 8080, From: 4141}},
 			SetupMocks: func(ports *MockRepository) {
@@ -263,6 +292,7 @@ func TestClaimer_Resolve(t *testing.T) {
 				// allocating twenty thousand ports to get there.
 				Allocator: port.New(port.Config{Min: 20000, Max: 20002}),
 				Ports:     ports,
+				Probe:     tc.Probe,
 			})
 
 			claims, err := claimer.Resolve(t.Context(), "example", tc.Held, tc.Mappings, cmp.Or(tc.Count, 1))

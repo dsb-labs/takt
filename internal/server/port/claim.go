@@ -73,6 +73,7 @@ type (
 	Claimer struct {
 		allocator Allocation
 		ports     Repository
+		probe     func(protocol Protocol, port int) bool
 	}
 
 	// The ClaimerConfig type contains fields used to construct a Claimer.
@@ -81,6 +82,12 @@ type (
 		Allocator Allocation
 		// Where the ports every workload already holds are read from.
 		Ports Repository
+		// Reports whether nothing on the host is listening on a port. A pinned port
+		// no workload holds is probed with it, so a port a daemon outside takt
+		// already binds is refused at apply rather than failing the start. May be
+		// nil, in which case a pinned port is checked against takt's own
+		// allocations alone. The server passes Available.
+		Probe func(protocol Protocol, port int) bool
 	}
 
 	// The key type identifies one of a workload's ports. The protocol is part of it
@@ -97,6 +104,7 @@ func NewClaimer(config ClaimerConfig) *Claimer {
 	return &Claimer{
 		allocator: config.Allocator,
 		ports:     config.Ports,
+		probe:     config.Probe,
 	}
 }
 
@@ -342,6 +350,11 @@ func (c *Claimer) resolve(
 		case isHeld && holder != workload:
 			return Claim{}, fmt.Errorf("%w: %d/%s is used by workload %q",
 				ErrHostPortTaken, mapping.From, protocol, holder)
+		case !isHeld && c.probe != nil && !c.probe(protocol, mapping.From):
+			// Only a port nothing of takt's holds is probed: one this workload
+			// holds is bound by its own running instance, which is not a conflict.
+			return Claim{}, fmt.Errorf("%w: %d/%s is in use on the host",
+				ErrHostPortTaken, mapping.From, protocol)
 		}
 
 		return Claim{

@@ -387,7 +387,7 @@ func Run(ctx context.Context, config Config) error {
 		Allocated:      ports.Allocated,
 	})
 
-	claimer := port.NewClaimer(port.ClaimerConfig{Allocator: allocator, Ports: ports})
+	claimer := port.NewClaimer(port.ClaimerConfig{Allocator: allocator, Ports: ports, Probe: port.Available})
 
 	svc = service.NewWorkloadService(service.WorkloadServiceConfig{
 		Address: workloadAddress,
