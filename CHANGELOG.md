@@ -8,6 +8,12 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Fixed
+
+- The first restart of a failed instance waited twice the manifest's `restart.delay`
+  ([#83](https://github.com/dsb-labs/takt/issues/83),
+  [#92](https://github.com/dsb-labs/takt/pull/92)).
+
 ## v0.8.0 - 2026-09-17
 
 ### Added
