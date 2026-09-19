@@ -840,7 +840,7 @@ health:
 
 | Field | Required | Default | Description |
 |---|---|---|---|
-| `http` | one of | | The path to request. Any 2xx response passes. |
+| `http` | one of | | The path to request, starting with `/`. A query is allowed. Any 2xx response passes. |
 | `tcp` | one of | | Check that the port accepts a connection. |
 | `port` | no | | Which published port to check, by name or by number. Needed when more than one TCP port is published — UDP ports do not count, since a check cannot use one. |
 | `interval` | no | `10s` | How often to check. |
