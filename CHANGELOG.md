@@ -16,6 +16,12 @@ describes how an entry is written.
 
 ### Fixed
 
+- An apply that raced a delete of the same workload could report success and
+  then have its row removed by the teardown, and a delete that raced an apply
+  referencing it could leave that reference dangling. Both checks now run
+  inside the transaction that writes
+  ([#84](https://github.com/dsb-labs/takt/issues/84),
+  [#100](https://github.com/dsb-labs/takt/pull/100)).
 - An `env` key holding `=` set a variable other than the one the manifest named,
   and a value holding a NUL byte failed the start rather than the apply. The
   manifest now refuses both
