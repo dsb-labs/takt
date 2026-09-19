@@ -2112,6 +2112,13 @@ func TestReconciler_Run_PacesFailedStarts(t *testing.T) {
 	require.Equal(t, 1, recorder.count(event.RestartPaced))
 	assert.Contains(t, string(recorder.data(event.RestartPaced)), `"error":"failed to start workload: no such image"`)
 	assert.Equal(t, 0, recorder.count(event.ConvergeFailed))
+
+	// The first wait is the manifest's delay itself, one second by default. Doubling
+	// starts with the second failure.
+	var paced event.Fields
+	require.NoError(t, json.Unmarshal(recorder.data(event.RestartPaced), &paced))
+	assert.Equal(t, 1, paced.Count)
+	assert.Equal(t, manifest.DefaultRestartDelay, paced.Delay)
 }
 
 func TestReconciler_Run_SurvivesAHangingDriver(t *testing.T) {

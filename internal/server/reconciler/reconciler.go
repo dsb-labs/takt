@@ -2718,13 +2718,14 @@ func exitCodeOf(instances []driver.Instance) int {
 }
 
 // delay returns how long to wait before the given restart attempt, doubling with
-// each consecutive failure up to maxBackoff.
+// each consecutive failure up to maxBackoff. The first attempt waits the base
+// itself, which is what the manifest's delay promises.
 func delay(attempts int, base time.Duration) time.Duration {
 	if base <= 0 {
 		base = baseBackoff
 	}
 
-	d := base << min(attempts, 8)
+	d := base << min(max(attempts-1, 0), 8)
 	if d > maxBackoff || d <= 0 {
 		// The shift overflows for a base a workload could legitimately name, so the
 		// ceiling catches that as well as an ordinary long wait.
