@@ -1,0 +1,6 @@
+version: v1
+name: example
+env:
+  EXAMPLE: "before\0after"
+container:
+  image: example/example:latest
