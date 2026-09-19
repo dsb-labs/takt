@@ -1539,6 +1539,55 @@ func TestReconciler_Run_StopsAnOrphanOnEveryDriver(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_SkipsTheOrphanSweepOnceCancelled(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+	repo.EXPECT().List(mock.Anything).Return(nil, nil)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	// The pass is cancelled while it is observing, which is where a shutdown most
+	// often lands. The orphan the observation reports must not be discarded under
+	// the cancelled context, where every failure would read as the cancellation.
+	discards := newCounter()
+	d.EXPECT().Discard(mock.Anything, mock.Anything, "orphan").
+		Run(func(context.Context, string, string) { discards.inc() }).Return(nil).Maybe()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+			cancel()
+
+			return []driver.Instance{{
+				ID:       "container-one",
+				Workload: "orphan",
+				SpecHash: "hash-one",
+				State:    driver.StateRunning,
+			}}, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	require.NoError(t, <-done)
+
+	assert.Equal(t, 0, discards.get(), "an orphan was swept under a cancelled context")
+}
+
 func TestReconciler_Run_LeavesARuntimeWithNoDriverAlone(t *testing.T) {
 	t.Parallel()
 
