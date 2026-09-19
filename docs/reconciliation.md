@@ -160,8 +160,10 @@ with nothing running are not held back by the roll.
 
 **Health folds in before any of this.** An instance that is up but failing its
 check reads as failed, so the same paced replacement path a crashed instance
-takes also serves an unhealthy one. While a sibling still runs, the workload
-lists as `degraded`.
+takes also serves an unhealthy one. The restart policy reads it as a failure
+whatever exit code a process that never exited carries: `on-failure` replaces
+it, and `never` leaves it running and reporting unhealthy. While a sibling still
+runs, the workload lists as `degraded`.
 
 ## Pacing, and giving up
 
