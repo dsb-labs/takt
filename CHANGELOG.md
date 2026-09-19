@@ -10,6 +10,11 @@ describes how an entry is written.
 
 ### Fixed
 
+- A health check's `http` path could name a host of its own, and the server
+  probed that host rather than the instance. The manifest now refuses a path
+  that does not start with `/`
+  ([#76](https://github.com/dsb-labs/takt/issues/76),
+  [#93](https://github.com/dsb-labs/takt/pull/93)).
 - The first restart of a failed instance waited twice the manifest's `restart.delay`
   ([#83](https://github.com/dsb-labs/takt/issues/83),
   [#92](https://github.com/dsb-labs/takt/pull/92)).
