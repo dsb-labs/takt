@@ -41,6 +41,11 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
+	// The first signal asks for a clean stop. Restoring the default handling once
+	// it has been asked for means a second one ends the process at once, so an
+	// operator is never held behind a shutdown that will not finish.
+	context.AfterFunc(ctx, cancel)
+
 	var address, caCert, configPath string
 
 	cmd := &cobra.Command{
