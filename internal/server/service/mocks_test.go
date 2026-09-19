@@ -4111,29 +4111,37 @@ func (_c *MockWorkloadRepository_List_Call) RunAndReturn(run func(ctx context.Co
 }
 
 // MarkDeleting provides a mock function for the type MockWorkloadRepository
-func (_mock *MockWorkloadRepository) MarkDeleting(ctx context.Context, name string) (database.Workload, error) {
-	ret := _mock.Called(ctx, name)
+func (_mock *MockWorkloadRepository) MarkDeleting(ctx context.Context, name string, force bool) (database.Workload, []string, error) {
+	ret := _mock.Called(ctx, name, force)
 
 	if len(ret) == 0 {
 		panic("no return value specified for MarkDeleting")
 	}
 
 	var r0 database.Workload
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (database.Workload, error)); ok {
-		return returnFunc(ctx, name)
+	var r1 []string
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, bool) (database.Workload, []string, error)); ok {
+		return returnFunc(ctx, name, force)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) database.Workload); ok {
-		r0 = returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, bool) database.Workload); ok {
+		r0 = returnFunc(ctx, name, force)
 	} else {
 		r0 = ret.Get(0).(database.Workload)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, name)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, bool) []string); ok {
+		r1 = returnFunc(ctx, name, force)
 	} else {
-		r1 = ret.Error(1)
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).([]string)
+		}
 	}
-	return r0, r1
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, bool) error); ok {
+		r2 = returnFunc(ctx, name, force)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
 }
 
 // MockWorkloadRepository_MarkDeleting_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkDeleting'
@@ -4144,11 +4152,12 @@ type MockWorkloadRepository_MarkDeleting_Call struct {
 // MarkDeleting is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
-func (_e *MockWorkloadRepository_Expecter) MarkDeleting(ctx any, name any) *MockWorkloadRepository_MarkDeleting_Call {
-	return &MockWorkloadRepository_MarkDeleting_Call{Call: _e.mock.On("MarkDeleting", ctx, name)}
+//   - force bool
+func (_e *MockWorkloadRepository_Expecter) MarkDeleting(ctx any, name any, force any) *MockWorkloadRepository_MarkDeleting_Call {
+	return &MockWorkloadRepository_MarkDeleting_Call{Call: _e.mock.On("MarkDeleting", ctx, name, force)}
 }
 
-func (_c *MockWorkloadRepository_MarkDeleting_Call) Run(run func(ctx context.Context, name string)) *MockWorkloadRepository_MarkDeleting_Call {
+func (_c *MockWorkloadRepository_MarkDeleting_Call) Run(run func(ctx context.Context, name string, force bool)) *MockWorkloadRepository_MarkDeleting_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -4158,20 +4167,25 @@ func (_c *MockWorkloadRepository_MarkDeleting_Call) Run(run func(ctx context.Con
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 bool
+		if args[2] != nil {
+			arg2 = args[2].(bool)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
 }
 
-func (_c *MockWorkloadRepository_MarkDeleting_Call) Return(workload database.Workload, err error) *MockWorkloadRepository_MarkDeleting_Call {
-	_c.Call.Return(workload, err)
+func (_c *MockWorkloadRepository_MarkDeleting_Call) Return(workload database.Workload, strings []string, err error) *MockWorkloadRepository_MarkDeleting_Call {
+	_c.Call.Return(workload, strings, err)
 	return _c
 }
 
-func (_c *MockWorkloadRepository_MarkDeleting_Call) RunAndReturn(run func(ctx context.Context, name string) (database.Workload, error)) *MockWorkloadRepository_MarkDeleting_Call {
+func (_c *MockWorkloadRepository_MarkDeleting_Call) RunAndReturn(run func(ctx context.Context, name string, force bool) (database.Workload, []string, error)) *MockWorkloadRepository_MarkDeleting_Call {
 	_c.Call.Return(run)
 	return _c
 }

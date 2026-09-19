@@ -120,8 +120,10 @@ type (
 		// or all of them when none are given.
 		List(ctx context.Context, queries ...database.Query) ([]database.Workload, error)
 		// MarkDeleting should record that the workload with the given name is to be
-		// deleted, returning it as it now stands.
-		MarkDeleting(ctx context.Context, name string) (database.Workload, error)
+		// deleted, returning it as it now stands beside the names of the workloads
+		// referencing it. Unless force is set, a referenced workload is left as it
+		// is and database.ErrWorkloadReferenced returned with the names.
+		MarkDeleting(ctx context.Context, name string, force bool) (database.Workload, []string, error)
 		// Suspend should record that the workload with the given name is not to
 		// run, returning it as it now stands.
 		Suspend(ctx context.Context, name string) (database.Workload, error)
@@ -921,6 +923,9 @@ func (s *WorkloadService) store(ctx context.Context, resolved resolution) (datab
 		switch {
 		case err == nil:
 			return stored, created, nil
+		case errors.Is(err, database.ErrWorkloadDeleting):
+			// A delete landed between resolving the specification and writing it.
+			return database.Workload{}, false, ErrWorkloadDeleting
 		case !errors.Is(err, database.ErrHostPortTaken):
 			return database.Workload{}, false, fmt.Errorf("failed to store workload: %w", err)
 		case port.Pinned(spec.Ports):
@@ -1176,19 +1181,15 @@ func scrapeLabels(name string, labels map[string]string) map[string]string {
 // workloads, which then report the reference they can no longer resolve and retry
 // until something holds the name again.
 func (s *WorkloadService) Delete(ctx context.Context, name string, force bool) (Workload, error) {
-	referencing, err := s.workloads.ReferencedBy(ctx, name)
-	if err != nil {
-		return Workload{}, fmt.Errorf("failed to read the workloads referencing this one: %w", err)
-	}
-
-	if len(referencing) > 0 && !force {
-		return Workload{}, fmt.Errorf("%w: referenced by %s", ErrWorkloadInUse, strings.Join(referencing, ", "))
-	}
-
-	marked, err := s.workloads.MarkDeleting(ctx, name)
+	// The references are read and the row marked in one transaction, so a
+	// reference written between the two cannot leave a workload pointing at a
+	// name that is on its way out.
+	marked, referencing, err := s.workloads.MarkDeleting(ctx, name, force)
 	switch {
 	case errors.Is(err, database.ErrWorkloadNotFound):
 		return Workload{}, ErrWorkloadNotFound
+	case errors.Is(err, database.ErrWorkloadReferenced):
+		return Workload{}, fmt.Errorf("%w: referenced by %s", ErrWorkloadInUse, strings.Join(referencing, ", "))
 	case err != nil:
 		return Workload{}, fmt.Errorf("failed to mark workload for deletion: %w", err)
 	}

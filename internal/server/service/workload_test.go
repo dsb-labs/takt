@@ -2136,7 +2136,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 		marked := storedWorkload("example")
 		marked.DeletedAt = time.Now().UTC()
 
-		repo.EXPECT().MarkDeleting(mock.Anything, "example").Return(marked, nil).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "example", mock.Anything).Return(marked, nil, nil).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return([]driver.Instance{
 			{ID: "container-one", Workload: "example", State: driver.StateRunning},
 		}, nil).Once()
@@ -2156,7 +2156,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 	t.Run("notifies the reconciler", func(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
-		repo.EXPECT().MarkDeleting(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "example", mock.Anything).Return(storedWorkload("example"), nil, nil).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		var notified bool
@@ -2172,8 +2172,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 	t.Run("reports a missing workload", func(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
-		repo.EXPECT().MarkDeleting(mock.Anything, "nope").
-			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "nope", mock.Anything).Return(database.Workload{}, nil, database.ErrWorkloadNotFound).Once()
 
 		svc := newTestService(t, d, repo, ports, nil)
 
@@ -2184,7 +2183,8 @@ func TestWorkloadService_Delete(t *testing.T) {
 	t.Run("refuses a workload another one references", func(t *testing.T) {
 		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
 
-		repo.EXPECT().ReferencedBy(mock.Anything, "postgres").Return([]string{"api"}, nil).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "postgres", false).
+			Return(database.Workload{}, []string{"api"}, database.ErrWorkloadReferenced).Once()
 
 		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
 			Logger:    newTestLogger(t),
@@ -2200,8 +2200,6 @@ func TestWorkloadService_Delete(t *testing.T) {
 		_, err := svc.Delete(t.Context(), "postgres", false)
 		require.ErrorIs(t, err, service.ErrWorkloadInUse)
 		assert.Contains(t, err.Error(), "api")
-
-		repo.AssertNotCalled(t, "MarkDeleting")
 	})
 
 	t.Run("deletes a referenced workload when forced", func(t *testing.T) {
@@ -2214,8 +2212,7 @@ func TestWorkloadService_Delete(t *testing.T) {
 		consumerSpec, err := json.Marshal(consumer)
 		require.NoError(t, err)
 
-		repo.EXPECT().ReferencedBy(mock.Anything, "postgres").Return([]string{"api"}, nil).Once()
-		repo.EXPECT().MarkDeleting(mock.Anything, "postgres").Return(storedWorkload("postgres"), nil).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "postgres", true).Return(storedWorkload("postgres"), []string{"api"}, nil).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		// The consumer is rehashed on the way out, the way a deleted secret rehashes
@@ -4064,8 +4061,7 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 		api := storedWorkload("api")
 		api.SpecHash = "stale"
 
-		repo.EXPECT().ReferencedBy(mock.Anything, "postgres").Return([]string{"api"}, nil).Once()
-		repo.EXPECT().MarkDeleting(mock.Anything, "postgres").Return(storedWorkload("postgres"), nil).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "postgres", true).Return(storedWorkload("postgres"), []string{"api"}, nil).Once()
 		repo.EXPECT().Get(mock.Anything, "api").Return(api, nil).Once()
 		repo.EXPECT().Upsert(mock.Anything, mock.Anything).Return(api, false, nil).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
@@ -4099,8 +4095,7 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 		api := storedWorkload("api")
 		api.SpecHash = hash
 
-		repo.EXPECT().ReferencedBy(mock.Anything, "postgres").Return([]string{"api"}, nil).Once()
-		repo.EXPECT().MarkDeleting(mock.Anything, "postgres").Return(storedWorkload("postgres"), nil).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "postgres", true).Return(storedWorkload("postgres"), []string{"api"}, nil).Once()
 		repo.EXPECT().Get(mock.Anything, "api").Return(api, nil).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
@@ -4173,7 +4168,7 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 		deleted := storedWorkload("example")
 		deleted.DeletedAt = time.Now().UTC()
 
-		repo.EXPECT().MarkDeleting(mock.Anything, "example").Return(deleted, nil).Once()
+		repo.EXPECT().MarkDeleting(mock.Anything, "example", mock.Anything).Return(deleted, nil, nil).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		// Recorded even though the row is on its way out: the teardown takes passes,
