@@ -123,6 +123,13 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// The path is appended to the instance's address, so one that parses as
+			// a user part and a host would send the probe to that host instead.
+			Name:         "rejects a health path naming a host",
+			File:         "health_http_host.yaml",
+			ExpectsError: true,
+		},
+		{
 			// Only the TCP port is checkable, so naming one is not ambiguous even
 			// though two ports are published.
 			Name: "a check on the tcp side of a dual-protocol workload",

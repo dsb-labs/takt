@@ -1,0 +1,8 @@
+version: v1
+name: example
+ports:
+  - to: 80
+health:
+  http: "@203.0.113.5/admin"
+container:
+  image: example/example:latest
