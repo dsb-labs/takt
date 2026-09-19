@@ -97,6 +97,20 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// The runtimes join each pair as KEY=VALUE, so a key holding "=" would
+			// set a variable other than the one written.
+			Name:         "rejects an env key that is not a variable name",
+			File:         "env_key_invalid.yaml",
+			ExpectsError: true,
+		},
+		{
+			// A NUL byte cannot reach a process's environment, and would otherwise
+			// be reported as a failure to execute rather than as a bad manifest.
+			Name:         "rejects an env value holding a NUL byte",
+			File:         "env_value_nul.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:         "rejects an exec command with an empty element",
 			File:         "exec_empty_command.yaml",
 			ExpectsError: true,

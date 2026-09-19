@@ -1,0 +1,6 @@
+version: v1
+name: example
+env:
+  "A=B": C
+container:
+  image: example/example:latest

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -398,15 +399,32 @@ func validReferenceName(name string) bool {
 	return namePattern.MatchString(name) && len(name) <= maxLabelKeyLength
 }
 
-// validateEnv reports whether the workload's environment holds usable references.
+// An environment variable name is what a shell accepts. The runtimes join each pair
+// as KEY=VALUE, so a key holding "=" would set a different variable from the one
+// written, and one holding NUL cannot reach a process at all.
+var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// validateEnv reports whether the workload's environment holds usable names and
+// references.
 //
-// Only the values are scanned. A key is the name of an environment variable rather
-// than something a workload reads, so a reference in one has nothing to substitute
-// into and is left as the literal text it is.
+// Only the values are scanned for references. A key is the name of an environment
+// variable rather than something a workload reads, so a reference in one has nothing
+// to substitute into and is left as the literal text it is.
 //
 // A mount names what it reads directly rather than as reference text, so there is no
 // syntax to reject there. validateVolumes checks those names.
 func validateEnv(spec Spec) error {
+	// Sorted so a manifest with two bad keys always reports the same one.
+	for _, key := range slices.Sorted(maps.Keys(spec.Env)) {
+		switch {
+		case !envKeyPattern.MatchString(key):
+			return fmt.Errorf("invalid env %q: a name is letters, digits and underscores, "+
+				"and does not start with a digit", key)
+		case strings.ContainsRune(spec.Env[key], 0):
+			return fmt.Errorf("invalid env %s: a value cannot hold a NUL byte", key)
+		}
+	}
+
 	_, err := References(spec)
 
 	return err
