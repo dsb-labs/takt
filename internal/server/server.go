@@ -191,6 +191,9 @@ func Run(ctx context.Context, config Config) error {
 		// Read-only paths beyond the host's own directories, for a runtime that lives
 		// somewhere those do not cover.
 		AllowPaths: config.Exec.AllowPaths,
+		// The server's own secrets, which sit under directories every workload
+		// may otherwise read.
+		DenyPaths: config.PrivatePaths(),
 	})
 
 	dockerDriver := docker.New(docker.Config{
