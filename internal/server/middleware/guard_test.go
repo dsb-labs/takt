@@ -94,6 +94,14 @@ func TestGuard(t *testing.T) {
 			ExpectStatus: http.StatusOK,
 		},
 		{
+			Name: "refuses an origin naming an address that is not loopback",
+			// A page from any address on the internet has that address as its
+			// origin. Only a loopback address says the page came from this machine.
+			Host:         "127.0.0.1:7373",
+			Origin:       "http://203.0.113.5",
+			ExpectStatus: http.StatusForbidden,
+		},
+		{
 			Name: "refuses an opaque origin",
 			// What a sandboxed page sends. It names nowhere this API is served from.
 			Host:         "127.0.0.1:7373",

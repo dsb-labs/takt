@@ -87,13 +87,23 @@ func permittedHost(host string, allowed map[string]struct{}) bool {
 //
 // An origin takt cannot parse is refused, as is the opaque "null" a sandboxed page
 // sends: neither names somewhere this API is served from.
+//
+// The rule for an address literal is narrower than the host check's. A request
+// naming an address reached this server by it, but a page's origin is where the
+// page came from, and a page from any address on the internet has one. Only a
+// loopback address says the page was served from this machine.
 func permittedOrigin(origin string, allowed map[string]struct{}) bool {
 	parsed, err := url.Parse(origin)
 	if err != nil {
 		return false
 	}
 
-	return permittedHost(parsed.Hostname(), allowed)
+	host := parsed.Hostname()
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+
+	return permittedHost(host, allowed)
 }
 
 // hostname returns the name part of a Host header, which carries a port when the
