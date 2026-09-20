@@ -38,7 +38,9 @@ Enabling is three steps: add the block, restart, init.
    holds one: the health and readiness probes a supervisor needs, the login
    and OIDC endpoints, and `acl init` itself before any token exists.
 2. Run `takt acl init`. It works exactly once and prints the recovery token,
-   which is the root of trust: store it somewhere safe.
+   which is the root of trust: store it somewhere safe. Until it has run, the
+   first caller to reach the listener owns that token, and the server says so
+   at startup.
 3. Apply the first policy with the recovery token, then work with a client
    token of your own from that point on. The recovery token exists for init
    and lockout recovery, not for daily use.
@@ -120,6 +122,12 @@ create` minted for the name.
 Principals share one namespace, so the convention is that humans are emails
 and machines are bare names. An identity provider's username then cannot
 collide with a machine's grants.
+
+An email is only as trustworthy as the issuer's verification of it. takt reads
+the claim `principalClaim` names and does not ask whether the issuer verified
+it, so an issuer that lets a user type any address lets them log in as it. Point
+`issuer` at a provider you control, or name `sub` as the principal claim, which
+the issuer assigns and nobody types.
 
 A grant names principals directly or through `group:<name>`. A group entry
 matches a group defined in the policy's own `groups` list, or a group the
