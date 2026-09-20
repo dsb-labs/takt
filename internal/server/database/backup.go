@@ -46,10 +46,12 @@ func Snapshot(ctx context.Context, source, destination string) error {
 	}
 
 	// Read-only, and deliberately not through Open, which migrates. A snapshot must
-	// not alter the database it is a snapshot of — an older binary taking a backup of
-	// a newer database would otherwise migrate it down on the way past. Read-only
-	// also means this adds no writer to a database another process is writing to:
-	// VACUUM INTO writes the destination and nothing else.
+	// not alter the database it is a snapshot of. Open refuses a database from a
+	// newer binary rather than migrating it down, so the risk is a snapshot that
+	// cannot be taken rather than one that changes what it copies, but a copy is
+	// still not the place to run migrations from. Read-only also means this adds
+	// no writer to a database another process is writing to: VACUUM INTO writes
+	// the destination and nothing else.
 	//
 	// The busy timeout still matters. VACUUM INTO holds a read lock for as long as it
 	// takes to copy, and it has to acquire one first.
