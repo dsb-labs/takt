@@ -336,12 +336,33 @@ func (a *AuthAPI) OidcCallback(ctx context.Context, request api.OidcCallbackRequ
 		}, nil
 	}
 
-	return api.OidcCallback302Response{
-		Headers: api.OidcCallback302ResponseHeaders{
-			Location:  new("/"),
-			SetCookie: new(a.sessionCookie(credential, token.ExpiresAt).String()),
-		},
+	// The state cookie has done its job and is cleared with the same response
+	// that sets the session, so it does not sit in the browser for the rest of
+	// its ten minutes.
+	return loggedIn{
+		session: a.sessionCookie(credential, token.ExpiresAt),
+		state:   a.clearStateCookie(),
 	}, nil
+}
+
+// The loggedIn type is the callback's response once the login has succeeded: a
+// redirect to the UI carrying the session cookie and clearing the state cookie.
+//
+// Written by hand because the generated response carries one Set-Cookie header,
+// and this response needs two.
+type loggedIn struct {
+	session *http.Cookie
+	state   *http.Cookie
+}
+
+// VisitOidcCallbackResponse writes the redirect and both cookies.
+func (l loggedIn) VisitOidcCallbackResponse(w http.ResponseWriter) error {
+	http.SetCookie(w, l.session)
+	http.SetCookie(w, l.state)
+	w.Header().Set("Location", "/")
+	w.WriteHeader(http.StatusFound)
+
+	return nil
 }
 
 // sessionCookie carries a minted credential to the browser. HttpOnly, so a
@@ -353,6 +374,19 @@ func (a *AuthAPI) sessionCookie(credential string, expires time.Time) *http.Cook
 		Value:    credential,
 		Path:     "/",
 		Expires:  expires,
+		HttpOnly: true,
+		Secure:   a.secure,
+		SameSite: http.SameSiteLaxMode,
+	}
+}
+
+// clearStateCookie tells the browser to drop the OIDC state cookie.
+func (a *AuthAPI) clearStateCookie() *http.Cookie {
+	return &http.Cookie{
+		Name:     "takt_oidc",
+		Value:    "",
+		Path:     "/api/v1/auth/oidc",
+		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   a.secure,
 		SameSite: http.SameSiteLaxMode,

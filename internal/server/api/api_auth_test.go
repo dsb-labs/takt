@@ -327,7 +327,15 @@ func TestAuthAPI_OIDCFlow(t *testing.T) {
 		resp := doAuth(t, svc, relyingParty(), identityStub{}, req)
 		require.Equal(t, http.StatusFound, resp.Code)
 		assert.Equal(t, "/", resp.Header().Get("Location"))
-		assert.Contains(t, resp.Header().Get("Set-Cookie"), auth.SessionCookie+"=takt_c_session")
+
+		// The session is set and the state cookie, which has done its job, is
+		// cleared in the same response.
+		cookies := resp.Result().Cookies()
+		require.Len(t, cookies, 2)
+		assert.Equal(t, auth.SessionCookie, cookies[0].Name)
+		assert.Equal(t, "takt_c_session", cookies[0].Value)
+		assert.Equal(t, "takt_oidc", cookies[1].Name)
+		assert.Equal(t, -1, cookies[1].MaxAge)
 	})
 
 	t.Run("the callback refuses a state it did not issue", func(t *testing.T) {
