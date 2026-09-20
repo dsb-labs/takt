@@ -145,6 +145,21 @@ func Run(ctx context.Context, config Config) error {
 		logger.Warn("acl reset consumed, init is permitted again")
 	}
 
+	// Until init has run, the first caller to reach the listener owns the
+	// recovery token. That is documented, and it is the state a fresh
+	// deployment is in, but it is also the state a reset leaves and the one
+	// an operator most wants pointed out.
+	if config.Auth != nil {
+		initialised, err := tokens.HasRecovery(ctx)
+		if err != nil {
+			return err
+		}
+
+		if !initialised {
+			logger.Warn("authentication is enabled and the acl is not initialised: the first caller of `takt acl init` will hold the recovery token")
+		}
+	}
+
 	checker := health.New(health.Config{
 		MeterProvider:  tel.MeterProvider(),
 		TracerProvider: tel.TracerProvider(),
