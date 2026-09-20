@@ -114,6 +114,15 @@ func Open(ctx context.Context, config Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
+	// SQLite permits one writer at a time, and every writer past the first waits
+	// on the busy timeout. Left unbounded, a burst of applies opens a connection
+	// each and every one of them queues for up to thirty seconds. A handful of
+	// connections is enough for the readers to keep answering while the writers
+	// take their turn, and anything past it waits in the pool rather than on the
+	// lock.
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(8)
+
 	if err = db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
