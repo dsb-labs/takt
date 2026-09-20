@@ -402,6 +402,13 @@ before it runs the command. A confined workload reaches:
 - its own command, and the host's system directories,
 - anything `exec.allow-paths` names, for reading only.
 
+The system directories include `/etc`, and `/etc` is where the packaged install
+keeps takt's own configuration, which may hold an OIDC client secret, and where a
+TLS key often lives. Those are carved out: the directory the configuration was
+read from, the TLS key and the keyring are refused, and the directory holding each
+is granted entry by entry rather than whole. A workload reads `/etc/hostname` and
+not `/etc/takt`.
+
 There is deliberately no grant for `/tmp`. It is shared by everything running
 as the server's user, so granting it would let one workload read what another
 wrote there. A workload that insists on a temporary directory can be pointed
