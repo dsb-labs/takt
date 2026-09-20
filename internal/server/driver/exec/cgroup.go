@@ -71,15 +71,16 @@ type cgroup struct {
 	// The directory itself, passed to the kernel as the process is cloned so the
 	// command never runs outside its limits.
 	dir *os.File
-	// The process limit the workload asked for, written only once the command has
-	// replaced the trampoline. Zero when it asked for none.
+	// The limits the workload asked for, written only once the command has
+	// replaced the trampoline. Nil when it asked for none.
 	//
-	// The other limits are written before the process exists, but this one cannot
-	// be: the kernel counts threads, and the trampoline is a Go runtime holding
-	// several where the command holds one until it says otherwise. Written up
-	// front, a small legitimate limit would kill the trampoline rather than bound
-	// the command.
-	pids int
+	// They cannot be written before the process exists. The trampoline is a Go
+	// runtime, holding several threads and tens of megabytes where the command
+	// may hold one thread and next to nothing, and a small legitimate limit
+	// written up front kills the trampoline rather than bounding the command. A
+	// trampoline killed before the exec closes the status pipe the way the exec
+	// does, so the server would report the instance running and find a corpse.
+	resources *manifest.Resources
 }
 
 // Enforceable reports whether this host lets takt enforce resource limits on an exec
@@ -333,13 +334,13 @@ func (d *Driver) limit(w driver.Workload) (*cgroup, error) {
 	return nil, nil
 }
 
-// create makes a workload's cgroup, writing its limits when the specification names
-// some.
+// create makes a workload's cgroup, holding the limits the specification names for
+// restrict to write once the command is running.
 //
-// The limits are written before the directory is handed back, so by the time a
-// process can be placed in it every limit already applies. The identifier reaching
-// the path was checked by the caller resolving the workload's directories, which
-// happens before any of this.
+// Only the process limit is written here, and at the trampoline's allowance rather
+// than the workload's, so even the moment before the exec cannot fork freely. The
+// identifier reaching the path was checked by the caller resolving the workload's
+// directories, which happens before any of this.
 func create(w driver.Workload) (*cgroup, error) {
 	if err := prepared(); err != nil {
 		return nil, fmt.Errorf("failed to prepare the cgroup subtree: %w", err)
@@ -358,16 +359,14 @@ func create(w driver.Workload) (*cgroup, error) {
 		return nil, fmt.Errorf("failed to create the workload's cgroup: %w", pathless(err))
 	}
 
-	group := &cgroup{path: path}
+	group := &cgroup{path: path, resources: w.Spec.Resources}
 
-	if resources := w.Spec.Resources; resources != nil {
-		if err = limits(path, resources); err != nil {
+	if resources := w.Spec.Resources; resources != nil && resources.Pids > 0 {
+		if err = limitFile(path, "pids.max", strconv.Itoa(max(resources.Pids, trampolinePids))); err != nil {
 			_ = os.Remove(path)
 
 			return nil, err
 		}
-
-		group.pids = resources.Pids
 	}
 
 	if group.dir, err = os.Open(path); err != nil {
@@ -377,6 +376,22 @@ func create(w driver.Workload) (*cgroup, error) {
 	}
 
 	return group, nil
+}
+
+// restrict writes the limits the workload asked for, once the command has replaced
+// the trampoline and holds a single thread and its own memory.
+//
+// Tightening below the current use is legal: nothing dies, and what the command
+// asks for from here on answers to the limit. A command that forks or allocates in
+// the moment before the write runs against the trampoline's allowance rather than
+// the limit, so an early burst can briefly exceed it, and everything after the
+// write answers to it.
+func (c *cgroup) restrict() error {
+	if c == nil || c.resources == nil {
+		return nil
+	}
+
+	return limits(c.path, c.resources)
 }
 
 // limits writes a workload's resource limits into its cgroup. A limit the
@@ -415,32 +430,12 @@ func limits(path string, resources *manifest.Resources) error {
 	}
 
 	if resources.Pids > 0 {
-		// The trampoline's allowance when the workload asked for less, since the
-		// kernel would count the trampoline's threads against the workload's
-		// limit. The limit asked for is written once the command is running, which
-		// restrictPids does.
-		if err := limitFile(path, "pids.max", strconv.Itoa(max(resources.Pids, trampolinePids))); err != nil {
+		if err := limitFile(path, "pids.max", strconv.Itoa(resources.Pids)); err != nil {
 			return err
 		}
 	}
 
 	return nil
-}
-
-// restrictPids tightens the process limit to the one the workload asked for, once
-// the command has replaced the trampoline and holds a single thread.
-//
-// Tightening below the current count is legal: nothing dies, and new forks fail.
-// A command that forks in the moment before the write runs against the
-// trampoline's allowance rather than the limit, so an early fork can briefly
-// exceed the limit — bounded by that allowance — and every fork after the write
-// answers to the limit.
-func (c *cgroup) restrictPids() error {
-	if c == nil || c.pids == 0 {
-		return nil
-	}
-
-	return limitFile(c.path, "pids.max", strconv.Itoa(c.pids))
 }
 
 // usageOf reports what the processes in a cgroup are consuming, read from the

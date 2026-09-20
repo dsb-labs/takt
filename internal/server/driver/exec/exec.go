@@ -371,10 +371,10 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", err
 	}
 
-	// The command has replaced the trampoline, which is what makes the process limit
-	// safe to write: the kernel counts threads, and only now does the process hold
-	// the one the command started with.
-	if err = limits.restrictPids(); err != nil {
+	// The command has replaced the trampoline, which is what makes the limits safe
+	// to write: only now does the process hold the command's own threads and
+	// memory rather than a Go runtime's.
+	if err = limits.restrict(); err != nil {
 		_ = d.kill(cmd.Process.Pid)
 		limits.discard()
 

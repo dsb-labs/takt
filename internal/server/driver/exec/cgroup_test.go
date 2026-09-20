@@ -33,6 +33,33 @@ func TestEnforceable(t *testing.T) {
 func TestDriver_ResourceLimits(t *testing.T) {
 	t.Parallel()
 
+	t.Run("starts a command under a limit the trampoline itself would not fit", func(t *testing.T) {
+		d, _ := newDriver(t)
+
+		// The trampoline is a Go runtime, and under the race detector a large one.
+		// The command it becomes needs almost nothing. A limit written before the
+		// exec would kill the trampoline, and a trampoline killed before the exec
+		// closes the status pipe the way the exec does, so the instance would be
+		// reported running and found dead.
+		w := workload(t, "example", 1, "hash-one", "sleep 60")
+		w.Spec.Resources = &manifest.Resources{Memory: "4m", Pids: 2}
+
+		pid, err := d.Start(t.Context(), w)
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateRunning)
+
+		path := cgroupOf(t, pid)
+		assert.Equal(t, strconv.Itoa(4*1024*1024), limitOf(t, path, "memory.max"))
+		assert.Equal(t, "2", limitOf(t, path, "pids.max"))
+
+		// Still up once the limits are written, which is the point.
+		time.Sleep(200 * time.Millisecond)
+		awaitState(t, d, "example", driver.StateRunning)
+
+		require.NoError(t, d.Stop(t.Context(), idOf(t), "example"))
+	})
+
 	t.Run("runs a limited workload in a cgroup carrying its limits", func(t *testing.T) {
 		d, _ := newDriver(t)
 
