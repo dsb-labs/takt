@@ -458,8 +458,10 @@ such a host, in whatever cgroup the server sits in, but it reports no usage.
 
 Inside the subtree, takt keeps a `main` cgroup holding the server, and one
 `takt-<id>-<instance>-<version>` cgroup per instance, so a workload's instances get
-cgroups of their own. The limits are written before the command starts, so it never
-runs outside them, and the cgroup is removed when the workload stops. Stopping kills
+cgroups of their own. The process is cloned into its cgroup, so it never runs
+outside it. The limits are written the moment the command replaces the trampoline
+takt starts it through, since a limit small enough for the command would kill the
+trampoline before it. The cgroup is removed when the workload stops. Stopping kills
 everything the cgroup holds, which reaches a process that left the workload's process
 group by making a session of its own.
 
