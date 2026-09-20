@@ -111,10 +111,10 @@ as an ordinary change and replaces the instance bound to the old one. Each insta
 carries a hash of its own, folding in the addresses it resolved, so a change to what
 one instance reads replaces that instance alone.
 
-A workload running several instances is replaced one instance per pass. The change
-rolls across them at the reconcile interval rather than taking every instance down at
-once, which is what makes replacing a counted workload a degradation rather than an
-outage.
+A workload running several instances is replaced one instance at a time. The next
+is not touched until the last replacement has settled — stayed up, and passed its
+check when it has one — rather than taking every instance down at once, which is
+what makes replacing a counted workload a degradation rather than an outage.
 
 ## The schedule outranks the restart policy
 
