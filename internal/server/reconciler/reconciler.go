@@ -1063,11 +1063,17 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		byIndex[instance.Index] = append(byIndex[instance.Index], instance)
 	}
 
-	// At most one replacement of something running per pass, so a change rolls
-	// across the instances at the reconcile interval instead of taking them all
-	// down at once. Slots with nothing running are not held back by it.
+	// At most one replacement of something running at a time, so a change rolls
+	// across the instances instead of taking them all down at once. A pass runs
+	// on every event the runtime reports, the replacement's own start included,
+	// so one per pass alone would roll at whatever speed the runtime answers.
+	// A replacement counts as in flight until what it started has settled: up
+	// for the settle period, and past its health check when it declares one. A
+	// replacement that never settles holds the roll at one instance, which is
+	// what makes a bad change a degradation rather than an outage. Slots with
+	// nothing running are not held back by it.
 	var (
-		replaced   bool
+		replaced   = r.rolling(ctx, row, count, byIndex)
 		anyRunning bool
 	)
 
@@ -1090,6 +1096,37 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 	// does now. Comparing what was delivered against what takt holds is the only
 	// thing that would notice.
 	return r.refresh(ctx, row)
+}
+
+// rolling reports whether a replacement is still in flight: some slot holds an
+// instance that is current, so it is the outcome of a replacement rather than the
+// subject of one, and that has not yet settled.
+//
+// The states the health check folds in count: an instance still in its start
+// period reads as pending, and one failing its check reads as failed, and neither
+// has settled. A slot whose expected hash cannot be resolved is left out, since
+// staleSlot leaves such a slot alone either way.
+func (r *Reconciler) rolling(ctx context.Context, row database.Workload, count int, byIndex map[int][]driver.Instance) bool {
+	now := r.now()
+
+	for index := range count {
+		expected, err := r.slotHash(ctx, row, index)
+		if err != nil {
+			continue
+		}
+
+		for _, instance := range byIndex[index] {
+			if instance.SpecHash != expected || instance.Retained {
+				continue
+			}
+
+			if !settled(instance, now) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // convergeSlot brings one instance of a workload into line, reporting whether the
