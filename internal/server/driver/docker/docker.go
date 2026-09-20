@@ -147,12 +147,13 @@ type (
 	}
 )
 
-// The address a container's ports are published on when the configuration names
-// none.
+// The address a container's ports are published on when the driver is given none.
 //
-// Loopback rather than every interface, and deliberately not docker's own default:
-// docker reads an empty host address as every interface, so a driver that passed one
-// through would publish a workload to the network whenever a caller forgot to say.
+// The server always gives one: the configuration's workload.bind, every interface
+// by default, which docs/configuration.md explains. This is the fallback for a
+// driver constructed without it, and it is loopback rather than docker's own
+// default of every interface, so a caller that forgot to say does not publish a
+// workload to the network.
 const defaultBind = "127.0.0.1"
 
 // Name returns the name this driver is registered under.
