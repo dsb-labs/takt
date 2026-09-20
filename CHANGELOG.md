@@ -10,6 +10,10 @@ describes how an entry is written.
 
 ### Changed
 
+- The server warns at startup when authentication is enabled and
+  `takt acl init` has not run
+  ([#78](https://github.com/dsb-labs/takt/issues/78),
+  [#104](https://github.com/dsb-labs/takt/pull/104)).
 - `allow-host-paths` is checked again each time an instance starts, not only when
   the manifest is applied. A stored workload whose path no longer sits under a
   prefix fails to start and says so in its events
