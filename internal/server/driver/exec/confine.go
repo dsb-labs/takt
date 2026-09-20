@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	osexec "os/exec"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -122,6 +124,10 @@ type ruleset struct {
 	Write []string `json:"write"`
 	// The directories the workload may read and execute from.
 	Read []string `json:"read"`
+	// Paths the workload may not read, beneath the system directories it otherwise
+	// may. Landlock only grants, so a directory holding one of these is granted
+	// entry by entry with the entries leading to it left out.
+	Deny []string `json:"deny,omitempty"`
 	// The individual files the workload may read, which is what a mounted value is,
 	// and the command's own binary.
 	Files []string `json:"files"`
@@ -217,7 +223,7 @@ func restrict(rs ruleset) error {
 		// The host's own files, and the devices a program expects to find. Missing
 		// entries are ignored: which of these a host has varies, and one that is not
 		// there grants nothing.
-		landlock.RODirs(append(systemPaths, rs.Read...)...).IgnoreIfMissing(),
+		landlock.RODirs(readable(append(slices.Clone(systemPaths), rs.Read...), rs.Deny)...).IgnoreIfMissing(),
 		landlock.RWFiles(devicePaths...).IgnoreIfMissing(),
 	}
 
@@ -237,6 +243,55 @@ func restrict(rs ruleset) error {
 	}
 
 	return landlock.V3.RestrictPaths(rules...)
+}
+
+// readable returns the system paths with the denied ones carved out.
+//
+// Landlock only grants, so a directory that holds a denied path cannot be granted
+// whole. It is opened and each of its entries granted instead, apart from the ones
+// leading to something denied, which are recursed into the same way. A directory
+// that cannot be read is granted whole, since nothing denied is known to be in
+// it, and one that does not exist is left for the rule to ignore.
+func readable(paths, deny []string) []string {
+	if len(deny) == 0 {
+		return paths
+	}
+
+	var out []string
+	for _, path := range paths {
+		out = append(out, carve(path, deny)...)
+	}
+
+	return out
+}
+
+// carve returns path, or the entries beneath it that do not lead to a denied path.
+func carve(path string, deny []string) []string {
+	var beneath bool
+	for _, denied := range deny {
+		switch {
+		case denied == path:
+			return nil
+		case strings.HasPrefix(denied, path+string(filepath.Separator)):
+			beneath = true
+		}
+	}
+
+	if !beneath {
+		return []string{path}
+	}
+
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return []string{path}
+	}
+
+	var out []string
+	for _, entry := range entries {
+		out = append(out, carve(filepath.Join(path, entry.Name()), deny)...)
+	}
+
+	return out
 }
 
 // pipes attaches the two descriptors a confinement talks over to a command that has

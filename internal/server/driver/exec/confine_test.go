@@ -113,6 +113,28 @@ func TestConfine(t *testing.T) {
 		assert.Contains(t, result.Output, "Permission denied")
 	})
 
+	t.Run("keeps a denied path from a directory it otherwise grants", func(t *testing.T) {
+		// Where the server's configuration and keys live sits under a directory
+		// every workload may read. Landlock only grants, so the directory is
+		// granted entry by entry with the denied one left out.
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "public"), []byte("OPEN"), 0o600))
+		require.NoError(t, os.Mkdir(filepath.Join(dir, "private"), 0o700))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "private", "key"), []byte("SEALED"), 0o600))
+
+		result := trampoline(t, ruleset{
+			Command: []string{"/bin/sh", "-c",
+				"cat " + filepath.Join(dir, "public") + " 2>&1; cat " + filepath.Join(dir, "private", "key") + " 2>&1"},
+			Read: []string{dir},
+			Deny: []string{filepath.Join(dir, "private")},
+		})
+
+		require.Empty(t, result.Status)
+		assert.Contains(t, result.Output, "OPEN", "a confined command could not read a sibling of the denied path")
+		assert.NotContains(t, result.Output, "SEALED", "a confined command read a denied path")
+		assert.Contains(t, result.Output, "Permission denied")
+	})
+
 	t.Run("allows a directory the ruleset grants for writing", func(t *testing.T) {
 		dir := t.TempDir()
 
@@ -259,6 +281,7 @@ type (
 		Command []string `json:"command"`
 		Write   []string `json:"write"`
 		Read    []string `json:"read"`
+		Deny    []string `json:"deny,omitempty"`
 		Files   []string `json:"files"`
 	}
 
