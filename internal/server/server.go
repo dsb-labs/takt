@@ -478,7 +478,7 @@ func Run(ctx context.Context, config Config) error {
 			Logger: logger,
 			Auth:   authSvc,
 			OIDC:   relyingParty,
-			Secure: config.HTTP.TLSEnabled(),
+			Secure: config.ServedOverTLS(),
 		}),
 		ACL:    api.NewACLAPI(api.ACLAPIConfig{Logger: logger, Policies: policySvc, Init: tokenSvc}),
 		Tokens: api.NewTokenAPI(api.TokenAPIConfig{Logger: logger, Tokens: tokenSvc}),
@@ -506,7 +506,7 @@ func Run(ctx context.Context, config Config) error {
 		// Outside the telemetry handler, which is the only place a handler can still
 		// reach the connection's own writer: everything below wraps it, and none of
 		// those wrappers carries a write deadline.
-		Handler: middleware.Stream(otelhttp.NewHandler(middleware.Wrap(mux, logger, config.HTTP.Hosts, authenticator), "takt",
+		Handler: middleware.Stream(otelhttp.NewHandler(middleware.Headers(config.ServedOverTLS())(middleware.Wrap(mux, logger, config.HTTP.Hosts, authenticator)), "takt",
 			otelhttp.WithMeterProvider(tel.MeterProvider()),
 			otelhttp.WithTracerProvider(tel.TracerProvider()),
 			otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(
