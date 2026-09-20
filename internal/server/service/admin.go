@@ -121,6 +121,30 @@ func NewAdminService(config AdminServiceConfig) *AdminService {
 	}
 }
 
+// SweepBackups removes the snapshot directories a previous server left beside
+// the database.
+//
+// A snapshot lives from PrepareBackup to the Close that follows the archive being
+// sent, and a server that died between the two leaves a copy of the database on
+// disk that nothing will read. Nothing else creates a backup- directory there, and
+// no backup is in flight when the server starts, so every one found is a leftover.
+func (s *AdminService) SweepBackups() error {
+	leftovers, err := filepath.Glob(filepath.Join(filepath.Dir(s.database), "backup-*"))
+	if err != nil {
+		return fmt.Errorf("failed to list backup directories: %w", err)
+	}
+
+	for _, dir := range leftovers {
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("failed to remove backup directory: %w", err)
+		}
+
+		s.logger.With("path", dir).Warn("removed a backup a previous server left behind")
+	}
+
+	return nil
+}
+
 // PrepareBackup takes a snapshot of what takt holds on disk.
 //
 // The backup covers a consistent snapshot of the database, and the keyring when the
