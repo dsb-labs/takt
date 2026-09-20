@@ -231,7 +231,10 @@ key or every secret under the new one, with nothing to repair by hand.
 
 The key that was replaced is kept. It still opens the backups taken before the rekey,
 which is why `takt admin backup --include-keys` carries the whole keyring rather than
-the current key alone.
+the current key alone. That cuts both ways when the rekey was because the key leaked:
+the leaked key is still on the disk, and still opens those older backups. Once a
+fresh backup has been taken under the new key, delete the old key's file from the
+keyring directory by hand, and the old backups with it.
 
 **Back the keyring up afterwards.** The copy you had opens nothing the node now
 holds.
