@@ -109,6 +109,8 @@ func New(ctx context.Context, config Config) (*Telemetry, error) {
 	// the failure class nothing measuring workloads can see: the server itself
 	// leaking.
 	if err = otelruntime.Start(otelruntime.WithMeterProvider(meters)); err != nil {
+		_ = meters.Shutdown(ctx)
+
 		return nil, fmt.Errorf("failed to start runtime metrics: %w", err)
 	}
 
@@ -121,6 +123,8 @@ func New(ctx context.Context, config Config) (*Telemetry, error) {
 
 	spans, logs, err := exporters(ctx, config)
 	if err != nil {
+		_ = meters.Shutdown(ctx)
+
 		return nil, err
 	}
 
