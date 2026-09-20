@@ -104,10 +104,17 @@ Three fixed roles, hierarchical: `admin` covers `operator`, `operator` covers
 | `operator` | Workload, volume, service, variable and secret lifecycle. |
 | `admin` | Applying the policy, managing tokens, and the node-level operations: reading the policy, listing tokens, backup and rekey. |
 
-Writing a secret is routine operation, not administration, which is why
-`operator` holds it — and why `operator` is the grant to be stingy with, not
-just `admin`: with secret writes in hand, the ACL surface is the only thing
-separating a compromised operator token from full control.
+**`operator` is control of the host.** Applying a workload runs code with
+whatever the Docker socket grants, and a manifest may add any kernel capability,
+mount any host path the configuration allows, and name any principal in a
+workload token, the admin ones included. Nothing in the role table narrows that,
+and nothing is meant to: a workload is what takt exists to run. What `admin`
+adds is control of takt itself — the policy, the tokens, the backups. The grant
+to be stingy with is therefore `operator`, and a token holding it deserves the
+same care as membership of the `docker` group.
+
+Writing a secret is a routine operation rather than administration, which is
+why `operator` holds it.
 
 Finer-grained capabilities are deliberately absent. The three roles are where
 the human cases land, and a machine wanting less than `viewer` is future work.
@@ -178,7 +185,8 @@ gone. A mounted token naming a signal also rotates in place before its
 lifetime elapses. The syntax and the rotation rules are in the
 [manifest reference](manifest.md#mounting-a-token).
 
-The principal is not restricted, `admin` included. A workload automating an
+The principal is not restricted, `admin` included, so an `operator` reaches an
+admin identity through a workload that mounts one. A workload automating an
 admin task — a runner applying the policy from a git repository — needs an
 admin identity, and takt does not decide a workload may not have one. The
 role that may apply such a workload can therefore reach that principal's
