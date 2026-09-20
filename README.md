@@ -182,6 +182,7 @@ dependency keeps working without being re-applied.
 - [Upgrading](docs/upgrading.md) — replacing the binary, and what survives it.
 - [Design](docs/design.md) — how reconciliation works and why it is built this way.
 - [Reconciliation](docs/reconciliation.md) — the reconciler's mechanics, with diagrams.
+- [Troubleshooting](docs/troubleshooting.md) — what the common failures look like, and what to do.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers building and testing takt.
 
