@@ -4,3 +4,7 @@
 node_modules/
 /internal/ui/dist/*
 !/internal/ui/dist/.gitkeep
+
+# Editor and agent state, which is the contributor's and not the repository's.
+.idea/
+.claude/
