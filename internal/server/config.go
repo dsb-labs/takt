@@ -24,6 +24,10 @@ import (
 type (
 	// The Config type contains the top-level configuration for the takt server.
 	Config struct {
+		// The file this configuration was read from, empty when it was not read
+		// from one. Not a setting: it is what LoadConfig records, so the server
+		// knows where its own configuration lives.
+		Source string `toml:"-"`
 		// HTTP server settings.
 		HTTP HTTPConfig `toml:"http"`
 		// On-disk state settings.
@@ -346,6 +350,13 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, fmt.Errorf("failed to decode config file: %w", err)
 	}
 
+	source, err := filepath.Abs(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("failed to resolve config file path: %w", err)
+	}
+
+	config.Source = source
+
 	return config, nil
 }
 
@@ -556,6 +567,24 @@ func (c *Config) ServedOverTLS() bool {
 	}
 
 	return strings.HasPrefix(c.Auth.OIDC.RedirectURL, "https://")
+}
+
+// PrivatePaths returns the paths on the host that hold the server's own secrets:
+// the directory its configuration was read from, which may hold an OIDC client
+// secret, the TLS private key, and the keyring. An exec workload runs as the
+// server's user, so these are what its confinement has to keep from it.
+func (c Config) PrivatePaths() []string {
+	paths := []string{c.KeysPath()}
+
+	if c.Source != "" {
+		paths = append(paths, filepath.Dir(c.Source))
+	}
+
+	if c.HTTP.TLSKey != "" {
+		paths = append(paths, c.HTTP.TLSKey)
+	}
+
+	return paths
 }
 
 // OIDCEnabled reports whether OIDC logins are configured.
