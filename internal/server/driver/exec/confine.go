@@ -223,8 +223,17 @@ func restrict(rs ruleset) error {
 		// The host's own files, and the devices a program expects to find. Missing
 		// entries are ignored: which of these a host has varies, and one that is not
 		// there grants nothing.
-		landlock.RODirs(readable(append(slices.Clone(systemPaths), rs.Read...), rs.Deny)...).IgnoreIfMissing(),
 		landlock.RWFiles(devicePaths...).IgnoreIfMissing(),
+	}
+
+	// The system directories with the denied paths carved out. Carving opens a
+	// directory and grants its entries, and an entry may be a file, which
+	// Landlock refuses directory rights on, so the two are granted separately.
+	dirs, files := readable(append(slices.Clone(systemPaths), rs.Read...), rs.Deny)
+	rules = append(rules, landlock.RODirs(dirs...).IgnoreIfMissing())
+
+	if len(files) > 0 {
+		rules = append(rules, landlock.ROFiles(files...).IgnoreIfMissing())
 	}
 
 	// The workload's own directories, which have to be there: the driver created the
@@ -245,53 +254,68 @@ func restrict(rs ruleset) error {
 	return landlock.V3.RestrictPaths(rules...)
 }
 
-// readable returns the system paths with the denied ones carved out.
+// readable returns the system paths with the denied ones carved out, as the
+// directories and the files to grant.
 //
 // Landlock only grants, so a directory that holds a denied path cannot be granted
 // whole. It is opened and each of its entries granted instead, apart from the ones
 // leading to something denied, which are recursed into the same way. A directory
 // that cannot be read is granted whole, since nothing denied is known to be in
 // it, and one that does not exist is left for the rule to ignore.
-func readable(paths, deny []string) []string {
+func readable(paths, deny []string) (dirs, files []string) {
 	if len(deny) == 0 {
-		return paths
+		return paths, nil
 	}
 
-	var out []string
 	for _, path := range paths {
-		out = append(out, carve(path, deny)...)
+		dirs, files = carve(path, deny, dirs, files)
 	}
 
-	return out
+	return dirs, files
 }
 
-// carve returns path, or the entries beneath it that do not lead to a denied path.
-func carve(path string, deny []string) []string {
+// carve appends path to dirs, or the entries beneath it that do not lead to a
+// denied path to dirs and files as each is.
+func carve(path string, deny, dirs, files []string) ([]string, []string) {
 	var beneath bool
 	for _, denied := range deny {
 		switch {
 		case denied == path:
-			return nil
+			return dirs, files
 		case strings.HasPrefix(denied, path+string(filepath.Separator)):
 			beneath = true
 		}
 	}
 
 	if !beneath {
-		return []string{path}
+		return append(dirs, path), files
 	}
 
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return []string{path}
+		return append(dirs, path), files
 	}
 
-	var out []string
 	for _, entry := range entries {
-		out = append(out, carve(filepath.Join(path, entry.Name()), deny)...)
+		child := filepath.Join(path, entry.Name())
+
+		// Read through a link rather than as one, since the rule opens what the
+		// link points at and the kernel decides on that. A link to nothing is
+		// skipped: there is nothing to grant, and the rule would refuse it.
+		info, err := os.Stat(child)
+		switch {
+		case err != nil:
+			continue
+		case !info.IsDir():
+			files = append(files, child)
+
+			continue
+		}
+
+		dirs, files = carve(child, deny, dirs, files)
 	}
 
-	return out
+	return dirs, files
 }
 
 // pipes attaches the two descriptors a confinement talks over to a command that has
