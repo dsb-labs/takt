@@ -115,6 +115,8 @@ type (
 		// The paths every workload may read, beyond the host's own files that a
 		// command needs to run at all.
 		allowed []string
+		// The paths no workload may read, beneath the host's own files.
+		denied []string
 
 		// Guards the supervised set, which the reconciler's goroutine and every
 		// supervising goroutine both touch.
@@ -148,6 +150,11 @@ type (
 		// no authentication, so a workload able to widen its own confinement would undo
 		// it.
 		AllowPaths []string
+		// Paths beneath the host's own directories that no workload may read: where
+		// the server keeps what is its alone, such as its configuration and keys.
+		// A workload runs as the server's user, so nothing but the confinement
+		// keeps these from it.
+		DenyPaths []string
 	}
 
 	// The supervised type is a process this server started.
@@ -182,6 +189,7 @@ func New(config Config) *Driver {
 		state:      filepath.Join(config.Root, stateDir),
 		workloads:  filepath.Join(config.Root, workloadDir),
 		allowed:    config.AllowPaths,
+		denied:     config.DenyPaths,
 		supervised: make(map[supKey]*supervised),
 		// Buffered so that a process ending never blocks its own supervisor on a
 		// reconciler that is mid-pass.
@@ -358,6 +366,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		// decides.
 		Write: append([]string{cwd}, hosts(w.Volumes)...),
 		Read:  d.allowed,
+		Deny:  d.denied,
 		// A mounted value is a file rather than a directory, and lives beside every
 		// other workload's. Granting the file rather than the directory is what stops
 		// one workload reading another's.
