@@ -531,3 +531,20 @@ func TestConfig_ServedOverTLS(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_PrivatePaths(t *testing.T) {
+	t.Parallel()
+
+	config := server.DefaultConfig()
+	config.Source = "/etc/takt/config.toml"
+	config.Data.Directory = "/var/lib/takt"
+	config.HTTP.TLSKey = "/etc/takt/tls/key.pem"
+
+	// The keyring, the configuration's directory and the TLS key: what an exec
+	// workload running as the server's user must be kept from.
+	assert.ElementsMatch(t, []string{
+		config.KeysPath(),
+		"/etc/takt",
+		"/etc/takt/tls/key.pem",
+	}, config.PrivatePaths())
+}
