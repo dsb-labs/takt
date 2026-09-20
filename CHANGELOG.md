@@ -21,6 +21,11 @@ describes how an entry is written.
 
 ### Fixed
 
+- A backup left on disk by a server that died mid-backup is removed at the next
+  startup, and expired tokens are swept at startup rather than an hour later. A
+  scheduled run retried after a failure records a run start rather than an
+  instance start ([#88](https://github.com/dsb-labs/takt/issues/88),
+  [#103](https://github.com/dsb-labs/takt/pull/103)).
 - Stopping the server while a client held a followed log or a service stream
   open waited thirty seconds and then exited with an error. The server now ends
   open responses as it shuts down, and a second interrupt ends the process at
