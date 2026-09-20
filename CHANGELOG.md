@@ -10,6 +10,14 @@ describes how an entry is written.
 
 ### Changed
 
+- Every response carries a content security policy, refuses framing and type
+  sniffing, and insists on TLS when reached over it. A browser page's origin is
+  accepted only from `localhost` or a loopback address, where any address
+  literal was accepted before. The session cookie is marked `Secure` behind a
+  proxy terminating TLS when the OIDC `redirect-url` is `https`, and the OIDC
+  state cookie is cleared as the login completes
+  ([#77](https://github.com/dsb-labs/takt/issues/77),
+  [#105](https://github.com/dsb-labs/takt/pull/105)).
 - The server warns at startup when authentication is enabled and
   `takt acl init` has not run
   ([#78](https://github.com/dsb-labs/takt/issues/78),
