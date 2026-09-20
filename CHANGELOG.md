@@ -33,6 +33,12 @@ describes how an entry is written.
 
 ### Fixed
 
+- A specification change to a workload running several instances replaced them
+  all within a second, since every replacement's own start woke the next pass.
+  The next instance now waits until the last replacement has stayed up for ten
+  seconds and passed its health check
+  ([#80](https://github.com/dsb-labs/takt/issues/80),
+  [#107](https://github.com/dsb-labs/takt/pull/107)).
 - An `exec` workload could read the server's own configuration, which may hold
   an OIDC client secret, and a TLS key kept under `/etc`, since the confinement
   granted `/etc` whole. The configuration's directory, the TLS key and the
