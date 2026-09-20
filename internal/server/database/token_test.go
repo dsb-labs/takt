@@ -84,10 +84,19 @@ func TestTokenRepository(t *testing.T) {
 		_, err = tokens.Create(ctx, database.Token{Hash: "hash-1", Type: "client", Source: "static", Principal: "ci"})
 		require.NoError(t, err)
 
+		initialised, err := tokens.HasRecovery(ctx)
+		require.NoError(t, err)
+		assert.True(t, initialised)
+
 		require.NoError(t, tokens.DeleteRecovery(ctx))
 		// The reset file asks for a state rather than an action, so deleting
 		// again is not an error.
 		require.NoError(t, tokens.DeleteRecovery(ctx))
+
+		// A client token is not a recovery token, so it does not count as one.
+		initialised, err = tokens.HasRecovery(ctx)
+		require.NoError(t, err)
+		assert.False(t, initialised)
 
 		_, err = tokens.GetByHash(ctx, "recovery-1")
 		assert.ErrorIs(t, err, database.ErrTokenNotFound)
