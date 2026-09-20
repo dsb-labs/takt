@@ -86,8 +86,16 @@ takt checks the name each request asks for, which is what closes this. A request
 naming an address or `localhost` is accepted, since an attacker cannot point either at
 a victim's own machine. A request naming anything else has to name something in
 `hosts`, or it is refused. A request from a browser page on another origin is refused
-whatever it names, with the same carve-out: a page served from an address
-literal or from `localhost` counts as the operator's own.
+whatever it names, with a narrower carve-out: a page served from `localhost` or a
+loopback address counts as the operator's own, since a page from any other address
+on the internet has that address as its origin.
+
+Every response also carries the headers a browser reads as policy: a content
+security policy that loads scripts and styles from takt alone and refuses to be
+framed, `X-Content-Type-Options: nosniff`, and, when the server is reached over
+TLS, `Strict-Transport-Security`. A session cookie is marked `Secure` when the
+server terminates TLS or the OIDC `redirect-url` names an `https` address, which is
+how a proxy in front says the browser reaches takt over TLS.
 
 A request carrying a body must also declare `Content-Type: application/json`. That is
 already the only body the API reads, and requiring it turns away the form-encoded and
