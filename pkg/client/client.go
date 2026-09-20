@@ -283,9 +283,6 @@ func hasStatus(err error, status int) bool {
 	return clientErr.Status == status
 }
 
-// newError builds an Error from a response the server didn't handle successfully.
-// The body is decoded for the server's own message where one is present, since it
-// describes the failure better than the status text can.
 // errorBody decodes the server's message from an unsuccessful response, for the
 // responses the client reads itself rather than through the generated parser.
 //
