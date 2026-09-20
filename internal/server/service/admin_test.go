@@ -156,6 +156,29 @@ func streamBackup(t *testing.T, dir string, options service.BackupOptions) []byt
 	return buf.Bytes()
 }
 
+func TestAdminService_SweepBackups(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	newBackupDatabase(t, dir)
+
+	// What a server that died between preparing a backup and closing it leaves:
+	// a snapshot directory beside the database. A directory of any other name is
+	// not takt's to remove.
+	leftover := filepath.Join(dir, "backup-1234")
+	require.NoError(t, os.Mkdir(leftover, 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(leftover, "state.db"), []byte("copy"), 0o600))
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "volumes"), 0o700))
+
+	require.NoError(t, newAdminService(t, dir).SweepBackups())
+
+	_, err := os.Stat(leftover)
+	assert.True(t, os.IsNotExist(err), "the leftover backup remains")
+
+	_, err = os.Stat(filepath.Join(dir, "volumes"))
+	assert.NoError(t, err, "a directory that is not a backup was removed")
+}
+
 func newAdminService(t *testing.T, dir string) *service.AdminService {
 	t.Helper()
 
