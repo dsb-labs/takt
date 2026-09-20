@@ -135,8 +135,8 @@ flowchart TD
     slot["slot"] --> term{"terminating?"}
     term -- yes --> wait["wait for the runtime to finish"]
     term -- no --> stale{"stale hash or drifted ports?"}
-    stale -- "yes, none replaced this pass" --> replace["stop, then start from the current spec"]
-    stale -- "yes, one already replaced" --> defer["roll on a later pass"]
+    stale -- "yes, no replacement in flight" --> replace["stop, then start from the current spec"]
+    stale -- "yes, one still settling" --> defer["roll on a later pass"]
     stale -- no --> up{"something running?"}
     up -- yes --> settle["clear the backoff once it has stayed up"]
     up -- no --> retired{"policy asks for nothing further?"}
@@ -153,10 +153,12 @@ resolved into it, so a target's port moving replaces exactly the instances that
 were reading it. An instance whose running ports no longer match its slot's rows
 is stale by another route — it is bound to an address nothing records.
 
-**Rolling** means at most one replacement of something running per workload per
-pass. A change crosses a three-instance workload in three passes, which is what
-makes replacing a counted workload a degradation rather than an outage. Slots
-with nothing running are not held back by the roll.
+**Rolling** means at most one replacement of something running per workload at a
+time. The next slot waits until the last replacement has settled: up for the settle
+period of ten seconds, and past its health check when the workload declares one. A
+replacement that never settles holds the roll at one instance, which is what makes
+replacing a counted workload a degradation rather than an outage. Slots with
+nothing running are not held back by the roll.
 
 **Health folds in before any of this.** An instance that is up but failing its
 check reads as failed, so the same paced replacement path a crashed instance
