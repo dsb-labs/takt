@@ -315,6 +315,10 @@ func Run(ctx context.Context, config Config) error {
 		Secrets:  secretSvc,
 	})
 
+	if err = adminSvc.SweepBackups(); err != nil {
+		return err
+	}
+
 	policySvc := service.NewPolicyService(service.PolicyServiceConfig{
 		Logger:   logger,
 		Policies: database.NewPolicyRepository(db),
@@ -559,6 +563,12 @@ func Run(ctx context.Context, config Config) error {
 		// hygiene for the token list rather than security — hourly is plenty.
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()
+
+		// Once at startup as well, so a server that was down for longer than an
+		// hour does not carry what expired in the meantime until its first tick.
+		if err := tokenSvc.Sweep(ctx); err != nil {
+			logger.With("error", err).Warn("failed to sweep expired tokens")
+		}
 
 		for {
 			select {
