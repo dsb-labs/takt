@@ -196,6 +196,19 @@ func (r *TokenRepository) DeleteRecovery(ctx context.Context) error {
 	return nil
 }
 
+// HasRecovery reports whether a recovery token exists, which is what says the
+// policy has been initialised and init is no longer permitted.
+func (r *TokenRepository) HasRecovery(ctx context.Context) (bool, error) {
+	const q = `SELECT COUNT(*) FROM token WHERE type = 'recovery'`
+
+	var count int
+	if err := r.db.QueryRowContext(ctx, q).Scan(&count); err != nil {
+		return false, fmt.Errorf("failed to count recovery tokens: %w", err)
+	}
+
+	return count > 0, nil
+}
+
 // GetForWorkload returns the token minted for the workload, version and
 // principal that every instance shares, reporting ErrTokenNotFound when none
 // exists. This is what the rotation check reads the expiry from.
