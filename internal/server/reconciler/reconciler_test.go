@@ -4193,6 +4193,112 @@ func TestReconciler_Run_RecordsWhatItObserved(t *testing.T) {
 	})
 }
 
+func TestReconciler_Run_RollsOnceTheReplacementHasSettled(t *testing.T) {
+	t.Parallel()
+
+	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+	// Three instances, every one stale. A pass runs on each event the runtime
+	// reports, the replacement's own start included, so one replacement per pass
+	// alone would take the three down inside a second. The next slot has to wait
+	// for the last replacement to settle.
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{storedWorkloadWithCount("example", "hash-two", 3)}, nil)
+	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil)
+
+	// The clock is the test's, so a replacement settles when the test says.
+	var now atomic.Int64
+	epoch := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	now.Store(0)
+
+	clock := func() time.Time { return epoch.Add(time.Duration(now.Load())) }
+
+	// What the runtime holds: every slot starts stale, and a replacement lands in
+	// its slot as current, started at the moment it was started.
+	var mux sync.Mutex
+	current := map[int]time.Time{}
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+		passes.inc()
+
+		mux.Lock()
+		defer mux.Unlock()
+
+		instances := make([]driver.Instance, 0, 3)
+		for index := range 3 {
+			instance := driver.Instance{ID: "old-" + strconv.Itoa(index), Workload: "example", Index: index, SpecHash: "hash-one", State: driver.StateRunning}
+			if started, ok := current[index]; ok {
+				instance = driver.Instance{ID: "new-" + strconv.Itoa(index), Workload: "example", Index: index, SpecHash: "hash-two", State: driver.StateRunning, StartedAt: started}
+			}
+
+			instances = append(instances, instance)
+		}
+
+		return instances, nil
+	})
+
+	d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", mock.Anything).Return(nil)
+
+	starts := newCounter()
+	d.EXPECT().Start(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, w driver.Workload) (string, error) {
+		starts.inc()
+
+		mux.Lock()
+		current[w.Instance] = clock()
+		mux.Unlock()
+
+		return "new", nil
+	})
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Interval:  time.Hour,
+		Now:       clock,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	// The first pass replaces one slot. Passes that follow at once, as the
+	// replacement's own events would cause, replace nothing more.
+	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
+	assert.Equal(t, 1, starts.get())
+
+	for i := 2; i <= 3; i++ {
+		r.Notify()
+		passes.wait(t, i)
+		awaitPasses(t, r, uint64(i))
+	}
+
+	assert.Equal(t, 1, starts.get(), "a second slot was replaced before the first replacement had settled")
+
+	// Once the replacement has been up for the settle period the roll moves on,
+	// again by one.
+	now.Store(int64(11 * time.Second))
+	r.Notify()
+	passes.wait(t, 4)
+	awaitPasses(t, r, 4)
+	assert.Equal(t, 2, starts.get())
+
+	now.Store(int64(22 * time.Second))
+	r.Notify()
+	passes.wait(t, 5)
+	awaitPasses(t, r, 5)
+	assert.Equal(t, 3, starts.get())
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_ForgetsADiscardedSlot(t *testing.T) {
 	t.Parallel()
 
