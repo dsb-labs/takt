@@ -1647,6 +1647,9 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 		Instances   []driver.Instance
 		ExpectStart bool
 		ExpectStop  bool
+		// The reason the start is recorded under, when one is expected. A run
+		// retried between occurrences is a run, the way a fresh occurrence is.
+		ExpectReason event.Reason
 	}{
 		{
 			// A schedule says when to run, and the moment a workload was applied is
@@ -1721,8 +1724,9 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 			Instances: []driver.Instance{
 				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateFailed, ExitCode: 1, StartedAt: ran},
 			},
-			ExpectStart: true,
-			ExpectStop:  true,
+			ExpectStart:  true,
+			ExpectStop:   true,
+			ExpectReason: event.RunStarted,
 		},
 		{
 			// Several occurrences passed while the server was down. The next
@@ -1741,7 +1745,7 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+			d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
 
 			row := storedWorkload("example", "hash-one")
 			row.Spec = specWithSchedule("example", tc.Cron, tc.Overlap)
@@ -1777,6 +1781,7 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 				Logger:    newTestLogger(t),
 				Drivers:   map[string]reconciler.Driver{docker.Name: d},
 				Workloads: repo,
+				Events:    recorder,
 				Interval:  time.Hour,
 				Now:       func() time.Time { return tc.Now },
 			})
@@ -1791,6 +1796,10 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 
 			cancel()
 			require.NoError(t, <-done)
+
+			if tc.ExpectReason != "" {
+				assert.Equal(t, 1, recorder.count(tc.ExpectReason))
+			}
 		})
 	}
 }

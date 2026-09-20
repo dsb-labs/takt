@@ -1164,7 +1164,7 @@ func (r *Reconciler) convergeSlot(ctx context.Context, row database.Workload, in
 		return false, r.attempt(ctx, row, index)
 	}
 
-	return false, r.restart(ctx, row, index, instances)
+	return false, r.restart(ctx, row, index, instances, event.InstanceStarted)
 }
 
 // countOf reads how many instances a stored workload asks for.
@@ -1818,7 +1818,7 @@ func (r *Reconciler) between(ctx context.Context, row database.Workload, instanc
 		return nil
 	}
 
-	return r.restart(ctx, row, 0, instances)
+	return r.restart(ctx, row, 0, instances, event.RunStarted)
 }
 
 // lastRun reports when the workload most recently started, or the zero time when
@@ -2004,8 +2004,10 @@ func (r *Reconciler) attempt(ctx context.Context, row database.Workload, index i
 }
 
 // restart brings back an instance whose runs have all stopped, pacing repeated
-// failures with exponential backoff.
-func (r *Reconciler) restart(ctx context.Context, row database.Workload, index int, instances []driver.Instance) error {
+// failures with exponential backoff. The start is recorded under the given reason,
+// which the caller names for the same reason start's callers do: a scheduled run
+// retried between occurrences is a run rather than an instance.
+func (r *Reconciler) restart(ctx context.Context, row database.Workload, index int, instances []driver.Instance, reason event.Reason) error {
 	if r.waiting(row.Name, index) {
 		return nil
 	}
@@ -2041,7 +2043,7 @@ func (r *Reconciler) restart(ctx context.Context, row database.Workload, index i
 		return fmt.Errorf("failed to clear stopped instance: %w", err)
 	}
 
-	if err := r.start(ctx, row, index, event.InstanceStarted); err != nil {
+	if err := r.start(ctx, row, index, reason); err != nil {
 		state := r.hold(ctx, row.Name, index, policy)
 		r.paced(ctx, row.Name, state, err)
 
