@@ -21,6 +21,10 @@ describes how an entry is written.
 
 ### Fixed
 
+- An `exec` workload naming a memory limit smaller than the process takt starts
+  it through could be killed before its command ran, and then read as running
+  ([#101](https://github.com/dsb-labs/takt/issues/101),
+  [#102](https://github.com/dsb-labs/takt/pull/102)).
 - A symbolic link beneath an allowed host path carried a path mount wherever it
   pointed. Links are now followed on both sides before the path is compared to
   the prefixes ([#74](https://github.com/dsb-labs/takt/issues/74),
