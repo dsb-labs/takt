@@ -477,3 +477,57 @@ func TestConfig_KeysPath(t *testing.T) {
 		assert.Equal(t, "/etc/takt/keys", config.KeysPath())
 	})
 }
+
+func TestConfig_ServedOverTLS(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name     string
+		Config   server.Config
+		Expected bool
+	}{
+		{
+			Name:     "plain http with no auth",
+			Config:   server.DefaultConfig(),
+			Expected: false,
+		},
+		{
+			Name: "the server terminates tls",
+			Config: func() server.Config {
+				c := server.DefaultConfig()
+				c.HTTP.TLSCert, c.HTTP.TLSKey = "/etc/takt/cert.pem", "/etc/takt/key.pem"
+
+				return c
+			}(),
+			Expected: true,
+		},
+		{
+			// A proxy terminates TLS and the OIDC redirect names the address the
+			// browser reaches, so a cookie may be marked Secure.
+			Name: "a proxy terminates tls in front",
+			Config: func() server.Config {
+				c := server.DefaultConfig()
+				c.Auth = &server.AuthConfig{OIDC: server.OIDCConfig{RedirectURL: "https://takt.example.com/api/v1/auth/oidc/callback"}}
+
+				return c
+			}(),
+			Expected: true,
+		},
+		{
+			Name: "a plain http redirect",
+			Config: func() server.Config {
+				c := server.DefaultConfig()
+				c.Auth = &server.AuthConfig{OIDC: server.OIDCConfig{RedirectURL: "http://takt.internal/api/v1/auth/oidc/callback"}}
+
+				return c
+			}(),
+			Expected: false,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			assert.Equal(t, tc.Expected, tc.Config.ServedOverTLS())
+		})
+	}
+}
