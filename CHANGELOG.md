@@ -33,6 +33,11 @@ describes how an entry is written.
 
 ### Fixed
 
+- An `exec` workload could read the server's own configuration, which may hold
+  an OIDC client secret, and a TLS key kept under `/etc`, since the confinement
+  granted `/etc` whole. The configuration's directory, the TLS key and the
+  keyring are now refused ([#75](https://github.com/dsb-labs/takt/issues/75),
+  [#106](https://github.com/dsb-labs/takt/pull/106)).
 - A backup left on disk by a server that died mid-backup is removed at the next
   startup, and expired tokens are swept at startup rather than an hour later. A
   scheduled run retried after a failure records a run start rather than an
