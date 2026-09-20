@@ -542,6 +542,22 @@ func (c *AuthConfig) validate() error {
 	return c.OIDC.validate()
 }
 
+// ServedOverTLS reports whether the browser reaches this server over TLS: either
+// the server terminates it, or a reverse proxy in front does and the OIDC
+// redirect names the https address the proxy serves. That decides whether a
+// cookie may be marked Secure.
+func (c *Config) ServedOverTLS() bool {
+	if c.HTTP.TLSEnabled() {
+		return true
+	}
+
+	if c.Auth == nil {
+		return false
+	}
+
+	return strings.HasPrefix(c.Auth.OIDC.RedirectURL, "https://")
+}
+
 // OIDCEnabled reports whether OIDC logins are configured.
 func (c *AuthConfig) OIDCEnabled() bool {
 	return c != nil && c.OIDC.Issuer != ""
