@@ -132,7 +132,7 @@ func TestVolumeAPI_ApplyVolume(t *testing.T) {
 				body = bytes.NewReader(encoded)
 			}
 
-			resp := doVolume(t, svc, http.MethodPut, "/api/v1/volumes/example-data", body)
+			resp := doVolume(t, svc, http.MethodPut, "/api/v1/volumes/example-data", body, "")
 			require.Equal(t, tc.ExpectStatus, resp.Code)
 
 			if tc.Assert == nil {
@@ -144,6 +144,87 @@ func TestVolumeAPI_ApplyVolume(t *testing.T) {
 			tc.Assert(t, result.Volume)
 		})
 	}
+}
+
+func TestVolumeAPI_GetVolume_Tag(t *testing.T) {
+	t.Parallel()
+
+	got := testVolume("example-data")
+	got.Version = 4
+
+	svc := NewMockVolumeService(t)
+	svc.EXPECT().Get(mock.Anything, "example-data").Return(got, nil).Once()
+
+	resp := doVolume(t, svc, http.MethodGet, "/api/v1/volumes/example-data", nil, "")
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	// The tag a conditional apply hands back, so a get has to be where a caller
+	// reads it.
+	assert.Equal(t, `"4"`, resp.Header().Get("ETag"))
+}
+
+// TestVolumeAPI_ApplyVolume_Conditional covers the If-Match handling shared by
+// every resource apply, of which the volume is one.
+func TestVolumeAPI_ApplyVolume_Conditional(t *testing.T) {
+	t.Parallel()
+
+	apply := func(t *testing.T, svc *MockVolumeService, ifMatch string) *httptest.ResponseRecorder {
+		t.Helper()
+
+		body, err := json.Marshal(generated.VolumeSpec{Version: "v1", Name: "example-data"})
+		require.NoError(t, err)
+
+		return doVolume(t, svc, http.MethodPut, "/api/v1/volumes/example-data",
+			bytes.NewReader(body), ifMatch)
+	}
+
+	t.Run("reports the applied volume's version as its tag", func(t *testing.T) {
+		applied := testVolume("example-data")
+		applied.Version = 4
+
+		svc := NewMockVolumeService(t)
+		// The quotes the header carries are stripped before the service sees the
+		// version.
+		svc.EXPECT().Apply(mock.Anything, mock.Anything, 3).Return(applied, false, nil).Once()
+
+		resp := apply(t, svc, `"3"`)
+		require.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, `"4"`, resp.Header().Get("ETag"))
+	})
+
+	t.Run("accepts a bare tag without quotes", func(t *testing.T) {
+		svc := NewMockVolumeService(t)
+		svc.EXPECT().Apply(mock.Anything, mock.Anything, 3).
+			Return(testVolume("example-data"), false, nil).Once()
+
+		resp := apply(t, svc, "3")
+		require.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("applies unconditionally without the header", func(t *testing.T) {
+		svc := NewMockVolumeService(t)
+		svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
+			Return(testVolume("example-data"), true, nil).Once()
+
+		resp := apply(t, svc, "")
+		require.Equal(t, http.StatusCreated, resp.Code)
+	})
+
+	t.Run("refuses a tag the volume has moved past", func(t *testing.T) {
+		svc := NewMockVolumeService(t)
+		svc.EXPECT().Apply(mock.Anything, mock.Anything, 3).
+			Return(service.Volume{}, false, service.ErrVolumeChanged).Once()
+
+		resp := apply(t, svc, `"3"`)
+		require.Equal(t, http.StatusPreconditionFailed, resp.Code)
+	})
+
+	t.Run("refuses a tag that is not a version", func(t *testing.T) {
+		// The service expects no call: a tag takt never issued is refused before
+		// anything is read or written.
+		resp := apply(t, NewMockVolumeService(t), `"not-a-version"`)
+		require.Equal(t, http.StatusBadRequest, resp.Code)
+	})
 }
 
 func TestVolumeAPI_GetVolume(t *testing.T) {
@@ -202,7 +283,7 @@ func TestVolumeAPI_GetVolume(t *testing.T) {
 			svc := NewMockVolumeService(t)
 			tc.SetupMocks(svc)
 
-			resp := doVolume(t, svc, http.MethodGet, tc.Target, nil)
+			resp := doVolume(t, svc, http.MethodGet, tc.Target, nil, "")
 			require.Equal(t, tc.ExpectStatus, resp.Code)
 
 			if tc.Assert == nil {
@@ -257,7 +338,7 @@ func TestVolumeAPI_ListVolumes(t *testing.T) {
 			svc := NewMockVolumeService(t)
 			tc.SetupMocks(svc)
 
-			resp := doVolume(t, svc, http.MethodGet, "/api/v1/volumes", nil)
+			resp := doVolume(t, svc, http.MethodGet, "/api/v1/volumes", nil, "")
 			require.Equal(t, http.StatusOK, resp.Code)
 
 			if tc.ExpectBody != "" {
@@ -286,7 +367,7 @@ func TestVolumeAPI_ListVolumes_Query(t *testing.T) {
 			Return(nil, nil).Once()
 
 		resp := doVolume(t, svc, http.MethodGet,
-			"/api/v1/volumes?query=%24.labels.app%3Dweb&query=%24.labels.env%3Dprod", nil)
+			"/api/v1/volumes?query=%24.labels.app%3Dweb&query=%24.labels.env%3Dprod", nil, "")
 		assert.Equal(t, http.StatusOK, resp.Code)
 	})
 
@@ -297,7 +378,7 @@ func TestVolumeAPI_ListVolumes_Query(t *testing.T) {
 		svc.EXPECT().List(mock.Anything, mock.Anything).
 			Return(nil, service.ErrInvalidQuery).Once()
 
-		resp := doVolume(t, svc, http.MethodGet, "/api/v1/volumes?query=nonsense", nil)
+		resp := doVolume(t, svc, http.MethodGet, "/api/v1/volumes?query=nonsense", nil, "")
 		assert.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 }
@@ -371,7 +452,7 @@ func TestVolumeAPI_DeleteVolume(t *testing.T) {
 			svc := NewMockVolumeService(t)
 			tc.SetupMocks(svc)
 
-			resp := doVolume(t, svc, http.MethodDelete, tc.Target, nil)
+			resp := doVolume(t, svc, http.MethodDelete, tc.Target, nil, "")
 			require.Equal(t, tc.ExpectStatus, resp.Code)
 
 			if tc.ExpectBody != "" {
@@ -451,7 +532,7 @@ func TestVolumeAPI_HidesInternalFailures(t *testing.T) {
 				body = bytes.NewReader(encoded)
 			}
 
-			resp := doVolume(t, svc, tc.Method, tc.Target, body)
+			resp := doVolume(t, svc, tc.Method, tc.Target, body, "")
 			require.Equal(t, http.StatusInternalServerError, resp.Code)
 
 			// None of what the error carried reaches the caller: not the path, not the
@@ -471,7 +552,7 @@ func testVolume(name string) service.Volume {
 	}
 }
 
-func doVolume(t *testing.T, svc *MockVolumeService, method, target string, body io.Reader) *httptest.ResponseRecorder {
+func doVolume(t *testing.T, svc *MockVolumeService, method, target string, body io.Reader, ifMatch string) *httptest.ResponseRecorder {
 	t.Helper()
 
 	logger := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError}))
@@ -490,6 +571,9 @@ func doVolume(t *testing.T, svc *MockVolumeService, method, target string, body 
 	}).Register(mux)
 
 	req := httptest.NewRequest(method, target, body)
+	if ifMatch != "" {
+		req.Header.Set("If-Match", ifMatch)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
