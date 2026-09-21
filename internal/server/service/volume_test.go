@@ -36,7 +36,7 @@ func TestVolumeService_Apply(t *testing.T) {
 
 		svc, root := newVolumeService(t, repo)
 
-		volume, created, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"app": "web"}})
+		volume, created, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"app": "web"}}, 0)
 		require.NoError(t, err)
 
 		assert.True(t, created, "a first apply did not report creation")
@@ -52,6 +52,50 @@ func TestVolumeService_Apply(t *testing.T) {
 		assert.True(t, info.IsDir())
 		assert.Equal(t, os.FileMode(0o700), info.Mode().Perm(),
 			"the volume is readable by more than the user running the server")
+	})
+
+	t.Run("passes the named version through to the repository", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockVolumeRepository(t)
+		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data"}, 3).
+			Return(database.Volume{ID: testVolumeID, Name: "example-data", Version: 4}, false, nil).Once()
+		repo.EXPECT().UsedBy(mock.Anything, "example-data").Return(nil, nil).Once()
+
+		svc, _ := newVolumeService(t, repo)
+
+		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"}, 3)
+		require.NoError(t, err)
+
+		assert.Equal(t, 4, volume.Version, "the applied volume did not carry its new version")
+	})
+
+	t.Run("refuses an apply naming a version the volume has moved past", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockVolumeRepository(t)
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 3).
+			Return(database.Volume{}, false, database.ErrVolumeChanged).Once()
+
+		svc, _ := newVolumeService(t, repo)
+
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"}, 3)
+		assert.ErrorIs(t, err, service.ErrVolumeChanged)
+	})
+
+	t.Run("refuses an apply naming a version of a volume that does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		// A caller holding a tag for something that is gone lost the same race as one
+		// holding a stale tag, so it is told the same thing.
+		repo := NewMockVolumeRepository(t)
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 3).
+			Return(database.Volume{}, false, database.ErrVolumeNotFound).Once()
+
+		svc, _ := newVolumeService(t, repo)
+
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"}, 3)
+		assert.ErrorIs(t, err, service.ErrVolumeChanged)
 	})
 
 	t.Run("applies the owner and mode to the directory", func(t *testing.T) {
@@ -74,7 +118,7 @@ func TestVolumeService_Apply(t *testing.T) {
 
 		svc, _ := newVolumeService(t, repo)
 
-		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: owner, Mode: "0755"})
+		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: owner, Mode: "0755"}, 0)
 		require.NoError(t, err)
 
 		assert.Equal(t, owner, volume.Owner)
@@ -104,7 +148,7 @@ func TestVolumeService_Apply(t *testing.T) {
 
 		svc, _ := newVolumeService(t, repo)
 
-		volume, created, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"app": "api"}})
+		volume, created, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"app": "api"}}, 0)
 		require.NoError(t, err)
 		assert.False(t, created, "an apply of an existing volume reported creation")
 		assert.Equal(t, map[string]string{"app": "api"}, volume.Labels)
@@ -129,7 +173,7 @@ func TestVolumeService_Apply(t *testing.T) {
 
 		svc, root := newVolumeService(t, repo)
 
-		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: owner, Mode: "0750"})
+		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: owner, Mode: "0750"}, 0)
 		require.NoError(t, err)
 
 		assert.Equal(t, owner, volume.Owner)
@@ -148,7 +192,7 @@ func TestVolumeService_Apply(t *testing.T) {
 		repo := NewMockVolumeRepository(t)
 		svc, _ := newVolumeService(t, repo)
 
-		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Mode: "rwxr-xr-x"})
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Mode: "rwxr-xr-x"}, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidVolume)
 	})
 
@@ -169,7 +213,7 @@ func TestVolumeService_Apply(t *testing.T) {
 
 		svc, root := newVolumeService(t, repo)
 
-		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: "0:0"})
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: "0:0"}, 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "CAP_CHOWN",
 			"the error does not say what grants the ability to assign another user")
@@ -194,7 +238,7 @@ func TestVolumeService_Apply(t *testing.T) {
 
 		svc, root := newVolumeService(t, repo)
 
-		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: "0:0"})
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Owner: "0:0"}, 0)
 		require.Error(t, err)
 
 		_, err = os.Stat(filepath.Join(root, "volumes", testVolumeID))
@@ -210,7 +254,7 @@ func TestVolumeService_Apply(t *testing.T) {
 		svc, _ := newVolumeService(t, repo)
 
 		for _, name := range []string{"Example_Data", "", "-leading", "trailing-", "a/b", ".."} {
-			_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: name})
+			_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: name}, 0)
 			assert.ErrorIs(t, err, service.ErrInvalidVolume, "accepted the name %q", name)
 		}
 	})
@@ -222,7 +266,7 @@ func TestVolumeService_Apply(t *testing.T) {
 		// expecting nothing.
 		svc, _ := newVolumeService(t, NewMockVolumeRepository(t))
 
-		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"takt.workload": "sneaky"}})
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data", Labels: map[string]string{"takt.workload": "sneaky"}}, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidVolume)
 	})
 
@@ -248,7 +292,7 @@ func TestVolumeService_Apply(t *testing.T) {
 			Root:    filepath.Join(root, "volumes"),
 		})
 
-		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"})
+		_, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"}, 0)
 		assert.Error(t, err)
 	})
 }
@@ -274,7 +318,7 @@ func TestVolumeService_Delete(t *testing.T) {
 
 		svc, _ := newVolumeService(t, repo)
 
-		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"})
+		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"}, 0)
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(volume.Path, "file"), []byte("data"), 0o600))
 
@@ -303,7 +347,7 @@ func TestVolumeService_Delete(t *testing.T) {
 
 		svc, _ := newVolumeService(t, repo)
 
-		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"})
+		volume, _, err := svc.Apply(t.Context(), manifest.Volume{Name: "example-data"}, 0)
 		require.NoError(t, err)
 
 		// A directory this user cannot read stands in for one owned by another user,

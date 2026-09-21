@@ -71,7 +71,7 @@ func TestServiceAPI_ApplyService(t *testing.T) {
 			Target: "/api/v1/services/example",
 			Body:   testServiceSpec(),
 			SetupMocks: func(svc *MockServiceService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(testServiceResult(), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
@@ -89,7 +89,7 @@ func TestServiceAPI_ApplyService(t *testing.T) {
 			Target: "/api/v1/services/example",
 			Body:   testServiceSpec(),
 			SetupMocks: func(svc *MockServiceService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(testServiceResult(), false, nil).Once()
 			},
 			ExpectStatus: http.StatusOK,
@@ -108,7 +108,7 @@ func TestServiceAPI_ApplyService(t *testing.T) {
 			Target: "/api/v1/services/example",
 			Body:   testServiceSpec(),
 			SetupMocks: func(svc *MockServiceService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Service{}, false, service.ErrInvalidService).Once()
 			},
 			ExpectStatus: http.StatusBadRequest,
@@ -125,7 +125,7 @@ func TestServiceAPI_ApplyService(t *testing.T) {
 			Target: "/api/v1/services/example",
 			Body:   testServiceSpec(),
 			SetupMocks: func(svc *MockServiceService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Service{}, false, errors.New("disk is full")).Once()
 			},
 			ExpectStatus: http.StatusInternalServerError,

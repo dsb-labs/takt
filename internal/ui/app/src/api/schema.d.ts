@@ -57,6 +57,11 @@ export interface paths {
      *     or variable it reads, and a workload whose address it references. One that
      *     does not is a 400 naming what is missing, rather than a workload stored in a
      *     state it could never run in.
+     *
+     *     The `If-Match` header makes the apply conditional: carrying the tag read
+     *     from the matching get, it is refused with a 412 when the resource has
+     *     moved on since. Omitting it applies unconditionally, which is what
+     *     creating one has to do — there is no tag yet to name.
      */
     put: operations["applyWorkload"];
     post?: never;
@@ -338,6 +343,11 @@ export interface paths {
      *
      *     An owner or a mode the manifest leaves empty stops being enforced
      *     rather than being reverted: the directory keeps whatever it has.
+     *
+     *     The `If-Match` header makes the apply conditional: carrying the tag read
+     *     from the matching get, it is refused with a 412 when the resource has
+     *     moved on since. Omitting it applies unconditionally, which is what
+     *     creating one has to do — there is no tag yet to name.
      */
     put: operations["applyVolume"];
     post?: never;
@@ -414,6 +424,11 @@ export interface paths {
      *     The workloads the target selects do not have to exist. A service is a
      *     question asked of whatever is running, so one applied ahead of its
      *     workloads reports no backends until they arrive.
+     *
+     *     The `If-Match` header makes the apply conditional: carrying the tag read
+     *     from the matching get, it is refused with a 412 when the resource has
+     *     moved on since. Omitting it applies unconditionally, which is what
+     *     creating one has to do — there is no tag yet to name.
      */
     put: operations["applyService"];
     post?: never;
@@ -3006,7 +3021,10 @@ export interface components {
         "application/json": components["schemas"]["ErrorResponse"];
       };
     };
-    /** @description The policy changed since it was read. Read it again and re-apply. */
+    /**
+     * @description The resource changed since it was read, so the tag the apply named is
+     *     no longer its tag. Read it again and re-apply.
+     */
     PreconditionFailed: {
       headers: {
         [name: string]: unknown;
@@ -3030,11 +3048,14 @@ export interface components {
     /** @description The identifier of the token. */
     TokenID: string;
     /**
-     * @description The tag of the policy document being replaced, as read from the ETag
-     *     header of `GET /api/v1/acl`. Required despite what the schema says —
-     *     an apply without it is refused with a 400 — but declared optional so
-     *     the absence is answered in the API's own error shape rather than the
-     *     router's.
+     * @description The tag of the resource being replaced, as read from the ETag header of
+     *     the matching get. An apply carrying one is refused with a 412 when the
+     *     resource has moved on since, rather than writing over whatever landed
+     *     in between.
+     *
+     *     Optional everywhere but on the policy document, which refuses an apply
+     *     without it. A resource apply that omits it is unconditional, because a
+     *     caller creating something has no tag to name yet.
      */
     IfMatch: string;
   };
@@ -3094,6 +3115,11 @@ export interface operations {
       /** @description The requested workload. */
       200: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -3109,7 +3135,19 @@ export interface operations {
   applyWorkload: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /**
+         * @description The tag of the resource being replaced, as read from the ETag header of
+         *     the matching get. An apply carrying one is refused with a 412 when the
+         *     resource has moved on since, rather than writing over whatever landed
+         *     in between.
+         *
+         *     Optional everywhere but on the policy document, which refuses an apply
+         *     without it. A resource apply that omits it is unconditional, because a
+         *     caller creating something has no tag to name yet.
+         */
+        "If-Match"?: components["parameters"]["IfMatch"];
+      };
       path: {
         /** @description The name that identifies the workload. */
         name: components["parameters"]["WorkloadName"];
@@ -3125,6 +3163,11 @@ export interface operations {
       /** @description The workload already existed and was updated, or was unchanged. */
       200: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -3134,6 +3177,11 @@ export interface operations {
       /** @description The workload was created. */
       201: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -3155,6 +3203,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      412: components["responses"]["PreconditionFailed"];
       /**
        * @description The specification is well-formed but names a runtime the server cannot
        *     run yet.
@@ -3569,6 +3618,11 @@ export interface operations {
       /** @description The requested volume. */
       200: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -3584,7 +3638,19 @@ export interface operations {
   applyVolume: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /**
+         * @description The tag of the resource being replaced, as read from the ETag header of
+         *     the matching get. An apply carrying one is refused with a 412 when the
+         *     resource has moved on since, rather than writing over whatever landed
+         *     in between.
+         *
+         *     Optional everywhere but on the policy document, which refuses an apply
+         *     without it. A resource apply that omits it is unconditional, because a
+         *     caller creating something has no tag to name yet.
+         */
+        "If-Match"?: components["parameters"]["IfMatch"];
+      };
       path: {
         /** @description The name that identifies the volume. */
         name: components["parameters"]["VolumeName"];
@@ -3600,6 +3666,11 @@ export interface operations {
       /** @description The volume already existed and was updated. */
       200: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -3609,6 +3680,11 @@ export interface operations {
       /** @description The volume was created. */
       201: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -3618,6 +3694,7 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      412: components["responses"]["PreconditionFailed"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3738,6 +3815,11 @@ export interface operations {
       /** @description The requested service. */
       200: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -3753,7 +3835,19 @@ export interface operations {
   applyService: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /**
+         * @description The tag of the resource being replaced, as read from the ETag header of
+         *     the matching get. An apply carrying one is refused with a 412 when the
+         *     resource has moved on since, rather than writing over whatever landed
+         *     in between.
+         *
+         *     Optional everywhere but on the policy document, which refuses an apply
+         *     without it. A resource apply that omits it is unconditional, because a
+         *     caller creating something has no tag to name yet.
+         */
+        "If-Match"?: components["parameters"]["IfMatch"];
+      };
       path: {
         /** @description The name that identifies the service. */
         name: components["parameters"]["ServiceName"];
@@ -3769,6 +3863,11 @@ export interface operations {
       /** @description The service already existed and was updated. */
       200: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -3778,6 +3877,11 @@ export interface operations {
       /** @description The service was created. */
       201: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -3787,6 +3891,7 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      412: components["responses"]["PreconditionFailed"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4388,11 +4493,14 @@ export interface operations {
       query?: never;
       header?: {
         /**
-         * @description The tag of the policy document being replaced, as read from the ETag
-         *     header of `GET /api/v1/acl`. Required despite what the schema says —
-         *     an apply without it is refused with a 400 — but declared optional so
-         *     the absence is answered in the API's own error shape rather than the
-         *     router's.
+         * @description The tag of the resource being replaced, as read from the ETag header of
+         *     the matching get. An apply carrying one is refused with a 412 when the
+         *     resource has moved on since, rather than writing over whatever landed
+         *     in between.
+         *
+         *     Optional everywhere but on the policy document, which refuses an apply
+         *     without it. A resource apply that omits it is unconditional, because a
+         *     caller creating something has no tag to name yet.
          */
         "If-Match"?: components["parameters"]["IfMatch"];
       };

@@ -61,6 +61,10 @@ type (
 		Ports []ResolvedPort
 		// The instances the server is currently running for the workload.
 		Instances []Instance
+		// The entity tag identifying this version of the workload, which a conditional
+		// apply hands back in WithIfMatch. Empty on one read from a list, which
+		// reports no tag per item.
+		ETag string
 		// The time the workload was first applied.
 		CreatedAt time.Time
 		// The time the workload's specification last changed.
@@ -390,8 +394,9 @@ const (
 //
 // Applying an unchanged specification is a no-op that leaves the workload's
 // version alone.
-func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool, error) {
-	resp, err := c.api.ApplyWorkloadWithResponse(ctx, spec.Name, wire.FromSpec(spec))
+func (c *Client) Apply(ctx context.Context, spec manifest.Spec, options ...ApplyOption) (Workload, bool, error) {
+	resp, err := c.api.ApplyWorkloadWithResponse(ctx, spec.Name,
+		&api.ApplyWorkloadParams{IfMatch: ifMatch(options)}, wire.FromSpec(spec))
 	if err != nil {
 		return Workload{}, false, fmt.Errorf("failed to send the request: %w", err)
 	}
@@ -399,12 +404,16 @@ func (c *Client) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool,
 	switch {
 	case resp.JSON201 != nil:
 		workload, err := newWorkload(resp.JSON201.Workload)
+		workload.ETag = resp.HTTPResponse.Header.Get("ETag")
 
 		return workload, true, err
 	case resp.JSON200 != nil:
 		workload, err := newWorkload(resp.JSON200.Workload)
+		workload.ETag = resp.HTTPResponse.Header.Get("ETag")
 
 		return workload, false, err
+	case resp.JSON412 != nil:
+		return Workload{}, false, fmt.Errorf("%s: %w", resp.JSON412.Error, ErrWorkloadChanged)
 	case resp.JSON400 != nil:
 		return Workload{}, false, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON409 != nil:
@@ -466,7 +475,10 @@ func (c *Client) Get(ctx context.Context, name string) (Workload, error) {
 
 	switch {
 	case resp.JSON200 != nil:
-		return newWorkload(resp.JSON200.Workload)
+		got, err := newWorkload(resp.JSON200.Workload)
+		got.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return got, err
 	case resp.JSON404 != nil:
 		return Workload{}, fmt.Errorf("%w: %s", ErrWorkloadNotFound, resp.JSON404.Error)
 	case resp.JSON500 != nil:

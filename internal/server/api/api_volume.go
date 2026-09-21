@@ -19,7 +19,9 @@ type (
 		// backing it when the name is new, and replacing its labels, owner and
 		// mode when it is not, reporting which happened. The owner and mode
 		// should be reapplied to the directory either way.
-		Apply(ctx context.Context, volume manifest.Volume) (service.Volume, bool, error)
+		// A non-zero ifMatch should condition the apply on the volume still
+		// being at that version.
+		Apply(ctx context.Context, volume manifest.Volume, ifMatch int) (service.Volume, bool, error)
 		// Get should return the volume with the given name.
 		Get(ctx context.Context, name string) (service.Volume, error)
 		// List should return the volumes matching every one of the given
@@ -69,11 +71,22 @@ func (a *VolumeAPI) ApplyVolume(ctx context.Context, request api.ApplyVolumeRequ
 	spec := wire.ToVolume(*request.Body)
 	spec.Name = request.Name
 
-	volume, created, err := a.volumes.Apply(ctx, spec)
+	ifMatch, _, ok := parseIfMatch(request.Params.IfMatch)
+	if !ok {
+		return api.ApplyVolume400JSONResponse{
+			Error: "the If-Match header must carry a tag read from GET /api/v1/volumes/{name}",
+		}, nil
+	}
+
+	volume, created, err := a.volumes.Apply(ctx, spec, ifMatch)
 	switch {
 	case errors.Is(err, service.ErrInvalidVolume):
 		return api.ApplyVolume400JSONResponse{
 			Error: err.Error(),
+		}, nil
+	case errors.Is(err, service.ErrVolumeChanged):
+		return api.ApplyVolume412JSONResponse{
+			Error: "the volume changed since it was read",
 		}, nil
 	case err != nil:
 		return api.ApplyVolume500JSONResponse{
@@ -82,10 +95,16 @@ func (a *VolumeAPI) ApplyVolume(ctx context.Context, request api.ApplyVolumeRequ
 	}
 
 	if created {
-		return api.ApplyVolume201JSONResponse{Volume: newVolume(volume)}, nil
+		return api.ApplyVolume201JSONResponse{
+			Body:    api.ApplyVolumeResult{Volume: newVolume(volume)},
+			Headers: api.ApplyVolume201ResponseHeaders{ETag: new(versionETag(volume.Version))},
+		}, nil
 	}
 
-	return api.ApplyVolume200JSONResponse{Volume: newVolume(volume)}, nil
+	return api.ApplyVolume200JSONResponse{
+		Body:    api.ApplyVolumeResult{Volume: newVolume(volume)},
+		Headers: api.ApplyVolume200ResponseHeaders{ETag: new(versionETag(volume.Version))},
+	}, nil
 }
 
 // GetVolume returns the volume with the given name.
@@ -102,7 +121,10 @@ func (a *VolumeAPI) GetVolume(ctx context.Context, request api.GetVolumeRequestO
 		}, nil
 	}
 
-	return api.GetVolume200JSONResponse{Volume: newVolume(volume)}, nil
+	return api.GetVolume200JSONResponse{
+		Body:    api.GetVolumeResult{Volume: newVolume(volume)},
+		Headers: api.GetVolume200ResponseHeaders{ETag: new(versionETag(volume.Version))},
+	}, nil
 }
 
 // ListVolumes returns the volumes matching the request's queries, or every

@@ -22,6 +22,9 @@ var (
 	ErrServiceNotFound = errors.New("service not found")
 	// ErrInvalidService is returned when a submitted service fails validation.
 	ErrInvalidService = errors.New("invalid service")
+	// ErrServiceChanged is returned when the service an apply was conditioned on is
+	// no longer the service the server holds.
+	ErrServiceChanged = errors.New("service changed since it was read")
 )
 
 type (
@@ -97,6 +100,9 @@ type (
 		// The addresses of the selected instances that are fit to serve:
 		// running, healthy when checked, and not being torn down.
 		Backends []Backend
+		// How many times the service has been written, which the API reports as its
+		// entity tag.
+		Version int
 		// The time the service was created.
 		CreatedAt time.Time
 		// The time the service was last modified.
@@ -148,7 +154,10 @@ func NewServiceService(config ServiceServiceConfig) *ServiceService {
 //
 // The manifest is validated again here, though the CLI validates before
 // submitting, because a caller of the API is free to skip the CLI.
-func (s *ServiceService) Apply(ctx context.Context, spec manifest.Service) (Service, bool, error) {
+//
+// A non-zero ifMatch conditions the apply on the service still being at that
+// version, reporting ErrServiceChanged when it is not.
+func (s *ServiceService) Apply(ctx context.Context, spec manifest.Service, ifMatch int) (Service, bool, error) {
 	spec.Defaults()
 
 	if err := manifest.ValidateService(spec); err != nil {
@@ -161,8 +170,15 @@ func (s *ServiceService) Apply(ctx context.Context, spec manifest.Service) (Serv
 		TargetLabels:   spec.Target.Labels,
 		TargetPort:     spec.Target.Port,
 		TargetProtocol: string(spec.Target.Protocol),
-	}, 0)
-	if err != nil {
+	}, ifMatch)
+	switch {
+	case errors.Is(err, database.ErrServiceChanged):
+		return Service{}, false, ErrServiceChanged
+	case errors.Is(err, database.ErrServiceNotFound):
+		// Only reachable on a conditional apply, which names a version a service
+		// that does not exist cannot be at.
+		return Service{}, false, ErrServiceChanged
+	case err != nil:
 		return Service{}, false, fmt.Errorf("failed to store service: %w", err)
 	}
 
@@ -374,6 +390,7 @@ func (s *ServiceService) hydrate(row database.Service, workloads []Workload) Ser
 			Protocol: manifest.Protocol(row.TargetProtocol),
 		},
 		Backends:  s.backends(row, workloads),
+		Version:   row.Version,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
 	}

@@ -25,6 +25,9 @@ var (
 	ErrVolumeInUse = errors.New("volume is in use")
 	// ErrInvalidVolume is returned when a volume's name is not one takt will accept.
 	ErrInvalidVolume = errors.New("invalid volume")
+	// ErrVolumeChanged is returned when the volume an apply was conditioned on is
+	// no longer the volume the server holds.
+	ErrVolumeChanged = errors.New("volume changed since it was read")
 )
 
 // The names a volume may have, which are the names a workload may have. A volume's
@@ -76,8 +79,13 @@ type (
 		// Empty when the directory keeps the default, readable only by the user
 		// running the server.
 		Mode string
+		// How many times the volume has been written, which the API reports as its
+		// entity tag.
+		Version int
 		// The time the volume was created.
 		CreatedAt time.Time
+		// The time the volume was last changed by an apply.
+		UpdatedAt time.Time
 	}
 
 	// The VolumeService type owns volumes and the directories backing them.
@@ -122,7 +130,10 @@ func NewVolumeService(config VolumeServiceConfig) *VolumeService {
 // everything and would be created again under a new identifier, where a row
 // with no directory is reported as a volume whose data cannot be reached — so
 // the failure that leaves nothing behind is the one to prefer.
-func (s *VolumeService) Apply(ctx context.Context, volume manifest.Volume) (Volume, bool, error) {
+//
+// A non-zero ifMatch conditions the apply on the volume still being at that
+// version, reporting ErrVolumeChanged when it is not.
+func (s *VolumeService) Apply(ctx context.Context, volume manifest.Volume, ifMatch int) (Volume, bool, error) {
 	if !volumeNamePattern.MatchString(volume.Name) || len(volume.Name) > 63 {
 		return Volume{}, false, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidVolume)
 	}
@@ -143,8 +154,15 @@ func (s *VolumeService) Apply(ctx context.Context, volume manifest.Volume) (Volu
 		Labels: volume.Labels,
 		Owner:  volume.Owner,
 		Mode:   volume.Mode,
-	}, 0)
-	if err != nil {
+	}, ifMatch)
+	switch {
+	case errors.Is(err, database.ErrVolumeChanged):
+		return Volume{}, false, ErrVolumeChanged
+	case errors.Is(err, database.ErrVolumeNotFound):
+		// Only reachable on a conditional apply, which names a version a volume
+		// that does not exist cannot be at.
+		return Volume{}, false, ErrVolumeChanged
+	case err != nil:
 		return Volume{}, false, err
 	}
 
@@ -424,7 +442,9 @@ func (s *VolumeService) hydrate(row database.Volume, usedBy []string) (Volume, e
 		Labels:    row.Labels,
 		Owner:     row.Owner,
 		Mode:      row.Mode,
+		Version:   row.Version,
 		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
 	}, nil
 }
 

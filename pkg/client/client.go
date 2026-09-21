@@ -25,11 +25,17 @@ import (
 var (
 	// ErrWorkloadNotFound is returned when no workload exists with the given name.
 	ErrWorkloadNotFound = errors.New("workload not found")
+	// ErrWorkloadChanged is returned when a conditional apply names a tag that is no
+	// longer the workload's.
+	ErrWorkloadChanged = errors.New("workload changed since it was read")
 	// ErrWorkloadInUse is returned when a workload another one references is deleted
 	// without being forced.
 	ErrWorkloadInUse = errors.New("workload is in use")
 	// ErrVolumeNotFound is returned when no volume exists with the given name.
 	ErrVolumeNotFound = errors.New("volume not found")
+	// ErrVolumeChanged is returned when a conditional apply names a tag that is no
+	// longer the volume's.
+	ErrVolumeChanged = errors.New("volume changed since it was read")
 	// ErrVolumeInUse is returned when a volume a workload mounts is deleted without
 	// being forced.
 	ErrVolumeInUse = errors.New("volume is in use")
@@ -38,6 +44,9 @@ var (
 	ErrInvalidVolumeName = errors.New("invalid volume name")
 	// ErrServiceNotFound is returned when no service exists with the given name.
 	ErrServiceNotFound = errors.New("service not found")
+	// ErrServiceChanged is returned when a conditional apply names a tag that is no
+	// longer the service's.
+	ErrServiceChanged = errors.New("service changed since it was read")
 	// ErrInvalidServiceName is returned when a name is not usable as a single
 	// segment of a request path.
 	ErrInvalidServiceName = errors.New("invalid service name")
@@ -332,4 +341,39 @@ func value[T any](pointer *T) T {
 	}
 
 	return *pointer
+}
+
+type (
+	// The ApplyOption type is a function that modifies how an apply is made.
+	ApplyOption func(*applyConfig)
+
+	applyConfig struct {
+		ifMatch string
+	}
+)
+
+// WithIfMatch conditions an apply on the resource still carrying the given tag,
+// as read from the ETag of the get that produced it.
+//
+// An apply without it writes whatever it is given over whatever is there. With
+// it, an apply working from a read that has since gone stale is refused rather
+// than quietly discarding the write that landed in between, reported as the
+// resource's own changed error.
+func WithIfMatch(etag string) ApplyOption {
+	return func(c *applyConfig) { c.ifMatch = etag }
+}
+
+// ifMatch folds the options down to the header an apply sends, which is nil when
+// the apply is unconditional.
+func ifMatch(options []ApplyOption) *string {
+	var config applyConfig
+	for _, option := range options {
+		option(&config)
+	}
+
+	if config.ifMatch == "" {
+		return nil
+	}
+
+	return &config.ifMatch
 }

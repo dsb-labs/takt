@@ -53,6 +53,9 @@ var (
 	// ErrWorkloadDeleting is returned when applying a workload that is currently
 	// being torn down.
 	ErrWorkloadDeleting = errors.New("workload is being deleted")
+	// ErrWorkloadChanged is returned when the workload an apply was conditioned on
+	// is no longer the workload the server holds.
+	ErrWorkloadChanged = errors.New("workload changed since it was read")
 	// ErrWorkloadSuspended is returned when restarting a workload that is
 	// suspended, since nothing would start until it is started again.
 	ErrWorkloadSuspended = errors.New("workload is suspended")
@@ -625,13 +628,16 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 // replace any running instance. Returns manifest.ErrNoRuntime when the
 // specification names no runtime, or ErrUnsupportedRuntime when it names one the
 // server cannot run.
-func (s *WorkloadService) Apply(ctx context.Context, spec manifest.Spec) (Workload, bool, error) {
+//
+// A non-zero ifMatch conditions the apply on the workload still being at that
+// version, reporting ErrWorkloadChanged when it is not.
+func (s *WorkloadService) Apply(ctx context.Context, spec manifest.Spec, ifMatch int) (Workload, bool, error) {
 	resolved, err := s.resolve(ctx, spec)
 	if err != nil {
 		return Workload{}, false, err
 	}
 
-	stored, created, err := s.store(ctx, resolved)
+	stored, created, err := s.store(ctx, resolved, ifMatch)
 	if err != nil {
 		return Workload{}, false, err
 	}
@@ -886,7 +892,7 @@ func unknown(mappings []manifest.Port) []string {
 // caller's, so a dynamic port is simply resolved again against what is now allocated.
 // A pinned port that collides is a different matter entirely: the caller asked for
 // something specific and has to be told it isn't available.
-func (s *WorkloadService) store(ctx context.Context, resolved resolution) (database.Workload, bool, error) {
+func (s *WorkloadService) store(ctx context.Context, resolved resolution, ifMatch int) (database.Workload, bool, error) {
 	// Bounded because a caller waiting on a request would rather hear that takt
 	// couldn't settle its ports than wait indefinitely for a quiet moment.
 	const attempts = 5
@@ -921,13 +927,19 @@ func (s *WorkloadService) store(ctx context.Context, resolved resolution) (datab
 		// The row and its ports are written together, so a claim that loses a race
 		// leaves no workload behind for the reconciler to start against ports
 		// nothing holds.
-		stored, created, err := s.workloads.Upsert(ctx, row, 0, ports...)
+		stored, created, err := s.workloads.Upsert(ctx, row, ifMatch, ports...)
 		switch {
 		case err == nil:
 			return stored, created, nil
 		case errors.Is(err, database.ErrWorkloadDeleting):
 			// A delete landed between resolving the specification and writing it.
 			return database.Workload{}, false, ErrWorkloadDeleting
+		case errors.Is(err, database.ErrWorkloadChanged):
+			return database.Workload{}, false, ErrWorkloadChanged
+		case errors.Is(err, database.ErrWorkloadNotFound):
+			// Only reachable on a conditional apply, which names a version a
+			// workload that does not exist cannot be at.
+			return database.Workload{}, false, ErrWorkloadChanged
 		case !errors.Is(err, database.ErrHostPortTaken):
 			return database.Workload{}, false, fmt.Errorf("failed to store workload: %w", err)
 		case port.Pinned(spec.Ports):

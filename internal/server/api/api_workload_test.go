@@ -49,7 +49,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			SetupMocks: func(svc *MockWorkloadService) {
 				svc.EXPECT().Apply(mock.Anything, mock.MatchedBy(func(spec manifest.Spec) bool {
 					return spec.Name == "example" && spec.Container != nil
-				})).Return(workload("example", state.Running), true, nil).Once()
+				}), 0).Return(workload("example", state.Running), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
 			Assert: func(t *testing.T, w generated.Workload) {
@@ -62,7 +62,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(workload("example", state.Running), false, nil).Once()
 			},
 			ExpectStatus: http.StatusOK,
@@ -80,7 +80,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, service.ErrUnsupportedRuntime).Once()
 			},
 			ExpectStatus: http.StatusUnprocessableEntity,
@@ -90,7 +90,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, service.ErrInvalidSpec).Once()
 			},
 			ExpectStatus: http.StatusBadRequest,
@@ -100,7 +100,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, manifest.ErrNoRuntime).Once()
 			},
 			ExpectStatus: http.StatusBadRequest,
@@ -110,7 +110,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, manifest.ErrAmbiguousRuntime).Once()
 			},
 			ExpectStatus: http.StatusBadRequest,
@@ -120,7 +120,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, fmt.Errorf("%w: example-data", service.ErrVolumeNotFound)).Once()
 			},
 			// The caller's to fix, and the message names the volume: an operator who
@@ -135,7 +135,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, fmt.Errorf("%w: db-password", service.ErrSecretNotFound)).Once()
 			},
 			// Named for the same reason a missing volume is. The workload could never
@@ -150,7 +150,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, fmt.Errorf("%w: log-level", service.ErrVariableNotFound)).Once()
 			},
 			ExpectStatus: http.StatusBadRequest,
@@ -163,7 +163,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, fmt.Errorf("%w: postgres", service.ErrWorkloadNotFound)).Once()
 			},
 			// This endpoint creates the workload it is given, so a workload that does
@@ -178,7 +178,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, fmt.Errorf("%w: postgres:http", service.ErrPortNotPublished)).Once()
 			},
 			ExpectStatus: http.StatusBadRequest,
@@ -191,7 +191,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, service.ErrWorkloadDeleting).Once()
 			},
 			ExpectStatus: http.StatusConflict,
@@ -201,7 +201,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, port.ErrHostPortTaken).Once()
 			},
 			// A conflict with state that already exists, not a malformed request.
@@ -212,7 +212,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, port.ErrNoPortsAvailable).Once()
 			},
 			// Nothing about the request needs to change: it becomes servable once a
@@ -225,7 +225,7 @@ func TestWorkloadAPI_ApplyWorkload(t *testing.T) {
 			Path: "/api/v1/workloads/example",
 			Body: containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, errors.New("disk is full")).Once()
 			},
 			ExpectStatus: http.StatusInternalServerError,
@@ -461,7 +461,7 @@ func TestWorkloadAPI_HidesInternalFailures(t *testing.T) {
 			Target: "/api/v1/workloads/example",
 			Body:   containerSpec("example"),
 			SetupMocks: func(svc *MockWorkloadService) {
-				svc.EXPECT().Apply(mock.Anything, mock.Anything).
+				svc.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 					Return(service.Workload{}, false, internal).Once()
 			},
 		},
