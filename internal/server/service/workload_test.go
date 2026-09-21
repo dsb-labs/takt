@@ -58,7 +58,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 						w.Runtime == string(manifest.RuntimeContainer) &&
 						w.SpecHash != "" &&
 						len(w.Spec) > 0
-				})).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				}), 0).RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 					w.Version = 1
 					return w, true, nil
 				}).Once()
@@ -82,8 +82,8 @@ func TestWorkloadService_Apply(t *testing.T) {
 				repo.EXPECT().Get(mock.Anything, "example").
 					Return(storedWorkload("example"), nil).Once()
 
-				repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-					RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
+					RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 						w.Version = 2
 						return w, false, nil
 					}).Once()
@@ -170,8 +170,8 @@ func TestWorkloadService_Apply(t *testing.T) {
 				repo.EXPECT().Get(mock.Anything, "example").
 					Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 
-				repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-					RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+				repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
+					RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 						w.Version = 1
 
 						return w, true, nil
@@ -266,8 +266,8 @@ func TestWorkloadService_ExecResourceLimits(t *testing.T) {
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				w.Version = 1
 
 				return w, true, nil
@@ -598,7 +598,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 
 			return len(stored.Volumes) == 1 &&
 				stored.Volumes[0].From == "/var/lib/takt/volumes/cvhs0dq0kqj4c9r8m1a0"
-		})).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		}), 0).RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 			w.Version = 1
 
 			return w, true, nil
@@ -647,7 +647,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			return len(stored.Volumes) == 1 &&
 				stored.Volumes[0].Path == "/mnt/media" &&
 				stored.Volumes[0].From == ""
-		})).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		}), 0).RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 			w.Version = 1
 
 			return w, true, nil
@@ -817,8 +817,8 @@ func TestWorkloadService_Apply_NotifiesReconciler(t *testing.T) {
 
 	repo.EXPECT().Get(mock.Anything, "example").
 		Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
-	repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+	repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
+		RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 			w.Version = 1
 			return w, true, nil
 		}).Once()
@@ -1634,8 +1634,8 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 		// constraint means one loses. Since takt chose the port, losing is its
 		// problem to resolve rather than something to report to the caller.
 		var attempts int
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				attempts++
 				if attempts == 1 {
 					return database.Workload{}, false, database.ErrHostPortTaken
@@ -1657,7 +1657,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 			Return(database.Workload{}, false, database.ErrHostPortTaken)
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil)
@@ -1698,8 +1698,8 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 			Return("10.0.0.5:20432", nil).Once()
 
 		var stored database.Workload
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				stored = w
 				w.ID, w.Version = "id-one", 1
 				return w, true, nil
@@ -1730,8 +1730,8 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 			addresses.EXPECT().Address(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(address, nil).Once()
 
-			repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-				RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+			repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 					hashes = append(hashes, w.SpecHash)
 					w.ID, w.Version = "id-one", 1
 					return w, true, nil
@@ -1807,8 +1807,8 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		var stored database.Workload
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				stored = w
 				w.ID, w.Version = "id-one", 1
 				return w, true, nil
@@ -1840,8 +1840,8 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		ports.EXPECT().Allocated(mock.Anything).Return(map[string][]int{"tcp": {20000, 20001}}, nil)
 
 		var claimed []database.Port
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, p ...database.Port) (database.Workload, bool, error) {
 				claimed = p
 				w.ID, w.Version = "id-one", 1
 				return w, true, nil
@@ -1871,8 +1871,8 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		var claimed []database.Port
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, p ...database.Port) (database.Workload, bool, error) {
 				claimed = p
 				w.ID, w.Version = "id-one", 1
 				return w, true, nil
@@ -1906,8 +1906,8 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		var claimed []database.Port
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, p ...database.Port) (database.Workload, bool, error) {
 				claimed = p
 				w.ID, w.Version = "id-one", 1
 				return w, true, nil
@@ -1946,8 +1946,8 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
 
 		var claimed []database.Port
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, p ...database.Port) (database.Workload, bool, error) {
 				claimed = p
 				w.ID, w.Version = "id-one", 2
 				return w, false, nil
@@ -1981,8 +1981,8 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		// wrong space would report a port as taken that nothing has.
 		ports.EXPECT().HolderOf(mock.Anything, 5353, string(manifest.ProtocolUDP)).Return("", false, nil).Once()
 
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				w.ID, w.Version = "id-one", 1
 				return w, true, nil
 			})
@@ -2258,8 +2258,8 @@ func TestWorkloadService_Delete(t *testing.T) {
 		repo.EXPECT().ReferencedBy(mock.Anything, "api").Return(nil, nil).Maybe()
 
 		rehashed := make(chan database.Workload, 1)
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				rehashed <- w
 
 				return w, false, nil
@@ -2526,8 +2526,8 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var hash string
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				hash = w.SpecHash
 
 				return w, true, nil
@@ -2590,8 +2590,8 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var stored database.Workload
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				stored = w
 
 				return w, true, nil
@@ -2717,8 +2717,8 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var stored database.Workload
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				stored = w
 
 				return w, true, nil
@@ -2753,8 +2753,8 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var stored database.Workload
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				stored = w
 
 				return w, true, nil
@@ -2847,8 +2847,8 @@ func TestWorkloadService_Apply_HashesImageDigest(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var stored database.Workload
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				stored = w
 
 				return w, true, nil
@@ -2915,8 +2915,8 @@ func TestWorkloadService_Rehash(t *testing.T) {
 
 		var stored database.Workload
 		var claimed []database.Port
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, p ...database.Port) (database.Workload, bool, error) {
 				stored, claimed = w, p
 
 				return w, false, nil
@@ -2974,8 +2974,8 @@ func TestWorkloadService_Rehash(t *testing.T) {
 			Return(database.Workload{ID: "workload-id", Name: "example", Spec: encoded, SpecHash: "stale"}, nil).Once()
 		secrets.EXPECT().Revisions(mock.Anything, []string{"db-password"}).Return(nil, nil).Once()
 		ports.EXPECT().List(mock.Anything, "workload-id").Return(nil, nil).Once()
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				return w, false, nil
 			}).Once()
 
@@ -3003,8 +3003,8 @@ func TestWorkloadService_Rehash(t *testing.T) {
 		ports.EXPECT().List(mock.Anything, "workload-id").Return(nil, nil).Once()
 
 		var stored database.Workload
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				stored = w
 
 				return w, false, nil
@@ -3065,8 +3065,8 @@ func TestWorkloadService_Rehash(t *testing.T) {
 			Return("sha256:two", nil).Once()
 		ports.EXPECT().List(mock.Anything, "workload-id").Return(nil, nil).Once()
 
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				return w, false, nil
 			}).Once()
 
@@ -3219,8 +3219,8 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 		var stored database.Workload
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				stored = w
 
 				return w, true, nil
@@ -3282,8 +3282,8 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 		secrets.EXPECT().Revisions(mock.Anything, mock.Anything).
 			Return(map[string]string{"tls-cert": "rev-one"}, nil).Once()
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				return w, true, nil
 			}).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
@@ -3315,8 +3315,8 @@ func applyForHashOf(t *testing.T, spec manifest.Spec, revisions, values map[stri
 	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	var hash string
-	repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+	repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 			hash = w.SpecHash
 
 			return w, true, nil
@@ -3341,8 +3341,8 @@ func applyForDigestHash(t *testing.T, spec manifest.Spec, digests map[string]str
 	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	var hash string
-	repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+	repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 			hash = w.SpecHash
 
 			return w, true, nil
@@ -3385,8 +3385,8 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 		// with whatever it is handed, so one given none would clear the rows and
 		// leave the stored specification naming a host port nothing holds.
 		var claimed []database.Port
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, p ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, p ...database.Port) (database.Workload, bool, error) {
 				claimed = p
 				return w, false, nil
 			}).Once()
@@ -3462,8 +3462,8 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
 		ports.EXPECT().List(mock.Anything, row.ID).Return(held, nil)
 		ports.EXPECT().Allocated(mock.Anything).Return(map[string][]int{"tcp": {20005}}, nil).Once()
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				return w, false, nil
 			}).Once()
 
@@ -3486,7 +3486,7 @@ func TestWorkloadService_Reallocate(t *testing.T) {
 		rehashed := make(chan database.Workload, 1)
 		repo.EXPECT().Upsert(mock.Anything, mock.MatchedBy(func(w database.Workload) bool {
 			return w.Name == "api"
-		}), mock.Anything).RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		}), mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 			rehashed <- w
 
 			return w, false, nil
@@ -4016,8 +4016,8 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 		events := NewMockWorkloadEventRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				w.Version = 1
 
 				return w, true, nil
@@ -4040,8 +4040,8 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 		events := NewMockWorkloadEventRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				w.Version = 2
 
 				return w, false, nil
@@ -4069,8 +4069,8 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 		events := NewMockWorkloadEventRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
-			RunAndReturn(func(_ context.Context, w database.Workload, _ ...database.Port) (database.Workload, bool, error) {
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
 				w.Version = 1
 
 				return w, false, nil
@@ -4096,7 +4096,7 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 
 		repo.EXPECT().MarkDeleting(mock.Anything, "postgres", true).Return(storedWorkload("postgres"), []string{"api"}, nil).Once()
 		repo.EXPECT().Get(mock.Anything, "api").Return(api, nil).Once()
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).Return(api, false, nil).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).Return(api, false, nil).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
 
 		// Recorded against the workload that reads the address rather than the one

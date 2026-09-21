@@ -54,7 +54,7 @@ func TestOpen_ConcurrentWrites(t *testing.T) {
 				Runtime:  "container",
 				Spec:     []byte(`{}`),
 				SpecHash: fmt.Sprintf("hash-%d", i),
-			})
+			}, 0)
 			if err != nil {
 				errs <- err
 			}

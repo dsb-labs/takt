@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/rs/xid"
@@ -13,6 +14,9 @@ import (
 var (
 	// ErrServiceNotFound is returned when no service exists with the requested name.
 	ErrServiceNotFound = errors.New("service not found")
+	// ErrServiceChanged is returned when the service an apply was conditioned on is
+	// not the service the database holds.
+	ErrServiceChanged = errors.New("service changed since it was read")
 )
 
 type (
@@ -36,6 +40,10 @@ type (
 		TargetPort int
 		// The transport protocol of the target port.
 		TargetProtocol string
+		// How many times the service has been written. This is the entity tag a
+		// conditional apply compares against, and it moves only when an apply
+		// changed something.
+		Version int
 		// The time the service was created.
 		CreatedAt time.Time
 		// The time the service was last modified.
@@ -61,21 +69,18 @@ func NewServiceRepository(db *sql.DB) *ServiceRepository {
 // An upsert rather than an insert-or-fail, because a service holds no data of
 // its own: applying the same manifest twice means the file is the truth, which
 // is how a workload's apply already behaves.
-func (r *ServiceRepository) Upsert(ctx context.Context, service Service) (Service, bool, error) {
-	const q = `
-		INSERT INTO service (id, name, labels, target_labels, target_port, target_protocol, created_at, updated_at)
-		VALUES (?, ?, jsonb(?), jsonb(?), ?, ?, ?, ?)
-		ON CONFLICT (name) DO UPDATE SET
-			labels = excluded.labels,
-			target_labels = excluded.target_labels,
-			target_port = excluded.target_port,
-			target_protocol = excluded.target_protocol,
-			updated_at = excluded.updated_at
-		RETURNING id, created_at, updated_at
-	`
-
-	timestamp := formatTime(time.Now().UTC())
-
+//
+// A non-zero ifMatch conditions the write on the stored version still being
+// that one, reporting ErrServiceChanged when it is not and ErrServiceNotFound
+// when there is no row to have the version at all. Zero applies
+// unconditionally, which is what a caller creating a service has to do: there
+// is no version yet to name.
+//
+// Like a workload's apply, a write that would change nothing is skipped, so
+// re-applying an unchanged manifest leaves the version where it is. That is
+// what lets a pipeline apply the same file repeatedly without invalidating
+// the tag it is holding.
+func (r *ServiceRepository) Upsert(ctx context.Context, service Service, ifMatch int) (Service, bool, error) {
 	labels, err := marshalLabels(service.Labels)
 	if err != nil {
 		return Service{}, false, err
@@ -86,33 +91,115 @@ func (r *ServiceRepository) Upsert(ctx context.Context, service Service) (Servic
 		return Service{}, false, err
 	}
 
-	// The identifier is generated ahead of the write. A conflict keeps the
-	// existing row's identifier, so the returned one reports which happened.
-	id := xid.New().String()
+	var (
+		stored  Service
+		created bool
+	)
 
-	var createdAt, updatedAt string
+	err = transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
+		existing, err := getService(ctx, tx, service.Name)
+		switch {
+		case errors.Is(err, ErrServiceNotFound):
+			if ifMatch != 0 {
+				return err
+			}
 
-	err = r.db.QueryRowContext(ctx, q,
-		id, service.Name, labels, targetLabels,
-		service.TargetPort, service.TargetProtocol, timestamp, timestamp).
-		Scan(&service.ID, &createdAt, &updatedAt)
-	if err != nil {
-		return Service{}, false, fmt.Errorf("failed to upsert service: %w", err)
-	}
+			stored, err = insertService(ctx, tx, service, labels, targetLabels)
 
-	service.CreatedAt, service.UpdatedAt, err = parseTimestamps(createdAt, updatedAt)
+			created = true
+
+			return err
+		case err != nil:
+			return err
+		case ifMatch != 0 && existing.Version != ifMatch:
+			return ErrServiceChanged
+		case unchangedService(existing, service):
+			stored = existing
+
+			return nil
+		}
+
+		stored, err = updateService(ctx, tx, service, labels, targetLabels, existing)
+
+		return err
+	})
 	if err != nil {
 		return Service{}, false, err
 	}
 
-	return service, service.ID == id, nil
+	return stored, created, nil
+}
+
+// insertService writes a service that does not exist yet.
+func insertService(ctx context.Context, tx *sql.Tx, service Service, labels, targetLabels string) (Service, error) {
+	const q = `
+		INSERT INTO service (id, name, labels, target_labels, target_port, target_protocol, version, created_at, updated_at)
+		VALUES (?, ?, jsonb(?), jsonb(?), ?, ?, 1, ?, ?)
+	`
+
+	now := time.Now().UTC()
+	timestamp := formatTime(now)
+
+	service.ID = xid.New().String()
+
+	_, err := tx.ExecContext(ctx, q, service.ID, service.Name, labels, targetLabels,
+		service.TargetPort, service.TargetProtocol, timestamp, timestamp)
+	if err != nil {
+		return Service{}, fmt.Errorf("failed to insert service: %w", err)
+	}
+
+	service.Version = 1
+	service.CreatedAt = now
+	service.UpdatedAt = now
+
+	return service, nil
+}
+
+// updateService replaces the fields an apply owns, moving the version on.
+func updateService(ctx context.Context, tx *sql.Tx, service Service, labels, targetLabels string, existing Service) (Service, error) {
+	const q = `
+		UPDATE service
+		SET labels = jsonb(?), target_labels = jsonb(?), target_port = ?,
+			target_protocol = ?, version = ?, updated_at = ?
+		WHERE name = ?
+	`
+
+	now := time.Now().UTC()
+
+	service.ID = existing.ID
+	service.Version = existing.Version + 1
+	service.CreatedAt = existing.CreatedAt
+	service.UpdatedAt = now
+
+	_, err := tx.ExecContext(ctx, q, labels, targetLabels, service.TargetPort,
+		service.TargetProtocol, service.Version, formatTime(now), service.Name)
+	if err != nil {
+		return Service{}, fmt.Errorf("failed to update service: %w", err)
+	}
+
+	return service, nil
+}
+
+// unchangedService reports whether an apply would leave the stored service
+// exactly as it is, which is the case where the write is skipped.
+func unchangedService(existing, incoming Service) bool {
+	return existing.TargetPort == incoming.TargetPort &&
+		existing.TargetProtocol == incoming.TargetProtocol &&
+		maps.Equal(existing.Labels, incoming.Labels) &&
+		maps.Equal(existing.TargetLabels, incoming.TargetLabels)
 }
 
 // Get returns the service with the given name, reporting ErrServiceNotFound when
 // no such service exists.
 func (r *ServiceRepository) Get(ctx context.Context, name string) (Service, error) {
-	const q = `
-		SELECT id, name, json(labels), json(target_labels), target_port, target_protocol, created_at, updated_at
+	return getService(ctx, r.db, name)
+}
+
+// getService reads a service through anything that can run a query, so that the
+// conditional write can read under the same lock it goes on to write with.
+func getService(ctx context.Context, q querier, name string) (Service, error) {
+	const stmt = `
+		SELECT id, name, json(labels), json(target_labels), target_port, target_protocol, version, created_at, updated_at
 		FROM service
 		WHERE name = ?
 	`
@@ -122,8 +209,8 @@ func (r *ServiceRepository) Get(ctx context.Context, name string) (Service, erro
 		labels, targetLabels, createdAt, updatedAt string
 	)
 
-	err := r.db.QueryRowContext(ctx, q, name).Scan(&service.ID, &service.Name, &labels,
-		&targetLabels, &service.TargetPort, &service.TargetProtocol, &createdAt, &updatedAt)
+	err := q.QueryRowContext(ctx, stmt, name).Scan(&service.ID, &service.Name, &labels,
+		&targetLabels, &service.TargetPort, &service.TargetProtocol, &service.Version, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Service{}, fmt.Errorf("%w: %s", ErrServiceNotFound, name)
@@ -152,7 +239,7 @@ func (r *ServiceRepository) Get(ctx context.Context, name string) (Service, erro
 // workload reads the services back and looks.
 func (r *ServiceRepository) List(ctx context.Context, queries ...Query) ([]Service, error) {
 	const q = `
-		SELECT id, name, json(labels), json(target_labels), target_port, target_protocol, created_at, updated_at
+		SELECT id, name, json(labels), json(target_labels), target_port, target_protocol, version, created_at, updated_at
 		FROM service
 	`
 
@@ -177,7 +264,7 @@ func (r *ServiceRepository) List(ctx context.Context, queries ...Query) ([]Servi
 		)
 
 		err = rows.Scan(&service.ID, &service.Name, &labels, &targetLabels,
-			&service.TargetPort, &service.TargetProtocol, &createdAt, &updatedAt)
+			&service.TargetPort, &service.TargetProtocol, &service.Version, &createdAt, &updatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan service: %w", err)
 		}

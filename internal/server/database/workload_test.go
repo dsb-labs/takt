@@ -22,7 +22,7 @@ func TestWorkloadRepository_Upsert(t *testing.T) {
 			Spec:     []byte(`{"name":"example"}`),
 			SpecHash: "hash-one",
 			Labels:   map[string]string{"some-key": "some-value"},
-		})
+		}, 0)
 
 		require.NoError(t, err)
 		assert.True(t, isNew)
@@ -44,10 +44,10 @@ func TestWorkloadRepository_Upsert(t *testing.T) {
 			SpecHash: "hash-one",
 		}
 
-		created, _, err := repo.Upsert(ctx, w)
+		created, _, err := repo.Upsert(ctx, w, 0)
 		require.NoError(t, err)
 
-		unchanged, isNew, err := repo.Upsert(ctx, w)
+		unchanged, isNew, err := repo.Upsert(ctx, w, 0)
 		require.NoError(t, err)
 
 		assert.False(t, isNew)
@@ -64,7 +64,7 @@ func TestWorkloadRepository_Upsert(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{"name":"example","image":"one"}`),
 			SpecHash: "hash-one",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		updated, isNew, err := repo.Upsert(ctx, database.Workload{
@@ -72,7 +72,7 @@ func TestWorkloadRepository_Upsert(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{"name":"example","image":"two"}`),
 			SpecHash: "hash-two",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		assert.False(t, isNew)
@@ -91,7 +91,7 @@ func TestWorkloadRepository_Upsert(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{"name":"example","image":"one"}`),
 			SpecHash: "hash-one",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		_, _, err = repo.MarkDeleting(ctx, "example", false)
@@ -105,13 +105,88 @@ func TestWorkloadRepository_Upsert(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{"name":"example","image":"two"}`),
 			SpecHash: "hash-two",
-		})
+		}, 0)
 		assert.ErrorIs(t, err, database.ErrWorkloadDeleting)
 
 		stored, err := repo.Get(ctx, "example")
 		require.NoError(t, err)
 		assert.Equal(t, 1, stored.Version)
 		assert.Equal(t, "hash-one", stored.SpecHash)
+	})
+	t.Run("applies when the version is the one the caller read", func(t *testing.T) {
+		t.Parallel()
+
+		repo := database.NewWorkloadRepository(newTestDatabase(t))
+		ctx := t.Context()
+
+		first, _, err := repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{"name":"example","image":"one"}`),
+			SpecHash: "hash-one",
+		}, 0)
+		require.NoError(t, err)
+
+		second, _, err := repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{"name":"example","image":"two"}`),
+			SpecHash: "hash-two",
+		}, first.Version)
+		require.NoError(t, err)
+
+		assert.Equal(t, 2, second.Version)
+	})
+
+	t.Run("refuses an apply conditioned on a version that has moved", func(t *testing.T) {
+		t.Parallel()
+
+		repo := database.NewWorkloadRepository(newTestDatabase(t))
+		ctx := t.Context()
+
+		first, _, err := repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{"name":"example","image":"one"}`),
+			SpecHash: "hash-one",
+		}, 0)
+		require.NoError(t, err)
+
+		_, _, err = repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{"name":"example","image":"two"}`),
+			SpecHash: "hash-two",
+		}, first.Version)
+		require.NoError(t, err)
+
+		// The caller is still holding the tag it read before the write above.
+		_, _, err = repo.Upsert(ctx, database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{"name":"example","image":"three"}`),
+			SpecHash: "hash-three",
+		}, first.Version)
+		assert.ErrorIs(t, err, database.ErrWorkloadChanged)
+
+		stored, err := repo.Get(ctx, "example")
+		require.NoError(t, err)
+
+		assert.Equal(t, "hash-two", stored.SpecHash, "the refused apply was written anyway")
+	})
+
+	t.Run("refuses a conditional apply for a workload that does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		repo := database.NewWorkloadRepository(newTestDatabase(t))
+
+		_, _, err := repo.Upsert(t.Context(), database.Workload{
+			Name:     "example",
+			Runtime:  "container",
+			Spec:     []byte(`{"name":"example"}`),
+			SpecHash: "hash-one",
+		}, 1)
+		assert.ErrorIs(t, err, database.ErrWorkloadNotFound)
 	})
 }
 
@@ -128,7 +203,7 @@ func TestWorkloadRepository_Get(t *testing.T) {
 			Spec:     []byte(`{"name":"example"}`),
 			SpecHash: "hash-one",
 			Labels:   map[string]string{"some-key": "some-value"},
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		got, err := repo.Get(ctx, "example")
@@ -161,7 +236,7 @@ func TestWorkloadRepository_List(t *testing.T) {
 				Runtime:  "container",
 				Spec:     []byte(`{}`),
 				SpecHash: "hash-" + name,
-			})
+			}, 0)
 			require.NoError(t, err)
 		}
 
@@ -203,7 +278,7 @@ func TestWorkloadRepository_List_Query(t *testing.T) {
 				Runtime:  "container",
 				Spec:     []byte(spec),
 				SpecHash: "hash-" + name,
-			})
+			}, 0)
 			require.NoError(t, err)
 		}
 	}
@@ -300,7 +375,7 @@ func TestWorkloadRepository_MarkDeleting(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash-one",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		marked, _, err := repo.MarkDeleting(ctx, "example", false)
@@ -323,7 +398,7 @@ func TestWorkloadRepository_MarkDeleting(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash-one",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		first, _, err := repo.MarkDeleting(ctx, "example", false)
@@ -386,7 +461,7 @@ func TestWorkloadRepository_Suspend(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash-one",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		suspended, err := repo.Suspend(ctx, "example")
@@ -412,7 +487,7 @@ func TestWorkloadRepository_Suspend(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash-one",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		first, err := repo.Suspend(ctx, "example")
@@ -444,7 +519,7 @@ func TestWorkloadRepository_Resume(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash-one",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		_, err = repo.Suspend(ctx, "example")
@@ -474,7 +549,7 @@ func TestWorkloadRepository_Resume(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash-one",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		resumed, err := repo.Resume(ctx, "example")
@@ -504,7 +579,7 @@ func TestWorkloadRepository_Delete(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash-one",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		require.NoError(t, repo.Delete(ctx, "example"))
@@ -570,7 +645,7 @@ func TestWorkloadRepository_ReferencedBy(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash-api-two",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		referencedBy, err := repo.ReferencedBy(t.Context(), "postgres")
@@ -610,6 +685,6 @@ func store(t *testing.T, repo *database.WorkloadRepository, name string, referen
 		Spec:      []byte(`{}`),
 		SpecHash:  "hash-" + name,
 		Workloads: references,
-	})
+	}, 0)
 	require.NoError(t, err)
 }

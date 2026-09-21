@@ -25,7 +25,7 @@ func TestVolumeService_Apply(t *testing.T) {
 		t.Parallel()
 
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Labels: map[string]string{"app": "web"}}).
+		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Labels: map[string]string{"app": "web"}}, 0).
 			Return(database.Volume{
 				ID:        testVolumeID,
 				Name:      "example-data",
@@ -62,7 +62,7 @@ func TestVolumeService_Apply(t *testing.T) {
 		owner := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Owner: owner, Mode: "0755"}).
+		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Owner: owner, Mode: "0755"}, 0).
 			Return(database.Volume{
 				ID:        testVolumeID,
 				Name:      "example-data",
@@ -94,7 +94,7 @@ func TestVolumeService_Apply(t *testing.T) {
 		t.Parallel()
 
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Labels: map[string]string{"app": "api"}}).
+		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Labels: map[string]string{"app": "api"}}, 0).
 			Return(database.Volume{
 				ID:     testVolumeID,
 				Name:   "example-data",
@@ -118,7 +118,7 @@ func TestVolumeService_Apply(t *testing.T) {
 		owner := fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid())
 
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Owner: owner, Mode: "0750"}).
+		repo.EXPECT().Upsert(mock.Anything, database.Volume{Name: "example-data", Owner: owner, Mode: "0750"}, 0).
 			Return(database.Volume{
 				ID:    testVolumeID,
 				Name:  "example-data",
@@ -163,7 +163,7 @@ func TestVolumeService_Apply(t *testing.T) {
 		// permission error says so. The row and the directory are both rolled
 		// back, so a failed create leaves nothing behind.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data", Owner: "0:0"}, true, nil).Once()
 		repo.EXPECT().Delete(mock.Anything, "example-data").Return(nil).Once()
 
@@ -189,7 +189,7 @@ func TestVolumeService_Apply(t *testing.T) {
 		// directory holds data, so it is left as it stands — which the strict
 		// mock proves by expecting no Delete.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data", Owner: "0:0"}, false, nil).Once()
 
 		svc, root := newVolumeService(t, repo)
@@ -233,7 +233,7 @@ func TestVolumeService_Apply(t *testing.T) {
 		// volume nothing can reach, and nothing later creates the directory. Better to
 		// leave nothing behind.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, true, nil).Once()
 		repo.EXPECT().Delete(mock.Anything, "example-data").Return(nil).Once()
 
@@ -262,7 +262,7 @@ func TestVolumeService_Delete(t *testing.T) {
 		// The only thing in takt that destroys stored data, so the directory going is
 		// worth asserting rather than assuming.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, true, nil).Once()
 		// Once for the apply that seeds the volume, beyond whatever the case
 		// under test reads.
@@ -292,7 +292,7 @@ func TestVolumeService_Delete(t *testing.T) {
 		// what grants that, because nothing else about a permission error says why a
 		// directory takt created cannot be removed.
 		repo := NewMockVolumeRepository(t)
-		repo.EXPECT().Upsert(mock.Anything, mock.Anything).
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
 			Return(database.Volume{ID: testVolumeID, Name: "example-data"}, true, nil).Once()
 		// Once for the apply that seeds the volume, beyond whatever the case
 		// under test reads.

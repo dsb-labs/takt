@@ -243,7 +243,7 @@ func newTestEventRepository(t *testing.T) (*database.WorkloadEventRepository, *s
 		Runtime:  "container",
 		Spec:     []byte(`{"name":"example"}`),
 		SpecHash: "hash-one",
-	})
+	}, 0)
 	require.NoError(t, err)
 
 	return database.NewWorkloadEventRepository(db, event.DefaultMaxEvents), db, workloads

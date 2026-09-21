@@ -26,7 +26,7 @@ func TestSnapshot(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		destination := filepath.Join(t.TempDir(), "backup.db")
@@ -58,7 +58,7 @@ func TestSnapshot(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		// Left open for the duration of the snapshot, so the change below is written

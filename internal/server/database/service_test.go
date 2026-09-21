@@ -29,7 +29,7 @@ func TestServiceRepository_Upsert(t *testing.T) {
 
 		services := database.NewServiceRepository(newTestDatabase(t))
 
-		stored, created, err := services.Upsert(t.Context(), testService("example"))
+		stored, created, err := services.Upsert(t.Context(), testService("example"), 0)
 		require.NoError(t, err)
 
 		assert.True(t, created, "the first write was not reported as a create")
@@ -44,7 +44,7 @@ func TestServiceRepository_Upsert(t *testing.T) {
 
 		services := database.NewServiceRepository(newTestDatabase(t))
 
-		first, created, err := services.Upsert(t.Context(), testService("example"))
+		first, created, err := services.Upsert(t.Context(), testService("example"), 0)
 		require.NoError(t, err)
 		require.True(t, created)
 
@@ -53,7 +53,7 @@ func TestServiceRepository_Upsert(t *testing.T) {
 		replacement.TargetPort = 9090
 		replacement.TargetProtocol = "udp"
 
-		second, created, err := services.Upsert(t.Context(), replacement)
+		second, created, err := services.Upsert(t.Context(), replacement, 0)
 		require.NoError(t, err)
 
 		assert.False(t, created, "the second write was reported as a create")
@@ -67,6 +67,85 @@ func TestServiceRepository_Upsert(t *testing.T) {
 		assert.Equal(t, "udp", got.TargetProtocol)
 		assert.WithinDuration(t, first.CreatedAt, got.CreatedAt, 0)
 	})
+	t.Run("versions a service from its first write", func(t *testing.T) {
+		t.Parallel()
+
+		services := database.NewServiceRepository(newTestDatabase(t))
+
+		stored, _, err := services.Upsert(t.Context(), testService("example"), 0)
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, stored.Version)
+	})
+
+	t.Run("leaves the version alone when an apply changes nothing", func(t *testing.T) {
+		t.Parallel()
+
+		services := database.NewServiceRepository(newTestDatabase(t))
+
+		first, _, err := services.Upsert(t.Context(), testService("example"), 0)
+		require.NoError(t, err)
+
+		second, created, err := services.Upsert(t.Context(), testService("example"), 0)
+		require.NoError(t, err)
+
+		assert.False(t, created)
+		assert.Equal(t, first.Version, second.Version)
+		assert.WithinDuration(t, first.UpdatedAt, second.UpdatedAt, 0)
+	})
+
+	t.Run("applies when the version is the one the caller read", func(t *testing.T) {
+		t.Parallel()
+
+		services := database.NewServiceRepository(newTestDatabase(t))
+
+		first, _, err := services.Upsert(t.Context(), testService("example"), 0)
+		require.NoError(t, err)
+
+		replacement := testService("example")
+		replacement.TargetPort = 9090
+
+		second, _, err := services.Upsert(t.Context(), replacement, first.Version)
+		require.NoError(t, err)
+
+		assert.Equal(t, 2, second.Version)
+	})
+
+	t.Run("refuses an apply conditioned on a version that has moved", func(t *testing.T) {
+		t.Parallel()
+
+		services := database.NewServiceRepository(newTestDatabase(t))
+
+		first, _, err := services.Upsert(t.Context(), testService("example"), 0)
+		require.NoError(t, err)
+
+		moved := testService("example")
+		moved.TargetPort = 9090
+
+		_, _, err = services.Upsert(t.Context(), moved, first.Version)
+		require.NoError(t, err)
+
+		// The caller is still holding the tag it read before the write above.
+		stale := testService("example")
+		stale.TargetPort = 9091
+
+		_, _, err = services.Upsert(t.Context(), stale, first.Version)
+		assert.ErrorIs(t, err, database.ErrServiceChanged)
+
+		got, err := services.Get(t.Context(), "example")
+		require.NoError(t, err)
+
+		assert.Equal(t, 9090, got.TargetPort, "the refused apply was written anyway")
+	})
+
+	t.Run("refuses a conditional apply for a service that does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		services := database.NewServiceRepository(newTestDatabase(t))
+
+		_, _, err := services.Upsert(t.Context(), testService("example"), 1)
+		assert.ErrorIs(t, err, database.ErrServiceNotFound)
+	})
 }
 
 func TestServiceRepository_Get(t *testing.T) {
@@ -77,7 +156,7 @@ func TestServiceRepository_Get(t *testing.T) {
 
 		services := database.NewServiceRepository(newTestDatabase(t))
 
-		stored, _, err := services.Upsert(t.Context(), testService("example"))
+		stored, _, err := services.Upsert(t.Context(), testService("example"), 0)
 		require.NoError(t, err)
 
 		got, err := services.Get(t.Context(), "example")
@@ -111,7 +190,7 @@ func TestServiceRepository_List(t *testing.T) {
 		services := database.NewServiceRepository(newTestDatabase(t))
 
 		for _, name := range []string{"beta", "alpha"} {
-			_, _, err := services.Upsert(t.Context(), testService(name))
+			_, _, err := services.Upsert(t.Context(), testService(name), 0)
 			require.NoError(t, err)
 		}
 
@@ -131,10 +210,10 @@ func TestServiceRepository_List(t *testing.T) {
 		labelled := testService("labelled")
 		labelled.Labels = map[string]string{"app.kubernetes.io/name": "web"}
 
-		_, _, err := services.Upsert(t.Context(), labelled)
+		_, _, err := services.Upsert(t.Context(), labelled, 0)
 		require.NoError(t, err)
 
-		_, _, err = services.Upsert(t.Context(), testService("other"))
+		_, _, err = services.Upsert(t.Context(), testService("other"), 0)
 		require.NoError(t, err)
 
 		// The key is quoted in the path because label keys may contain dots,
@@ -167,7 +246,7 @@ func TestServiceRepository_Delete(t *testing.T) {
 
 		services := database.NewServiceRepository(newTestDatabase(t))
 
-		_, _, err := services.Upsert(t.Context(), testService("example"))
+		_, _, err := services.Upsert(t.Context(), testService("example"), 0)
 		require.NoError(t, err)
 
 		require.NoError(t, services.Delete(t.Context(), "example"))

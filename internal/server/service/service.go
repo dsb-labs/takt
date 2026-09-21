@@ -31,7 +31,9 @@ type (
 		// Upsert should record the service under its name, replacing what a
 		// service already holding the name says, and report whether it created
 		// the row.
-		Upsert(ctx context.Context, service database.Service) (database.Service, bool, error)
+		// A non-zero ifMatch conditions the write on the stored version still
+		// being that one.
+		Upsert(ctx context.Context, service database.Service, ifMatch int) (database.Service, bool, error)
 		// Get should return the service with the given name.
 		Get(ctx context.Context, name string) (database.Service, error)
 		// List should return the services matching every one of the given
@@ -159,7 +161,7 @@ func (s *ServiceService) Apply(ctx context.Context, spec manifest.Service) (Serv
 		TargetLabels:   spec.Target.Labels,
 		TargetPort:     spec.Target.Port,
 		TargetProtocol: string(spec.Target.Protocol),
-	})
+	}, 0)
 	if err != nil {
 		return Service{}, false, fmt.Errorf("failed to store service: %w", err)
 	}

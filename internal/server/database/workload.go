@@ -19,6 +19,9 @@ var (
 	// ErrWorkloadReferenced is returned when a delete is refused because another
 	// workload references the one being deleted.
 	ErrWorkloadReferenced = errors.New("workload is referenced")
+	// ErrWorkloadChanged is returned when the workload an apply was conditioned on
+	// is not the workload the database holds.
+	ErrWorkloadChanged = errors.New("workload changed since it was read")
 )
 
 type (
@@ -95,9 +98,15 @@ func NewWorkloadRepository(db *sql.DB) *WorkloadRepository {
 // bumps the version nor moves UpdatedAt. When the hash differs the version is
 // incremented, which is what causes the reconciler to replace running instances.
 //
+// A non-zero ifMatch conditions the write on the stored version still being that
+// one, reporting ErrWorkloadChanged when it is not and ErrWorkloadNotFound when
+// there is no row to have the version at all. Zero applies unconditionally,
+// which is what a caller creating a workload has to do: there is no version yet
+// to name.
+//
 // The Version, CreatedAt and UpdatedAt fields of w are ignored. The repository
 // assigns them.
-func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Port) (Workload, bool, error) {
+func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ifMatch int, ports ...Port) (Workload, bool, error) {
 	labels, err := marshalLabels(w.Labels)
 	if err != nil {
 		return Workload{}, false, err
@@ -115,6 +124,10 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Po
 		existing, err := get(ctx, tx, w.Name)
 		switch {
 		case errors.Is(err, ErrWorkloadNotFound):
+			if ifMatch != 0 {
+				return err
+			}
+
 			if stored, err = insert(ctx, tx, w, labels); err != nil {
 				return err
 			}
@@ -128,6 +141,10 @@ func (r *WorkloadRepository) Upsert(ctx context.Context, w Workload, ports ...Po
 			// written over, and the teardown that follows would remove the row the
 			// apply had just been told succeeded.
 			return ErrWorkloadDeleting
+		case ifMatch != 0 && existing.Version != ifMatch:
+			// Checked after the teardown above, because a workload on its way out is
+			// not something a caller retries with a fresher tag.
+			return ErrWorkloadChanged
 		case existing.SpecHash == w.SpecHash:
 			// Nothing about the specification changed, so the row is left alone. The
 			// ports are still reclaimed below, since an allocation may have been

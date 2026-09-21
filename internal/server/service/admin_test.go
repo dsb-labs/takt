@@ -60,7 +60,7 @@ func TestAdminService_PrepareBackup(t *testing.T) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		archive := streamBackup(t, dir, service.BackupOptions{})

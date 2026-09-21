@@ -351,7 +351,7 @@ func TestVariableRepository_UsedBy(t *testing.T) {
 			Spec:     []byte(`{}`),
 			SpecHash: "hash-example",
 			Secrets:  []string{"token"},
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		usedBy, err := database.NewVariableRepository(db).UsedBy(ctx, "token")
@@ -396,7 +396,7 @@ func TestWorkloadRepository_Upsert_LinksBothKinds(t *testing.T) {
 		SpecHash:  "hash-example",
 		Secrets:   []string{"db-password"},
 		Variables: []string{"log-level"},
-	})
+	}, 0)
 	require.NoError(t, err)
 
 	usedBy, err := database.NewSecretRepository(db).UsedBy(ctx, "db-password")
@@ -423,6 +423,6 @@ func linkVariableWorkload(t *testing.T, db *sql.DB, name string, variables ...st
 		Spec:      []byte(`{}`),
 		SpecHash:  "hash-" + name,
 		Variables: variables,
-	})
+	}, 0)
 	require.NoError(t, err)
 }
