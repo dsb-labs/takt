@@ -1174,8 +1174,8 @@ func (_m *MockServiceService) EXPECT() *MockServiceService_Expecter {
 }
 
 // Apply provides a mock function for the type MockServiceService
-func (_mock *MockServiceService) Apply(ctx context.Context, spec manifest.Service) (service.Service, bool, error) {
-	ret := _mock.Called(ctx, spec)
+func (_mock *MockServiceService) Apply(ctx context.Context, spec manifest.Service, ifMatch int) (service.Service, bool, error) {
+	ret := _mock.Called(ctx, spec, ifMatch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Apply")
@@ -1184,21 +1184,21 @@ func (_mock *MockServiceService) Apply(ctx context.Context, spec manifest.Servic
 	var r0 service.Service
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Service) (service.Service, bool, error)); ok {
-		return returnFunc(ctx, spec)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Service, int) (service.Service, bool, error)); ok {
+		return returnFunc(ctx, spec, ifMatch)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Service) service.Service); ok {
-		r0 = returnFunc(ctx, spec)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Service, int) service.Service); ok {
+		r0 = returnFunc(ctx, spec, ifMatch)
 	} else {
 		r0 = ret.Get(0).(service.Service)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Service) bool); ok {
-		r1 = returnFunc(ctx, spec)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Service, int) bool); ok {
+		r1 = returnFunc(ctx, spec, ifMatch)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, manifest.Service) error); ok {
-		r2 = returnFunc(ctx, spec)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, manifest.Service, int) error); ok {
+		r2 = returnFunc(ctx, spec, ifMatch)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -1213,11 +1213,12 @@ type MockServiceService_Apply_Call struct {
 // Apply is a helper method to define mock.On call
 //   - ctx context.Context
 //   - spec manifest.Service
-func (_e *MockServiceService_Expecter) Apply(ctx any, spec any) *MockServiceService_Apply_Call {
-	return &MockServiceService_Apply_Call{Call: _e.mock.On("Apply", ctx, spec)}
+//   - ifMatch int
+func (_e *MockServiceService_Expecter) Apply(ctx any, spec any, ifMatch any) *MockServiceService_Apply_Call {
+	return &MockServiceService_Apply_Call{Call: _e.mock.On("Apply", ctx, spec, ifMatch)}
 }
 
-func (_c *MockServiceService_Apply_Call) Run(run func(ctx context.Context, spec manifest.Service)) *MockServiceService_Apply_Call {
+func (_c *MockServiceService_Apply_Call) Run(run func(ctx context.Context, spec manifest.Service, ifMatch int)) *MockServiceService_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1227,9 +1228,14 @@ func (_c *MockServiceService_Apply_Call) Run(run func(ctx context.Context, spec 
 		if args[1] != nil {
 			arg1 = args[1].(manifest.Service)
 		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -1240,7 +1246,7 @@ func (_c *MockServiceService_Apply_Call) Return(service1 service.Service, b bool
 	return _c
 }
 
-func (_c *MockServiceService_Apply_Call) RunAndReturn(run func(ctx context.Context, spec manifest.Service) (service.Service, bool, error)) *MockServiceService_Apply_Call {
+func (_c *MockServiceService_Apply_Call) RunAndReturn(run func(ctx context.Context, spec manifest.Service, ifMatch int) (service.Service, bool, error)) *MockServiceService_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2320,8 +2326,8 @@ func (_m *MockVolumeService) EXPECT() *MockVolumeService_Expecter {
 }
 
 // Apply provides a mock function for the type MockVolumeService
-func (_mock *MockVolumeService) Apply(ctx context.Context, volume manifest.Volume) (service.Volume, bool, error) {
-	ret := _mock.Called(ctx, volume)
+func (_mock *MockVolumeService) Apply(ctx context.Context, volume manifest.Volume, ifMatch int) (service.Volume, bool, error) {
+	ret := _mock.Called(ctx, volume, ifMatch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Apply")
@@ -2330,21 +2336,21 @@ func (_mock *MockVolumeService) Apply(ctx context.Context, volume manifest.Volum
 	var r0 service.Volume
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) (service.Volume, bool, error)); ok {
-		return returnFunc(ctx, volume)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume, int) (service.Volume, bool, error)); ok {
+		return returnFunc(ctx, volume, ifMatch)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume) service.Volume); ok {
-		r0 = returnFunc(ctx, volume)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Volume, int) service.Volume); ok {
+		r0 = returnFunc(ctx, volume, ifMatch)
 	} else {
 		r0 = ret.Get(0).(service.Volume)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Volume) bool); ok {
-		r1 = returnFunc(ctx, volume)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Volume, int) bool); ok {
+		r1 = returnFunc(ctx, volume, ifMatch)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, manifest.Volume) error); ok {
-		r2 = returnFunc(ctx, volume)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, manifest.Volume, int) error); ok {
+		r2 = returnFunc(ctx, volume, ifMatch)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -2359,11 +2365,12 @@ type MockVolumeService_Apply_Call struct {
 // Apply is a helper method to define mock.On call
 //   - ctx context.Context
 //   - volume manifest.Volume
-func (_e *MockVolumeService_Expecter) Apply(ctx any, volume any) *MockVolumeService_Apply_Call {
-	return &MockVolumeService_Apply_Call{Call: _e.mock.On("Apply", ctx, volume)}
+//   - ifMatch int
+func (_e *MockVolumeService_Expecter) Apply(ctx any, volume any, ifMatch any) *MockVolumeService_Apply_Call {
+	return &MockVolumeService_Apply_Call{Call: _e.mock.On("Apply", ctx, volume, ifMatch)}
 }
 
-func (_c *MockVolumeService_Apply_Call) Run(run func(ctx context.Context, volume manifest.Volume)) *MockVolumeService_Apply_Call {
+func (_c *MockVolumeService_Apply_Call) Run(run func(ctx context.Context, volume manifest.Volume, ifMatch int)) *MockVolumeService_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -2373,9 +2380,14 @@ func (_c *MockVolumeService_Apply_Call) Run(run func(ctx context.Context, volume
 		if args[1] != nil {
 			arg1 = args[1].(manifest.Volume)
 		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -2386,7 +2398,7 @@ func (_c *MockVolumeService_Apply_Call) Return(volume1 service.Volume, b bool, e
 	return _c
 }
 
-func (_c *MockVolumeService_Apply_Call) RunAndReturn(run func(ctx context.Context, volume manifest.Volume) (service.Volume, bool, error)) *MockVolumeService_Apply_Call {
+func (_c *MockVolumeService_Apply_Call) RunAndReturn(run func(ctx context.Context, volume manifest.Volume, ifMatch int) (service.Volume, bool, error)) *MockVolumeService_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2625,8 +2637,8 @@ func (_m *MockWorkloadService) EXPECT() *MockWorkloadService_Expecter {
 }
 
 // Apply provides a mock function for the type MockWorkloadService
-func (_mock *MockWorkloadService) Apply(ctx context.Context, spec manifest.Spec) (service.Workload, bool, error) {
-	ret := _mock.Called(ctx, spec)
+func (_mock *MockWorkloadService) Apply(ctx context.Context, spec manifest.Spec, ifMatch int) (service.Workload, bool, error) {
+	ret := _mock.Called(ctx, spec, ifMatch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Apply")
@@ -2635,21 +2647,21 @@ func (_mock *MockWorkloadService) Apply(ctx context.Context, spec manifest.Spec)
 	var r0 service.Workload
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Spec) (service.Workload, bool, error)); ok {
-		return returnFunc(ctx, spec)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Spec, int) (service.Workload, bool, error)); ok {
+		return returnFunc(ctx, spec, ifMatch)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Spec) service.Workload); ok {
-		r0 = returnFunc(ctx, spec)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Spec, int) service.Workload); ok {
+		r0 = returnFunc(ctx, spec, ifMatch)
 	} else {
 		r0 = ret.Get(0).(service.Workload)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Spec) bool); ok {
-		r1 = returnFunc(ctx, spec)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Spec, int) bool); ok {
+		r1 = returnFunc(ctx, spec, ifMatch)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, manifest.Spec) error); ok {
-		r2 = returnFunc(ctx, spec)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, manifest.Spec, int) error); ok {
+		r2 = returnFunc(ctx, spec, ifMatch)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -2664,11 +2676,12 @@ type MockWorkloadService_Apply_Call struct {
 // Apply is a helper method to define mock.On call
 //   - ctx context.Context
 //   - spec manifest.Spec
-func (_e *MockWorkloadService_Expecter) Apply(ctx any, spec any) *MockWorkloadService_Apply_Call {
-	return &MockWorkloadService_Apply_Call{Call: _e.mock.On("Apply", ctx, spec)}
+//   - ifMatch int
+func (_e *MockWorkloadService_Expecter) Apply(ctx any, spec any, ifMatch any) *MockWorkloadService_Apply_Call {
+	return &MockWorkloadService_Apply_Call{Call: _e.mock.On("Apply", ctx, spec, ifMatch)}
 }
 
-func (_c *MockWorkloadService_Apply_Call) Run(run func(ctx context.Context, spec manifest.Spec)) *MockWorkloadService_Apply_Call {
+func (_c *MockWorkloadService_Apply_Call) Run(run func(ctx context.Context, spec manifest.Spec, ifMatch int)) *MockWorkloadService_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -2678,9 +2691,14 @@ func (_c *MockWorkloadService_Apply_Call) Run(run func(ctx context.Context, spec
 		if args[1] != nil {
 			arg1 = args[1].(manifest.Spec)
 		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -2691,7 +2709,7 @@ func (_c *MockWorkloadService_Apply_Call) Return(workload service.Workload, b bo
 	return _c
 }
 
-func (_c *MockWorkloadService_Apply_Call) RunAndReturn(run func(ctx context.Context, spec manifest.Spec) (service.Workload, bool, error)) *MockWorkloadService_Apply_Call {
+func (_c *MockWorkloadService_Apply_Call) RunAndReturn(run func(ctx context.Context, spec manifest.Spec, ifMatch int) (service.Workload, bool, error)) *MockWorkloadService_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }

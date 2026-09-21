@@ -13,6 +13,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
@@ -275,4 +276,50 @@ func (w *flushWriter) Write(p []byte) (int, error) {
 	_ = w.control.Flush()
 
 	return n, nil
+}
+
+// quoteETag wraps a tag in the quotes the ETag header carries.
+func quoteETag(etag string) string {
+	return `"` + etag + `"`
+}
+
+// unquoteETag strips the quotes an If-Match header carries, accepting a bare
+// tag too so a caller pasting the value by hand is not refused over quoting.
+func unquoteETag(etag string) string {
+	if len(etag) >= 2 && etag[0] == '"' && etag[len(etag)-1] == '"' {
+		return etag[1 : len(etag)-1]
+	}
+
+	return etag
+}
+
+// versionETag renders a resource's version as the tag a conditional apply
+// hands back.
+//
+// The policy document derives its tag from its content, because it is one
+// document with no row of its own to count writes against. A workload, volume
+// or service already counts its writes, and that count moves only when an apply
+// changed something, so it says the same thing more cheaply.
+func versionETag(version int) string {
+	return quoteETag(strconv.Itoa(version))
+}
+
+// parseIfMatch reads the version an If-Match header names, reporting whether
+// the header was absent and whether what it carried was a version at all.
+//
+// An absent header means an unconditional apply, which is what creating a
+// resource has to do: there is no tag yet to name. A header carrying something
+// that is not one of takt's tags is a caller mistake rather than a conflict, so
+// it is told apart from a version that simply no longer matches.
+func parseIfMatch(header *string) (version int, conditional, ok bool) {
+	if header == nil || *header == "" {
+		return 0, false, true
+	}
+
+	version, err := strconv.Atoi(unquoteETag(*header))
+	if err != nil || version <= 0 {
+		return 0, true, false
+	}
+
+	return version, true, true
 }

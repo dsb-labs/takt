@@ -213,7 +213,7 @@ func TestWorkloadService_Apply(t *testing.T) {
 
 			svc := newTestService(t, d, repo, ports, nil)
 
-			got, created, err := svc.Apply(t.Context(), tc.Spec)
+			got, created, err := svc.Apply(t.Context(), tc.Spec, 0)
 			if tc.ExpectErr != nil {
 				assert.ErrorIs(t, err, tc.ExpectErr)
 				return
@@ -246,7 +246,7 @@ func TestWorkloadService_ExecResourceLimits(t *testing.T) {
 		// anything is read or written, so an unexpected call fails the test.
 		svc := newLimitedService(t, exec.ErrNotEnforceable, NewMockWorkloadRepository(t))
 
-		_, _, err := svc.Apply(t.Context(), spec)
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		assert.ErrorIs(t, err, service.ErrUnsupportedRuntime)
 	})
 
@@ -275,7 +275,7 @@ func TestWorkloadService_ExecResourceLimits(t *testing.T) {
 
 		svc := newLimitedService(t, nil, repo)
 
-		got, created, err := svc.Apply(t.Context(), spec)
+		got, created, err := svc.Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 		assert.True(t, created)
 		assert.Equal(t, manifest.RuntimeExec, got.Runtime)
@@ -617,7 +617,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Claimer:   newTestClaimer(ports, allocatorStub{}),
 		})
 
-		_, _, err := svc.Apply(t.Context(), spec)
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 	})
 
@@ -666,7 +666,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			AllowHostPaths: []string{"/mnt"},
 		})
 
-		_, _, err := svc.Apply(t.Context(), pathSpec)
+		_, _, err := svc.Apply(t.Context(), pathSpec, 0)
 		require.NoError(t, err)
 	})
 
@@ -694,7 +694,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			AllowHostPaths: []string{"/mnt/media"},
 		})
 
-		_, _, err := svc.Apply(t.Context(), pathSpec)
+		_, _, err := svc.Apply(t.Context(), pathSpec, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidSpec)
 	})
 
@@ -726,7 +726,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			AllowHostPaths: []string{filepath.Join(root, "media")},
 		})
 
-		_, _, err := svc.Apply(t.Context(), pathSpec)
+		_, _, err := svc.Apply(t.Context(), pathSpec, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidSpec)
 	})
 
@@ -753,7 +753,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Claimer:   newTestClaimer(ports, allocatorStub{}),
 		})
 
-		_, _, err := svc.Apply(t.Context(), pathSpec)
+		_, _, err := svc.Apply(t.Context(), pathSpec, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidSpec)
 	})
 
@@ -783,7 +783,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Claimer:   newTestClaimer(ports, allocatorStub{}),
 		})
 
-		_, _, err := svc.Apply(t.Context(), spec)
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		assert.ErrorIs(t, err, service.ErrVolumeNotFound)
 	})
 
@@ -805,7 +805,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Claimer:   newTestClaimer(ports, allocatorStub{}),
 		})
 
-		_, _, err := svc.Apply(t.Context(), spec)
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		assert.ErrorIs(t, err, service.ErrVolumeNotFound)
 	})
 }
@@ -827,7 +827,7 @@ func TestWorkloadService_Apply_NotifiesReconciler(t *testing.T) {
 	var notified bool
 	svc := newTestService(t, d, repo, ports, func() { notified = true })
 
-	_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
+	_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"), 0)
 	require.NoError(t, err)
 
 	// Desired state changed, so the reconciler must be woken rather than left to
@@ -1647,7 +1647,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 
 		svc := newTestService(t, d, repo, ports, nil)
 
-		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
+		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"), 0)
 		require.NoError(t, err)
 		assert.Equal(t, 2, attempts)
 	})
@@ -1670,7 +1670,7 @@ func TestWorkloadService_Apply_PortCollision(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
 		spec.Ports = []manifest.Port{{To: 8080, From: 4141}}
 
-		_, _, err := svc.Apply(t.Context(), spec)
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		assert.ErrorIs(t, err, port.ErrHostPortTaken)
 	})
 }
@@ -1706,7 +1706,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 			})
 
 		_, _, err := newTestAddressAwareService(t, d, repo, ports, addresses).
-			Apply(t.Context(), referencing("postgres://app@${workload:postgres:pg}/app"))
+			Apply(t.Context(), referencing("postgres://app@${workload:postgres:pg}/app"), 0)
 		require.NoError(t, err)
 
 		// Recorded so that moving the referenced workload's ports can find what reads
@@ -1738,7 +1738,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 				})
 
 			_, _, err := newTestAddressAwareService(t, d, repo, ports, addresses).
-				Apply(t.Context(), referencing("postgres://app@${workload:postgres:pg}/app"))
+				Apply(t.Context(), referencing("postgres://app@${workload:postgres:pg}/app"), 0)
 			require.NoError(t, err)
 		}
 
@@ -1761,7 +1761,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 		// The workload could never run, and the operator asking for it is the one who
 		// can fix the name or apply what it names first.
 		_, _, err := newTestAddressAwareService(t, d, repo, ports, addresses).
-			Apply(t.Context(), referencing("${workload:nope}"))
+			Apply(t.Context(), referencing("${workload:nope}"), 0)
 		require.ErrorIs(t, err, service.ErrWorkloadNotFound)
 		assert.Contains(t, err.Error(), "nope")
 
@@ -1779,7 +1779,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 			Return("", fmt.Errorf("%w: workload postgres does not publish http", resolve.ErrPortNotPublished)).Once()
 
 		_, _, err := newTestAddressAwareService(t, d, repo, ports, addresses).
-			Apply(t.Context(), referencing("${workload:postgres:http}"))
+			Apply(t.Context(), referencing("${workload:postgres:http}"), 0)
 		require.ErrorIs(t, err, service.ErrPortNotPublished)
 		assert.Contains(t, err.Error(), "postgres:http")
 
@@ -1793,7 +1793,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 			Return(database.Workload{}, database.ErrWorkloadNotFound)
 
 		_, _, err := newTestService(t, d, repo, ports, nil).
-			Apply(t.Context(), referencing("${workload:postgres}"))
+			Apply(t.Context(), referencing("${workload:postgres}"), 0)
 		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
 	})
 
@@ -1815,7 +1815,7 @@ func TestWorkloadService_Apply_WorkloadReferences(t *testing.T) {
 			})
 
 		_, _, err := newTestService(t, d, repo, ports, nil).
-			Apply(t.Context(), containerSpec("example", "example/example:latest"))
+			Apply(t.Context(), containerSpec("example", "example/example:latest"), 0)
 		require.NoError(t, err)
 
 		sum := sha256.Sum256(stored.Spec)
@@ -1852,7 +1852,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
 		spec.Ports = []manifest.Port{{To: 53, Protocol: manifest.ProtocolUDP}}
 
-		_, _, err := svc.Apply(t.Context(), spec)
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 
 		require.Len(t, claimed, 1)
@@ -1888,7 +1888,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 			{To: 53, Protocol: manifest.ProtocolUDP},
 		}
 
-		_, _, err := svc.Apply(t.Context(), spec)
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 
 		require.Len(t, claimed, 2)
@@ -1921,7 +1921,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
 		spec.Ports = []manifest.Port{{Name: "http", To: 8080}, {To: 9090}}
 
-		workload, _, err := svc.Apply(t.Context(), spec)
+		workload, _, err := svc.Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 
 		require.Len(t, claimed, 2)
@@ -1960,7 +1960,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
 		spec.Ports = []manifest.Port{{Name: "api", To: 8080}}
 
-		_, _, err := svc.Apply(t.Context(), spec)
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 
 		require.Len(t, claimed, 1)
@@ -1992,7 +1992,7 @@ func TestWorkloadService_Apply_Ports(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
 		spec.Ports = []manifest.Port{{To: 53, From: 5353, Protocol: manifest.ProtocolUDP}}
 
-		_, _, err := svc.Apply(t.Context(), spec)
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 	})
 }
@@ -2022,7 +2022,7 @@ func TestWorkloadService_Apply_NoPortsAvailable(t *testing.T) {
 
 	// An exhausted range is a capacity problem rather than a fault or a bad request,
 	// and the API depends on this translation to answer 503 rather than 500.
-	_, _, err := svc.Apply(t.Context(), spec)
+	_, _, err := svc.Apply(t.Context(), spec, 0)
 	assert.ErrorIs(t, err, port.ErrNoPortsAvailable)
 
 	// The workload must not have been stored: it has no reachable address, and the
@@ -2511,8 +2511,67 @@ func TestWorkloadService_Apply_RejectsATerminatingWorkload(t *testing.T) {
 
 	// Re-applying a workload mid-teardown would race the reconciler removing it,
 	// and could leave the freshly applied instance being torn down instead.
-	_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
+	_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"), 0)
 	assert.ErrorIs(t, err, service.ErrWorkloadDeleting)
+}
+
+func TestWorkloadService_Apply_Conditional(t *testing.T) {
+	t.Parallel()
+
+	spec := containerSpec("example", "example/example:latest")
+
+	t.Run("passes the named version through to the repository", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 3, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
+				w.ID, w.Version = "id-one", 4
+
+				return w, false, nil
+			}).Once()
+
+		got, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec, 3)
+		require.NoError(t, err)
+
+		assert.Equal(t, 4, got.Version, "the applied workload did not carry its new version")
+	})
+
+	t.Run("refuses an apply naming a version the workload has moved past", func(t *testing.T) {
+		t.Parallel()
+
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 3, mock.Anything).
+			Return(database.Workload{}, false, database.ErrWorkloadChanged).Once()
+
+		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec, 3)
+		assert.ErrorIs(t, err, service.ErrWorkloadChanged)
+	})
+
+	t.Run("refuses an apply naming a version of a workload that does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		// A caller holding a tag for something that is gone lost the same race as one
+		// holding a stale tag, so it is told the same thing.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 3, mock.Anything).
+			Return(database.Workload{}, false, database.ErrWorkloadNotFound).Once()
+
+		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec, 3)
+		assert.ErrorIs(t, err, service.ErrWorkloadChanged)
+	})
 }
 
 func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
@@ -2534,7 +2593,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 			}).Once()
 
 		_, _, err := newTestService(t, d, repo, ports, nil).
-			Apply(t.Context(), containerSpec("example", "example/example:latest"))
+			Apply(t.Context(), containerSpec("example", "example/example:latest"), 0)
 		require.NoError(t, err)
 
 		// Pinned to the literal, because a change here replaces every running instance
@@ -2597,7 +2656,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 				return w, true, nil
 			}).Once()
 
-		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 
 		// The API echoes the stored specification back, so a resolved value here would
@@ -2622,7 +2681,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 
 		// The workload could never start, and the operator applying it is the one who
 		// can correct the name.
-		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec, 0)
 		require.ErrorIs(t, err, service.ErrSecretNotFound)
 		assert.Contains(t, err.Error(), "nope")
 	})
@@ -2633,7 +2692,7 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
 		spec.Env = map[string]string{"DSN": "${secret:unterminated"}
 
-		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec)
+		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidSpec)
 	})
 }
@@ -2724,7 +2783,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 				return w, true, nil
 			}).Once()
 
-		_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec)
+		_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 
 		// A variable is stored as written, as a secret is. The value is not a secret,
@@ -2760,7 +2819,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 				return w, true, nil
 			}).Once()
 
-		_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec)
+		_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 
 		assert.Equal(t, []string{"db-password"}, stored.Secrets)
@@ -2780,7 +2839,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 
 		// The workload could never start, and the operator applying it is the one who
 		// can correct the name.
-		_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec)
+		_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec, 0)
 		require.ErrorIs(t, err, service.ErrVariableNotFound)
 		assert.Contains(t, err.Error(), "nope")
 	})
@@ -2794,7 +2853,7 @@ func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 
-		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec)
+		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec, 0)
 		assert.ErrorIs(t, err, service.ErrVariableNotFound)
 	})
 }
@@ -2854,7 +2913,7 @@ func TestWorkloadService_Apply_HashesImageDigest(t *testing.T) {
 				return w, true, nil
 			}).Once()
 
-		_, _, err := newTestImageAwareService(t, d, repo, ports, images).Apply(t.Context(), spec)
+		_, _, err := newTestImageAwareService(t, d, repo, ports, images).Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 
 		// The API echoes the stored specification back as what was submitted, and
@@ -2875,7 +2934,7 @@ func TestWorkloadService_Apply_HashesImageDigest(t *testing.T) {
 
 		// A hash computed without the digest would claim the image is unchanged
 		// when nothing checked, so the apply is refused instead.
-		_, _, err := newTestImageAwareService(t, d, repo, ports, images).Apply(t.Context(), spec)
+		_, _, err := newTestImageAwareService(t, d, repo, ports, images).Apply(t.Context(), spec, 0)
 		assert.Error(t, err)
 	})
 
@@ -2887,7 +2946,7 @@ func TestWorkloadService_Apply_HashesImageDigest(t *testing.T) {
 		repo.EXPECT().Get(mock.Anything, "example").
 			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
 
-		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec)
+		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidSpec)
 	})
 }
@@ -3226,7 +3285,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 				return w, true, nil
 			}).Once()
 
-		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 
 		// A mounted value is stored as the name it reads, and no path is resolved for it:
@@ -3254,7 +3313,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 
 		// The workload could never start, and the operator applying it is the one who can
 		// correct the name.
-		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec, 0)
 		require.ErrorIs(t, err, service.ErrSecretNotFound)
 		assert.Contains(t, err.Error(), "nope")
 	})
@@ -3265,7 +3324,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 		spec := containerSpec("example", "example/example:latest")
 		spec.Volumes = []manifest.VolumeMount{{To: "/etc/tls/cert.pem"}}
 
-		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec)
+		_, _, err := newTestService(t, d, repo, ports, nil).Apply(t.Context(), spec, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidSpec)
 	})
 
@@ -3288,7 +3347,7 @@ func TestWorkloadService_Apply_HashesMountedValues(t *testing.T) {
 			}).Once()
 		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
-		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec)
+		_, _, err := newTestSecretAwareService(t, d, repo, ports, secrets).Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 	})
 }
@@ -3322,7 +3381,7 @@ func applyForHashOf(t *testing.T, spec manifest.Spec, revisions, values map[stri
 			return w, true, nil
 		}).Once()
 
-	_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec)
+	_, _, err := newTestReferenceAwareService(t, d, repo, ports, secrets, variables).Apply(t.Context(), spec, 0)
 	require.NoError(t, err)
 
 	return hash
@@ -3356,7 +3415,7 @@ func applyForDigestHash(t *testing.T, spec manifest.Spec, digests map[string]str
 		}
 	}
 
-	_, _, err := newTestImageAwareService(t, d, repo, ports, images).Apply(t.Context(), spec)
+	_, _, err := newTestImageAwareService(t, d, repo, ports, images).Apply(t.Context(), spec, 0)
 	require.NoError(t, err)
 
 	return hash
@@ -3880,7 +3939,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 				spec := containerSpec(workloadName(i), "example/example:latest")
 				spec.Ports = []manifest.Port{{To: 8080}}
 
-				applied[i], _, errs[i] = svc.Apply(t.Context(), spec)
+				applied[i], _, errs[i] = svc.Apply(t.Context(), spec, 0)
 			})
 		}
 
@@ -3908,7 +3967,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		first := containerSpec("first", "example/example:latest")
 		first.Ports = []manifest.Port{{From: 21000, To: 8080}}
 
-		_, _, err := svc.Apply(t.Context(), first)
+		_, _, err := svc.Apply(t.Context(), first, 0)
 		require.NoError(t, err)
 
 		// A dynamic port that collides is takt's to resolve, so it is allocated again.
@@ -3917,7 +3976,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		second := containerSpec("second", "example/example:latest")
 		second.Ports = []manifest.Port{{From: 21000, To: 8080}}
 
-		_, _, err = svc.Apply(t.Context(), second)
+		_, _, err = svc.Apply(t.Context(), second, 0)
 		assert.ErrorIs(t, err, port.ErrHostPortTaken)
 	})
 
@@ -3930,7 +3989,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		taken := containerSpec("taken", "example/example:latest")
 		taken.Ports = []manifest.Port{{From: 20000, To: 8080}}
 
-		_, _, err := svc.Apply(t.Context(), taken)
+		_, _, err := svc.Apply(t.Context(), taken, 0)
 		require.NoError(t, err)
 
 		// Allocation avoids what the repository reports as allocated, so the collision
@@ -3951,7 +4010,7 @@ func TestWorkloadService_Apply_Concurrent(t *testing.T) {
 		contender := containerSpec("contender", "example/example:latest")
 		contender.Ports = []manifest.Port{{To: 8080}}
 
-		_, _, err = blindSvc.Apply(t.Context(), contender)
+		_, _, err = blindSvc.Apply(t.Context(), contender, 0)
 		require.ErrorIs(t, err, port.ErrHostPortTaken)
 		// A pinned collision reports the same sentinel, so the wording is what says
 		// this was the bound being reached rather than a port the caller asked for.
@@ -4031,7 +4090,7 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 
 		svc := newTestRecordingService(t, d, repo, ports, events)
 
-		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
+		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"), 0)
 		require.NoError(t, err)
 	})
 
@@ -4060,7 +4119,7 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 
 		spec := containerSpec("example", "example/example:v2")
 
-		_, _, err := svc.Apply(t.Context(), spec)
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 	})
 
@@ -4082,7 +4141,7 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 		// Whatever runs the manifests on a loop re-applies them unchanged, and an
 		// event for each of those would bury the applies that explain something.
 		// The repository expects no call, so one would fail the test.
-		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"))
+		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"), 0)
 		require.NoError(t, err)
 	})
 

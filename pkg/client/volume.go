@@ -31,6 +31,10 @@ type Volume struct {
 	// The permission bits on the volume's directory, as an octal string. Empty
 	// when the directory keeps the server's default.
 	Mode string
+	// The entity tag identifying this version of the volume, which a conditional
+	// apply hands back in WithIfMatch. Empty on one read from a list, which
+	// reports no tag per item.
+	ETag string
 	// The time the volume was created.
 	CreatedAt time.Time
 }
@@ -61,21 +65,29 @@ func checkName(name string) error {
 //
 // A volume has to exist before a workload can mount it, so that a mistyped
 // name is reported rather than quietly becoming a second empty volume.
-func (c *Client) ApplyVolume(ctx context.Context, volume manifest.Volume) (Volume, error) {
+func (c *Client) ApplyVolume(ctx context.Context, volume manifest.Volume, options ...ApplyOption) (Volume, error) {
 	if err := checkName(volume.Name); err != nil {
 		return Volume{}, err
 	}
 
-	resp, err := c.api.ApplyVolumeWithResponse(ctx, volume.Name, wire.FromVolume(volume))
+	resp, err := c.api.ApplyVolumeWithResponse(ctx, volume.Name, &api.ApplyVolumeParams{IfMatch: ifMatch(options)}, wire.FromVolume(volume))
 	if err != nil {
 		return Volume{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
 	case resp.JSON200 != nil:
-		return newVolume(resp.JSON200.Volume), nil
+		applied := newVolume(resp.JSON200.Volume)
+		applied.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return applied, nil
 	case resp.JSON201 != nil:
-		return newVolume(resp.JSON201.Volume), nil
+		applied := newVolume(resp.JSON201.Volume)
+		applied.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return applied, nil
+	case resp.JSON412 != nil:
+		return Volume{}, fmt.Errorf("%s: %w", resp.JSON412.Error, ErrVolumeChanged)
 	case resp.JSON400 != nil:
 		return Volume{}, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON500 != nil:
@@ -99,7 +111,10 @@ func (c *Client) GetVolume(ctx context.Context, name string) (Volume, error) {
 
 	switch {
 	case resp.JSON200 != nil:
-		return newVolume(resp.JSON200.Volume), nil
+		got := newVolume(resp.JSON200.Volume)
+		got.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return got, nil
 	case resp.JSON404 != nil:
 		return Volume{}, fmt.Errorf("%s: %w", resp.JSON404.Error, ErrVolumeNotFound)
 	case resp.JSON500 != nil:

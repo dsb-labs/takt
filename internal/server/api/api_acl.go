@@ -130,18 +130,3 @@ func (a *ACLAPI) InitACL(ctx context.Context, _ api.InitACLRequestObject) (api.I
 
 	return api.InitACL201JSONResponse{Credential: credential}, nil
 }
-
-// quoteETag wraps a tag in the quotes the ETag header carries.
-func quoteETag(etag string) string {
-	return `"` + etag + `"`
-}
-
-// unquoteETag strips the quotes an If-Match header carries, accepting a bare
-// tag too so a caller pasting the value by hand is not refused over quoting.
-func unquoteETag(etag string) string {
-	if len(etag) >= 2 && etag[0] == '"' && etag[len(etag)-1] == '"' {
-		return etag[1 : len(etag)-1]
-	}
-
-	return etag
-}

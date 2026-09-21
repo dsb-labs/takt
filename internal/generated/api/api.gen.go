@@ -2651,11 +2651,14 @@ type sessionContextKey string
 
 // ApplyACLPolicyParams defines parameters for ApplyACLPolicy.
 type ApplyACLPolicyParams struct {
-	// IfMatch The tag of the policy document being replaced, as read from the ETag
-	// header of `GET /api/v1/acl`. Required despite what the schema says —
-	// an apply without it is refused with a 400 — but declared optional so
-	// the absence is answered in the API's own error shape rather than the
-	// router's.
+	// IfMatch The tag of the resource being replaced, as read from the ETag header of
+	// the matching get. An apply carrying one is refused with a 412 when the
+	// resource has moved on since, rather than writing over whatever landed
+	// in between.
+	//
+	// Optional everywhere but on the policy document, which refuses an apply
+	// without it. A resource apply that omits it is unconditional, because a
+	// caller creating something has no tag to name yet.
 	IfMatch *IfMatch `json:"If-Match,omitempty"`
 }
 
@@ -2733,6 +2736,19 @@ type ListServicesParams struct {
 	Follow *bool `form:"follow,omitempty" json:"follow,omitempty"`
 }
 
+// ApplyServiceParams defines parameters for ApplyService.
+type ApplyServiceParams struct {
+	// IfMatch The tag of the resource being replaced, as read from the ETag header of
+	// the matching get. An apply carrying one is refused with a 412 when the
+	// resource has moved on since, rather than writing over whatever landed
+	// in between.
+	//
+	// Optional everywhere but on the policy document, which refuses an apply
+	// without it. A resource apply that omits it is unconditional, because a
+	// caller creating something has no tag to name yet.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
+}
+
 // ListVariablesParams defines parameters for ListVariables.
 type ListVariablesParams struct {
 	// Query A `path=value` filter over the variable's labels, where the path is a
@@ -2765,6 +2781,19 @@ type DeleteVolumeParams struct {
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
 }
 
+// ApplyVolumeParams defines parameters for ApplyVolume.
+type ApplyVolumeParams struct {
+	// IfMatch The tag of the resource being replaced, as read from the ETag header of
+	// the matching get. An apply carrying one is refused with a 412 when the
+	// resource has moved on since, rather than writing over whatever landed
+	// in between.
+	//
+	// Optional everywhere but on the policy document, which refuses an apply
+	// without it. A resource apply that omits it is unconditional, because a
+	// caller creating something has no tag to name yet.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
+}
+
 // ListWorkloadsParams defines parameters for ListWorkloads.
 type ListWorkloadsParams struct {
 	// Query A `path=value` filter over the workload's specification, where the path
@@ -2783,6 +2812,19 @@ type DeleteWorkloadParams struct {
 	// workloads are redeployed and then report the reference they can no longer
 	// resolve, retrying until something holds the name again.
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+}
+
+// ApplyWorkloadParams defines parameters for ApplyWorkload.
+type ApplyWorkloadParams struct {
+	// IfMatch The tag of the resource being replaced, as read from the ETag header of
+	// the matching get. An apply carrying one is refused with a 412 when the
+	// resource has moved on since, rather than writing over whatever landed
+	// in between.
+	//
+	// Optional everywhere but on the policy document, which refuses an apply
+	// without it. A resource apply that omits it is unconditional, because a
+	// caller creating something has no tag to name yet.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
 }
 
 // GetWorkloadEventsParams defines parameters for GetWorkloadEvents.
@@ -3372,10 +3414,15 @@ type ClientInterface interface {
 	// question asked of whatever is running, so one applied ahead of its
 	// workloads reports no backends until they arrive.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
-	ApplyServiceWithBody(ctx context.Context, name ServiceName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ApplyServiceWithBody(ctx context.Context, name ServiceName, params *ApplyServiceParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ApplyService Create or update a service
 	//
@@ -3389,10 +3436,15 @@ type ClientInterface interface {
 	// question asked of whatever is running, so one applied ahead of its
 	// workloads reports no backends until they arrive.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
-	ApplyService(ctx context.Context, name ServiceName, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ApplyService(ctx context.Context, name ServiceName, params *ApplyServiceParams, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetHealth Report that the server is alive
 	//
@@ -3636,10 +3688,15 @@ type ClientInterface interface {
 	// An owner or a mode the manifest leaves empty stops being enforced
 	// rather than being reverted: the directory keeps whatever it has.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
-	ApplyVolumeWithBody(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ApplyVolumeWithBody(ctx context.Context, name VolumeName, params *ApplyVolumeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ApplyVolume Create or update a volume
 	//
@@ -3657,10 +3714,15 @@ type ClientInterface interface {
 	// An owner or a mode the manifest leaves empty stops being enforced
 	// rather than being reverted: the directory keeps whatever it has.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
-	ApplyVolume(ctx context.Context, name VolumeName, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ApplyVolume(ctx context.Context, name VolumeName, params *ApplyVolumeParams, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListWorkloads List workloads
 	//
@@ -3712,10 +3774,15 @@ type ClientInterface interface {
 	// does not is a 400 naming what is missing, rather than a workload stored in a
 	// state it could never run in.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
-	ApplyWorkloadWithBody(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ApplyWorkloadWithBody(ctx context.Context, name WorkloadName, params *ApplyWorkloadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ApplyWorkload Create or update a workload
 	//
@@ -3731,10 +3798,15 @@ type ClientInterface interface {
 	// does not is a 400 naming what is missing, rather than a workload stored in a
 	// state it could never run in.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
-	ApplyWorkload(ctx context.Context, name WorkloadName, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	ApplyWorkload(ctx context.Context, name WorkloadName, params *ApplyWorkloadParams, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DryRunWorkloadWithBody Report what applying a workload would do
 	//
@@ -4581,11 +4653,16 @@ func (c *Client) GetService(ctx context.Context, name ServiceName, reqEditors ..
 // question asked of whatever is running, so one applied ahead of its
 // workloads reports no backends until they arrive.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
-func (c *Client) ApplyServiceWithBody(ctx context.Context, name ServiceName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewApplyServiceRequestWithBody(c.Server, name, contentType, body)
+func (c *Client) ApplyServiceWithBody(ctx context.Context, name ServiceName, params *ApplyServiceParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyServiceRequestWithBody(c.Server, name, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4608,11 +4685,16 @@ func (c *Client) ApplyServiceWithBody(ctx context.Context, name ServiceName, con
 // question asked of whatever is running, so one applied ahead of its
 // workloads reports no backends until they arrive.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
-func (c *Client) ApplyService(ctx context.Context, name ServiceName, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewApplyServiceRequest(c.Server, name, body)
+func (c *Client) ApplyService(ctx context.Context, name ServiceName, params *ApplyServiceParams, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyServiceRequest(c.Server, name, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5025,11 +5107,16 @@ func (c *Client) GetVolume(ctx context.Context, name VolumeName, reqEditors ...R
 // An owner or a mode the manifest leaves empty stops being enforced
 // rather than being reverted: the directory keeps whatever it has.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
-func (c *Client) ApplyVolumeWithBody(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewApplyVolumeRequestWithBody(c.Server, name, contentType, body)
+func (c *Client) ApplyVolumeWithBody(ctx context.Context, name VolumeName, params *ApplyVolumeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyVolumeRequestWithBody(c.Server, name, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5056,11 +5143,16 @@ func (c *Client) ApplyVolumeWithBody(ctx context.Context, name VolumeName, conte
 // An owner or a mode the manifest leaves empty stops being enforced
 // rather than being reverted: the directory keeps whatever it has.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
-func (c *Client) ApplyVolume(ctx context.Context, name VolumeName, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewApplyVolumeRequest(c.Server, name, body)
+func (c *Client) ApplyVolume(ctx context.Context, name VolumeName, params *ApplyVolumeParams, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyVolumeRequest(c.Server, name, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5151,11 +5243,16 @@ func (c *Client) GetWorkload(ctx context.Context, name WorkloadName, reqEditors 
 // does not is a 400 naming what is missing, rather than a workload stored in a
 // state it could never run in.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
-func (c *Client) ApplyWorkloadWithBody(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewApplyWorkloadRequestWithBody(c.Server, name, contentType, body)
+func (c *Client) ApplyWorkloadWithBody(ctx context.Context, name WorkloadName, params *ApplyWorkloadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyWorkloadRequestWithBody(c.Server, name, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5180,11 +5277,16 @@ func (c *Client) ApplyWorkloadWithBody(ctx context.Context, name WorkloadName, c
 // does not is a 400 naming what is missing, rather than a workload stored in a
 // state it could never run in.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
-func (c *Client) ApplyWorkload(ctx context.Context, name WorkloadName, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewApplyWorkloadRequest(c.Server, name, body)
+func (c *Client) ApplyWorkload(ctx context.Context, name WorkloadName, params *ApplyWorkloadParams, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyWorkloadRequest(c.Server, name, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -6296,18 +6398,18 @@ func NewGetServiceRequest(server string, name ServiceName) (*http.Request, error
 }
 
 // NewApplyServiceRequest calls the generic ApplyService builder with application/json body
-func NewApplyServiceRequest(server string, name ServiceName, body ApplyServiceJSONRequestBody) (*http.Request, error) {
+func NewApplyServiceRequest(server string, name ServiceName, params *ApplyServiceParams, body ApplyServiceJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewApplyServiceRequestWithBody(server, name, "application/json", bodyReader)
+	return NewApplyServiceRequestWithBody(server, name, params, "application/json", bodyReader)
 }
 
 // NewApplyServiceRequestWithBody constructs an http.Request for the ApplyService method, with any body, and a specified content type
-func NewApplyServiceRequestWithBody(server string, name ServiceName, contentType string, body io.Reader) (*http.Request, error) {
+func NewApplyServiceRequestWithBody(server string, name ServiceName, params *ApplyServiceParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6338,6 +6440,21 @@ func NewApplyServiceRequestWithBody(server string, name ServiceName, contentType
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.IfMatch != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "If-Match", *params.IfMatch, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("If-Match", headerParam0)
+		}
+
+	}
 
 	return req, nil
 }
@@ -6897,18 +7014,18 @@ func NewGetVolumeRequest(server string, name VolumeName) (*http.Request, error) 
 }
 
 // NewApplyVolumeRequest calls the generic ApplyVolume builder with application/json body
-func NewApplyVolumeRequest(server string, name VolumeName, body ApplyVolumeJSONRequestBody) (*http.Request, error) {
+func NewApplyVolumeRequest(server string, name VolumeName, params *ApplyVolumeParams, body ApplyVolumeJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewApplyVolumeRequestWithBody(server, name, "application/json", bodyReader)
+	return NewApplyVolumeRequestWithBody(server, name, params, "application/json", bodyReader)
 }
 
 // NewApplyVolumeRequestWithBody constructs an http.Request for the ApplyVolume method, with any body, and a specified content type
-func NewApplyVolumeRequestWithBody(server string, name VolumeName, contentType string, body io.Reader) (*http.Request, error) {
+func NewApplyVolumeRequestWithBody(server string, name VolumeName, params *ApplyVolumeParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6939,6 +7056,21 @@ func NewApplyVolumeRequestWithBody(server string, name VolumeName, contentType s
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.IfMatch != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "If-Match", *params.IfMatch, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("If-Match", headerParam0)
+		}
+
+	}
 
 	return req, nil
 }
@@ -7093,18 +7225,18 @@ func NewGetWorkloadRequest(server string, name WorkloadName) (*http.Request, err
 }
 
 // NewApplyWorkloadRequest calls the generic ApplyWorkload builder with application/json body
-func NewApplyWorkloadRequest(server string, name WorkloadName, body ApplyWorkloadJSONRequestBody) (*http.Request, error) {
+func NewApplyWorkloadRequest(server string, name WorkloadName, params *ApplyWorkloadParams, body ApplyWorkloadJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewApplyWorkloadRequestWithBody(server, name, "application/json", bodyReader)
+	return NewApplyWorkloadRequestWithBody(server, name, params, "application/json", bodyReader)
 }
 
 // NewApplyWorkloadRequestWithBody constructs an http.Request for the ApplyWorkload method, with any body, and a specified content type
-func NewApplyWorkloadRequestWithBody(server string, name WorkloadName, contentType string, body io.Reader) (*http.Request, error) {
+func NewApplyWorkloadRequestWithBody(server string, name WorkloadName, params *ApplyWorkloadParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -7135,6 +7267,21 @@ func NewApplyWorkloadRequestWithBody(server string, name WorkloadName, contentTy
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.IfMatch != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "If-Match", *params.IfMatch, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("If-Match", headerParam0)
+		}
+
+	}
 
 	return req, nil
 }
@@ -7989,10 +8136,15 @@ type ClientWithResponsesInterface interface {
 	// question asked of whatever is running, so one applied ahead of its
 	// workloads reports no backends until they arrive.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
-	ApplyServiceWithBodyWithResponse(ctx context.Context, name ServiceName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error)
+	ApplyServiceWithBodyWithResponse(ctx context.Context, name ServiceName, params *ApplyServiceParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error)
 
 	// ApplyServiceWithResponse Create or update a service
 	//
@@ -8006,10 +8158,15 @@ type ClientWithResponsesInterface interface {
 	// question asked of whatever is running, so one applied ahead of its
 	// workloads reports no backends until they arrive.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
-	ApplyServiceWithResponse(ctx context.Context, name ServiceName, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error)
+	ApplyServiceWithResponse(ctx context.Context, name ServiceName, params *ApplyServiceParams, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error)
 
 	// GetHealthWithResponse Report that the server is alive
 	//
@@ -8277,10 +8434,15 @@ type ClientWithResponsesInterface interface {
 	// An owner or a mode the manifest leaves empty stops being enforced
 	// rather than being reverted: the directory keeps whatever it has.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
-	ApplyVolumeWithBodyWithResponse(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error)
+	ApplyVolumeWithBodyWithResponse(ctx context.Context, name VolumeName, params *ApplyVolumeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error)
 
 	// ApplyVolumeWithResponse Create or update a volume
 	//
@@ -8298,10 +8460,15 @@ type ClientWithResponsesInterface interface {
 	// An owner or a mode the manifest leaves empty stops being enforced
 	// rather than being reverted: the directory keeps whatever it has.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
-	ApplyVolumeWithResponse(ctx context.Context, name VolumeName, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error)
+	ApplyVolumeWithResponse(ctx context.Context, name VolumeName, params *ApplyVolumeParams, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error)
 
 	// ListWorkloadsWithResponse List workloads
 	//
@@ -8359,10 +8526,15 @@ type ClientWithResponsesInterface interface {
 	// does not is a 400 naming what is missing, rather than a workload stored in a
 	// state it could never run in.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
-	ApplyWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyWorkloadResponse, error)
+	ApplyWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, params *ApplyWorkloadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyWorkloadResponse, error)
 
 	// ApplyWorkloadWithResponse Create or update a workload
 	//
@@ -8378,10 +8550,15 @@ type ClientWithResponsesInterface interface {
 	// does not is a 400 naming what is missing, rather than a workload stored in a
 	// state it could never run in.
 	//
+	// The `If-Match` header makes the apply conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the resource has
+	// moved on since. Omitting it applies unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
-	ApplyWorkloadWithResponse(ctx context.Context, name WorkloadName, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyWorkloadResponse, error)
+	ApplyWorkloadWithResponse(ctx context.Context, name WorkloadName, params *ApplyWorkloadParams, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyWorkloadResponse, error)
 
 	// DryRunWorkloadWithBodyWithResponse Report what applying a workload would do
 	//
@@ -9870,6 +10047,11 @@ func (r DeleteServiceResponse) ContentType() string {
 	return ""
 }
 
+// GetServiceResponse200Headers the declared response headers of an HTTP 200 response for GetService
+type GetServiceResponse200Headers struct {
+	ETag *string
+}
+
 // GetServiceResponse401Headers the declared response headers of an HTTP 401 response for GetService
 type GetServiceResponse401Headers struct {
 	WWWAuthenticate *string
@@ -9888,6 +10070,8 @@ type GetServiceResponse struct {
 	JSON404 *NotFound
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *GetServiceResponse200Headers
 	// Headers401 the parsed response headers for an HTTP 401 response
 	Headers401 *GetServiceResponse401Headers
 }
@@ -9946,6 +10130,16 @@ func (r GetServiceResponse) ContentType() string {
 	return ""
 }
 
+// ApplyServiceResponse200Headers the declared response headers of an HTTP 200 response for ApplyService
+type ApplyServiceResponse200Headers struct {
+	ETag *string
+}
+
+// ApplyServiceResponse201Headers the declared response headers of an HTTP 201 response for ApplyService
+type ApplyServiceResponse201Headers struct {
+	ETag *string
+}
+
 // ApplyServiceResponse401Headers the declared response headers of an HTTP 401 response for ApplyService
 type ApplyServiceResponse401Headers struct {
 	WWWAuthenticate *string
@@ -9964,8 +10158,14 @@ type ApplyServiceResponse struct {
 	JSON401 *Unauthorized
 	// JSON403 the response for an HTTP 403 `application/json` response
 	JSON403 *Forbidden
+	// JSON412 the response for an HTTP 412 `application/json` response
+	JSON412 *PreconditionFailed
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *ApplyServiceResponse200Headers
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *ApplyServiceResponse201Headers
 	// Headers401 the parsed response headers for an HTTP 401 response
 	Headers401 *ApplyServiceResponse401Headers
 }
@@ -9993,6 +10193,11 @@ func (r ApplyServiceResponse) GetJSON401() *Unauthorized {
 // GetJSON403 returns the response for an HTTP 403 `application/json` response
 func (r ApplyServiceResponse) GetJSON403() *Forbidden {
 	return r.JSON403
+}
+
+// GetJSON412 returns the response for an HTTP 412 `application/json` response
+func (r ApplyServiceResponse) GetJSON412() *PreconditionFailed {
+	return r.JSON412
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -10961,6 +11166,11 @@ func (r DeleteVolumeResponse) ContentType() string {
 	return ""
 }
 
+// GetVolumeResponse200Headers the declared response headers of an HTTP 200 response for GetVolume
+type GetVolumeResponse200Headers struct {
+	ETag *string
+}
+
 // GetVolumeResponse401Headers the declared response headers of an HTTP 401 response for GetVolume
 type GetVolumeResponse401Headers struct {
 	WWWAuthenticate *string
@@ -10979,6 +11189,8 @@ type GetVolumeResponse struct {
 	JSON404 *NotFound
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *GetVolumeResponse200Headers
 	// Headers401 the parsed response headers for an HTTP 401 response
 	Headers401 *GetVolumeResponse401Headers
 }
@@ -11037,6 +11249,16 @@ func (r GetVolumeResponse) ContentType() string {
 	return ""
 }
 
+// ApplyVolumeResponse200Headers the declared response headers of an HTTP 200 response for ApplyVolume
+type ApplyVolumeResponse200Headers struct {
+	ETag *string
+}
+
+// ApplyVolumeResponse201Headers the declared response headers of an HTTP 201 response for ApplyVolume
+type ApplyVolumeResponse201Headers struct {
+	ETag *string
+}
+
 // ApplyVolumeResponse401Headers the declared response headers of an HTTP 401 response for ApplyVolume
 type ApplyVolumeResponse401Headers struct {
 	WWWAuthenticate *string
@@ -11055,8 +11277,14 @@ type ApplyVolumeResponse struct {
 	JSON401 *Unauthorized
 	// JSON403 the response for an HTTP 403 `application/json` response
 	JSON403 *Forbidden
+	// JSON412 the response for an HTTP 412 `application/json` response
+	JSON412 *PreconditionFailed
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *ApplyVolumeResponse200Headers
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *ApplyVolumeResponse201Headers
 	// Headers401 the parsed response headers for an HTTP 401 response
 	Headers401 *ApplyVolumeResponse401Headers
 }
@@ -11084,6 +11312,11 @@ func (r ApplyVolumeResponse) GetJSON401() *Unauthorized {
 // GetJSON403 returns the response for an HTTP 403 `application/json` response
 func (r ApplyVolumeResponse) GetJSON403() *Forbidden {
 	return r.JSON403
+}
+
+// GetJSON412 returns the response for an HTTP 412 `application/json` response
+func (r ApplyVolumeResponse) GetJSON412() *PreconditionFailed {
+	return r.JSON412
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -11279,6 +11512,11 @@ func (r DeleteWorkloadResponse) ContentType() string {
 	return ""
 }
 
+// GetWorkloadResponse200Headers the declared response headers of an HTTP 200 response for GetWorkload
+type GetWorkloadResponse200Headers struct {
+	ETag *string
+}
+
 // GetWorkloadResponse401Headers the declared response headers of an HTTP 401 response for GetWorkload
 type GetWorkloadResponse401Headers struct {
 	WWWAuthenticate *string
@@ -11297,6 +11535,8 @@ type GetWorkloadResponse struct {
 	JSON404 *NotFound
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *GetWorkloadResponse200Headers
 	// Headers401 the parsed response headers for an HTTP 401 response
 	Headers401 *GetWorkloadResponse401Headers
 }
@@ -11355,6 +11595,16 @@ func (r GetWorkloadResponse) ContentType() string {
 	return ""
 }
 
+// ApplyWorkloadResponse200Headers the declared response headers of an HTTP 200 response for ApplyWorkload
+type ApplyWorkloadResponse200Headers struct {
+	ETag *string
+}
+
+// ApplyWorkloadResponse201Headers the declared response headers of an HTTP 201 response for ApplyWorkload
+type ApplyWorkloadResponse201Headers struct {
+	ETag *string
+}
+
 // ApplyWorkloadResponse401Headers the declared response headers of an HTTP 401 response for ApplyWorkload
 type ApplyWorkloadResponse401Headers struct {
 	WWWAuthenticate *string
@@ -11375,12 +11625,18 @@ type ApplyWorkloadResponse struct {
 	JSON403 *Forbidden
 	// JSON409 the response for an HTTP 409 `application/json` response
 	JSON409 *ErrorResponse
+	// JSON412 the response for an HTTP 412 `application/json` response
+	JSON412 *PreconditionFailed
 	// JSON422 the response for an HTTP 422 `application/json` response
 	JSON422 *ErrorResponse
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// JSON503 the response for an HTTP 503 `application/json` response
 	JSON503 *ErrorResponse
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *ApplyWorkloadResponse200Headers
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *ApplyWorkloadResponse201Headers
 	// Headers401 the parsed response headers for an HTTP 401 response
 	Headers401 *ApplyWorkloadResponse401Headers
 }
@@ -11413,6 +11669,11 @@ func (r ApplyWorkloadResponse) GetJSON403() *Forbidden {
 // GetJSON409 returns the response for an HTTP 409 `application/json` response
 func (r ApplyWorkloadResponse) GetJSON409() *ErrorResponse {
 	return r.JSON409
+}
+
+// GetJSON412 returns the response for an HTTP 412 `application/json` response
+func (r ApplyWorkloadResponse) GetJSON412() *PreconditionFailed {
+	return r.JSON412
 }
 
 // GetJSON422 returns the response for an HTTP 422 `application/json` response
@@ -12537,11 +12798,16 @@ func (c *ClientWithResponses) GetServiceWithResponse(ctx context.Context, name S
 // question asked of whatever is running, so one applied ahead of its
 // workloads reports no backends until they arrive.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
-func (c *ClientWithResponses) ApplyServiceWithBodyWithResponse(ctx context.Context, name ServiceName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error) {
-	rsp, err := c.ApplyServiceWithBody(ctx, name, contentType, body, reqEditors...)
+func (c *ClientWithResponses) ApplyServiceWithBodyWithResponse(ctx context.Context, name ServiceName, params *ApplyServiceParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error) {
+	rsp, err := c.ApplyServiceWithBody(ctx, name, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -12560,11 +12826,16 @@ func (c *ClientWithResponses) ApplyServiceWithBodyWithResponse(ctx context.Conte
 // question asked of whatever is running, so one applied ahead of its
 // workloads reports no backends until they arrive.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/services/{name} (the `ApplyService` operationId).
-func (c *ClientWithResponses) ApplyServiceWithResponse(ctx context.Context, name ServiceName, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error) {
-	rsp, err := c.ApplyService(ctx, name, body, reqEditors...)
+func (c *ClientWithResponses) ApplyServiceWithResponse(ctx context.Context, name ServiceName, params *ApplyServiceParams, body ApplyServiceJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyServiceResponse, error) {
+	rsp, err := c.ApplyService(ctx, name, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -12933,11 +13204,16 @@ func (c *ClientWithResponses) GetVolumeWithResponse(ctx context.Context, name Vo
 // An owner or a mode the manifest leaves empty stops being enforced
 // rather than being reverted: the directory keeps whatever it has.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
-func (c *ClientWithResponses) ApplyVolumeWithBodyWithResponse(ctx context.Context, name VolumeName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error) {
-	rsp, err := c.ApplyVolumeWithBody(ctx, name, contentType, body, reqEditors...)
+func (c *ClientWithResponses) ApplyVolumeWithBodyWithResponse(ctx context.Context, name VolumeName, params *ApplyVolumeParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error) {
+	rsp, err := c.ApplyVolumeWithBody(ctx, name, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -12960,11 +13236,16 @@ func (c *ClientWithResponses) ApplyVolumeWithBodyWithResponse(ctx context.Contex
 // An owner or a mode the manifest leaves empty stops being enforced
 // rather than being reverted: the directory keeps whatever it has.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/volumes/{name} (the `ApplyVolume` operationId).
-func (c *ClientWithResponses) ApplyVolumeWithResponse(ctx context.Context, name VolumeName, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error) {
-	rsp, err := c.ApplyVolume(ctx, name, body, reqEditors...)
+func (c *ClientWithResponses) ApplyVolumeWithResponse(ctx context.Context, name VolumeName, params *ApplyVolumeParams, body ApplyVolumeJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyVolumeResponse, error) {
+	rsp, err := c.ApplyVolume(ctx, name, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -13045,11 +13326,16 @@ func (c *ClientWithResponses) GetWorkloadWithResponse(ctx context.Context, name 
 // does not is a 400 naming what is missing, rather than a workload stored in a
 // state it could never run in.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
-func (c *ClientWithResponses) ApplyWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyWorkloadResponse, error) {
-	rsp, err := c.ApplyWorkloadWithBody(ctx, name, contentType, body, reqEditors...)
+func (c *ClientWithResponses) ApplyWorkloadWithBodyWithResponse(ctx context.Context, name WorkloadName, params *ApplyWorkloadParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyWorkloadResponse, error) {
+	rsp, err := c.ApplyWorkloadWithBody(ctx, name, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -13070,11 +13356,16 @@ func (c *ClientWithResponses) ApplyWorkloadWithBodyWithResponse(ctx context.Cont
 // does not is a 400 naming what is missing, rather than a workload stored in a
 // state it could never run in.
 //
+// The `If-Match` header makes the apply conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the resource has
+// moved on since. Omitting it applies unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/workloads/{name} (the `ApplyWorkload` operationId).
-func (c *ClientWithResponses) ApplyWorkloadWithResponse(ctx context.Context, name WorkloadName, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyWorkloadResponse, error) {
-	rsp, err := c.ApplyWorkload(ctx, name, body, reqEditors...)
+func (c *ClientWithResponses) ApplyWorkloadWithResponse(ctx context.Context, name WorkloadName, params *ApplyWorkloadParams, body ApplyWorkloadJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyWorkloadResponse, error) {
+	rsp, err := c.ApplyWorkload(ctx, name, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -14541,6 +14832,16 @@ func ParseGetServiceResponse(rsp *http.Response) (*GetServiceResponse, error) {
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers GetServiceResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
 	case rsp.StatusCode == 401:
 		var headers GetServiceResponse401Headers
 		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
@@ -14605,6 +14906,13 @@ func ParseApplyServiceResponse(rsp *http.Response) (*ApplyServiceResponse, error
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 412:
+		var dest PreconditionFailed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON412 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -14615,6 +14923,26 @@ func ParseApplyServiceResponse(rsp *http.Response) (*ApplyServiceResponse, error
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers ApplyServiceResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 201:
+		var headers ApplyServiceResponse201Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers201 = &headers
 	case rsp.StatusCode == 401:
 		var headers ApplyServiceResponse401Headers
 		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
@@ -15485,6 +15813,16 @@ func ParseGetVolumeResponse(rsp *http.Response) (*GetVolumeResponse, error) {
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers GetVolumeResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
 	case rsp.StatusCode == 401:
 		var headers GetVolumeResponse401Headers
 		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
@@ -15549,6 +15887,13 @@ func ParseApplyVolumeResponse(rsp *http.Response) (*ApplyVolumeResponse, error) 
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 412:
+		var dest PreconditionFailed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON412 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -15559,6 +15904,26 @@ func ParseApplyVolumeResponse(rsp *http.Response) (*ApplyVolumeResponse, error) 
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers ApplyVolumeResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 201:
+		var headers ApplyVolumeResponse201Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers201 = &headers
 	case rsp.StatusCode == 401:
 		var headers ApplyVolumeResponse401Headers
 		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
@@ -15767,6 +16132,16 @@ func ParseGetWorkloadResponse(rsp *http.Response) (*GetWorkloadResponse, error) 
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers GetWorkloadResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
 	case rsp.StatusCode == 401:
 		var headers GetWorkloadResponse401Headers
 		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
@@ -15838,6 +16213,13 @@ func ParseApplyWorkloadResponse(rsp *http.Response) (*ApplyWorkloadResponse, err
 		}
 		response.JSON409 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 412:
+		var dest PreconditionFailed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON412 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest ErrorResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -15862,6 +16244,26 @@ func ParseApplyWorkloadResponse(rsp *http.Response) (*ApplyWorkloadResponse, err
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers ApplyWorkloadResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 201:
+		var headers ApplyWorkloadResponse201Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers201 = &headers
 	case rsp.StatusCode == 401:
 		var headers ApplyWorkloadResponse401Headers
 		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
@@ -16382,7 +16784,7 @@ type ServerInterface interface {
 	GetService(w http.ResponseWriter, r *http.Request, name ServiceName)
 	// ApplyService Create or update a service
 	// (PUT /api/v1/services/{name})
-	ApplyService(w http.ResponseWriter, r *http.Request, name ServiceName)
+	ApplyService(w http.ResponseWriter, r *http.Request, name ServiceName, params ApplyServiceParams)
 	// GetHealth Report that the server is alive
 	// (GET /api/v1/system/health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -16427,7 +16829,7 @@ type ServerInterface interface {
 	GetVolume(w http.ResponseWriter, r *http.Request, name VolumeName)
 	// ApplyVolume Create or update a volume
 	// (PUT /api/v1/volumes/{name})
-	ApplyVolume(w http.ResponseWriter, r *http.Request, name VolumeName)
+	ApplyVolume(w http.ResponseWriter, r *http.Request, name VolumeName, params ApplyVolumeParams)
 	// ListWorkloads List workloads
 	// (GET /api/v1/workloads)
 	ListWorkloads(w http.ResponseWriter, r *http.Request, params ListWorkloadsParams)
@@ -16439,7 +16841,7 @@ type ServerInterface interface {
 	GetWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
 	// ApplyWorkload Create or update a workload
 	// (PUT /api/v1/workloads/{name})
-	ApplyWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
+	ApplyWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName, params ApplyWorkloadParams)
 	// DryRunWorkload Report what applying a workload would do
 	// (POST /api/v1/workloads/{name}/dry-run)
 	DryRunWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName)
@@ -17090,8 +17492,32 @@ func (siw *ServerInterfaceWrapper) ApplyService(w http.ResponseWriter, r *http.R
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ApplyServiceParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ApplyService(w, r, name)
+		siw.Handler.ApplyService(w, r, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17558,8 +17984,32 @@ func (siw *ServerInterfaceWrapper) ApplyVolume(w http.ResponseWriter, r *http.Re
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ApplyVolumeParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ApplyVolume(w, r, name)
+		siw.Handler.ApplyVolume(w, r, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17717,8 +18167,32 @@ func (siw *ServerInterfaceWrapper) ApplyWorkload(w http.ResponseWriter, r *http.
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ApplyWorkloadParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.ApplyWorkload(w, r, name)
+		siw.Handler.ApplyWorkload(w, r, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19640,15 +20114,25 @@ type GetServiceResponseObject interface {
 	VisitGetServiceResponse(w http.ResponseWriter) error
 }
 
-type GetService200JSONResponse GetServiceResult
+type GetService200ResponseHeaders struct {
+	ETag *string
+}
+
+type GetService200JSONResponse struct {
+	Body    GetServiceResult
+	Headers GetService200ResponseHeaders
+}
 
 func (response GetService200JSONResponse) VisitGetServiceResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
@@ -19716,37 +20200,58 @@ func (response GetService500JSONResponse) VisitGetServiceResponse(w http.Respons
 }
 
 type ApplyServiceRequestObject struct {
-	Name ServiceName `json:"name"`
-	Body *ApplyServiceJSONRequestBody
+	Name   ServiceName `json:"name"`
+	Params ApplyServiceParams
+	Body   *ApplyServiceJSONRequestBody
 }
 
 type ApplyServiceResponseObject interface {
 	VisitApplyServiceResponse(w http.ResponseWriter) error
 }
 
-type ApplyService200JSONResponse ApplyServiceResult
+type ApplyService200ResponseHeaders struct {
+	ETag *string
+}
+
+type ApplyService200JSONResponse struct {
+	Body    ApplyServiceResult
+	Headers ApplyService200ResponseHeaders
+}
 
 func (response ApplyService200JSONResponse) VisitApplyServiceResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type ApplyService201JSONResponse ApplyServiceResult
+type ApplyService201ResponseHeaders struct {
+	ETag *string
+}
+
+type ApplyService201JSONResponse struct {
+	Body    ApplyServiceResult
+	Headers ApplyService201ResponseHeaders
+}
 
 func (response ApplyService201JSONResponse) VisitApplyServiceResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
@@ -19793,6 +20298,20 @@ func (response ApplyService403JSONResponse) VisitApplyServiceResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyService412JSONResponse struct{ PreconditionFailedJSONResponse }
+
+func (response ApplyService412JSONResponse) VisitApplyServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -20819,15 +21338,25 @@ type GetVolumeResponseObject interface {
 	VisitGetVolumeResponse(w http.ResponseWriter) error
 }
 
-type GetVolume200JSONResponse GetVolumeResult
+type GetVolume200ResponseHeaders struct {
+	ETag *string
+}
+
+type GetVolume200JSONResponse struct {
+	Body    GetVolumeResult
+	Headers GetVolume200ResponseHeaders
+}
 
 func (response GetVolume200JSONResponse) VisitGetVolumeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
@@ -20895,37 +21424,58 @@ func (response GetVolume500JSONResponse) VisitGetVolumeResponse(w http.ResponseW
 }
 
 type ApplyVolumeRequestObject struct {
-	Name VolumeName `json:"name"`
-	Body *ApplyVolumeJSONRequestBody
+	Name   VolumeName `json:"name"`
+	Params ApplyVolumeParams
+	Body   *ApplyVolumeJSONRequestBody
 }
 
 type ApplyVolumeResponseObject interface {
 	VisitApplyVolumeResponse(w http.ResponseWriter) error
 }
 
-type ApplyVolume200JSONResponse ApplyVolumeResult
+type ApplyVolume200ResponseHeaders struct {
+	ETag *string
+}
+
+type ApplyVolume200JSONResponse struct {
+	Body    ApplyVolumeResult
+	Headers ApplyVolume200ResponseHeaders
+}
 
 func (response ApplyVolume200JSONResponse) VisitApplyVolumeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type ApplyVolume201JSONResponse ApplyVolumeResult
+type ApplyVolume201ResponseHeaders struct {
+	ETag *string
+}
+
+type ApplyVolume201JSONResponse struct {
+	Body    ApplyVolumeResult
+	Headers ApplyVolume201ResponseHeaders
+}
 
 func (response ApplyVolume201JSONResponse) VisitApplyVolumeResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
@@ -20972,6 +21522,20 @@ func (response ApplyVolume403JSONResponse) VisitApplyVolumeResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyVolume412JSONResponse struct{ PreconditionFailedJSONResponse }
+
+func (response ApplyVolume412JSONResponse) VisitApplyVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -21181,15 +21745,25 @@ type GetWorkloadResponseObject interface {
 	VisitGetWorkloadResponse(w http.ResponseWriter) error
 }
 
-type GetWorkload200JSONResponse GetWorkloadResult
+type GetWorkload200ResponseHeaders struct {
+	ETag *string
+}
+
+type GetWorkload200JSONResponse struct {
+	Body    GetWorkloadResult
+	Headers GetWorkload200ResponseHeaders
+}
 
 func (response GetWorkload200JSONResponse) VisitGetWorkloadResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
@@ -21257,37 +21831,58 @@ func (response GetWorkload500JSONResponse) VisitGetWorkloadResponse(w http.Respo
 }
 
 type ApplyWorkloadRequestObject struct {
-	Name WorkloadName `json:"name"`
-	Body *ApplyWorkloadJSONRequestBody
+	Name   WorkloadName `json:"name"`
+	Params ApplyWorkloadParams
+	Body   *ApplyWorkloadJSONRequestBody
 }
 
 type ApplyWorkloadResponseObject interface {
 	VisitApplyWorkloadResponse(w http.ResponseWriter) error
 }
 
-type ApplyWorkload200JSONResponse ApplyWorkloadResult
+type ApplyWorkload200ResponseHeaders struct {
+	ETag *string
+}
+
+type ApplyWorkload200JSONResponse struct {
+	Body    ApplyWorkloadResult
+	Headers ApplyWorkload200ResponseHeaders
+}
 
 func (response ApplyWorkload200JSONResponse) VisitApplyWorkloadResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type ApplyWorkload201JSONResponse ApplyWorkloadResult
+type ApplyWorkload201ResponseHeaders struct {
+	ETag *string
+}
+
+type ApplyWorkload201JSONResponse struct {
+	Body    ApplyWorkloadResult
+	Headers ApplyWorkload201ResponseHeaders
+}
 
 func (response ApplyWorkload201JSONResponse) VisitApplyWorkloadResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
@@ -21348,6 +21943,20 @@ func (response ApplyWorkload409JSONResponse) VisitApplyWorkloadResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyWorkload412JSONResponse struct{ PreconditionFailedJSONResponse }
+
+func (response ApplyWorkload412JSONResponse) VisitApplyWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -22686,10 +23295,11 @@ func (sh *strictHandler) GetService(w http.ResponseWriter, r *http.Request, name
 }
 
 // ApplyService operation middleware
-func (sh *strictHandler) ApplyService(w http.ResponseWriter, r *http.Request, name ServiceName) {
+func (sh *strictHandler) ApplyService(w http.ResponseWriter, r *http.Request, name ServiceName, params ApplyServiceParams) {
 	var request ApplyServiceRequestObject
 
 	request.Name = name
+	request.Params = params
 
 	var body ApplyServiceJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -23087,10 +23697,11 @@ func (sh *strictHandler) GetVolume(w http.ResponseWriter, r *http.Request, name 
 }
 
 // ApplyVolume operation middleware
-func (sh *strictHandler) ApplyVolume(w http.ResponseWriter, r *http.Request, name VolumeName) {
+func (sh *strictHandler) ApplyVolume(w http.ResponseWriter, r *http.Request, name VolumeName, params ApplyVolumeParams) {
 	var request ApplyVolumeRequestObject
 
 	request.Name = name
+	request.Params = params
 
 	var body ApplyVolumeJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -23199,10 +23810,11 @@ func (sh *strictHandler) GetWorkload(w http.ResponseWriter, r *http.Request, nam
 }
 
 // ApplyWorkload operation middleware
-func (sh *strictHandler) ApplyWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName) {
+func (sh *strictHandler) ApplyWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName, params ApplyWorkloadParams) {
 	var request ApplyWorkloadRequestObject
 
 	request.Name = name
+	request.Params = params
 
 	var body ApplyWorkloadJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

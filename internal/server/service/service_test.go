@@ -112,7 +112,7 @@ func TestServiceService_Apply(t *testing.T) {
 				Labels: map[string]string{"app": "web"},
 				Port:   8080,
 			},
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		assert.True(t, created)
@@ -124,6 +124,31 @@ func TestServiceService_Apply(t *testing.T) {
 		assert.Equal(t, []service.Backend{
 			{Workload: "web", Instance: 0, Address: "203.0.113.10:20000"},
 		}, applied.Backends)
+	})
+
+	t.Run("refuses an apply naming a version the service has moved past", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockServiceRepository(t)
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 3).
+			Return(database.Service{}, false, database.ErrServiceChanged).Once()
+
+		// The backends are only resolved once the row is written, so the lister is
+		// never reached.
+		workloads := NewMockWorkloadLister(t)
+
+		svc := newServiceService(t, repo, workloads)
+
+		_, _, err := svc.Apply(t.Context(), manifest.Service{
+			Version: "v1",
+			Name:    "example",
+			Target: manifest.ServiceTarget{
+				Labels:   map[string]string{"app": "web"},
+				Port:     8080,
+				Protocol: manifest.ProtocolTCP,
+			},
+		}, 3)
+		assert.ErrorIs(t, err, service.ErrServiceChanged)
 	})
 
 	t.Run("refuses an invalid service before anything is written", func(t *testing.T) {
@@ -139,7 +164,7 @@ func TestServiceService_Apply(t *testing.T) {
 			Version: "v1",
 			Name:    "example",
 			Target:  manifest.ServiceTarget{Port: 8080, Protocol: manifest.ProtocolTCP},
-		})
+		}, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidService)
 	})
 }
@@ -590,7 +615,7 @@ func TestServiceService_AsksForAPassWhenAServiceChanges(t *testing.T) {
 		Version: "v1",
 		Name:    "example",
 		Target:  manifest.ServiceTarget{Labels: map[string]string{"app": "web"}, Port: 8080},
-	})
+	}, 0)
 	require.NoError(t, err)
 
 	require.NoError(t, svc.Delete(t.Context(), "example"))

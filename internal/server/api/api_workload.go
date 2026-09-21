@@ -24,7 +24,9 @@ type (
 	WorkloadService interface {
 		// Apply should store the given specification as desired state, reporting
 		// whether the workload was newly created.
-		Apply(ctx context.Context, spec manifest.Spec) (service.Workload, bool, error)
+		// A non-zero ifMatch should condition the apply on the workload still
+		// being at that version.
+		Apply(ctx context.Context, spec manifest.Spec, ifMatch int) (service.Workload, bool, error)
 		// DryRun should report what applying the given specification would do,
 		// without applying it.
 		DryRun(ctx context.Context, spec manifest.Spec) (service.DryRun, error)
@@ -140,8 +142,19 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		}, nil
 	}
 
-	workload, created, err := a.workloads.Apply(ctx, spec)
+	ifMatch, _, ok := parseIfMatch(request.Params.IfMatch)
+	if !ok {
+		return api.ApplyWorkload400JSONResponse{
+			Error: "the If-Match header must carry a tag read from GET /api/v1/workloads/{name}",
+		}, nil
+	}
+
+	workload, created, err := a.workloads.Apply(ctx, spec, ifMatch)
 	switch {
+	case errors.Is(err, service.ErrWorkloadChanged):
+		return api.ApplyWorkload412JSONResponse{
+			Error: "the workload changed since it was read",
+		}, nil
 	case errors.Is(err, service.ErrWorkloadDeleting):
 		return api.ApplyWorkload409JSONResponse{
 			Error: fmt.Sprintf("workload %q is being deleted", request.Name),
@@ -183,10 +196,16 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 	}
 
 	if created {
-		return api.ApplyWorkload201JSONResponse{Workload: newWorkload(workload)}, nil
+		return api.ApplyWorkload201JSONResponse{
+			Body:    api.ApplyWorkloadResult{Workload: newWorkload(workload)},
+			Headers: api.ApplyWorkload201ResponseHeaders{ETag: new(versionETag(workload.Version))},
+		}, nil
 	}
 
-	return api.ApplyWorkload200JSONResponse{Workload: newWorkload(workload)}, nil
+	return api.ApplyWorkload200JSONResponse{
+		Body:    api.ApplyWorkloadResult{Workload: newWorkload(workload)},
+		Headers: api.ApplyWorkload200ResponseHeaders{ETag: new(versionETag(workload.Version))},
+	}, nil
 }
 
 // DryRunWorkload reports what applying the given specification would do, and
@@ -266,7 +285,10 @@ func (a *WorkloadAPI) GetWorkload(ctx context.Context, request api.GetWorkloadRe
 		}, nil
 	}
 
-	return api.GetWorkload200JSONResponse{Workload: newWorkload(workload)}, nil
+	return api.GetWorkload200JSONResponse{
+		Body:    api.GetWorkloadResult{Workload: newWorkload(workload)},
+		Headers: api.GetWorkload200ResponseHeaders{ETag: new(versionETag(workload.Version))},
+	}, nil
 }
 
 // GetWorkloadEvents returns what the server recorded about the named workload.

@@ -23,7 +23,9 @@ type (
 		// Apply should record the service a manifest describes, replacing what a
 		// service already holding the name says, and report whether it created
 		// the service.
-		Apply(ctx context.Context, spec manifest.Service) (service.Service, bool, error)
+		// A non-zero ifMatch should condition the apply on the service still
+		// being at that version.
+		Apply(ctx context.Context, spec manifest.Service, ifMatch int) (service.Service, bool, error)
 		// Get should return the service with the given name with its backends
 		// resolved.
 		Get(ctx context.Context, name string) (service.Service, error)
@@ -80,8 +82,19 @@ func (a *ServiceAPI) ApplyService(ctx context.Context, request api.ApplyServiceR
 		}, nil
 	}
 
-	applied, created, err := a.services.Apply(ctx, wire.ToService(*request.Body))
+	ifMatch, _, ok := parseIfMatch(request.Params.IfMatch)
+	if !ok {
+		return api.ApplyService400JSONResponse{
+			Error: "the If-Match header must carry a tag read from GET /api/v1/services/{name}",
+		}, nil
+	}
+
+	applied, created, err := a.services.Apply(ctx, wire.ToService(*request.Body), ifMatch)
 	switch {
+	case errors.Is(err, service.ErrServiceChanged):
+		return api.ApplyService412JSONResponse{
+			Error: "the service changed since it was read",
+		}, nil
 	case errors.Is(err, service.ErrInvalidService):
 		return api.ApplyService400JSONResponse{
 			Error: err.Error(),
@@ -93,10 +106,16 @@ func (a *ServiceAPI) ApplyService(ctx context.Context, request api.ApplyServiceR
 	}
 
 	if created {
-		return api.ApplyService201JSONResponse{Service: newService(applied)}, nil
+		return api.ApplyService201JSONResponse{
+			Body:    api.ApplyServiceResult{Service: newService(applied)},
+			Headers: api.ApplyService201ResponseHeaders{ETag: new(versionETag(applied.Version))},
+		}, nil
 	}
 
-	return api.ApplyService200JSONResponse{Service: newService(applied)}, nil
+	return api.ApplyService200JSONResponse{
+		Body:    api.ApplyServiceResult{Service: newService(applied)},
+		Headers: api.ApplyService200ResponseHeaders{ETag: new(versionETag(applied.Version))},
+	}, nil
 }
 
 // GetService returns the service with the given name.
@@ -113,7 +132,10 @@ func (a *ServiceAPI) GetService(ctx context.Context, request api.GetServiceReque
 		}, nil
 	}
 
-	return api.GetService200JSONResponse{Service: newService(got)}, nil
+	return api.GetService200JSONResponse{
+		Body:    api.GetServiceResult{Service: newService(got)},
+		Headers: api.GetService200ResponseHeaders{ETag: new(versionETag(got.Version))},
+	}, nil
 }
 
 // ListServices returns the services matching the request's queries, or every

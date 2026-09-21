@@ -29,6 +29,10 @@ type (
 		// The selected instances that are fit to serve when the response was
 		// written. Empty when nothing selected is fit to serve.
 		Backends []ServiceBackend
+		// The entity tag identifying this version of the service, which a conditional
+		// apply hands back in WithIfMatch. Empty on one read from a list, which
+		// reports no tag per item.
+		ETag string
 		// The time the service was created.
 		CreatedAt time.Time
 		// The time the service was last modified.
@@ -65,21 +69,29 @@ func checkServiceName(name string) error {
 // says, however many times it is applied. The workloads the target selects do
 // not have to exist, so a service applied ahead of its workloads reports no
 // backends until they arrive.
-func (c *Client) ApplyService(ctx context.Context, service manifest.Service) (Service, error) {
+func (c *Client) ApplyService(ctx context.Context, service manifest.Service, options ...ApplyOption) (Service, error) {
 	if err := checkServiceName(service.Name); err != nil {
 		return Service{}, err
 	}
 
-	resp, err := c.api.ApplyServiceWithResponse(ctx, service.Name, wire.FromService(service))
+	resp, err := c.api.ApplyServiceWithResponse(ctx, service.Name, &api.ApplyServiceParams{IfMatch: ifMatch(options)}, wire.FromService(service))
 	if err != nil {
 		return Service{}, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
 	case resp.JSON200 != nil:
-		return newService(resp.JSON200.Service), nil
+		applied := newService(resp.JSON200.Service)
+		applied.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return applied, nil
 	case resp.JSON201 != nil:
-		return newService(resp.JSON201.Service), nil
+		applied := newService(resp.JSON201.Service)
+		applied.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return applied, nil
+	case resp.JSON412 != nil:
+		return Service{}, fmt.Errorf("%s: %w", resp.JSON412.Error, ErrServiceChanged)
 	case resp.JSON400 != nil:
 		return Service{}, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON500 != nil:
@@ -103,7 +115,10 @@ func (c *Client) GetService(ctx context.Context, name string) (Service, error) {
 
 	switch {
 	case resp.JSON200 != nil:
-		return newService(resp.JSON200.Service), nil
+		got := newService(resp.JSON200.Service)
+		got.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return got, nil
 	case resp.JSON404 != nil:
 		return Service{}, fmt.Errorf("%s: %w", resp.JSON404.Error, ErrServiceNotFound)
 	case resp.JSON500 != nil:
