@@ -6,3 +6,9 @@ changes when its specification does.
 Use --dry-run to report what applying the manifest would do without doing
 any of it. The report says whether the workload would be created, whether
 its running instances would be replaced, and which fields would change.
+
+Pass --if-match the tag "takt workload get" reported for the workload
+being replaced, and the apply is refused when the workload has moved on
+since, rather than writing over whatever landed in between. Without it
+an apply writes unconditionally, which is what creating one has to do:
+there is no tag yet to name.

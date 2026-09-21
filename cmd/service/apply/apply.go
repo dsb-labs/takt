@@ -19,6 +19,8 @@ var usage string
 // Command returns the "service apply" command used to submit a service manifest to
 // the takt server.
 func Command() *cobra.Command {
+	var ifMatch string
+
 	cmd := &cobra.Command{
 		Use:   "apply <manifest>",
 		Short: "Create or update a service from a manifest file",
@@ -38,7 +40,7 @@ func Command() *cobra.Command {
 
 			c := client.FromContext(cmd.Context())
 
-			applied, err := c.ApplyService(cmd.Context(), spec)
+			applied, err := c.ApplyService(cmd.Context(), spec, client.WithIfMatch(ifMatch))
 			if err != nil {
 				return fmt.Errorf("failed to apply service: %w", err)
 			}
@@ -49,6 +51,9 @@ func Command() *cobra.Command {
 			return enc.Encode(applied)
 		},
 	}
+
+	cmd.Flags().StringVar(&ifMatch, "if-match", "",
+		"apply only if the service's tag still matches this one, as reported by \"takt service get\"")
 
 	return cmd
 }

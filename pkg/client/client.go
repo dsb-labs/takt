@@ -359,6 +359,9 @@ type (
 // it, an apply working from a read that has since gone stale is refused rather
 // than quietly discarding the write that landed in between, reported as the
 // resource's own changed error.
+//
+// An empty tag is the same as not passing the option at all, so a caller
+// threading through a flag left unset does not have to special-case it.
 func WithIfMatch(etag string) ApplyOption {
 	return func(c *applyConfig) { c.ifMatch = etag }
 }
