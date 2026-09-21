@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -1156,7 +1157,7 @@ func TestWorkloadAPI_GetWorkloadEvents(t *testing.T) {
 
 	t.Run("returns the events the service reports", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Events(mock.Anything, "example", 100).Return([]service.Event{
+		svc.EXPECT().Events(mock.Anything, "example", time.Time{}, 100).Return([]service.Event{
 			{
 				Reason:    event.ImagePulling,
 				Message:   "Pulling image alpine:3",
@@ -1185,17 +1186,32 @@ func TestWorkloadAPI_GetWorkloadEvents(t *testing.T) {
 
 	t.Run("honours the limit parameter", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Events(mock.Anything, "example", 5).Return(nil, nil).Once()
+		svc.EXPECT().Events(mock.Anything, "example", time.Time{}, 5).Return(nil, nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/events?limit=5", nil)
 		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("honours the since parameter", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Events(mock.Anything, "example", seen, 100).Return(nil, nil).Once()
+
+		resp := do(t, svc, http.MethodGet,
+			"/api/v1/workloads/example/events?since="+url.QueryEscape(seen.Format(time.RFC3339)), nil)
+		assert.Equal(t, http.StatusOK, resp.Code)
+	})
+
+	t.Run("rejects a since that is not a time", func(t *testing.T) {
+		resp := do(t, NewMockWorkloadService(t), http.MethodGet,
+			"/api/v1/workloads/example/events?since=yesterday", nil)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 
 	// The server reads what it is asked to read, so an uncapped request would let a
 	// caller decide how much work it does.
 	t.Run("caps an unbounded limit", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Events(mock.Anything, "example", 1000).Return(nil, nil).Once()
+		svc.EXPECT().Events(mock.Anything, "example", time.Time{}, 1000).Return(nil, nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/events?limit=100000", nil)
 		assert.Equal(t, http.StatusOK, resp.Code)
@@ -1205,7 +1221,7 @@ func TestWorkloadAPI_GetWorkloadEvents(t *testing.T) {
 	// wire would say it has a payload that happens to be empty.
 	t.Run("leaves out the data of an event that carries none", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Events(mock.Anything, "example", 100).
+		svc.EXPECT().Events(mock.Anything, "example", time.Time{}, 100).
 			Return([]service.Event{{Reason: event.Applied, Message: "applied", Data: event.Encode(event.Fields{}), Count: 1}}, nil).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/events", nil)
@@ -1219,7 +1235,7 @@ func TestWorkloadAPI_GetWorkloadEvents(t *testing.T) {
 
 	t.Run("reports a missing workload", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Events(mock.Anything, "nope", 100).Return(nil, service.ErrWorkloadNotFound).Once()
+		svc.EXPECT().Events(mock.Anything, "nope", time.Time{}, 100).Return(nil, service.ErrWorkloadNotFound).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/nope/events", nil)
 		assert.Equal(t, http.StatusNotFound, resp.Code)
@@ -1227,7 +1243,7 @@ func TestWorkloadAPI_GetWorkloadEvents(t *testing.T) {
 
 	t.Run("reports a failure to read them", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
-		svc.EXPECT().Events(mock.Anything, "example", 100).Return(nil, errors.New("database is gone")).Once()
+		svc.EXPECT().Events(mock.Anything, "example", time.Time{}, 100).Return(nil, errors.New("database is gone")).Once()
 
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/events", nil)
 		assert.Equal(t, http.StatusInternalServerError, resp.Code)

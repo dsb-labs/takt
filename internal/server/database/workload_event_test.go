@@ -22,7 +22,7 @@ func TestWorkloadEventRepository_Record(t *testing.T) {
 
 		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{"ref":"alpine:3"}`)))
 
-		stored, err := events.List(ctx, "example", 10)
+		stored, err := events.List(ctx, "example", time.Time{}, 10)
 		require.NoError(t, err)
 		require.Len(t, stored, 1)
 
@@ -40,7 +40,7 @@ func TestWorkloadEventRepository_Record(t *testing.T) {
 			require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{"ref":"alpine:3"}`)))
 		}
 
-		stored, err := events.List(ctx, "example", 10)
+		stored, err := events.List(ctx, "example", time.Time{}, 10)
 		require.NoError(t, err)
 		require.Len(t, stored, 1)
 
@@ -56,7 +56,7 @@ func TestWorkloadEventRepository_Record(t *testing.T) {
 		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{"ref":"alpine:3"}`)))
 		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{"ref":"alpine:4"}`)))
 
-		stored, err := events.List(ctx, "example", 10)
+		stored, err := events.List(ctx, "example", time.Time{}, 10)
 		require.NoError(t, err)
 		assert.Len(t, stored, 2)
 	})
@@ -67,7 +67,7 @@ func TestWorkloadEventRepository_Record(t *testing.T) {
 
 		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{"ref":"alpine:3"}`)))
 
-		first, err := events.List(ctx, "example", 10)
+		first, err := events.List(ctx, "example", time.Time{}, 10)
 		require.NoError(t, err)
 		require.Len(t, first, 1)
 
@@ -75,7 +75,7 @@ func TestWorkloadEventRepository_Record(t *testing.T) {
 
 		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{"ref":"alpine:3"}`)))
 
-		second, err := events.List(ctx, "example", 10)
+		second, err := events.List(ctx, "example", time.Time{}, 10)
 		require.NoError(t, err)
 		require.Len(t, second, 1)
 
@@ -91,7 +91,7 @@ func TestWorkloadEventRepository_Record(t *testing.T) {
 
 		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{"ref":"alpine:3"}`)))
 
-		first, err := events.List(ctx, "example", 10)
+		first, err := events.List(ctx, "example", time.Time{}, 10)
 		require.NoError(t, err)
 		require.Len(t, first, 1)
 
@@ -99,7 +99,7 @@ func TestWorkloadEventRepository_Record(t *testing.T) {
 
 		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{"ref":"alpine:3"}`)))
 
-		second, err := events.List(ctx, "example", 10)
+		second, err := events.List(ctx, "example", time.Time{}, 10)
 		require.NoError(t, err)
 		require.Len(t, second, 1)
 
@@ -112,7 +112,7 @@ func TestWorkloadEventRepository_Record(t *testing.T) {
 
 		require.NoError(t, events.Record(ctx, "missing", event.ImagePulling, []byte(`{"ref":"alpine:3"}`)))
 
-		stored, err := events.List(ctx, "missing", 10)
+		stored, err := events.List(ctx, "missing", time.Time{}, 10)
 		require.NoError(t, err)
 		assert.Empty(t, stored)
 	})
@@ -130,7 +130,7 @@ func TestWorkloadEventRepository_Record(t *testing.T) {
 				[]byte(fmt.Sprintf(`{"instance":%d}`, i))))
 		}
 
-		stored, err := events.List(ctx, "example", 500)
+		stored, err := events.List(ctx, "example", time.Time{}, 500)
 		require.NoError(t, err)
 		assert.Len(t, stored, 5)
 
@@ -148,7 +148,7 @@ func TestWorkloadEventRepository_List(t *testing.T) {
 
 		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{}`)))
 
-		stored, err := events.List(ctx, "example", 10)
+		stored, err := events.List(ctx, "example", time.Time{}, 10)
 		require.NoError(t, err)
 		require.Len(t, stored, 1)
 
@@ -156,7 +156,7 @@ func TestWorkloadEventRepository_List(t *testing.T) {
 
 		require.NoError(t, events.Record(ctx, "example", event.InstanceStarted, []byte(`{}`)))
 
-		ordered, err := events.List(ctx, "example", 10)
+		ordered, err := events.List(ctx, "example", time.Time{}, 10)
 		require.NoError(t, err)
 		require.Len(t, ordered, 2)
 
@@ -173,9 +173,50 @@ func TestWorkloadEventRepository_List(t *testing.T) {
 				[]byte(fmt.Sprintf(`{"instance":%d}`, i))))
 		}
 
-		stored, err := events.List(ctx, "example", 2)
+		stored, err := events.List(ctx, "example", time.Time{}, 2)
 		require.NoError(t, err)
 		assert.Len(t, stored, 2)
+	})
+
+	t.Run("drops the events last seen at or before the given time", func(t *testing.T) {
+		events, db, _ := newTestEventRepository(t)
+		ctx := t.Context()
+
+		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{}`)))
+
+		stored, err := events.List(ctx, "example", time.Time{}, 10)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+
+		backdate(t, db, stored[0].ID, time.Now().UTC().Add(-time.Hour))
+
+		require.NoError(t, events.Record(ctx, "example", event.InstanceStarted, []byte(`{}`)))
+
+		recent, err := events.List(ctx, "example", time.Now().UTC().Add(-time.Minute), 10)
+		require.NoError(t, err)
+		require.Len(t, recent, 1)
+
+		assert.Equal(t, event.InstanceStarted, recent[0].Reason)
+	})
+
+	t.Run("returns an event again once a repeat has moved it", func(t *testing.T) {
+		events, _, _ := newTestEventRepository(t)
+		ctx := t.Context()
+
+		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{}`)))
+
+		stored, err := events.List(ctx, "example", time.Time{}, 10)
+		require.NoError(t, err)
+		require.Len(t, stored, 1)
+
+		assert.Empty(t, mustList(t, events, stored[0].LastSeen))
+
+		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{}`)))
+
+		repeated := mustList(t, events, stored[0].LastSeen)
+		require.Len(t, repeated, 1)
+
+		assert.Equal(t, 2, repeated[0].Count)
 	})
 
 	t.Run("returns nothing once the workload is deleted", func(t *testing.T) {
@@ -185,7 +226,7 @@ func TestWorkloadEventRepository_List(t *testing.T) {
 		require.NoError(t, events.Record(ctx, "example", event.ImagePulling, []byte(`{"ref":"alpine:3"}`)))
 		require.NoError(t, workloads.Delete(ctx, "example"))
 
-		stored, err := events.List(ctx, "example", 10)
+		stored, err := events.List(ctx, "example", time.Time{}, 10)
 		require.NoError(t, err)
 		assert.Empty(t, stored)
 	})
@@ -206,6 +247,16 @@ func newTestEventRepository(t *testing.T) (*database.WorkloadEventRepository, *s
 	require.NoError(t, err)
 
 	return database.NewWorkloadEventRepository(db, event.DefaultMaxEvents), db, workloads
+}
+
+// mustList reads the example workload's events last seen after the given time.
+func mustList(t *testing.T, events *database.WorkloadEventRepository, since time.Time) []database.WorkloadEvent {
+	t.Helper()
+
+	stored, err := events.List(t.Context(), "example", since, 10)
+	require.NoError(t, err)
+
+	return stored
 }
 
 // backdate moves an event's last seen time into the past, which is how a test

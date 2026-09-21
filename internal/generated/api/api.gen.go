@@ -2791,6 +2791,15 @@ type GetWorkloadEventsParams struct {
 	// the server reads what it is asked for and an unbounded request would let
 	// a caller decide how much work the server does.
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Since Return only the events last seen after this time. A caller polling for
+	// what has changed passes back the newest `lastSeen` it has already read.
+	//
+	// The filter is on the last sighting, not the first, so an event that
+	// recurs is returned again carrying its new count. The count is part of
+	// the event, and a repeat is a change worth reporting rather than one
+	// already delivered.
+	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
 }
 
 // GetWorkloadLogsParams defines parameters for GetWorkloadLogs.
@@ -3793,7 +3802,8 @@ type ClientInterface interface {
 	//
 	// The server keeps a bounded number of events per workload, oldest removed
 	// first, so a workload's history reaches back as far as its rate of events
-	// allows rather than for a fixed time.
+	// allows rather than for a fixed time. A `since` reaching further back than
+	// that returns everything still kept, which is not everything that happened.
 	//
 	// Corresponds with GET /api/v1/workloads/{name}/events (the `GetWorkloadEvents` operationId).
 	GetWorkloadEvents(ctx context.Context, name WorkloadName, params *GetWorkloadEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -5271,7 +5281,8 @@ func (c *Client) DryRunWorkload(ctx context.Context, name WorkloadName, body Dry
 //
 // The server keeps a bounded number of events per workload, oldest removed
 // first, so a workload's history reaches back as far as its rate of events
-// allows rather than for a fixed time.
+// allows rather than for a fixed time. A `since` reaching further back than
+// that returns everything still kept, which is not everything that happened.
 //
 // Corresponds with GET /api/v1/workloads/{name}/events (the `GetWorkloadEvents` operationId).
 func (c *Client) GetWorkloadEvents(ctx context.Context, name WorkloadName, params *GetWorkloadEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -7222,6 +7233,18 @@ func NewGetWorkloadEventsRequest(server string, name WorkloadName, params *GetWo
 
 		}
 
+		if params.Since != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "since", *params.Since, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if encoded := queryValues.Encode(); encoded != "" {
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
@@ -8426,7 +8449,8 @@ type ClientWithResponsesInterface interface {
 	//
 	// The server keeps a bounded number of events per workload, oldest removed
 	// first, so a workload's history reaches back as far as its rate of events
-	// allows rather than for a fixed time.
+	// allows rather than for a fixed time. A `since` reaching further back than
+	// that returns everything still kept, which is not everything that happened.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -13135,7 +13159,8 @@ func (c *ClientWithResponses) DryRunWorkloadWithResponse(ctx context.Context, na
 //
 // The server keeps a bounded number of events per workload, oldest removed
 // first, so a workload's history reaches back as far as its rate of events
-// allows rather than for a fixed time.
+// allows rather than for a fixed time. A `since` reaching further back than
+// that returns everything still kept, which is not everything that happened.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -17772,6 +17797,19 @@ func (siw *ServerInterfaceWrapper) GetWorkloadEvents(w http.ResponseWriter, r *h
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "since" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "since", r.URL.Query(), &params.Since, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "since"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "since", Err: err})
 		}
 		return
 	}

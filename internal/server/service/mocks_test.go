@@ -4605,8 +4605,8 @@ func (_m *MockWorkloadEventRepository) EXPECT() *MockWorkloadEventRepository_Exp
 }
 
 // List provides a mock function for the type MockWorkloadEventRepository
-func (_mock *MockWorkloadEventRepository) List(ctx context.Context, name string, limit int) ([]database.WorkloadEvent, error) {
-	ret := _mock.Called(ctx, name, limit)
+func (_mock *MockWorkloadEventRepository) List(ctx context.Context, name string, since time.Time, limit int) ([]database.WorkloadEvent, error) {
+	ret := _mock.Called(ctx, name, since, limit)
 
 	if len(ret) == 0 {
 		panic("no return value specified for List")
@@ -4614,18 +4614,18 @@ func (_mock *MockWorkloadEventRepository) List(ctx context.Context, name string,
 
 	var r0 []database.WorkloadEvent
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int) ([]database.WorkloadEvent, error)); ok {
-		return returnFunc(ctx, name, limit)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, time.Time, int) ([]database.WorkloadEvent, error)); ok {
+		return returnFunc(ctx, name, since, limit)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int) []database.WorkloadEvent); ok {
-		r0 = returnFunc(ctx, name, limit)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, time.Time, int) []database.WorkloadEvent); ok {
+		r0 = returnFunc(ctx, name, since, limit)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]database.WorkloadEvent)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int) error); ok {
-		r1 = returnFunc(ctx, name, limit)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, time.Time, int) error); ok {
+		r1 = returnFunc(ctx, name, since, limit)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -4640,12 +4640,13 @@ type MockWorkloadEventRepository_List_Call struct {
 // List is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
+//   - since time.Time
 //   - limit int
-func (_e *MockWorkloadEventRepository_Expecter) List(ctx any, name any, limit any) *MockWorkloadEventRepository_List_Call {
-	return &MockWorkloadEventRepository_List_Call{Call: _e.mock.On("List", ctx, name, limit)}
+func (_e *MockWorkloadEventRepository_Expecter) List(ctx any, name any, since any, limit any) *MockWorkloadEventRepository_List_Call {
+	return &MockWorkloadEventRepository_List_Call{Call: _e.mock.On("List", ctx, name, since, limit)}
 }
 
-func (_c *MockWorkloadEventRepository_List_Call) Run(run func(ctx context.Context, name string, limit int)) *MockWorkloadEventRepository_List_Call {
+func (_c *MockWorkloadEventRepository_List_Call) Run(run func(ctx context.Context, name string, since time.Time, limit int)) *MockWorkloadEventRepository_List_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -4655,14 +4656,19 @@ func (_c *MockWorkloadEventRepository_List_Call) Run(run func(ctx context.Contex
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 int
+		var arg2 time.Time
 		if args[2] != nil {
-			arg2 = args[2].(int)
+			arg2 = args[2].(time.Time)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -4673,7 +4679,7 @@ func (_c *MockWorkloadEventRepository_List_Call) Return(workloadEvents []databas
 	return _c
 }
 
-func (_c *MockWorkloadEventRepository_List_Call) RunAndReturn(run func(ctx context.Context, name string, limit int) ([]database.WorkloadEvent, error)) *MockWorkloadEventRepository_List_Call {
+func (_c *MockWorkloadEventRepository_List_Call) RunAndReturn(run func(ctx context.Context, name string, since time.Time, limit int) ([]database.WorkloadEvent, error)) *MockWorkloadEventRepository_List_Call {
 	_c.Call.Return(run)
 	return _c
 }

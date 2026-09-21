@@ -136,7 +136,8 @@ export interface paths {
      *
      *     The server keeps a bounded number of events per workload, oldest removed
      *     first, so a workload's history reaches back as far as its rate of events
-     *     allows rather than for a fixed time.
+     *     allows rather than for a fixed time. A `since` reaching further back than
+     *     that returns everything still kept, which is not everything that happened.
      */
     get: operations["getWorkloadEvents"];
     put?: never;
@@ -3311,6 +3312,16 @@ export interface operations {
          *     a caller decide how much work the server does.
          */
         limit?: number;
+        /**
+         * @description Return only the events last seen after this time. A caller polling for
+         *     what has changed passes back the newest `lastSeen` it has already read.
+         *
+         *     The filter is on the last sighting, not the first, so an event that
+         *     recurs is returned again carrying its new count. The count is part of
+         *     the event, and a repeat is a change worth reporting rather than one
+         *     already delivered.
+         */
+        since?: string;
       };
       header?: never;
       path: {
