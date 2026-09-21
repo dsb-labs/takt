@@ -107,6 +107,7 @@ takt workload apply example.yaml
 | Flag | Description |
 |---|---|
 | `--dry-run` | Report what applying the manifest would do, and apply nothing. |
+| `--if-match` | Apply only while the workload still carries this tag. |
 
 Parses the manifest, submits it, and prints the resulting workload.
 
@@ -115,6 +116,13 @@ specification does, so a repeated apply never restarts healthy work.
 
 Applying a workload that is still terminating is rejected rather than resurrecting it
 half torn down.
+
+Every workload carries an entity tag, which `takt workload get` prints as `ETag`.
+Passing that tag to `--if-match` makes the apply conditional. takt refuses it when
+the workload has moved on since the get, rather than writing over whatever landed in
+between. Read the workload again and re-apply. Leaving the flag unset applies
+unconditionally, which is what creating a workload has to do — there is no tag yet to
+name.
 
 ### workload apply --dry-run
 
@@ -430,6 +438,10 @@ yet is lost with the server, and can simply be sent again.
 takt volume apply volume.yaml
 ```
 
+| Flag | Description |
+|---|---|
+| `--if-match` | Apply only while the volume still carries this tag. |
+
 Creates the volume when the name is new, and updates it when it is not. The stored
 volume becomes what the manifest says, however many times it is applied. The
 manifest is a name, labels if you want them, and optionally who owns the directory
@@ -460,6 +472,9 @@ leaves the directory as it stands.
 Nothing mounting the volume is redeployed. None of these fields say anything about
 the volume's place in a workload's specification, so no specification hash moves.
 
+A volume carries an entity tag the same way a workload does, and `--if-match` reads
+the same. See [workload apply](#workload-apply).
+
 ## volume list
 
 ```sh
@@ -486,7 +501,9 @@ takt volume get example-data
 ```
 
 Prints one volume. `Path` is where its data is on the host running the server, which is
-what something taking a backup needs.
+what something taking a backup needs. `ETag` is the tag a conditional
+[volume apply](#volume-apply) hands back, and `UpdatedAt` is when the volume's labels,
+owner or mode last changed.
 
 ## volume delete
 
@@ -521,12 +538,19 @@ until the reconciler has stopped it, so the data it mounts is still in use.
 takt service apply service.yaml
 ```
 
+| Flag | Description |
+|---|---|
+| `--if-match` | Apply only while the service still carries this tag. |
+
 Creates or updates a service from a manifest file. The stored selection becomes what
 the manifest says, however many times it is applied. See [Services](services.md) for
 the manifest and what a service selects.
 
 The workloads the target selects do not have to exist. A service applied ahead of its
 workloads reports no backends until they arrive.
+
+A service carries an entity tag the same way a workload does, and `--if-match` reads
+the same. See [workload apply](#workload-apply).
 
 ## service list
 
