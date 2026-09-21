@@ -269,11 +269,13 @@ for that.
 ```sh
 takt workload events example
 takt workload events example --limit 20
+takt workload events example --since 10m
 ```
 
 | Flag | Default | Description |
 |---|---|---|
 | `--limit`, `-n` | `100` | Events to read, most recently seen first. |
+| `--since` | | Read only the events last seen since a duration ago or an RFC 3339 time. |
 
 Prints what the server recorded about a workload while converging it, as JSON. An
 event names a cause rather than a state: which image is being pulled, why an instance
@@ -292,6 +294,16 @@ is fetching, for a caller doing something with the event beyond showing it.
 
 The server keeps a bounded number of events per workload, fifty by default. See
 [operating](operating.md) for the cap and how to raise it.
+
+`--since` reads only the events last seen after a moment. Give it a duration ago,
+such as `10m`, or an RFC 3339 time. A script watching a workload passes back the
+newest `lastSeen` it has already read.
+
+The filter is on the last sighting rather than the first. An event that has
+recurred since then is reported again, carrying its new count. That is the point:
+the count is part of the event, and a pull that has run another twenty passes has
+changed even though nothing new was recorded. A `--since` reaching further back
+than the cap returns everything still kept, which is not everything that happened.
 
 ## workload logs
 
