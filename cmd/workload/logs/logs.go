@@ -51,7 +51,7 @@ func Command() *cobra.Command {
 					return err
 				}
 
-				options = append(options, client.WithSince(instant))
+				options = append(options, client.WithLogsSince(instant))
 			}
 
 			if err := c.Logs(cmd.Context(), cmd.OutOrStdout(), args[0], options...); err != nil {

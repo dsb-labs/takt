@@ -1075,7 +1075,7 @@ func TestClient_Logs(t *testing.T) {
 		})
 
 		var logs strings.Builder
-		require.NoError(t, c.Logs(t.Context(), &logs, "example", client.WithFollow(), client.WithSince(since)))
+		require.NoError(t, c.Logs(t.Context(), &logs, "example", client.WithFollow(), client.WithLogsSince(since)))
 		assert.Equal(t, "still going\n", logs.String())
 	})
 
@@ -1160,7 +1160,7 @@ func TestClient_Events(t *testing.T) {
 			})
 		})
 
-		got, err := c.Events(t.Context(), "example", 20)
+		got, err := c.Events(t.Context(), "example", client.WithEventsLimit(20))
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 
@@ -1170,6 +1170,17 @@ func TestClient_Events(t *testing.T) {
 		assert.Equal(t, 4, got[0].Count)
 		assert.Equal(t, seen, got[0].FirstSeen)
 		assert.Equal(t, seen.Add(time.Minute), got[0].LastSeen)
+	})
+
+	t.Run("asks for only the events last seen since an instant", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, seen.Format(time.RFC3339Nano), r.URL.Query().Get("since"))
+
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadEventsResult{})
+		})
+
+		_, err := c.Events(t.Context(), "example", client.WithEventsSince(seen))
+		require.NoError(t, err)
 	})
 
 	// An exit status of zero is a clean exit, and the server leaving the field out
@@ -1184,7 +1195,7 @@ func TestClient_Events(t *testing.T) {
 			})
 		})
 
-		got, err := c.Events(t.Context(), "example", 0)
+		got, err := c.Events(t.Context(), "example")
 		require.NoError(t, err)
 		require.Len(t, got, 2)
 
@@ -1202,7 +1213,7 @@ func TestClient_Events(t *testing.T) {
 			})
 		})
 
-		got, err := c.Events(t.Context(), "example", 0)
+		got, err := c.Events(t.Context(), "example")
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 		assert.Equal(t, client.EventReason("somethingNewer"), got[0].Reason)
@@ -1213,7 +1224,7 @@ func TestClient_Events(t *testing.T) {
 			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "nope" does not exist`})
 		})
 
-		_, err := c.Events(t.Context(), "nope", 0)
+		_, err := c.Events(t.Context(), "nope")
 		assert.ErrorIs(t, err, client.ErrWorkloadNotFound)
 	})
 }
