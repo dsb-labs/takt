@@ -10,6 +10,12 @@ describes how an entry is written.
 
 ### Added
 
+- A workload, volume or service apply can name the version it expects to be
+  replacing, the way an `acl apply` already could. `takt workload get` prints
+  the resource's tag as `ETag`, `takt workload apply --if-match` carries it
+  back, and takt refuses the apply when the resource has moved on since
+  ([#89](https://github.com/dsb-labs/takt/issues/89),
+  [#114](https://github.com/dsb-labs/takt/pull/114)).
 - `takt workload events --since` reads only the events a workload was last
   seen at after the given time, which a poller uses to pick up where it left
   off ([#89](https://github.com/dsb-labs/takt/issues/89),
