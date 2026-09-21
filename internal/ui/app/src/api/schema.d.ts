@@ -3073,6 +3073,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3097,6 +3099,8 @@ export interface operations {
           "application/json": components["schemas"]["GetWorkloadResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
@@ -3136,6 +3140,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       /**
        * @description The workload is being deleted. It cannot be applied again until its
        *     teardown has finished and it has disappeared.
@@ -3204,6 +3210,8 @@ export interface operations {
           "application/json": components["schemas"]["DeleteWorkloadResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       /** @description Another workload references this one, and force was not set. */
       409: {
@@ -3288,6 +3296,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
@@ -3321,6 +3331,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
@@ -3350,6 +3362,8 @@ export interface operations {
           "application/json": components["schemas"]["StopWorkloadResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       /** @description The workload is being deleted, so there is nothing left to hold down. */
       409: {
@@ -3388,6 +3402,8 @@ export interface operations {
           "application/json": components["schemas"]["StartWorkloadResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       /** @description The workload is being deleted and cannot run again. */
       409: {
@@ -3426,6 +3442,8 @@ export interface operations {
           "application/json": components["schemas"]["RestartWorkloadResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       /** @description The workload is being deleted or is suspended. */
       409: {
@@ -3465,6 +3483,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       /**
        * @description The workload is being deleted, or the specification pins a host port
        *     another workload holds.
@@ -3518,6 +3538,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3542,6 +3564,8 @@ export interface operations {
           "application/json": components["schemas"]["GetVolumeResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
@@ -3581,6 +3605,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3618,6 +3644,8 @@ export interface operations {
           "application/json": components["schemas"]["DeleteVolumeResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       /** @description A workload mounts the volume, and force was not set. */
       409: {
@@ -3679,6 +3707,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3703,6 +3733,8 @@ export interface operations {
           "application/json": components["schemas"]["GetServiceResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
@@ -3742,6 +3774,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3771,6 +3805,8 @@ export interface operations {
           "application/json": components["schemas"]["DeleteServiceResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
@@ -3802,6 +3838,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3826,6 +3864,8 @@ export interface operations {
           "application/json": components["schemas"]["GetSecretResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
@@ -3865,6 +3905,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3901,6 +3943,8 @@ export interface operations {
           "application/json": components["schemas"]["DeleteSecretResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       /** @description A workload reads the secret, and force was not set. */
       409: {
@@ -3940,6 +3984,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3964,6 +4010,8 @@ export interface operations {
           "application/json": components["schemas"]["GetVariableResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       500: components["responses"]["InternalServerError"];
     };
@@ -4003,6 +4051,8 @@ export interface operations {
         };
       };
       400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4039,6 +4089,8 @@ export interface operations {
           "application/json": components["schemas"]["DeleteVariableResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       /** @description A workload reads the variable, and force was not set. */
       409: {
@@ -4088,6 +4140,8 @@ export interface operations {
           "application/zip": string;
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4113,6 +4167,8 @@ export interface operations {
           "application/json": components["schemas"]["RekeyResult"];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4565,6 +4621,8 @@ export interface operations {
           "text/plain": string;
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4586,6 +4644,8 @@ export interface operations {
           "application/json": components["schemas"]["ScrapeTargetGroup"][];
         };
       };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       500: components["responses"]["InternalServerError"];
     };
   };
