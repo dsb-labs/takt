@@ -7,6 +7,7 @@ package api_test
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/dsb-labs/takt/internal/server/auth"
 	"github.com/dsb-labs/takt/internal/server/driver"
@@ -2834,8 +2835,8 @@ func (_c *MockWorkloadService_DryRun_Call) RunAndReturn(run func(ctx context.Con
 }
 
 // Events provides a mock function for the type MockWorkloadService
-func (_mock *MockWorkloadService) Events(ctx context.Context, name string, limit int) ([]service.Event, error) {
-	ret := _mock.Called(ctx, name, limit)
+func (_mock *MockWorkloadService) Events(ctx context.Context, name string, since time.Time, limit int) ([]service.Event, error) {
+	ret := _mock.Called(ctx, name, since, limit)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Events")
@@ -2843,18 +2844,18 @@ func (_mock *MockWorkloadService) Events(ctx context.Context, name string, limit
 
 	var r0 []service.Event
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int) ([]service.Event, error)); ok {
-		return returnFunc(ctx, name, limit)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, time.Time, int) ([]service.Event, error)); ok {
+		return returnFunc(ctx, name, since, limit)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int) []service.Event); ok {
-		r0 = returnFunc(ctx, name, limit)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, time.Time, int) []service.Event); ok {
+		r0 = returnFunc(ctx, name, since, limit)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]service.Event)
 		}
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int) error); ok {
-		r1 = returnFunc(ctx, name, limit)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, time.Time, int) error); ok {
+		r1 = returnFunc(ctx, name, since, limit)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -2869,12 +2870,13 @@ type MockWorkloadService_Events_Call struct {
 // Events is a helper method to define mock.On call
 //   - ctx context.Context
 //   - name string
+//   - since time.Time
 //   - limit int
-func (_e *MockWorkloadService_Expecter) Events(ctx any, name any, limit any) *MockWorkloadService_Events_Call {
-	return &MockWorkloadService_Events_Call{Call: _e.mock.On("Events", ctx, name, limit)}
+func (_e *MockWorkloadService_Expecter) Events(ctx any, name any, since any, limit any) *MockWorkloadService_Events_Call {
+	return &MockWorkloadService_Events_Call{Call: _e.mock.On("Events", ctx, name, since, limit)}
 }
 
-func (_c *MockWorkloadService_Events_Call) Run(run func(ctx context.Context, name string, limit int)) *MockWorkloadService_Events_Call {
+func (_c *MockWorkloadService_Events_Call) Run(run func(ctx context.Context, name string, since time.Time, limit int)) *MockWorkloadService_Events_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -2884,14 +2886,19 @@ func (_c *MockWorkloadService_Events_Call) Run(run func(ctx context.Context, nam
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
-		var arg2 int
+		var arg2 time.Time
 		if args[2] != nil {
-			arg2 = args[2].(int)
+			arg2 = args[2].(time.Time)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -2902,7 +2909,7 @@ func (_c *MockWorkloadService_Events_Call) Return(events []service.Event, err er
 	return _c
 }
 
-func (_c *MockWorkloadService_Events_Call) RunAndReturn(run func(ctx context.Context, name string, limit int) ([]service.Event, error)) *MockWorkloadService_Events_Call {
+func (_c *MockWorkloadService_Events_Call) RunAndReturn(run func(ctx context.Context, name string, since time.Time, limit int) ([]service.Event, error)) *MockWorkloadService_Events_Call {
 	_c.Call.Return(run)
 	return _c
 }

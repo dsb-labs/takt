@@ -1108,7 +1108,7 @@ func TestWorkloadService_Events(t *testing.T) {
 		repo, events := NewMockWorkloadRepository(t), NewMockWorkloadEventRepository(t)
 
 		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
-		events.EXPECT().List(mock.Anything, "example", 10).Return([]database.WorkloadEvent{
+		events.EXPECT().List(mock.Anything, "example", time.Time{}, 10).Return([]database.WorkloadEvent{
 			{
 				Reason:    event.ImagePulling,
 				Data:      event.Encode(event.Fields{Reference: "alpine:3"}),
@@ -1124,7 +1124,7 @@ func TestWorkloadService_Events(t *testing.T) {
 			Events:    events,
 		})
 
-		got, err := svc.Events(t.Context(), "example", 10)
+		got, err := svc.Events(t.Context(), "example", time.Time{}, 10)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
 
@@ -1150,7 +1150,7 @@ func TestWorkloadService_Events(t *testing.T) {
 
 		// A name nothing knows and a workload with nothing recorded are different
 		// answers, so the first is reported rather than read as an empty list.
-		_, err := svc.Events(t.Context(), "missing", 10)
+		_, err := svc.Events(t.Context(), "missing", time.Time{}, 10)
 		require.ErrorIs(t, err, service.ErrWorkloadNotFound)
 	})
 
@@ -1164,7 +1164,7 @@ func TestWorkloadService_Events(t *testing.T) {
 			Workloads: repo,
 		})
 
-		got, err := svc.Events(t.Context(), "example", 10)
+		got, err := svc.Events(t.Context(), "example", time.Time{}, 10)
 		require.NoError(t, err)
 		assert.Empty(t, got)
 	})

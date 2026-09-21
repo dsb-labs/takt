@@ -123,22 +123,33 @@ func (r *WorkloadEventRepository) Record(ctx context.Context, name string, reaso
 }
 
 // List returns the events recorded against the named workload, most recently
-// seen first, up to limit rows.
+// seen first, up to limit rows. A non-zero since drops the events last seen at
+// or before it.
 //
 // A workload that does not exist has no events, and so reads as empty rather than
 // as a failure. Callers that need to tell the two apart ask for the workload
 // first.
-func (r *WorkloadEventRepository) List(ctx context.Context, name string, limit int) ([]WorkloadEvent, error) {
+//
+// Since filters on the last sighting rather than the first, so an event that
+// recurs is returned again with its new count. That is what a caller polling for
+// what changed wants: the count is part of the event, and coalescing moved it.
+func (r *WorkloadEventRepository) List(ctx context.Context, name string, since time.Time, limit int) ([]WorkloadEvent, error) {
 	const q = `
 		SELECT e.id, e.workload_id, e.reason, json(e.data), e.count, e.first_seen, e.last_seen
 		FROM workload_event e
 		JOIN workload w ON w.id = e.workload_id
 		WHERE w.name = ?
+		AND (? = '' OR e.last_seen > ?)
 		ORDER BY e.last_seen DESC
 		LIMIT ?
 	`
 
-	rows, err := r.db.QueryContext(ctx, q, name, limit)
+	var bound string
+	if !since.IsZero() {
+		bound = formatTime(since)
+	}
+
+	rows, err := r.db.QueryContext(ctx, q, name, bound, bound, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query workload events: %w", err)
 	}

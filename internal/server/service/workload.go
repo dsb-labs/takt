@@ -158,8 +158,9 @@ type (
 		// with an event already recorded carrying the same reason and data.
 		Record(ctx context.Context, name string, reason event.Reason, data []byte) error
 		// List should return the events recorded against the named workload, most
-		// recently seen first, up to limit of them.
-		List(ctx context.Context, name string, limit int) ([]database.WorkloadEvent, error)
+		// recently seen first, up to limit of them. A non-zero since should drop
+		// the events last seen at or before it.
+		List(ctx context.Context, name string, since time.Time, limit int) ([]database.WorkloadEvent, error)
 	}
 
 	// The PortRepository interface describes the port allocation operations the
@@ -1323,13 +1324,14 @@ func (s *WorkloadService) Restart(ctx context.Context, name string) (Workload, e
 }
 
 // Events returns what the server recorded about the named workload while
-// converging it, most recently seen first, up to limit of them.
+// converging it, most recently seen first, up to limit of them. A non-zero
+// since drops the events last seen at or before it.
 // Returns ErrWorkloadNotFound when no such workload exists.
 //
 // The workload is read first so that a name nothing knows is reported as missing
 // rather than as having no events, which are different answers to different
 // questions.
-func (s *WorkloadService) Events(ctx context.Context, name string, limit int) ([]Event, error) {
+func (s *WorkloadService) Events(ctx context.Context, name string, since time.Time, limit int) ([]Event, error) {
 	if _, err := s.workloads.Get(ctx, name); err != nil {
 		if errors.Is(err, database.ErrWorkloadNotFound) {
 			return nil, ErrWorkloadNotFound
@@ -1342,7 +1344,7 @@ func (s *WorkloadService) Events(ctx context.Context, name string, limit int) ([
 		return nil, nil
 	}
 
-	rows, err := s.events.List(ctx, name, limit)
+	rows, err := s.events.List(ctx, name, since, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read workload events: %w", err)
 	}

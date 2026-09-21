@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/server/driver"
@@ -30,8 +31,9 @@ type (
 		// Get should return the workload with the given name.
 		Get(ctx context.Context, name string) (service.Workload, error)
 		// Events should return what the server recorded about the named workload,
-		// most recently seen first, up to limit of them.
-		Events(ctx context.Context, name string, limit int) ([]service.Event, error)
+		// most recently seen first, up to limit of them. A non-zero since should
+		// drop the events last seen at or before it.
+		Events(ctx context.Context, name string, since time.Time, limit int) ([]service.Event, error)
 		// List should return the workloads matching every one of the given queries,
 		// or all of them when none are given.
 		List(ctx context.Context, queries ...string) ([]service.Workload, error)
@@ -274,7 +276,12 @@ func (a *WorkloadAPI) GetWorkloadEvents(ctx context.Context, request api.GetWork
 		limit = min(max(*request.Params.Limit, minEventLimit), maxEventLimit)
 	}
 
-	events, err := a.workloads.Events(ctx, request.Name, limit)
+	var since time.Time
+	if request.Params.Since != nil {
+		since = *request.Params.Since
+	}
+
+	events, err := a.workloads.Events(ctx, request.Name, since, limit)
 	switch {
 	case errors.Is(err, service.ErrWorkloadNotFound):
 		return api.GetWorkloadEvents404JSONResponse{
