@@ -5,3 +5,7 @@ pulled, why an instance was replaced, why a start failed. Events are returned
 most recently seen first. Repeated sightings of one thing are reported once,
 with a count and the times that bound them, so a pull running across forty
 passes reads as one event rather than forty.
+
+Passing --since reads only the events last seen after a moment, given as a
+duration ago such as 10m or as an RFC 3339 time. The filter is on the last
+sighting, so an event that has recurred is reported again with its new count.

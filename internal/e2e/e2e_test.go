@@ -853,7 +853,7 @@ func (s *Suite) TestEventsRecordWhyAWorkloadLooksTheWayItDoes() {
 
 	s.awaitState(name, client.WorkloadStateRunning)
 
-	events, err := s.client.Events(s.ctx(), name, 0)
+	events, err := s.client.Events(s.ctx(), name)
 	s.Require().NoError(err)
 
 	reasons := make(map[client.EventReason]client.Event, len(events))

@@ -476,16 +476,56 @@ func (c *Client) Get(ctx context.Context, name string) (Workload, error) {
 	}
 }
 
+type (
+	// The EventOption type is a function that modifies which events are read.
+	EventOption func(*eventConfig)
+
+	eventConfig struct {
+		since time.Time
+		limit int
+	}
+)
+
+// WithEventsSince modifies a read to return only the events last seen after an
+// instant.
+//
+// The filter is on the last sighting rather than the first, so an event that
+// recurs is returned again carrying its new count. A caller polling for what
+// changed passes back the newest LastSeen it has already read, and a changed
+// count is a change worth reporting.
+func WithEventsSince(t time.Time) EventOption {
+	return func(c *eventConfig) { c.since = t }
+}
+
+// WithEventsLimit modifies a read to return no more than a number of events.
+//
+// A count of zero or less leaves the limit to the server, which is also what
+// happens when this is not passed at all. The server caps what it will read
+// either way, so a generous count is answered with as much as it is willing to
+// serve rather than refused.
+func WithEventsLimit(events int) EventOption {
+	return func(c *eventConfig) { c.limit = events }
+}
+
 // Events returns what the server recorded about the named workload while
-// converging it, most recently seen first, up to limit of them. Returns
+// converging it, most recently seen first, as the options describe. Returns
 // ErrWorkloadNotFound when no such workload exists.
 //
-// A limit of zero asks for the server's default. The server caps what it will
-// return, so asking for more than the cap returns the cap rather than failing.
-func (c *Client) Events(ctx context.Context, name string, limit int) ([]Event, error) {
+// Passing no options reads the most recent events with the server deciding how
+// many of them to return.
+func (c *Client) Events(ctx context.Context, name string, options ...EventOption) ([]Event, error) {
+	var config eventConfig
+	for _, option := range options {
+		option(&config)
+	}
+
 	var params api.GetWorkloadEventsParams
-	if limit > 0 {
-		params.Limit = &limit
+	if config.limit > 0 {
+		params.Limit = &config.limit
+	}
+
+	if !config.since.IsZero() {
+		params.Since = &config.since
 	}
 
 	resp, err := c.api.GetWorkloadEventsWithResponse(ctx, name, &params)
@@ -965,12 +1005,13 @@ func WithInstance(index int) LogOption {
 	return func(c *logConfig) { c.instance = new(index) }
 }
 
-// WithSince modifies a read to return only the output written at or after an instant.
+// WithLogsSince modifies a read to return only the output written at or after an
+// instant.
 //
 // This reaches container workloads only. An exec workload's output is a plain file with
 // no timestamps in it, so the server ignores this rather than filtering on times it
 // would have to invent.
-func WithSince(t time.Time) LogOption {
+func WithLogsSince(t time.Time) LogOption {
 	return func(c *logConfig) { c.since = t }
 }
 
