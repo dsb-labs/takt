@@ -8,3 +8,9 @@ The directory keeps its path across an apply, so nothing mounting the
 volume is redeployed, and the owner and mode are reapplied to it. An
 owner or a mode the manifest leaves empty stops being enforced rather
 than being reverted.
+
+Pass --if-match the tag "takt volume get" reported for the volume being
+replaced, and the apply is refused when the volume has moved on since,
+rather than writing over whatever landed in between. Without it an apply
+writes unconditionally, which is what creating one has to do: there is
+no tag yet to name.

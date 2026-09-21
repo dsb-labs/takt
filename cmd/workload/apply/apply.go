@@ -19,7 +19,10 @@ var usage string
 // Command returns the "workload apply" command used to submit a workload manifest to the
 // takt server.
 func Command() *cobra.Command {
-	var dryRun bool
+	var (
+		dryRun  bool
+		ifMatch string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "apply <manifest>",
@@ -52,7 +55,7 @@ func Command() *cobra.Command {
 				return enc.Encode(run)
 			}
 
-			workload, _, err := c.Apply(cmd.Context(), spec)
+			workload, _, err := c.Apply(cmd.Context(), spec, client.WithIfMatch(ifMatch))
 			if err != nil {
 				return fmt.Errorf("failed to apply workload: %w", err)
 			}
@@ -61,6 +64,8 @@ func Command() *cobra.Command {
 		},
 	}
 
+	cmd.Flags().StringVar(&ifMatch, "if-match", "",
+		"apply only if the workload's tag still matches this one, as reported by \"takt workload get\"")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what applying the manifest would do, and apply nothing")
 
 	return cmd

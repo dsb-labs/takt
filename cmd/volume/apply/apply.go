@@ -19,6 +19,8 @@ var usage string
 // Command returns the "volume apply" command used to submit a volume manifest to
 // the takt server.
 func Command() *cobra.Command {
+	var ifMatch string
+
 	cmd := &cobra.Command{
 		Use:   "apply <manifest>",
 		Short: "Create or update a volume from a manifest file",
@@ -38,7 +40,7 @@ func Command() *cobra.Command {
 
 			c := client.FromContext(cmd.Context())
 
-			applied, err := c.ApplyVolume(cmd.Context(), spec)
+			applied, err := c.ApplyVolume(cmd.Context(), spec, client.WithIfMatch(ifMatch))
 			if err != nil {
 				return fmt.Errorf("failed to apply volume: %w", err)
 			}
@@ -49,6 +51,9 @@ func Command() *cobra.Command {
 			return enc.Encode(applied)
 		},
 	}
+
+	cmd.Flags().StringVar(&ifMatch, "if-match", "",
+		"apply only if the volume's tag still matches this one, as reported by \"takt volume get\"")
 
 	return cmd
 }
