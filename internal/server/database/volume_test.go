@@ -18,7 +18,7 @@ func TestVolumeRepository_Upsert(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		stored, created, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"})
+		stored, created, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"}, 0)
 		require.NoError(t, err)
 
 		assert.True(t, created, "a first upsert did not report creation")
@@ -32,7 +32,7 @@ func TestVolumeRepository_Upsert(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		stored, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data", Owner: "470", Mode: "0700"})
+		stored, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data", Owner: "470", Mode: "0700"}, 0)
 		require.NoError(t, err)
 
 		got, created, err := volumes.Upsert(t.Context(), database.Volume{
@@ -40,7 +40,7 @@ func TestVolumeRepository_Upsert(t *testing.T) {
 			Labels: map[string]string{"app": "web"},
 			Owner:  "470:470",
 			Mode:   "0755",
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		// The identifier and the creation time are the volume's own, kept
@@ -52,6 +52,98 @@ func TestVolumeRepository_Upsert(t *testing.T) {
 		assert.Equal(t, "470:470", got.Owner)
 		assert.Equal(t, "0755", got.Mode)
 	})
+	t.Run("versions a volume from its first write", func(t *testing.T) {
+		t.Parallel()
+
+		volumes := database.NewVolumeRepository(newTestDatabase(t))
+
+		stored, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"}, 0)
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, stored.Version)
+		assert.WithinDuration(t, stored.CreatedAt, stored.UpdatedAt, 0)
+	})
+
+	t.Run("moves the version and the update time on a change", func(t *testing.T) {
+		t.Parallel()
+
+		volumes := database.NewVolumeRepository(newTestDatabase(t))
+
+		first, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"}, 0)
+		require.NoError(t, err)
+
+		second, _, err := volumes.Upsert(t.Context(),
+			database.Volume{Name: "example-data", Owner: "470"}, 0)
+		require.NoError(t, err)
+
+		assert.Equal(t, 2, second.Version)
+		assert.False(t, second.UpdatedAt.Before(first.UpdatedAt), "the update time went backwards")
+	})
+
+	t.Run("leaves the version alone when an apply changes nothing", func(t *testing.T) {
+		t.Parallel()
+
+		volumes := database.NewVolumeRepository(newTestDatabase(t))
+
+		volume := database.Volume{Name: "example-data", Labels: map[string]string{"app": "web"}, Owner: "470"}
+
+		first, _, err := volumes.Upsert(t.Context(), volume, 0)
+		require.NoError(t, err)
+
+		second, created, err := volumes.Upsert(t.Context(), volume, 0)
+		require.NoError(t, err)
+
+		assert.False(t, created)
+		assert.Equal(t, first.Version, second.Version)
+		assert.WithinDuration(t, first.UpdatedAt, second.UpdatedAt, 0)
+	})
+
+	t.Run("applies when the version is the one the caller read", func(t *testing.T) {
+		t.Parallel()
+
+		volumes := database.NewVolumeRepository(newTestDatabase(t))
+
+		first, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"}, 0)
+		require.NoError(t, err)
+
+		second, _, err := volumes.Upsert(t.Context(),
+			database.Volume{Name: "example-data", Owner: "470"}, first.Version)
+		require.NoError(t, err)
+
+		assert.Equal(t, 2, second.Version)
+	})
+
+	t.Run("refuses an apply conditioned on a version that has moved", func(t *testing.T) {
+		t.Parallel()
+
+		volumes := database.NewVolumeRepository(newTestDatabase(t))
+
+		first, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"}, 0)
+		require.NoError(t, err)
+
+		_, _, err = volumes.Upsert(t.Context(),
+			database.Volume{Name: "example-data", Owner: "470"}, first.Version)
+		require.NoError(t, err)
+
+		// The caller is still holding the tag it read before the write above.
+		_, _, err = volumes.Upsert(t.Context(),
+			database.Volume{Name: "example-data", Owner: "480"}, first.Version)
+		assert.ErrorIs(t, err, database.ErrVolumeChanged)
+
+		got, err := volumes.Get(t.Context(), "example-data")
+		require.NoError(t, err)
+
+		assert.Equal(t, "470", got.Owner, "the refused apply was written anyway")
+	})
+
+	t.Run("refuses a conditional apply for a volume that does not exist", func(t *testing.T) {
+		t.Parallel()
+
+		volumes := database.NewVolumeRepository(newTestDatabase(t))
+
+		_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"}, 1)
+		assert.ErrorIs(t, err, database.ErrVolumeNotFound)
+	})
 }
 
 func TestVolumeRepository_Get(t *testing.T) {
@@ -62,7 +154,7 @@ func TestVolumeRepository_Get(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		stored, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"})
+		stored, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"}, 0)
 		require.NoError(t, err)
 
 		got, err := volumes.Get(t.Context(), "example-data")
@@ -78,7 +170,7 @@ func TestVolumeRepository_Get(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data", Owner: "470:470", Mode: "0755"})
+		_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data", Owner: "470:470", Mode: "0755"}, 0)
 		require.NoError(t, err)
 
 		got, err := volumes.Get(t.Context(), "example-data")
@@ -107,7 +199,7 @@ func TestVolumeRepository_List(t *testing.T) {
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
 		for _, name := range []string{"charlie", "alpha", "bravo"} {
-			_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: name})
+			_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: name}, 0)
 			require.NoError(t, err)
 		}
 
@@ -147,7 +239,7 @@ func TestVolumeRepository_List_Query(t *testing.T) {
 		}
 
 		for name, volumeLabels := range labels {
-			_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: name, Labels: volumeLabels})
+			_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: name, Labels: volumeLabels}, 0)
 			require.NoError(t, err)
 		}
 	}
@@ -230,7 +322,7 @@ func TestVolumeRepository_Delete(t *testing.T) {
 
 		volumes := database.NewVolumeRepository(newTestDatabase(t))
 
-		_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"})
+		_, _, err := volumes.Upsert(t.Context(), database.Volume{Name: "example-data"}, 0)
 		require.NoError(t, err)
 
 		require.NoError(t, volumes.Delete(t.Context(), "example-data"))
@@ -335,6 +427,6 @@ func storeWorkload(t *testing.T, db *sql.DB, name, spec string) {
 		Runtime:  "container",
 		Spec:     []byte(spec),
 		SpecHash: "hash-" + name,
-	})
+	}, 0)
 	require.NoError(t, err)
 }

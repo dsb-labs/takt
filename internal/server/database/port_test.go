@@ -303,7 +303,7 @@ func TestWorkloadRepository_Delete_ReleasesPorts(t *testing.T) {
 		Runtime:  "container",
 		Spec:     []byte(`{}`),
 		SpecHash: "hash-one",
-	})
+	}, 0)
 	require.NoError(t, err)
 
 	require.NoError(t, ports.Claim(ctx, stored.ID, []database.Port{
@@ -332,7 +332,7 @@ func newTestPorts(t *testing.T) (*database.PortRepository, string, string) {
 			Runtime:  "container",
 			Spec:     []byte(`{}`),
 			SpecHash: "hash-" + name,
-		})
+		}, 0)
 		require.NoError(t, err)
 
 		ids = append(ids, stored.ID)

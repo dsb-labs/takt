@@ -388,7 +388,7 @@ func createTestWorkload(t *testing.T, db *sql.DB, name string) database.Workload
 		Runtime:  "container",
 		Spec:     []byte(`{"name":"` + name + `"}`),
 		SpecHash: "hash-" + name,
-	})
+	}, 0)
 	require.NoError(t, err)
 
 	return workload

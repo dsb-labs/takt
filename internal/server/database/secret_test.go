@@ -375,7 +375,7 @@ func linkWorkload(t *testing.T, db *sql.DB, name string, secrets ...string) {
 		Spec:     []byte(`{}`),
 		SpecHash: "hash-" + name,
 		Secrets:  secrets,
-	})
+	}, 0)
 	require.NoError(t, err)
 }
 

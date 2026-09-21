@@ -40,7 +40,9 @@ type (
 		// name and replacing its labels, owner and mode when one does, reporting
 		// which happened. A created volume gets its identifier and creation
 		// time assigned, and an updated one keeps both.
-		Upsert(ctx context.Context, volume database.Volume) (database.Volume, bool, error)
+		// A non-zero ifMatch conditions the write on the stored version still
+		// being that one.
+		Upsert(ctx context.Context, volume database.Volume, ifMatch int) (database.Volume, bool, error)
 		// Get should return the volume with the given name.
 		Get(ctx context.Context, name string) (database.Volume, error)
 		// List should return the volumes matching every one of the given queries,
@@ -141,7 +143,7 @@ func (s *VolumeService) Apply(ctx context.Context, volume manifest.Volume) (Volu
 		Labels: volume.Labels,
 		Owner:  volume.Owner,
 		Mode:   volume.Mode,
-	})
+	}, 0)
 	if err != nil {
 		return Volume{}, false, err
 	}

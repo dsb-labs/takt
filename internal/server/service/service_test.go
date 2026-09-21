@@ -95,7 +95,7 @@ func TestServiceService_Apply(t *testing.T) {
 			TargetLabels:   map[string]string{"app": "web"},
 			TargetPort:     8080,
 			TargetProtocol: "tcp",
-		}).Return(storedService(), true, nil).Once()
+		}, 0).Return(storedService(), true, nil).Once()
 
 		workloads := NewMockWorkloadLister(t)
 		workloads.EXPECT().List(mock.Anything, []string{`$.labels."app"=web`}).
@@ -573,7 +573,7 @@ func TestServiceService_AsksForAPassWhenAServiceChanges(t *testing.T) {
 	t.Parallel()
 
 	repo := NewMockServiceRepository(t)
-	repo.EXPECT().Upsert(mock.Anything, mock.Anything).Return(storedService(), true, nil).Once()
+	repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).Return(storedService(), true, nil).Once()
 	repo.EXPECT().Delete(mock.Anything, "example").Return(nil).Once()
 
 	workloads := NewMockWorkloadLister(t)

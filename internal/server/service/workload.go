@@ -112,7 +112,9 @@ type (
 	WorkloadRepository interface {
 		// Upsert should store w as the desired state for its name, claiming the given
 		// ports in the same write, and report whether the workload was newly created.
-		Upsert(ctx context.Context, w database.Workload, ports ...database.Port) (database.Workload, bool, error)
+		// A non-zero ifMatch conditions the write on the stored version still
+		// being that one.
+		Upsert(ctx context.Context, w database.Workload, ifMatch int, ports ...database.Port) (database.Workload, bool, error)
 		// Get should return the workload with the given name.
 		Get(ctx context.Context, name string) (database.Workload, error)
 		// List should return the workloads matching every one of the given queries,
@@ -919,7 +921,7 @@ func (s *WorkloadService) store(ctx context.Context, resolved resolution) (datab
 		// The row and its ports are written together, so a claim that loses a race
 		// leaves no workload behind for the reconciler to start against ports
 		// nothing holds.
-		stored, created, err := s.workloads.Upsert(ctx, row, ports...)
+		stored, created, err := s.workloads.Upsert(ctx, row, 0, ports...)
 		switch {
 		case err == nil:
 			return stored, created, nil
@@ -1547,7 +1549,7 @@ func (s *WorkloadService) Reallocate(ctx context.Context, name string) (bool, er
 	// allocation with whatever it was handed, so an Upsert given none clears the
 	// rows that were just claimed and leaves the specification naming host ports
 	// nothing holds.
-	if _, _, err = s.workloads.Upsert(ctx, row, ports...); err != nil {
+	if _, _, err = s.workloads.Upsert(ctx, row, 0, ports...); err != nil {
 		return false, fmt.Errorf("failed to store workload: %w", err)
 	}
 
@@ -1754,7 +1756,7 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 	row.SpecHash = hash
 	row.Secrets, row.Variables, row.Workloads = read.secrets, read.variables, read.workloads
 
-	if _, _, err = s.workloads.Upsert(ctx, row, held...); err != nil {
+	if _, _, err = s.workloads.Upsert(ctx, row, 0, held...); err != nil {
 		return false, fmt.Errorf("failed to store workload: %w", err)
 	}
 
