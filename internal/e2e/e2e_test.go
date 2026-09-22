@@ -1460,7 +1460,7 @@ func (s *Suite) TestContainerOutputIsCapped() {
 	ids := s.containers(name)
 	s.Require().NotEmpty(ids)
 
-	out, err := exec.Command("docker", "inspect", "--format", "{{.HostConfig.LogConfig.Config.max-size}} {{.HostConfig.LogConfig.Config.max-file}}", ids[0]).Output()
+	out, err := exec.Command("docker", "inspect", "--format", `{{index .HostConfig.LogConfig.Config "max-size"}} {{index .HostConfig.LogConfig.Config "max-file"}}`, ids[0]).Output()
 	s.Require().NoError(err)
 	s.Equal("1m 2", strings.TrimSpace(string(out)))
 }
