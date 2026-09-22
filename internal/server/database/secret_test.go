@@ -18,7 +18,7 @@ func TestSecretRepository_Upsert(t *testing.T) {
 		keyID := newTestKey(t, db)
 		secrets := database.NewSecretRepository(db)
 
-		stored, err := secrets.Upsert(t.Context(), "db-password", []byte("sealed"), "rev-one", keyID, nil)
+		stored, err := secrets.Upsert(t.Context(), database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
 		assert.Equal(t, "db-password", stored.Name)
@@ -33,10 +33,10 @@ func TestSecretRepository_Upsert(t *testing.T) {
 		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		first, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID, nil)
+		first, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
-		second, err := secrets.Upsert(ctx, "db-password", []byte("resealed"), "rev-two", keyID, nil)
+		second, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("resealed"), Revision: "rev-two", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
 		// The identity and creation time survive, so rotating a secret does not read
@@ -49,6 +49,69 @@ func TestSecretRepository_Upsert(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []byte("resealed"), read.Value)
 	})
+
+	t.Run("versions a secret from its first write", func(t *testing.T) {
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
+		ctx := t.Context()
+
+		first, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
+		require.NoError(t, err)
+		assert.Equal(t, 1, first.Version)
+
+		second, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("resealed"), Revision: "rev-two", KeyID: keyID}, 0)
+		require.NoError(t, err)
+		assert.Equal(t, 2, second.Version)
+
+		read, err := secrets.Get(ctx, "db-password")
+		require.NoError(t, err)
+		assert.Equal(t, 2, read.Version)
+	})
+
+	t.Run("applies when the version is the one the caller read", func(t *testing.T) {
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
+		ctx := t.Context()
+
+		first, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
+		require.NoError(t, err)
+
+		second, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("resealed"), Revision: "rev-two", KeyID: keyID}, first.Version)
+		require.NoError(t, err)
+		assert.Equal(t, 2, second.Version)
+	})
+
+	t.Run("refuses a set conditioned on a version that has moved", func(t *testing.T) {
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
+		ctx := t.Context()
+
+		first, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
+		require.NoError(t, err)
+
+		_, err = secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("resealed"), Revision: "rev-two", KeyID: keyID}, first.Version)
+		require.NoError(t, err)
+
+		// The caller is still holding the tag it read before the write above.
+		_, err = secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("resealed-again"), Revision: "rev-three", KeyID: keyID}, first.Version)
+		assert.ErrorIs(t, err, database.ErrSecretChanged)
+
+		read, err := secrets.Get(ctx, "db-password")
+		require.NoError(t, err)
+		assert.Equal(t, "rev-two", read.Revision, "the refused set was written anyway")
+	})
+
+	t.Run("refuses a conditional set for a secret that does not exist", func(t *testing.T) {
+		db := newTestDatabase(t)
+		keyID := newTestKey(t, db)
+		secrets := database.NewSecretRepository(db)
+
+		_, err := secrets.Upsert(t.Context(), database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 1)
+		assert.ErrorIs(t, err, database.ErrSecretNotFound)
+	})
 }
 
 func TestSecretRepository_Get(t *testing.T) {
@@ -60,7 +123,7 @@ func TestSecretRepository_Get(t *testing.T) {
 		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID, nil)
+		_, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
 		stored, err := secrets.Get(ctx, "db-password")
@@ -87,10 +150,10 @@ func TestSecretRepository_List(t *testing.T) {
 		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID, nil)
+		_, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
-		_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two", keyID, nil)
+		_, err = secrets.Upsert(ctx, database.Secret{Name: "api-token", Value: []byte("sealed-too"), Revision: "rev-two", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
 		listed, err := secrets.List(ctx)
@@ -133,7 +196,7 @@ func TestSecretRepository_List_Query(t *testing.T) {
 		}
 
 		for name, secretLabels := range labels {
-			_, err := secrets.Upsert(t.Context(), name, []byte("sealed"), "rev-one", keyID, secretLabels)
+			_, err := secrets.Upsert(t.Context(), database.Secret{Name: name, Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID, Labels: secretLabels}, 0)
 			require.NoError(t, err)
 		}
 	}
@@ -218,7 +281,7 @@ func TestSecretRepository_Delete(t *testing.T) {
 		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID, nil)
+		_, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
 		require.NoError(t, secrets.Delete(ctx, "db-password"))
@@ -241,7 +304,7 @@ func TestSecretRepository_Delete(t *testing.T) {
 		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID, nil)
+		_, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
 		linkWorkload(t, db, "example", "db-password")
@@ -265,10 +328,10 @@ func TestSecretRepository_Revisions(t *testing.T) {
 		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID, nil)
+		_, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
-		_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two", keyID, nil)
+		_, err = secrets.Upsert(ctx, database.Secret{Name: "api-token", Value: []byte("sealed-too"), Revision: "rev-two", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
 		revisions, err := secrets.Revisions(ctx, []string{"db-password", "api-token"})
@@ -282,7 +345,7 @@ func TestSecretRepository_Revisions(t *testing.T) {
 		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID, nil)
+		_, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
 		require.NoError(t, err)
 
 		// The caller knows what it asked about, so what a missing secret means is
@@ -387,9 +450,9 @@ func TestSecretRepository_ListSealed(t *testing.T) {
 	secrets := database.NewSecretRepository(db)
 	ctx := t.Context()
 
-	_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", keyID, nil)
+	_, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: keyID}, 0)
 	require.NoError(t, err)
-	_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two", keyID, nil)
+	_, err = secrets.Upsert(ctx, database.Secret{Name: "api-token", Value: []byte("sealed-too"), Revision: "rev-two", KeyID: keyID}, 0)
 	require.NoError(t, err)
 
 	listed, err := secrets.ListSealed(ctx)
@@ -413,7 +476,7 @@ func TestSecretRepository_Rekey(t *testing.T) {
 		keys := database.NewEncryptionKeyRepository(db)
 		ctx := t.Context()
 
-		before, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", oldKey, nil)
+		before, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: oldKey}, 0)
 		require.NoError(t, err)
 
 		require.NoError(t, secrets.Rekey(ctx, "new-key", map[string][]byte{
@@ -463,9 +526,9 @@ func TestSecretRepository_Rekey(t *testing.T) {
 		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", oldKey, nil)
+		_, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: oldKey}, 0)
 		require.NoError(t, err)
-		_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two", oldKey, nil)
+		_, err = secrets.Upsert(ctx, database.Secret{Name: "api-token", Value: []byte("sealed-too"), Revision: "rev-two", KeyID: oldKey}, 0)
 		require.NoError(t, err)
 
 		err = secrets.Rekey(ctx, "new-key", map[string][]byte{"db-password": []byte("resealed")})
@@ -487,7 +550,7 @@ func TestSecretRepository_Rekey(t *testing.T) {
 		secrets := database.NewSecretRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", oldKey, nil)
+		_, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: oldKey}, 0)
 		require.NoError(t, err)
 
 		err = secrets.Rekey(ctx, "new-key", map[string][]byte{"api-token": []byte("resealed")})
@@ -506,9 +569,9 @@ func TestSecretRepository_Rekey(t *testing.T) {
 		keys := database.NewEncryptionKeyRepository(db)
 		ctx := t.Context()
 
-		_, err := secrets.Upsert(ctx, "db-password", []byte("sealed"), "rev-one", oldKey, nil)
+		_, err := secrets.Upsert(ctx, database.Secret{Name: "db-password", Value: []byte("sealed"), Revision: "rev-one", KeyID: oldKey}, 0)
 		require.NoError(t, err)
-		_, err = secrets.Upsert(ctx, "api-token", []byte("sealed-too"), "rev-two", oldKey, nil)
+		_, err = secrets.Upsert(ctx, database.Secret{Name: "api-token", Value: []byte("sealed-too"), Revision: "rev-two", KeyID: oldKey}, 0)
 		require.NoError(t, err)
 
 		// One of the two names is not there, so the rewrite fails partway through

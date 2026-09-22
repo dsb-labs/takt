@@ -17,6 +17,9 @@ var (
 	// ErrSecretsChanged is returned when the secrets a rekey was asked to rewrite
 	// are not the secrets the database holds.
 	ErrSecretsChanged = errors.New("secrets changed during the rekey")
+	// ErrSecretChanged is returned when the secret a set was conditioned on is not
+	// the secret the database holds.
+	ErrSecretChanged = errors.New("secret changed since it was read")
 )
 
 type (
@@ -48,6 +51,11 @@ type (
 		// Readable back, where the value deliberately is not. A label on a secret is
 		// as public as the secret's name.
 		Labels map[string]string
+		// How many times the secret has been written, by its value or its labels.
+		// This is the entity tag a conditional set compares against. A rekey does not
+		// move it, for the same reason it does not move the revision: it changes how
+		// the value is stored, not what the caller set.
+		Version int
 		// The time the secret was created.
 		CreatedAt time.Time
 		// The time the secret last changed, by its value or its labels. The revision
@@ -67,56 +75,74 @@ func NewSecretRepository(db *sql.DB) *SecretRepository {
 	return &SecretRepository{db: db}
 }
 
-// Upsert stores value as the secret with the given name, returning the stored
-// secret.
+// Upsert stores the given secret, returning it as stored. The given secret's
+// identifier, version and timestamps are ignored: all of them are this
+// repository's to hand out.
 //
-// The write is unconditional: whether the value actually changed is the caller's to
-// decide, because only the caller can decrypt what is already there to compare.
-// Calling this at all therefore means the value moved, and the revision passed with
-// it is the new one.
+// The write is unconditional on the content: whether the value actually changed is
+// the caller's to decide, because only the caller can decrypt what is already there
+// to compare. Calling this at all therefore means the secret moved, and the revision
+// on it is the one the value now carries.
+//
+// A non-zero ifMatch conditions the write on the stored version still being that
+// one, reporting ErrSecretChanged when it is not and ErrSecretNotFound when there is
+// no row to have the version at all. Zero writes unconditionally, which is what a
+// caller creating a secret has to do: there is no version yet to name.
 //
 // The creation time is preserved on a secret that already existed, so rotating one
 // does not read as creating it again.
-func (r *SecretRepository) Upsert(
-	ctx context.Context, name string, value []byte, revision, keyID string, labels map[string]string,
-) (Secret, error) {
+func (r *SecretRepository) Upsert(ctx context.Context, secret Secret, ifMatch int) (Secret, error) {
 	const q = `
-		INSERT INTO secret (id, name, value, revision, key_id, labels, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, jsonb(?), ?, ?)
+		INSERT INTO secret (id, name, value, revision, key_id, labels, version, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, jsonb(?), ?, ?, ?)
 		ON CONFLICT (name) DO UPDATE SET
 			value = excluded.value,
 			revision = excluded.revision,
 			key_id = excluded.key_id,
 			labels = excluded.labels,
+			version = excluded.version,
 			updated_at = excluded.updated_at
 		RETURNING id, created_at, updated_at
 	`
 
 	timestamp := formatTime(time.Now().UTC())
 
-	encoded, err := marshalLabels(labels)
+	encoded, err := marshalLabels(secret.Labels)
 	if err != nil {
 		return Secret{}, err
 	}
 
-	secret := Secret{
-		ID:       xid.New().String(),
-		Name:     name,
-		Value:    value,
-		Revision: revision,
-		KeyID:    keyID,
-		Labels:   labels,
-	}
+	secret.ID = xid.New().String()
 
 	var (
 		createdAt string
 		updatedAt string
 	)
 
-	err = r.db.QueryRowContext(ctx, q, secret.ID, name, value, revision, keyID, encoded, timestamp, timestamp).
-		Scan(&secret.ID, &createdAt, &updatedAt)
+	err = transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
+		current, err := currentVersion(ctx, tx, "secret", secret.Name)
+		switch {
+		case err != nil:
+			return fmt.Errorf("failed to load secret: %w", err)
+		case current == 0 && ifMatch != 0:
+			return fmt.Errorf("%w: %s", ErrSecretNotFound, secret.Name)
+		case ifMatch != 0 && current != ifMatch:
+			return ErrSecretChanged
+		}
+
+		secret.Version = current + 1
+
+		err = tx.QueryRowContext(ctx, q, secret.ID, secret.Name, secret.Value, secret.Revision, secret.KeyID, encoded,
+			secret.Version, timestamp, timestamp).
+			Scan(&secret.ID, &createdAt, &updatedAt)
+		if err != nil {
+			return fmt.Errorf("failed to upsert secret: %w", err)
+		}
+
+		return nil
+	})
 	if err != nil {
-		return Secret{}, fmt.Errorf("failed to upsert secret: %w", err)
+		return Secret{}, err
 	}
 
 	if secret.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
@@ -133,7 +159,11 @@ func (r *SecretRepository) Upsert(
 // Get returns the secret with the given name, including its encrypted value,
 // reporting ErrSecretNotFound when no such secret exists.
 func (r *SecretRepository) Get(ctx context.Context, name string) (Secret, error) {
-	const q = `SELECT id, name, value, revision, key_id, json(labels), created_at, updated_at FROM secret WHERE name = ?`
+	const q = `
+		SELECT id, name, value, revision, key_id, json(labels), version, created_at, updated_at
+		FROM secret
+		WHERE name = ?
+	`
 
 	var (
 		secret    Secret
@@ -143,7 +173,8 @@ func (r *SecretRepository) Get(ctx context.Context, name string) (Secret, error)
 	)
 
 	err := r.db.QueryRowContext(ctx, q, name).
-		Scan(&secret.ID, &secret.Name, &secret.Value, &secret.Revision, &secret.KeyID, &labels, &createdAt, &updatedAt)
+		Scan(&secret.ID, &secret.Name, &secret.Value, &secret.Revision, &secret.KeyID, &labels,
+			&secret.Version, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Secret{}, fmt.Errorf("%w: %s", ErrSecretNotFound, name)
@@ -179,7 +210,7 @@ func (r *SecretRepository) Get(ctx context.Context, name string) (Secret, error)
 // leak one.
 func (r *SecretRepository) List(ctx context.Context, queries ...Query) ([]Secret, error) {
 	const q = `
-		SELECT id, name, revision, json(labels), created_at, updated_at
+		SELECT id, name, revision, json(labels), version, created_at, updated_at
 		FROM secret
 	`
 
@@ -205,7 +236,8 @@ func (r *SecretRepository) List(ctx context.Context, queries ...Query) ([]Secret
 			updatedAt string
 		)
 
-		if err = rows.Scan(&secret.ID, &secret.Name, &secret.Revision, &labels, &createdAt, &updatedAt); err != nil {
+		err = rows.Scan(&secret.ID, &secret.Name, &secret.Revision, &labels, &secret.Version, &createdAt, &updatedAt)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan secret: %w", err)
 		}
 
@@ -360,7 +392,11 @@ func linkSecrets(ctx context.Context, tx *sql.Tx, workloadID string, names []str
 // Unlike List, this carries the ciphertext. Only a rekey has business reading every
 // sealed value at once, which is why the ordinary listing leaves it out.
 func (r *SecretRepository) ListSealed(ctx context.Context) ([]Secret, error) {
-	const q = `SELECT id, name, value, revision, key_id, created_at, updated_at FROM secret ORDER BY name ASC`
+	const q = `
+		SELECT id, name, value, revision, key_id, version, created_at, updated_at
+		FROM secret
+		ORDER BY name ASC
+	`
 
 	rows, err := r.db.QueryContext(ctx, q)
 	if err != nil {
@@ -377,7 +413,8 @@ func (r *SecretRepository) ListSealed(ctx context.Context) ([]Secret, error) {
 			updatedAt string
 		)
 
-		err = rows.Scan(&secret.ID, &secret.Name, &secret.Value, &secret.Revision, &secret.KeyID, &createdAt, &updatedAt)
+		err = rows.Scan(&secret.ID, &secret.Name, &secret.Value, &secret.Revision, &secret.KeyID,
+			&secret.Version, &createdAt, &updatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan secret: %w", err)
 		}

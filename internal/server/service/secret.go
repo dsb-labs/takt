@@ -26,6 +26,9 @@ var (
 	ErrSecretInUse = errors.New("secret is in use")
 	// ErrInvalidSecret is returned when a secret's name is not one takt will accept.
 	ErrInvalidSecret = errors.New("invalid secret")
+	// ErrSecretChanged is returned when the secret a set was conditioned on is no
+	// longer the secret the server holds.
+	ErrSecretChanged = errors.New("secret changed since it was read")
 )
 
 // How many random bytes a revision carries.
@@ -44,9 +47,10 @@ type (
 	// The SecretRepository interface describes the persistence operations the secret
 	// service uses.
 	SecretRepository interface {
-		// Upsert should store the given encrypted value and revision as the secret
-		// with the given name, recording which key sealed it.
-		Upsert(ctx context.Context, name string, value []byte, revision, keyID string, labels map[string]string) (database.Secret, error)
+		// Upsert should store the given secret, whose value is already sealed
+		// under the key it names. A non-zero ifMatch should condition the write
+		// on the stored version still being that one.
+		Upsert(ctx context.Context, secret database.Secret, ifMatch int) (database.Secret, error)
 		// Get should return the secret with the given name, including its encrypted
 		// value.
 		Get(ctx context.Context, name string) (database.Secret, error)
@@ -97,6 +101,10 @@ type (
 		// Readable back, where the value deliberately is not. A label on a secret is
 		// as public as the secret's name.
 		Labels map[string]string
+		// How many times the secret has been written, which the API reports as its
+		// entity tag. Unlike the revision it moves on a relabel too, and it says
+		// nothing about the value either way.
+		Version int
 		// The time the secret was created.
 		CreatedAt time.Time
 		// The time the secret last changed, by its value or its labels. The revision
@@ -168,7 +176,12 @@ func NewSecretService(config SecretServiceConfig) *SecretService {
 //
 // A value that did change moves the revision, and every workload referencing the
 // secret is rehashed so the reconciler replaces its instances.
-func (s *SecretService) Set(ctx context.Context, name string, value []byte, labels map[string]string) (Secret, bool, error) {
+//
+// A non-zero ifMatch conditions the set on the secret still being at that version,
+// reporting ErrSecretChanged when it is not. A set that would change nothing is
+// still refused on a stale version: the caller's picture of the secret is wrong
+// either way, and saying so is the point.
+func (s *SecretService) Set(ctx context.Context, name string, value []byte, labels map[string]string, ifMatch int) (Secret, bool, error) {
 	if !referenceNamePattern.MatchString(name) || len(name) > 63 {
 		return Secret{}, false, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidSecret)
 	}
@@ -185,8 +198,14 @@ func (s *SecretService) Set(ctx context.Context, name string, value []byte, labe
 
 	existing, err := s.secrets.Get(ctx, name)
 	switch {
+	case errors.Is(err, database.ErrSecretNotFound) && ifMatch != 0:
+		// A conditional set names a version a secret that does not exist cannot
+		// be at.
+		return Secret{}, false, ErrSecretChanged
 	case err != nil && !errors.Is(err, database.ErrSecretNotFound):
 		return Secret{}, false, fmt.Errorf("failed to load secret: %w", err)
+	case err == nil && ifMatch != 0 && existing.Version != ifMatch:
+		return Secret{}, false, ErrSecretChanged
 	case err == nil && s.unchanged(name, existing.Value, value):
 		if maps.Equal(existing.Labels, labels) {
 			secret, err := s.hydrate(ctx, existing)
@@ -198,9 +217,11 @@ func (s *SecretService) Set(ctx context.Context, name string, value []byte, labe
 		// upsert, but under the revision the secret already holds: the revision is
 		// what says the value changed, and moving it for a label would replace every
 		// instance reading the secret. Nothing is redeployed for the same reason.
-		relabelled, err := s.secrets.Upsert(ctx, name, existing.Value, existing.Revision, existing.KeyID, labels)
+		existing.Labels = labels
+
+		relabelled, err := s.secrets.Upsert(ctx, existing, ifMatch)
 		if err != nil {
-			return Secret{}, false, err
+			return Secret{}, false, changedSecret(err)
 		}
 
 		secret, err := s.hydrate(ctx, relabelled)
@@ -220,9 +241,15 @@ func (s *SecretService) Set(ctx context.Context, name string, value []byte, labe
 		return Secret{}, false, err
 	}
 
-	stored, err := s.secrets.Upsert(ctx, name, sealed, revision, s.keyID, labels)
+	stored, err := s.secrets.Upsert(ctx, database.Secret{
+		Name:     name,
+		Value:    sealed,
+		Revision: revision,
+		KeyID:    s.keyID,
+		Labels:   labels,
+	}, ifMatch)
 	if err != nil {
-		return Secret{}, false, err
+		return Secret{}, false, changedSecret(err)
 	}
 
 	// The workloads reading it are rehashed after the value has landed, so nothing is
@@ -350,6 +377,20 @@ func (s *SecretService) Value(ctx context.Context, name string) (string, error) 
 	return string(opened), nil
 }
 
+// changedSecret maps a conditional write the repository refused onto the
+// service's own error, and leaves any other error as it is.
+//
+// A secret that is not there is reported as changed rather than as missing: only
+// a conditional set can be refused that way, and it named a version a missing
+// secret cannot be at.
+func changedSecret(err error) error {
+	if errors.Is(err, database.ErrSecretChanged) || errors.Is(err, database.ErrSecretNotFound) {
+		return ErrSecretChanged
+	}
+
+	return err
+}
+
 // unchanged reports whether stored already holds value.
 //
 // Called with the cipher's read lock already held, and so does not take it. Taking
@@ -410,6 +451,7 @@ func (s *SecretService) hydrate(ctx context.Context, row database.Secret) (Secre
 		Revision:  row.Revision,
 		UsedBy:    usedBy,
 		Labels:    row.Labels,
+		Version:   row.Version,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
 	}, nil

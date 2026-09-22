@@ -43,7 +43,7 @@ type (
 	// policy a client token is evaluated against.
 	PolicyReader interface {
 		// Get should return the current policy and its tag.
-		Get(ctx context.Context) (manifest.Policy, string, error)
+		Get(ctx context.Context) (Policy, error)
 	}
 
 	// The IdentityVerifier interface describes how a raw OIDC identity token
@@ -142,10 +142,12 @@ func (s *AuthService) Authenticate(ctx context.Context, credential string) (auth
 		return auth.Identity{Role: manifest.RoleAdmin, TokenID: token.ID, Recovery: true}, nil
 	}
 
-	policy, _, err := s.policies.Get(ctx)
+	stored, err := s.policies.Get(ctx)
 	if err != nil {
 		return auth.Identity{}, err
 	}
+
+	policy := stored.Spec
 
 	role, _ := auth.Evaluate(policy, token.Principal, token.Groups)
 
@@ -196,10 +198,12 @@ func (s *AuthService) LoginOIDC(ctx context.Context, rawIDToken string) (Token, 
 		return Token{}, "", fmt.Errorf("%w: %v", ErrInvalidCredential, err)
 	}
 
-	policy, _, err := s.policies.Get(ctx)
+	stored, err := s.policies.Get(ctx)
 	if err != nil {
 		return Token{}, "", err
 	}
+
+	policy := stored.Spec
 
 	principalClaim := defaultPrincipalClaim
 

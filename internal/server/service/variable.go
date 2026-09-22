@@ -23,14 +23,18 @@ var (
 	// ErrInvalidVariable is returned when a variable's name is not one takt will
 	// accept.
 	ErrInvalidVariable = errors.New("invalid variable")
+	// ErrVariableChanged is returned when the variable a set was conditioned on is
+	// no longer the variable the server holds.
+	ErrVariableChanged = errors.New("variable changed since it was read")
 )
 
 type (
 	// The VariableRepository interface describes the persistence operations the
 	// variable service uses.
 	VariableRepository interface {
-		// Upsert should store the given value as the variable with the given name.
-		Upsert(ctx context.Context, name, value string, labels map[string]string) (database.Variable, error)
+		// Upsert should store the given variable. A non-zero ifMatch should
+		// condition the write on the stored version still being that one.
+		Upsert(ctx context.Context, variable database.Variable, ifMatch int) (database.Variable, error)
 		// Get should return the variable with the given name.
 		Get(ctx context.Context, name string) (database.Variable, error)
 		// List should return the variables matching every one of the given
@@ -57,6 +61,9 @@ type (
 		UsedBy []string
 		// Arbitrary key-value pairs attached to the variable.
 		Labels map[string]string
+		// How many times the variable has been written, which the API reports as
+		// its entity tag.
+		Version int
 		// The time the variable was created.
 		CreatedAt time.Time
 		// The time the variable last changed, by its value or its labels.
@@ -108,7 +115,12 @@ func NewVariableService(config VariableServiceConfig) *VariableService {
 //
 // A value that did change moves the hash of every workload referencing the variable,
 // so the reconciler replaces their instances.
-func (s *VariableService) Set(ctx context.Context, name, value string, labels map[string]string) (Variable, bool, error) {
+//
+// A non-zero ifMatch conditions the set on the variable still being at that
+// version, reporting ErrVariableChanged when it is not. A set that would change
+// nothing is still refused on a stale version: the caller's picture of the
+// variable is wrong either way, and saying so is the point.
+func (s *VariableService) Set(ctx context.Context, name, value string, labels map[string]string, ifMatch int) (Variable, bool, error) {
 	if !referenceNamePattern.MatchString(name) || len(name) > 63 {
 		return Variable{}, false, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidVariable)
 	}
@@ -119,8 +131,14 @@ func (s *VariableService) Set(ctx context.Context, name, value string, labels ma
 
 	existing, err := s.variables.Get(ctx, name)
 	switch {
+	case errors.Is(err, database.ErrVariableNotFound) && ifMatch != 0:
+		// A conditional set names a version a variable that does not exist cannot
+		// be at.
+		return Variable{}, false, ErrVariableChanged
 	case err != nil && !errors.Is(err, database.ErrVariableNotFound):
 		return Variable{}, false, fmt.Errorf("failed to load variable: %w", err)
+	case err == nil && ifMatch != 0 && existing.Version != ifMatch:
+		return Variable{}, false, ErrVariableChanged
 	case err == nil && existing.Value == value:
 		if maps.Equal(existing.Labels, labels) {
 			variable, err := s.hydrate(ctx, existing)
@@ -131,9 +149,11 @@ func (s *VariableService) Set(ctx context.Context, name, value string, labels ma
 		// The labels moved and the value did not. Written back through the same
 		// upsert, and nothing referencing the variable is redeployed: what redeploys
 		// a reader is the value it reads, and that is unchanged.
-		relabelled, err := s.variables.Upsert(ctx, name, value, labels)
+		existing.Labels = labels
+
+		relabelled, err := s.variables.Upsert(ctx, existing, ifMatch)
 		if err != nil {
-			return Variable{}, false, err
+			return Variable{}, false, changedVariable(err)
 		}
 
 		variable, err := s.hydrate(ctx, relabelled)
@@ -143,9 +163,9 @@ func (s *VariableService) Set(ctx context.Context, name, value string, labels ma
 
 	created := errors.Is(err, database.ErrVariableNotFound)
 
-	stored, err := s.variables.Upsert(ctx, name, value, labels)
+	stored, err := s.variables.Upsert(ctx, database.Variable{Name: name, Value: value, Labels: labels}, ifMatch)
 	if err != nil {
-		return Variable{}, false, err
+		return Variable{}, false, changedVariable(err)
 	}
 
 	// The workloads reading it are rehashed after the value has landed, so nothing is
@@ -263,6 +283,20 @@ func (s *VariableService) Value(ctx context.Context, name string) (string, error
 	return stored.Value, nil
 }
 
+// changedVariable maps a conditional write the repository refused onto the
+// service's own error, and leaves any other error as it is.
+//
+// A variable that is not there is reported as changed rather than as missing:
+// only a conditional set can be refused that way, and it named a version a
+// missing variable cannot be at.
+func changedVariable(err error) error {
+	if errors.Is(err, database.ErrVariableChanged) || errors.Is(err, database.ErrVariableNotFound) {
+		return ErrVariableChanged
+	}
+
+	return err
+}
+
 // redeploy moves the specification hash of every workload referencing the named
 // variable, so that the reconciler replaces the instances reading the old value.
 func (s *VariableService) redeploy(ctx context.Context, name string) error {
@@ -305,6 +339,7 @@ func (s *VariableService) hydrate(ctx context.Context, row database.Variable) (V
 		Value:     row.Value,
 		UsedBy:    usedBy,
 		Labels:    row.Labels,
+		Version:   row.Version,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
 	}, nil

@@ -82,7 +82,7 @@ func (a *ServiceAPI) ApplyService(ctx context.Context, request api.ApplyServiceR
 		}, nil
 	}
 
-	ifMatch, _, ok := parseIfMatch(request.Params.IfMatch)
+	ifMatch, ok := resourceIfMatch(request.Params.IfMatch)
 	if !ok {
 		return api.ApplyService400JSONResponse{
 			Error: "the If-Match header must carry a tag read from GET /api/v1/services/{name}",

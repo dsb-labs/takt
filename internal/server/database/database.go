@@ -196,6 +196,28 @@ func transaction(ctx context.Context, db *sql.DB, fn func(ctx context.Context, t
 	return nil
 }
 
+// currentVersion returns the version of the named row in the given table, or zero
+// when there is none, for a conditional write to compare against under the same
+// lock it goes on to write with.
+//
+// The table is named by the repository calling this, never by anything a caller
+// sent, which is what makes splicing it into the statement safe.
+func currentVersion(ctx context.Context, tx *sql.Tx, table, name string) (int, error) {
+	q := `SELECT version FROM ` + table + ` WHERE name = ?`
+
+	var version int
+
+	err := tx.QueryRowContext(ctx, q, name).Scan(&version)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return 0, nil
+	case err != nil:
+		return 0, err
+	}
+
+	return version, nil
+}
+
 func migrateUp(db *sql.DB) error {
 	m, err := newMigrator(db)
 	if err != nil {

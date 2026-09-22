@@ -16,7 +16,7 @@ func TestVariableRepository_Upsert(t *testing.T) {
 	t.Run("stores a variable on first write", func(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 
-		stored, err := variables.Upsert(t.Context(), "log-level", "debug", nil)
+		stored, err := variables.Upsert(t.Context(), database.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 
 		assert.Equal(t, "log-level", stored.Name)
@@ -29,10 +29,10 @@ func TestVariableRepository_Upsert(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		first, err := variables.Upsert(ctx, "log-level", "debug", nil)
+		first, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 
-		second, err := variables.Upsert(ctx, "log-level", "info", nil)
+		second, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "info"}, 0)
 		require.NoError(t, err)
 
 		// The identity and creation time survive, so changing a variable does not read
@@ -46,7 +46,7 @@ func TestVariableRepository_Upsert(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "empty", "", nil)
+		_, err := variables.Upsert(ctx, database.Variable{Name: "empty", Value: ""}, 0)
 		require.NoError(t, err)
 
 		// An empty value is a value. A workload reading it gets an empty environment
@@ -54,6 +54,61 @@ func TestVariableRepository_Upsert(t *testing.T) {
 		stored, err := variables.Get(ctx, "empty")
 		require.NoError(t, err)
 		assert.Empty(t, stored.Value)
+	})
+
+	t.Run("versions a variable from its first write", func(t *testing.T) {
+		variables := database.NewVariableRepository(newTestDatabase(t))
+		ctx := t.Context()
+
+		first, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "debug"}, 0)
+		require.NoError(t, err)
+		assert.Equal(t, 1, first.Version)
+
+		second, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "info"}, 0)
+		require.NoError(t, err)
+		assert.Equal(t, 2, second.Version)
+
+		read, err := variables.Get(ctx, "log-level")
+		require.NoError(t, err)
+		assert.Equal(t, 2, read.Version)
+	})
+
+	t.Run("applies when the version is the one the caller read", func(t *testing.T) {
+		variables := database.NewVariableRepository(newTestDatabase(t))
+		ctx := t.Context()
+
+		first, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "debug"}, 0)
+		require.NoError(t, err)
+
+		second, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "info"}, first.Version)
+		require.NoError(t, err)
+		assert.Equal(t, 2, second.Version)
+	})
+
+	t.Run("refuses a set conditioned on a version that has moved", func(t *testing.T) {
+		variables := database.NewVariableRepository(newTestDatabase(t))
+		ctx := t.Context()
+
+		first, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "debug"}, 0)
+		require.NoError(t, err)
+
+		_, err = variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "info"}, first.Version)
+		require.NoError(t, err)
+
+		// The caller is still holding the tag it read before the write above.
+		_, err = variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "warn"}, first.Version)
+		assert.ErrorIs(t, err, database.ErrVariableChanged)
+
+		read, err := variables.Get(ctx, "log-level")
+		require.NoError(t, err)
+		assert.Equal(t, "info", read.Value, "the refused set was written anyway")
+	})
+
+	t.Run("refuses a conditional set for a variable that does not exist", func(t *testing.T) {
+		variables := database.NewVariableRepository(newTestDatabase(t))
+
+		_, err := variables.Upsert(t.Context(), database.Variable{Name: "log-level", Value: "debug"}, 1)
+		assert.ErrorIs(t, err, database.ErrVariableNotFound)
 	})
 }
 
@@ -64,7 +119,7 @@ func TestVariableRepository_Get(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
+		_, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 
 		stored, err := variables.Get(ctx, "log-level")
@@ -87,10 +142,10 @@ func TestVariableRepository_List(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
+		_, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 
-		_, err = variables.Upsert(ctx, "db-host", "localhost", nil)
+		_, err = variables.Upsert(ctx, database.Variable{Name: "db-host", Value: "localhost"}, 0)
 		require.NoError(t, err)
 
 		listed, err := variables.List(ctx)
@@ -126,7 +181,7 @@ func TestVariableRepository_List_Query(t *testing.T) {
 		}
 
 		for name, variableLabels := range labels {
-			_, err := variables.Upsert(t.Context(), name, "value-"+name, variableLabels)
+			_, err := variables.Upsert(t.Context(), database.Variable{Name: name, Value: "value-" + name, Labels: variableLabels}, 0)
 			require.NoError(t, err)
 		}
 	}
@@ -208,7 +263,7 @@ func TestVariableRepository_Delete(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
+		_, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 
 		require.NoError(t, variables.Delete(ctx, "log-level"))
@@ -229,7 +284,7 @@ func TestVariableRepository_Delete(t *testing.T) {
 		variables := database.NewVariableRepository(db)
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
+		_, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 
 		linkVariableWorkload(t, db, "example", "log-level")
@@ -251,10 +306,10 @@ func TestVariableRepository_Values(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
+		_, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 
-		_, err = variables.Upsert(ctx, "db-host", "localhost", nil)
+		_, err = variables.Upsert(ctx, database.Variable{Name: "db-host", Value: "localhost"}, 0)
 		require.NoError(t, err)
 
 		values, err := variables.Values(ctx, []string{"log-level", "db-host"})
@@ -266,7 +321,7 @@ func TestVariableRepository_Values(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "log-level", "debug", nil)
+		_, err := variables.Upsert(ctx, database.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 
 		// The caller knows what it asked about, so what a missing variable means is
@@ -280,7 +335,7 @@ func TestVariableRepository_Values(t *testing.T) {
 		variables := database.NewVariableRepository(newTestDatabase(t))
 		ctx := t.Context()
 
-		_, err := variables.Upsert(ctx, "empty", "", nil)
+		_, err := variables.Upsert(ctx, database.Variable{Name: "empty", Value: ""}, 0)
 		require.NoError(t, err)
 
 		// Present with an empty value rather than absent, since these values reach a

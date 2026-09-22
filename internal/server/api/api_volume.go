@@ -71,7 +71,7 @@ func (a *VolumeAPI) ApplyVolume(ctx context.Context, request api.ApplyVolumeRequ
 	spec := wire.ToVolume(*request.Body)
 	spec.Name = request.Name
 
-	ifMatch, _, ok := parseIfMatch(request.Params.IfMatch)
+	ifMatch, ok := resourceIfMatch(request.Params.IfMatch)
 	if !ok {
 		return api.ApplyVolume400JSONResponse{
 			Error: "the If-Match header must carry a tag read from GET /api/v1/volumes/{name}",

@@ -393,35 +393,29 @@ func (_m *MockPolicyReader) EXPECT() *MockPolicyReader_Expecter {
 }
 
 // Get provides a mock function for the type MockPolicyReader
-func (_mock *MockPolicyReader) Get(ctx context.Context) (manifest.Policy, string, error) {
+func (_mock *MockPolicyReader) Get(ctx context.Context) (service.Policy, error) {
 	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Get")
 	}
 
-	var r0 manifest.Policy
-	var r1 string
-	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) (manifest.Policy, string, error)); ok {
+	var r0 service.Policy
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (service.Policy, error)); ok {
 		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) manifest.Policy); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context) service.Policy); ok {
 		r0 = returnFunc(ctx)
 	} else {
-		r0 = ret.Get(0).(manifest.Policy)
+		r0 = ret.Get(0).(service.Policy)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) string); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
 		r1 = returnFunc(ctx)
 	} else {
-		r1 = ret.Get(1).(string)
+		r1 = ret.Error(1)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context) error); ok {
-		r2 = returnFunc(ctx)
-	} else {
-		r2 = ret.Error(2)
-	}
-	return r0, r1, r2
+	return r0, r1
 }
 
 // MockPolicyReader_Get_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Get'
@@ -448,12 +442,12 @@ func (_c *MockPolicyReader_Get_Call) Run(run func(ctx context.Context)) *MockPol
 	return _c
 }
 
-func (_c *MockPolicyReader_Get_Call) Return(policy manifest.Policy, s string, err error) *MockPolicyReader_Get_Call {
-	_c.Call.Return(policy, s, err)
+func (_c *MockPolicyReader_Get_Call) Return(policy service.Policy, err error) *MockPolicyReader_Get_Call {
+	_c.Call.Return(policy, err)
 	return _c
 }
 
-func (_c *MockPolicyReader_Get_Call) RunAndReturn(run func(ctx context.Context) (manifest.Policy, string, error)) *MockPolicyReader_Get_Call {
+func (_c *MockPolicyReader_Get_Call) RunAndReturn(run func(ctx context.Context) (service.Policy, error)) *MockPolicyReader_Get_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -686,20 +680,29 @@ func (_m *MockPolicyRepository) EXPECT() *MockPolicyRepository_Expecter {
 }
 
 // Apply provides a mock function for the type MockPolicyRepository
-func (_mock *MockPolicyRepository) Apply(ctx context.Context, document []byte, etag string, previousETag string) error {
-	ret := _mock.Called(ctx, document, etag, previousETag)
+func (_mock *MockPolicyRepository) Apply(ctx context.Context, document []byte, ifMatch int) (database.Policy, error) {
+	ret := _mock.Called(ctx, document, ifMatch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Apply")
 	}
 
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, []byte, string, string) error); ok {
-		r0 = returnFunc(ctx, document, etag, previousETag)
-	} else {
-		r0 = ret.Error(0)
+	var r0 database.Policy
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []byte, int) (database.Policy, error)); ok {
+		return returnFunc(ctx, document, ifMatch)
 	}
-	return r0
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []byte, int) database.Policy); ok {
+		r0 = returnFunc(ctx, document, ifMatch)
+	} else {
+		r0 = ret.Get(0).(database.Policy)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, []byte, int) error); ok {
+		r1 = returnFunc(ctx, document, ifMatch)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
 }
 
 // MockPolicyRepository_Apply_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Apply'
@@ -710,13 +713,12 @@ type MockPolicyRepository_Apply_Call struct {
 // Apply is a helper method to define mock.On call
 //   - ctx context.Context
 //   - document []byte
-//   - etag string
-//   - previousETag string
-func (_e *MockPolicyRepository_Expecter) Apply(ctx any, document any, etag any, previousETag any) *MockPolicyRepository_Apply_Call {
-	return &MockPolicyRepository_Apply_Call{Call: _e.mock.On("Apply", ctx, document, etag, previousETag)}
+//   - ifMatch int
+func (_e *MockPolicyRepository_Expecter) Apply(ctx any, document any, ifMatch any) *MockPolicyRepository_Apply_Call {
+	return &MockPolicyRepository_Apply_Call{Call: _e.mock.On("Apply", ctx, document, ifMatch)}
 }
 
-func (_c *MockPolicyRepository_Apply_Call) Run(run func(ctx context.Context, document []byte, etag string, previousETag string)) *MockPolicyRepository_Apply_Call {
+func (_c *MockPolicyRepository_Apply_Call) Run(run func(ctx context.Context, document []byte, ifMatch int)) *MockPolicyRepository_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -726,30 +728,25 @@ func (_c *MockPolicyRepository_Apply_Call) Run(run func(ctx context.Context, doc
 		if args[1] != nil {
 			arg1 = args[1].([]byte)
 		}
-		var arg2 string
+		var arg2 int
 		if args[2] != nil {
-			arg2 = args[2].(string)
-		}
-		var arg3 string
-		if args[3] != nil {
-			arg3 = args[3].(string)
+			arg2 = args[2].(int)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
-			arg3,
 		)
 	})
 	return _c
 }
 
-func (_c *MockPolicyRepository_Apply_Call) Return(err error) *MockPolicyRepository_Apply_Call {
-	_c.Call.Return(err)
+func (_c *MockPolicyRepository_Apply_Call) Return(policy database.Policy, err error) *MockPolicyRepository_Apply_Call {
+	_c.Call.Return(policy, err)
 	return _c
 }
 
-func (_c *MockPolicyRepository_Apply_Call) RunAndReturn(run func(ctx context.Context, document []byte, etag string, previousETag string) error) *MockPolicyRepository_Apply_Call {
+func (_c *MockPolicyRepository_Apply_Call) RunAndReturn(run func(ctx context.Context, document []byte, ifMatch int) (database.Policy, error)) *MockPolicyRepository_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1167,8 +1164,8 @@ func (_c *MockSecretRepository_Rekey_Call) RunAndReturn(run func(ctx context.Con
 }
 
 // Upsert provides a mock function for the type MockSecretRepository
-func (_mock *MockSecretRepository) Upsert(ctx context.Context, name string, value []byte, revision string, keyID string, labels map[string]string) (database.Secret, error) {
-	ret := _mock.Called(ctx, name, value, revision, keyID, labels)
+func (_mock *MockSecretRepository) Upsert(ctx context.Context, secret database.Secret, ifMatch int) (database.Secret, error) {
+	ret := _mock.Called(ctx, secret, ifMatch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
@@ -1176,16 +1173,16 @@ func (_mock *MockSecretRepository) Upsert(ctx context.Context, name string, valu
 
 	var r0 database.Secret
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, string, string, map[string]string) (database.Secret, error)); ok {
-		return returnFunc(ctx, name, value, revision, keyID, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.Secret, int) (database.Secret, error)); ok {
+		return returnFunc(ctx, secret, ifMatch)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, string, string, map[string]string) database.Secret); ok {
-		r0 = returnFunc(ctx, name, value, revision, keyID, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.Secret, int) database.Secret); ok {
+		r0 = returnFunc(ctx, secret, ifMatch)
 	} else {
 		r0 = ret.Get(0).(database.Secret)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []byte, string, string, map[string]string) error); ok {
-		r1 = returnFunc(ctx, name, value, revision, keyID, labels)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, database.Secret, int) error); ok {
+		r1 = returnFunc(ctx, secret, ifMatch)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -1199,59 +1196,41 @@ type MockSecretRepository_Upsert_Call struct {
 
 // Upsert is a helper method to define mock.On call
 //   - ctx context.Context
-//   - name string
-//   - value []byte
-//   - revision string
-//   - keyID string
-//   - labels map[string]string
-func (_e *MockSecretRepository_Expecter) Upsert(ctx any, name any, value any, revision any, keyID any, labels any) *MockSecretRepository_Upsert_Call {
-	return &MockSecretRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, name, value, revision, keyID, labels)}
+//   - secret database.Secret
+//   - ifMatch int
+func (_e *MockSecretRepository_Expecter) Upsert(ctx any, secret any, ifMatch any) *MockSecretRepository_Upsert_Call {
+	return &MockSecretRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, secret, ifMatch)}
 }
 
-func (_c *MockSecretRepository_Upsert_Call) Run(run func(ctx context.Context, name string, value []byte, revision string, keyID string, labels map[string]string)) *MockSecretRepository_Upsert_Call {
+func (_c *MockSecretRepository_Upsert_Call) Run(run func(ctx context.Context, secret database.Secret, ifMatch int)) *MockSecretRepository_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 database.Secret
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(database.Secret)
 		}
-		var arg2 []byte
+		var arg2 int
 		if args[2] != nil {
-			arg2 = args[2].([]byte)
-		}
-		var arg3 string
-		if args[3] != nil {
-			arg3 = args[3].(string)
-		}
-		var arg4 string
-		if args[4] != nil {
-			arg4 = args[4].(string)
-		}
-		var arg5 map[string]string
-		if args[5] != nil {
-			arg5 = args[5].(map[string]string)
+			arg2 = args[2].(int)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
-			arg3,
-			arg4,
-			arg5,
 		)
 	})
 	return _c
 }
 
-func (_c *MockSecretRepository_Upsert_Call) Return(secret database.Secret, err error) *MockSecretRepository_Upsert_Call {
-	_c.Call.Return(secret, err)
+func (_c *MockSecretRepository_Upsert_Call) Return(secret1 database.Secret, err error) *MockSecretRepository_Upsert_Call {
+	_c.Call.Return(secret1, err)
 	return _c
 }
 
-func (_c *MockSecretRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, name string, value []byte, revision string, keyID string, labels map[string]string) (database.Secret, error)) *MockSecretRepository_Upsert_Call {
+func (_c *MockSecretRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, secret database.Secret, ifMatch int) (database.Secret, error)) *MockSecretRepository_Upsert_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -3040,8 +3019,8 @@ func (_c *MockVariableRepository_List_Call) RunAndReturn(run func(ctx context.Co
 }
 
 // Upsert provides a mock function for the type MockVariableRepository
-func (_mock *MockVariableRepository) Upsert(ctx context.Context, name string, value string, labels map[string]string) (database.Variable, error) {
-	ret := _mock.Called(ctx, name, value, labels)
+func (_mock *MockVariableRepository) Upsert(ctx context.Context, variable database.Variable, ifMatch int) (database.Variable, error) {
+	ret := _mock.Called(ctx, variable, ifMatch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Upsert")
@@ -3049,16 +3028,16 @@ func (_mock *MockVariableRepository) Upsert(ctx context.Context, name string, va
 
 	var r0 database.Variable
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string) (database.Variable, error)); ok {
-		return returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.Variable, int) (database.Variable, error)); ok {
+		return returnFunc(ctx, variable, ifMatch)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string) database.Variable); ok {
-		r0 = returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, database.Variable, int) database.Variable); ok {
+		r0 = returnFunc(ctx, variable, ifMatch)
 	} else {
 		r0 = ret.Get(0).(database.Variable)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, map[string]string) error); ok {
-		r1 = returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, database.Variable, int) error); ok {
+		r1 = returnFunc(ctx, variable, ifMatch)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -3072,47 +3051,41 @@ type MockVariableRepository_Upsert_Call struct {
 
 // Upsert is a helper method to define mock.On call
 //   - ctx context.Context
-//   - name string
-//   - value string
-//   - labels map[string]string
-func (_e *MockVariableRepository_Expecter) Upsert(ctx any, name any, value any, labels any) *MockVariableRepository_Upsert_Call {
-	return &MockVariableRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, name, value, labels)}
+//   - variable database.Variable
+//   - ifMatch int
+func (_e *MockVariableRepository_Expecter) Upsert(ctx any, variable any, ifMatch any) *MockVariableRepository_Upsert_Call {
+	return &MockVariableRepository_Upsert_Call{Call: _e.mock.On("Upsert", ctx, variable, ifMatch)}
 }
 
-func (_c *MockVariableRepository_Upsert_Call) Run(run func(ctx context.Context, name string, value string, labels map[string]string)) *MockVariableRepository_Upsert_Call {
+func (_c *MockVariableRepository_Upsert_Call) Run(run func(ctx context.Context, variable database.Variable, ifMatch int)) *MockVariableRepository_Upsert_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 database.Variable
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(database.Variable)
 		}
-		var arg2 string
+		var arg2 int
 		if args[2] != nil {
-			arg2 = args[2].(string)
-		}
-		var arg3 map[string]string
-		if args[3] != nil {
-			arg3 = args[3].(map[string]string)
+			arg2 = args[2].(int)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
-			arg3,
 		)
 	})
 	return _c
 }
 
-func (_c *MockVariableRepository_Upsert_Call) Return(variable database.Variable, err error) *MockVariableRepository_Upsert_Call {
-	_c.Call.Return(variable, err)
+func (_c *MockVariableRepository_Upsert_Call) Return(variable1 database.Variable, err error) *MockVariableRepository_Upsert_Call {
+	_c.Call.Return(variable1, err)
 	return _c
 }
 
-func (_c *MockVariableRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, name string, value string, labels map[string]string) (database.Variable, error)) *MockVariableRepository_Upsert_Call {
+func (_c *MockVariableRepository_Upsert_Call) RunAndReturn(run func(ctx context.Context, variable database.Variable, ifMatch int) (database.Variable, error)) *MockVariableRepository_Upsert_Call {
 	_c.Call.Return(run)
 	return _c
 }

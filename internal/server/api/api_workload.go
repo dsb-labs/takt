@@ -142,7 +142,7 @@ func (a *WorkloadAPI) ApplyWorkload(ctx context.Context, request api.ApplyWorklo
 		}, nil
 	}
 
-	ifMatch, _, ok := parseIfMatch(request.Params.IfMatch)
+	ifMatch, ok := resourceIfMatch(request.Params.IfMatch)
 	if !ok {
 		return api.ApplyWorkload400JSONResponse{
 			Error: "the If-Match header must carry a tag read from GET /api/v1/workloads/{name}",

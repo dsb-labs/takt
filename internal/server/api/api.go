@@ -293,33 +293,45 @@ func unquoteETag(etag string) string {
 	return etag
 }
 
-// versionETag renders a resource's version as the tag a conditional apply
-// hands back.
+// versionETag renders a version as the tag a conditional apply hands back.
 //
-// The policy document derives its tag from its content, because it is one
-// document with no row of its own to count writes against. A workload, volume
-// or service already counts its writes, and that count moves only when an apply
-// changed something, so it says the same thing more cheaply.
+// Every resource counts its writes, the policy included, and that count moves
+// only when an apply changed something. One tag format reaches every
+// conditional write, so a caller learns the rule once.
 func versionETag(version int) string {
 	return quoteETag(strconv.Itoa(version))
 }
 
 // parseIfMatch reads the version an If-Match header names, reporting whether
-// the header was absent and whether what it carried was a version at all.
+// the header was present and whether what it carried was a version at all.
 //
-// An absent header means an unconditional apply, which is what creating a
-// resource has to do: there is no tag yet to name. A header carrying something
-// that is not one of takt's tags is a caller mistake rather than a conflict, so
-// it is told apart from a version that simply no longer matches.
-func parseIfMatch(header *string) (version int, conditional, ok bool) {
+// A header carrying something that is not one of takt's tags is a caller
+// mistake rather than a conflict, so it is told apart from a version that
+// simply no longer matches. Zero is accepted: it is the version the policy
+// reports before its first apply. Whether it is a version the resource in
+// hand can be at is the handler's to decide.
+func parseIfMatch(header *string) (version int, present, ok bool) {
 	if header == nil || *header == "" {
 		return 0, false, true
 	}
 
 	version, err := strconv.Atoi(unquoteETag(*header))
-	if err != nil || version <= 0 {
+	if err != nil || version < 0 {
 		return 0, true, false
 	}
 
 	return version, true, true
+}
+
+// resourceIfMatch reads the version a conditional apply of a named resource
+// expects, reporting whether the header was usable.
+//
+// An absent header means an unconditional apply, which is what creating a
+// resource has to do: there is no tag yet to name. Zero is refused: a named
+// resource has no version before its first write and version one from it, so
+// a tag of zero is one takt never issued.
+func resourceIfMatch(header *string) (version int, ok bool) {
+	version, present, ok := parseIfMatch(header)
+
+	return version, ok && (!present || version > 0)
 }

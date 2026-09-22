@@ -45,35 +45,29 @@ func (_m *MockPolicyService) EXPECT() *MockPolicyService_Expecter {
 }
 
 // Apply provides a mock function for the type MockPolicyService
-func (_mock *MockPolicyService) Apply(ctx context.Context, policy manifest.Policy, ifMatch string) (manifest.Policy, string, error) {
+func (_mock *MockPolicyService) Apply(ctx context.Context, policy manifest.Policy, ifMatch int) (service.Policy, error) {
 	ret := _mock.Called(ctx, policy, ifMatch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Apply")
 	}
 
-	var r0 manifest.Policy
-	var r1 string
-	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Policy, string) (manifest.Policy, string, error)); ok {
+	var r0 service.Policy
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Policy, int) (service.Policy, error)); ok {
 		return returnFunc(ctx, policy, ifMatch)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Policy, string) manifest.Policy); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Policy, int) service.Policy); ok {
 		r0 = returnFunc(ctx, policy, ifMatch)
 	} else {
-		r0 = ret.Get(0).(manifest.Policy)
+		r0 = ret.Get(0).(service.Policy)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Policy, string) string); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Policy, int) error); ok {
 		r1 = returnFunc(ctx, policy, ifMatch)
 	} else {
-		r1 = ret.Get(1).(string)
+		r1 = ret.Error(1)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, manifest.Policy, string) error); ok {
-		r2 = returnFunc(ctx, policy, ifMatch)
-	} else {
-		r2 = ret.Error(2)
-	}
-	return r0, r1, r2
+	return r0, r1
 }
 
 // MockPolicyService_Apply_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Apply'
@@ -84,12 +78,12 @@ type MockPolicyService_Apply_Call struct {
 // Apply is a helper method to define mock.On call
 //   - ctx context.Context
 //   - policy manifest.Policy
-//   - ifMatch string
+//   - ifMatch int
 func (_e *MockPolicyService_Expecter) Apply(ctx any, policy any, ifMatch any) *MockPolicyService_Apply_Call {
 	return &MockPolicyService_Apply_Call{Call: _e.mock.On("Apply", ctx, policy, ifMatch)}
 }
 
-func (_c *MockPolicyService_Apply_Call) Run(run func(ctx context.Context, policy manifest.Policy, ifMatch string)) *MockPolicyService_Apply_Call {
+func (_c *MockPolicyService_Apply_Call) Run(run func(ctx context.Context, policy manifest.Policy, ifMatch int)) *MockPolicyService_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -99,9 +93,9 @@ func (_c *MockPolicyService_Apply_Call) Run(run func(ctx context.Context, policy
 		if args[1] != nil {
 			arg1 = args[1].(manifest.Policy)
 		}
-		var arg2 string
+		var arg2 int
 		if args[2] != nil {
-			arg2 = args[2].(string)
+			arg2 = args[2].(int)
 		}
 		run(
 			arg0,
@@ -112,46 +106,40 @@ func (_c *MockPolicyService_Apply_Call) Run(run func(ctx context.Context, policy
 	return _c
 }
 
-func (_c *MockPolicyService_Apply_Call) Return(policy1 manifest.Policy, s string, err error) *MockPolicyService_Apply_Call {
-	_c.Call.Return(policy1, s, err)
+func (_c *MockPolicyService_Apply_Call) Return(policy1 service.Policy, err error) *MockPolicyService_Apply_Call {
+	_c.Call.Return(policy1, err)
 	return _c
 }
 
-func (_c *MockPolicyService_Apply_Call) RunAndReturn(run func(ctx context.Context, policy manifest.Policy, ifMatch string) (manifest.Policy, string, error)) *MockPolicyService_Apply_Call {
+func (_c *MockPolicyService_Apply_Call) RunAndReturn(run func(ctx context.Context, policy manifest.Policy, ifMatch int) (service.Policy, error)) *MockPolicyService_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Get provides a mock function for the type MockPolicyService
-func (_mock *MockPolicyService) Get(ctx context.Context) (manifest.Policy, string, error) {
+func (_mock *MockPolicyService) Get(ctx context.Context) (service.Policy, error) {
 	ret := _mock.Called(ctx)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Get")
 	}
 
-	var r0 manifest.Policy
-	var r1 string
-	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context) (manifest.Policy, string, error)); ok {
+	var r0 service.Policy
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context) (service.Policy, error)); ok {
 		return returnFunc(ctx)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context) manifest.Policy); ok {
+	if returnFunc, ok := ret.Get(0).(func(context.Context) service.Policy); ok {
 		r0 = returnFunc(ctx)
 	} else {
-		r0 = ret.Get(0).(manifest.Policy)
+		r0 = ret.Get(0).(service.Policy)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context) string); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context) error); ok {
 		r1 = returnFunc(ctx)
 	} else {
-		r1 = ret.Get(1).(string)
+		r1 = ret.Error(1)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context) error); ok {
-		r2 = returnFunc(ctx)
-	} else {
-		r2 = ret.Error(2)
-	}
-	return r0, r1, r2
+	return r0, r1
 }
 
 // MockPolicyService_Get_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Get'
@@ -178,12 +166,12 @@ func (_c *MockPolicyService_Get_Call) Run(run func(ctx context.Context)) *MockPo
 	return _c
 }
 
-func (_c *MockPolicyService_Get_Call) Return(policy manifest.Policy, s string, err error) *MockPolicyService_Get_Call {
-	_c.Call.Return(policy, s, err)
+func (_c *MockPolicyService_Get_Call) Return(policy service.Policy, err error) *MockPolicyService_Get_Call {
+	_c.Call.Return(policy, err)
 	return _c
 }
 
-func (_c *MockPolicyService_Get_Call) RunAndReturn(run func(ctx context.Context) (manifest.Policy, string, error)) *MockPolicyService_Get_Call {
+func (_c *MockPolicyService_Get_Call) RunAndReturn(run func(ctx context.Context) (service.Policy, error)) *MockPolicyService_Get_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1063,8 +1051,8 @@ func (_c *MockSecretService_List_Call) RunAndReturn(run func(ctx context.Context
 }
 
 // Set provides a mock function for the type MockSecretService
-func (_mock *MockSecretService) Set(ctx context.Context, name string, value []byte, labels map[string]string) (service.Secret, bool, error) {
-	ret := _mock.Called(ctx, name, value, labels)
+func (_mock *MockSecretService) Set(ctx context.Context, name string, value []byte, labels map[string]string, ifMatch int) (service.Secret, bool, error) {
+	ret := _mock.Called(ctx, name, value, labels, ifMatch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Set")
@@ -1073,21 +1061,21 @@ func (_mock *MockSecretService) Set(ctx context.Context, name string, value []by
 	var r0 service.Secret
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, map[string]string) (service.Secret, bool, error)); ok {
-		return returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, map[string]string, int) (service.Secret, bool, error)); ok {
+		return returnFunc(ctx, name, value, labels, ifMatch)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, map[string]string) service.Secret); ok {
-		r0 = returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, []byte, map[string]string, int) service.Secret); ok {
+		r0 = returnFunc(ctx, name, value, labels, ifMatch)
 	} else {
 		r0 = ret.Get(0).(service.Secret)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []byte, map[string]string) bool); ok {
-		r1 = returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, []byte, map[string]string, int) bool); ok {
+		r1 = returnFunc(ctx, name, value, labels, ifMatch)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, string, []byte, map[string]string) error); ok {
-		r2 = returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, []byte, map[string]string, int) error); ok {
+		r2 = returnFunc(ctx, name, value, labels, ifMatch)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -1104,11 +1092,12 @@ type MockSecretService_Set_Call struct {
 //   - name string
 //   - value []byte
 //   - labels map[string]string
-func (_e *MockSecretService_Expecter) Set(ctx any, name any, value any, labels any) *MockSecretService_Set_Call {
-	return &MockSecretService_Set_Call{Call: _e.mock.On("Set", ctx, name, value, labels)}
+//   - ifMatch int
+func (_e *MockSecretService_Expecter) Set(ctx any, name any, value any, labels any, ifMatch any) *MockSecretService_Set_Call {
+	return &MockSecretService_Set_Call{Call: _e.mock.On("Set", ctx, name, value, labels, ifMatch)}
 }
 
-func (_c *MockSecretService_Set_Call) Run(run func(ctx context.Context, name string, value []byte, labels map[string]string)) *MockSecretService_Set_Call {
+func (_c *MockSecretService_Set_Call) Run(run func(ctx context.Context, name string, value []byte, labels map[string]string, ifMatch int)) *MockSecretService_Set_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1126,11 +1115,16 @@ func (_c *MockSecretService_Set_Call) Run(run func(ctx context.Context, name str
 		if args[3] != nil {
 			arg3 = args[3].(map[string]string)
 		}
+		var arg4 int
+		if args[4] != nil {
+			arg4 = args[4].(int)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
+			arg4,
 		)
 	})
 	return _c
@@ -1141,7 +1135,7 @@ func (_c *MockSecretService_Set_Call) Return(secret service.Secret, b bool, err 
 	return _c
 }
 
-func (_c *MockSecretService_Set_Call) RunAndReturn(run func(ctx context.Context, name string, value []byte, labels map[string]string) (service.Secret, bool, error)) *MockSecretService_Set_Call {
+func (_c *MockSecretService_Set_Call) RunAndReturn(run func(ctx context.Context, name string, value []byte, labels map[string]string, ifMatch int) (service.Secret, bool, error)) *MockSecretService_Set_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2215,8 +2209,8 @@ func (_c *MockVariableService_List_Call) RunAndReturn(run func(ctx context.Conte
 }
 
 // Set provides a mock function for the type MockVariableService
-func (_mock *MockVariableService) Set(ctx context.Context, name string, value string, labels map[string]string) (service.Variable, bool, error) {
-	ret := _mock.Called(ctx, name, value, labels)
+func (_mock *MockVariableService) Set(ctx context.Context, name string, value string, labels map[string]string, ifMatch int) (service.Variable, bool, error) {
+	ret := _mock.Called(ctx, name, value, labels, ifMatch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Set")
@@ -2225,21 +2219,21 @@ func (_mock *MockVariableService) Set(ctx context.Context, name string, value st
 	var r0 service.Variable
 	var r1 bool
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string) (service.Variable, bool, error)); ok {
-		return returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string, int) (service.Variable, bool, error)); ok {
+		return returnFunc(ctx, name, value, labels, ifMatch)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string) service.Variable); ok {
-		r0 = returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string, map[string]string, int) service.Variable); ok {
+		r0 = returnFunc(ctx, name, value, labels, ifMatch)
 	} else {
 		r0 = ret.Get(0).(service.Variable)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, map[string]string) bool); ok {
-		r1 = returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string, map[string]string, int) bool); ok {
+		r1 = returnFunc(ctx, name, value, labels, ifMatch)
 	} else {
 		r1 = ret.Get(1).(bool)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, map[string]string) error); ok {
-		r2 = returnFunc(ctx, name, value, labels)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, string, string, map[string]string, int) error); ok {
+		r2 = returnFunc(ctx, name, value, labels, ifMatch)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -2256,11 +2250,12 @@ type MockVariableService_Set_Call struct {
 //   - name string
 //   - value string
 //   - labels map[string]string
-func (_e *MockVariableService_Expecter) Set(ctx any, name any, value any, labels any) *MockVariableService_Set_Call {
-	return &MockVariableService_Set_Call{Call: _e.mock.On("Set", ctx, name, value, labels)}
+//   - ifMatch int
+func (_e *MockVariableService_Expecter) Set(ctx any, name any, value any, labels any, ifMatch any) *MockVariableService_Set_Call {
+	return &MockVariableService_Set_Call{Call: _e.mock.On("Set", ctx, name, value, labels, ifMatch)}
 }
 
-func (_c *MockVariableService_Set_Call) Run(run func(ctx context.Context, name string, value string, labels map[string]string)) *MockVariableService_Set_Call {
+func (_c *MockVariableService_Set_Call) Run(run func(ctx context.Context, name string, value string, labels map[string]string, ifMatch int)) *MockVariableService_Set_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -2278,11 +2273,16 @@ func (_c *MockVariableService_Set_Call) Run(run func(ctx context.Context, name s
 		if args[3] != nil {
 			arg3 = args[3].(map[string]string)
 		}
+		var arg4 int
+		if args[4] != nil {
+			arg4 = args[4].(int)
+		}
 		run(
 			arg0,
 			arg1,
 			arg2,
 			arg3,
+			arg4,
 		)
 	})
 	return _c
@@ -2293,7 +2293,7 @@ func (_c *MockVariableService_Set_Call) Return(variable service.Variable, b bool
 	return _c
 }
 
-func (_c *MockVariableService_Set_Call) RunAndReturn(run func(ctx context.Context, name string, value string, labels map[string]string) (service.Variable, bool, error)) *MockVariableService_Set_Call {
+func (_c *MockVariableService_Set_Call) RunAndReturn(run func(ctx context.Context, name string, value string, labels map[string]string, ifMatch int) (service.Variable, bool, error)) *MockVariableService_Set_Call {
 	_c.Call.Return(run)
 	return _c
 }
