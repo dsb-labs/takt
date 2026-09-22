@@ -67,22 +67,33 @@ func (c *Client) GetPolicy(ctx context.Context) (Policy, error) {
 }
 
 // ApplyPolicy replaces the whole policy with the given document, on the
-// condition that ifMatch is the tag GetPolicy reported for the document being
-// replaced. A stale tag is reported as ErrPolicyChanged rather than silently
-// clobbering a concurrent apply: read the policy again and re-apply.
+// condition that the policy still carries the tag WithIfMatch names. A stale
+// tag is reported as ErrPolicyChanged rather than silently clobbering a
+// concurrent apply: read the policy again and re-apply.
 //
-// The tag is not optional, unlike the WithIfMatch a resource apply takes. The
-// policy always exists, so there is always a tag to name, and an apply that
-// named none would be a lost update on its way to happening. ReplacePolicy is
-// the one-step form that reads the tag itself.
+// Without WithIfMatch the tag is read first and the apply conditioned on it,
+// which is the one-step form `takt acl apply` uses. The apply is never
+// unconditional, unlike a resource apply without the option. The policy
+// always exists, so there is always a tag to name, and an apply that named
+// none would be a lost update on its way to happening.
 //
 // Returns the policy as applied, carrying its new tag.
-func (c *Client) ApplyPolicy(ctx context.Context, policy manifest.Policy, ifMatch string) (Policy, error) {
+func (c *Client) ApplyPolicy(ctx context.Context, policy manifest.Policy, options ...ApplyOption) (Policy, error) {
 	if err := manifest.ValidatePolicy(policy); err != nil {
 		return Policy{}, err
 	}
 
-	params := api.ApplyACLPolicyParams{IfMatch: new(ifMatch)}
+	etag := ifMatch(options)
+	if etag == nil {
+		current, err := c.GetPolicy(ctx)
+		if err != nil {
+			return Policy{}, err
+		}
+
+		etag = new(current.ETag)
+	}
+
+	params := api.ApplyACLPolicyParams{IfMatch: etag}
 
 	resp, err := c.api.ApplyACLPolicyWithResponse(ctx, &params, wire.FromPolicy(policy))
 	if err != nil {
@@ -101,17 +112,4 @@ func (c *Client) ApplyPolicy(ctx context.Context, policy manifest.Policy, ifMatc
 	default:
 		return Policy{}, newError(resp.StatusCode(), nil)
 	}
-}
-
-// ReplacePolicy reads the current policy's tag and applies the given document
-// against it, which is the one-step form `takt acl apply` uses. A concurrent
-// apply between the read and the write is still reported as
-// ErrPolicyChanged, for the caller to re-run.
-func (c *Client) ReplacePolicy(ctx context.Context, policy manifest.Policy) (Policy, error) {
-	current, err := c.GetPolicy(ctx)
-	if err != nil {
-		return Policy{}, err
-	}
-
-	return c.ApplyPolicy(ctx, policy, current.ETag)
 }
