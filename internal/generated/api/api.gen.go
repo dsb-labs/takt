@@ -2711,6 +2711,19 @@ type DeleteSecretParams struct {
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
 }
 
+// SetSecretParams defines parameters for SetSecret.
+type SetSecretParams struct {
+	// IfMatch The tag of the resource being replaced, as read from the ETag header of
+	// the matching get. An apply carrying one is refused with a 412 when the
+	// resource has moved on since, rather than writing over whatever landed
+	// in between.
+	//
+	// Optional everywhere but on the policy document, which refuses an apply
+	// without it. A resource apply that omits it is unconditional, because a
+	// caller creating something has no tag to name yet.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
+}
+
 // ListServicesParams defines parameters for ListServices.
 type ListServicesParams struct {
 	// Query A `path=value` filter over the service's labels, where the path is a
@@ -2763,6 +2776,19 @@ type DeleteVariableParams struct {
 	// running until something replaces them, and then fail to start until the
 	// variable exists again.
 	Force *bool `form:"force,omitempty" json:"force,omitempty"`
+}
+
+// SetVariableParams defines parameters for SetVariable.
+type SetVariableParams struct {
+	// IfMatch The tag of the resource being replaced, as read from the ETag header of
+	// the matching get. An apply carrying one is refused with a 412 when the
+	// resource has moved on since, rather than writing over whatever landed
+	// in between.
+	//
+	// Optional everywhere but on the policy document, which refuses an apply
+	// without it. A resource apply that omits it is unconditional, because a
+	// caller creating something has no tag to name yet.
+	IfMatch *IfMatch `json:"If-Match,omitempty"`
 }
 
 // ListVolumesParams defines parameters for ListVolumes.
@@ -3027,9 +3053,12 @@ type ClientInterface interface {
 	//
 	// The `If-Match` header must carry the tag of the document being
 	// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
-	// than silently clobbering a concurrent apply. The document itself
-	// carries no version field: it would go stale the moment the server
-	// accepted it.
+	// than silently clobbering a concurrent apply. It is required here
+	// where a resource apply may omit it: the policy always exists, so
+	// there is always a tag to name, and an apply that named none would be
+	// a lost update on its way to happening. The document itself carries
+	// no version field: it would go stale the moment the server accepted
+	// it.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -3044,9 +3073,12 @@ type ClientInterface interface {
 	//
 	// The `If-Match` header must carry the tag of the document being
 	// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
-	// than silently clobbering a concurrent apply. The document itself
-	// carries no version field: it would go stale the moment the server
-	// accepted it.
+	// than silently clobbering a concurrent apply. It is required here
+	// where a resource apply may omit it: the policy always exists, so
+	// there is always a tag to name, and an apply that named none would be
+	// a lost update on its way to happening. The document itself carries
+	// no version field: it would go stale the moment the server accepted
+	// it.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -3343,10 +3375,15 @@ type ClientInterface interface {
 	// hash of every workload reading the secret. Those workloads are then replaced
 	// by the reconciler, and the new value reaches them as they start.
 	//
+	// The `If-Match` header makes the set conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the secret has
+	// moved on since. Omitting it sets unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
-	SetSecretWithBody(ctx context.Context, name SecretName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	SetSecretWithBody(ctx context.Context, name SecretName, params *SetSecretParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SetSecret Set a secret's value
 	//
@@ -3361,10 +3398,15 @@ type ClientInterface interface {
 	// hash of every workload reading the secret. Those workloads are then replaced
 	// by the reconciler, and the new value reaches them as they start.
 	//
+	// The `If-Match` header makes the set conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the secret has
+	// moved on since. Omitting it sets unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
-	SetSecret(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	SetSecret(ctx context.Context, name SecretName, params *SetSecretParams, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListServices List services
 	//
@@ -3616,10 +3658,15 @@ type ClientInterface interface {
 	// reading the variable. Those workloads are then replaced by the reconciler,
 	// and the new value reaches them as they start.
 	//
+	// The `If-Match` header makes the set conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the variable has
+	// moved on since. Omitting it sets unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
-	SetVariableWithBody(ctx context.Context, name VariableName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	SetVariableWithBody(ctx context.Context, name VariableName, params *SetVariableParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SetVariable Set a variable's value
 	//
@@ -3634,10 +3681,15 @@ type ClientInterface interface {
 	// reading the variable. Those workloads are then replaced by the reconciler,
 	// and the new value reaches them as they start.
 	//
+	// The `If-Match` header makes the set conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the variable has
+	// moved on since. Omitting it sets unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes a body of the `application/json` content type.
 	//
 	// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
-	SetVariable(ctx context.Context, name VariableName, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	SetVariable(ctx context.Context, name VariableName, params *SetVariableParams, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListVolumes List volumes
 	//
@@ -4036,9 +4088,12 @@ func (c *Client) GetACLPolicy(ctx context.Context, reqEditors ...RequestEditorFn
 //
 // The `If-Match` header must carry the tag of the document being
 // replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
-// than silently clobbering a concurrent apply. The document itself
-// carries no version field: it would go stale the moment the server
-// accepted it.
+// than silently clobbering a concurrent apply. It is required here
+// where a resource apply may omit it: the policy always exists, so
+// there is always a tag to name, and an apply that named none would be
+// a lost update on its way to happening. The document itself carries
+// no version field: it would go stale the moment the server accepted
+// it.
 //
 // Takes any type of body and a specified content type.
 //
@@ -4063,9 +4118,12 @@ func (c *Client) ApplyACLPolicyWithBody(ctx context.Context, params *ApplyACLPol
 //
 // The `If-Match` header must carry the tag of the document being
 // replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
-// than silently clobbering a concurrent apply. The document itself
-// carries no version field: it would go stale the moment the server
-// accepted it.
+// than silently clobbering a concurrent apply. It is required here
+// where a resource apply may omit it: the policy always exists, so
+// there is always a tag to name, and an apply that named none would be
+// a lost update on its way to happening. The document itself carries
+// no version field: it would go stale the moment the server accepted
+// it.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -4532,11 +4590,16 @@ func (c *Client) GetSecret(ctx context.Context, name SecretName, reqEditors ...R
 // hash of every workload reading the secret. Those workloads are then replaced
 // by the reconciler, and the new value reaches them as they start.
 //
+// The `If-Match` header makes the set conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the secret has
+// moved on since. Omitting it sets unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
-func (c *Client) SetSecretWithBody(ctx context.Context, name SecretName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewSetSecretRequestWithBody(c.Server, name, contentType, body)
+func (c *Client) SetSecretWithBody(ctx context.Context, name SecretName, params *SetSecretParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetSecretRequestWithBody(c.Server, name, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4560,11 +4623,16 @@ func (c *Client) SetSecretWithBody(ctx context.Context, name SecretName, content
 // hash of every workload reading the secret. Those workloads are then replaced
 // by the reconciler, and the new value reaches them as they start.
 //
+// The `If-Match` header makes the set conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the secret has
+// moved on since. Omitting it sets unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
-func (c *Client) SetSecret(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewSetSecretRequest(c.Server, name, body)
+func (c *Client) SetSecret(ctx context.Context, name SecretName, params *SetSecretParams, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetSecretRequest(c.Server, name, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4985,11 +5053,16 @@ func (c *Client) GetVariable(ctx context.Context, name VariableName, reqEditors 
 // reading the variable. Those workloads are then replaced by the reconciler,
 // and the new value reaches them as they start.
 //
+// The `If-Match` header makes the set conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the variable has
+// moved on since. Omitting it sets unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes any type of body and a specified content type.
 //
 // Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
-func (c *Client) SetVariableWithBody(ctx context.Context, name VariableName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewSetVariableRequestWithBody(c.Server, name, contentType, body)
+func (c *Client) SetVariableWithBody(ctx context.Context, name VariableName, params *SetVariableParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetVariableRequestWithBody(c.Server, name, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5013,11 +5086,16 @@ func (c *Client) SetVariableWithBody(ctx context.Context, name VariableName, con
 // reading the variable. Those workloads are then replaced by the reconciler,
 // and the new value reaches them as they start.
 //
+// The `If-Match` header makes the set conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the variable has
+// moved on since. Omitting it sets unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes a body of the `application/json` content type.
 //
 // Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
-func (c *Client) SetVariable(ctx context.Context, name VariableName, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewSetVariableRequest(c.Server, name, body)
+func (c *Client) SetVariable(ctx context.Context, name VariableName, params *SetVariableParams, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetVariableRequest(c.Server, name, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -6217,18 +6295,18 @@ func NewGetSecretRequest(server string, name SecretName) (*http.Request, error) 
 }
 
 // NewSetSecretRequest calls the generic SetSecret builder with application/json body
-func NewSetSecretRequest(server string, name SecretName, body SetSecretJSONRequestBody) (*http.Request, error) {
+func NewSetSecretRequest(server string, name SecretName, params *SetSecretParams, body SetSecretJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewSetSecretRequestWithBody(server, name, "application/json", bodyReader)
+	return NewSetSecretRequestWithBody(server, name, params, "application/json", bodyReader)
 }
 
 // NewSetSecretRequestWithBody constructs an http.Request for the SetSecret method, with any body, and a specified content type
-func NewSetSecretRequestWithBody(server string, name SecretName, contentType string, body io.Reader) (*http.Request, error) {
+func NewSetSecretRequestWithBody(server string, name SecretName, params *SetSecretParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6259,6 +6337,21 @@ func NewSetSecretRequestWithBody(server string, name SecretName, contentType str
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.IfMatch != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "If-Match", *params.IfMatch, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("If-Match", headerParam0)
+		}
+
+	}
 
 	return req, nil
 }
@@ -6818,18 +6911,18 @@ func NewGetVariableRequest(server string, name VariableName) (*http.Request, err
 }
 
 // NewSetVariableRequest calls the generic SetVariable builder with application/json body
-func NewSetVariableRequest(server string, name VariableName, body SetVariableJSONRequestBody) (*http.Request, error) {
+func NewSetVariableRequest(server string, name VariableName, params *SetVariableParams, body SetVariableJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewSetVariableRequestWithBody(server, name, "application/json", bodyReader)
+	return NewSetVariableRequestWithBody(server, name, params, "application/json", bodyReader)
 }
 
 // NewSetVariableRequestWithBody constructs an http.Request for the SetVariable method, with any body, and a specified content type
-func NewSetVariableRequestWithBody(server string, name VariableName, contentType string, body io.Reader) (*http.Request, error) {
+func NewSetVariableRequestWithBody(server string, name VariableName, params *SetVariableParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6860,6 +6953,21 @@ func NewSetVariableRequestWithBody(server string, name VariableName, contentType
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.IfMatch != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithOptions("simple", false, "If-Match", *params.IfMatch, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("If-Match", headerParam0)
+		}
+
+	}
 
 	return req, nil
 }
@@ -7723,9 +7831,12 @@ type ClientWithResponsesInterface interface {
 	//
 	// The `If-Match` header must carry the tag of the document being
 	// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
-	// than silently clobbering a concurrent apply. The document itself
-	// carries no version field: it would go stale the moment the server
-	// accepted it.
+	// than silently clobbering a concurrent apply. It is required here
+	// where a resource apply may omit it: the policy always exists, so
+	// there is always a tag to name, and an apply that named none would be
+	// a lost update on its way to happening. The document itself carries
+	// no version field: it would go stale the moment the server accepted
+	// it.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -7740,9 +7851,12 @@ type ClientWithResponsesInterface interface {
 	//
 	// The `If-Match` header must carry the tag of the document being
 	// replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
-	// than silently clobbering a concurrent apply. The document itself
-	// carries no version field: it would go stale the moment the server
-	// accepted it.
+	// than silently clobbering a concurrent apply. It is required here
+	// where a resource apply may omit it: the policy always exists, so
+	// there is always a tag to name, and an apply that named none would be
+	// a lost update on its way to happening. The document itself carries
+	// no version field: it would go stale the moment the server accepted
+	// it.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -8059,10 +8173,15 @@ type ClientWithResponsesInterface interface {
 	// hash of every workload reading the secret. Those workloads are then replaced
 	// by the reconciler, and the new value reaches them as they start.
 	//
+	// The `If-Match` header makes the set conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the secret has
+	// moved on since. Omitting it sets unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
-	SetSecretWithBodyWithResponse(ctx context.Context, name SecretName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetSecretResponse, error)
+	SetSecretWithBodyWithResponse(ctx context.Context, name SecretName, params *SetSecretParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetSecretResponse, error)
 
 	// SetSecretWithResponse Set a secret's value
 	//
@@ -8077,10 +8196,15 @@ type ClientWithResponsesInterface interface {
 	// hash of every workload reading the secret. Those workloads are then replaced
 	// by the reconciler, and the new value reaches them as they start.
 	//
+	// The `If-Match` header makes the set conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the secret has
+	// moved on since. Omitting it sets unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
-	SetSecretWithResponse(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSecretResponse, error)
+	SetSecretWithResponse(ctx context.Context, name SecretName, params *SetSecretParams, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSecretResponse, error)
 
 	// ListServicesWithResponse List services
 	//
@@ -8356,10 +8480,15 @@ type ClientWithResponsesInterface interface {
 	// reading the variable. Those workloads are then replaced by the reconciler,
 	// and the new value reaches them as they start.
 	//
+	// The `If-Match` header makes the set conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the variable has
+	// moved on since. Omitting it sets unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
-	SetVariableWithBodyWithResponse(ctx context.Context, name VariableName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetVariableResponse, error)
+	SetVariableWithBodyWithResponse(ctx context.Context, name VariableName, params *SetVariableParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetVariableResponse, error)
 
 	// SetVariableWithResponse Set a variable's value
 	//
@@ -8374,10 +8503,15 @@ type ClientWithResponsesInterface interface {
 	// reading the variable. Those workloads are then replaced by the reconciler,
 	// and the new value reaches them as they start.
 	//
+	// The `If-Match` header makes the set conditional: carrying the tag read
+	// from the matching get, it is refused with a 412 when the variable has
+	// moved on since. Omitting it sets unconditionally, which is what
+	// creating one has to do — there is no tag yet to name.
+	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
-	SetVariableWithResponse(ctx context.Context, name VariableName, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*SetVariableResponse, error)
+	SetVariableWithResponse(ctx context.Context, name VariableName, params *SetVariableParams, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*SetVariableResponse, error)
 
 	// ListVolumesWithResponse List volumes
 	//
@@ -9736,6 +9870,11 @@ func (r DeleteSecretResponse) ContentType() string {
 	return ""
 }
 
+// GetSecretResponse200Headers the declared response headers of an HTTP 200 response for GetSecret
+type GetSecretResponse200Headers struct {
+	ETag *string
+}
+
 // GetSecretResponse401Headers the declared response headers of an HTTP 401 response for GetSecret
 type GetSecretResponse401Headers struct {
 	WWWAuthenticate *string
@@ -9754,6 +9893,8 @@ type GetSecretResponse struct {
 	JSON404 *NotFound
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *GetSecretResponse200Headers
 	// Headers401 the parsed response headers for an HTTP 401 response
 	Headers401 *GetSecretResponse401Headers
 }
@@ -9812,6 +9953,16 @@ func (r GetSecretResponse) ContentType() string {
 	return ""
 }
 
+// SetSecretResponse200Headers the declared response headers of an HTTP 200 response for SetSecret
+type SetSecretResponse200Headers struct {
+	ETag *string
+}
+
+// SetSecretResponse201Headers the declared response headers of an HTTP 201 response for SetSecret
+type SetSecretResponse201Headers struct {
+	ETag *string
+}
+
 // SetSecretResponse401Headers the declared response headers of an HTTP 401 response for SetSecret
 type SetSecretResponse401Headers struct {
 	WWWAuthenticate *string
@@ -9830,8 +9981,14 @@ type SetSecretResponse struct {
 	JSON401 *Unauthorized
 	// JSON403 the response for an HTTP 403 `application/json` response
 	JSON403 *Forbidden
+	// JSON412 the response for an HTTP 412 `application/json` response
+	JSON412 *PreconditionFailed
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *SetSecretResponse200Headers
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *SetSecretResponse201Headers
 	// Headers401 the parsed response headers for an HTTP 401 response
 	Headers401 *SetSecretResponse401Headers
 }
@@ -9859,6 +10016,11 @@ func (r SetSecretResponse) GetJSON401() *Unauthorized {
 // GetJSON403 returns the response for an HTTP 403 `application/json` response
 func (r SetSecretResponse) GetJSON403() *Forbidden {
 	return r.JSON403
+}
+
+// GetJSON412 returns the response for an HTTP 412 `application/json` response
+func (r SetSecretResponse) GetJSON412() *PreconditionFailed {
+	return r.JSON412
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -10848,6 +11010,11 @@ func (r DeleteVariableResponse) ContentType() string {
 	return ""
 }
 
+// GetVariableResponse200Headers the declared response headers of an HTTP 200 response for GetVariable
+type GetVariableResponse200Headers struct {
+	ETag *string
+}
+
 // GetVariableResponse401Headers the declared response headers of an HTTP 401 response for GetVariable
 type GetVariableResponse401Headers struct {
 	WWWAuthenticate *string
@@ -10866,6 +11033,8 @@ type GetVariableResponse struct {
 	JSON404 *NotFound
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *GetVariableResponse200Headers
 	// Headers401 the parsed response headers for an HTTP 401 response
 	Headers401 *GetVariableResponse401Headers
 }
@@ -10924,6 +11093,16 @@ func (r GetVariableResponse) ContentType() string {
 	return ""
 }
 
+// SetVariableResponse200Headers the declared response headers of an HTTP 200 response for SetVariable
+type SetVariableResponse200Headers struct {
+	ETag *string
+}
+
+// SetVariableResponse201Headers the declared response headers of an HTTP 201 response for SetVariable
+type SetVariableResponse201Headers struct {
+	ETag *string
+}
+
 // SetVariableResponse401Headers the declared response headers of an HTTP 401 response for SetVariable
 type SetVariableResponse401Headers struct {
 	WWWAuthenticate *string
@@ -10942,8 +11121,14 @@ type SetVariableResponse struct {
 	JSON401 *Unauthorized
 	// JSON403 the response for an HTTP 403 `application/json` response
 	JSON403 *Forbidden
+	// JSON412 the response for an HTTP 412 `application/json` response
+	JSON412 *PreconditionFailed
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *SetVariableResponse200Headers
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *SetVariableResponse201Headers
 	// Headers401 the parsed response headers for an HTTP 401 response
 	Headers401 *SetVariableResponse401Headers
 }
@@ -10971,6 +11156,11 @@ func (r SetVariableResponse) GetJSON401() *Unauthorized {
 // GetJSON403 returns the response for an HTTP 403 `application/json` response
 func (r SetVariableResponse) GetJSON403() *Forbidden {
 	return r.JSON403
+}
+
+// GetJSON412 returns the response for an HTTP 412 `application/json` response
+func (r SetVariableResponse) GetJSON412() *PreconditionFailed {
+	return r.JSON412
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -12247,9 +12437,12 @@ func (c *ClientWithResponses) GetACLPolicyWithResponse(ctx context.Context, reqE
 //
 // The `If-Match` header must carry the tag of the document being
 // replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
-// than silently clobbering a concurrent apply. The document itself
-// carries no version field: it would go stale the moment the server
-// accepted it.
+// than silently clobbering a concurrent apply. It is required here
+// where a resource apply may omit it: the policy always exists, so
+// there is always a tag to name, and an apply that named none would be
+// a lost update on its way to happening. The document itself carries
+// no version field: it would go stale the moment the server accepted
+// it.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -12270,9 +12463,12 @@ func (c *ClientWithResponses) ApplyACLPolicyWithBodyWithResponse(ctx context.Con
 //
 // The `If-Match` header must carry the tag of the document being
 // replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
-// than silently clobbering a concurrent apply. The document itself
-// carries no version field: it would go stale the moment the server
-// accepted it.
+// than silently clobbering a concurrent apply. It is required here
+// where a resource apply may omit it: the policy always exists, so
+// there is always a tag to name, and an apply that named none would be
+// a lost update on its way to happening. The document itself carries
+// no version field: it would go stale the moment the server accepted
+// it.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -12691,11 +12887,16 @@ func (c *ClientWithResponses) GetSecretWithResponse(ctx context.Context, name Se
 // hash of every workload reading the secret. Those workloads are then replaced
 // by the reconciler, and the new value reaches them as they start.
 //
+// The `If-Match` header makes the set conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the secret has
+// moved on since. Omitting it sets unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
-func (c *ClientWithResponses) SetSecretWithBodyWithResponse(ctx context.Context, name SecretName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetSecretResponse, error) {
-	rsp, err := c.SetSecretWithBody(ctx, name, contentType, body, reqEditors...)
+func (c *ClientWithResponses) SetSecretWithBodyWithResponse(ctx context.Context, name SecretName, params *SetSecretParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetSecretResponse, error) {
+	rsp, err := c.SetSecretWithBody(ctx, name, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -12715,11 +12916,16 @@ func (c *ClientWithResponses) SetSecretWithBodyWithResponse(ctx context.Context,
 // hash of every workload reading the secret. Those workloads are then replaced
 // by the reconciler, and the new value reaches them as they start.
 //
+// The `If-Match` header makes the set conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the secret has
+// moved on since. Omitting it sets unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/secrets/{name} (the `SetSecret` operationId).
-func (c *ClientWithResponses) SetSecretWithResponse(ctx context.Context, name SecretName, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSecretResponse, error) {
-	rsp, err := c.SetSecret(ctx, name, body, reqEditors...)
+func (c *ClientWithResponses) SetSecretWithResponse(ctx context.Context, name SecretName, params *SetSecretParams, body SetSecretJSONRequestBody, reqEditors ...RequestEditorFn) (*SetSecretResponse, error) {
+	rsp, err := c.SetSecret(ctx, name, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -13096,11 +13302,16 @@ func (c *ClientWithResponses) GetVariableWithResponse(ctx context.Context, name 
 // reading the variable. Those workloads are then replaced by the reconciler,
 // and the new value reaches them as they start.
 //
+// The `If-Match` header makes the set conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the variable has
+// moved on since. Omitting it sets unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
-func (c *ClientWithResponses) SetVariableWithBodyWithResponse(ctx context.Context, name VariableName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetVariableResponse, error) {
-	rsp, err := c.SetVariableWithBody(ctx, name, contentType, body, reqEditors...)
+func (c *ClientWithResponses) SetVariableWithBodyWithResponse(ctx context.Context, name VariableName, params *SetVariableParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetVariableResponse, error) {
+	rsp, err := c.SetVariableWithBody(ctx, name, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -13120,11 +13331,16 @@ func (c *ClientWithResponses) SetVariableWithBodyWithResponse(ctx context.Contex
 // reading the variable. Those workloads are then replaced by the reconciler,
 // and the new value reaches them as they start.
 //
+// The `If-Match` header makes the set conditional: carrying the tag read
+// from the matching get, it is refused with a 412 when the variable has
+// moved on since. Omitting it sets unconditionally, which is what
+// creating one has to do — there is no tag yet to name.
+//
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with PUT /api/v1/variables/{name} (the `SetVariable` operationId).
-func (c *ClientWithResponses) SetVariableWithResponse(ctx context.Context, name VariableName, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*SetVariableResponse, error) {
-	rsp, err := c.SetVariable(ctx, name, body, reqEditors...)
+func (c *ClientWithResponses) SetVariableWithResponse(ctx context.Context, name VariableName, params *SetVariableParams, body SetVariableJSONRequestBody, reqEditors ...RequestEditorFn) (*SetVariableResponse, error) {
+	rsp, err := c.SetVariable(ctx, name, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -14554,6 +14770,16 @@ func ParseGetSecretResponse(rsp *http.Response) (*GetSecretResponse, error) {
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers GetSecretResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
 	case rsp.StatusCode == 401:
 		var headers GetSecretResponse401Headers
 		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
@@ -14618,6 +14844,13 @@ func ParseSetSecretResponse(rsp *http.Response) (*SetSecretResponse, error) {
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 412:
+		var dest PreconditionFailed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON412 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -14628,6 +14861,26 @@ func ParseSetSecretResponse(rsp *http.Response) (*SetSecretResponse, error) {
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers SetSecretResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 201:
+		var headers SetSecretResponse201Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers201 = &headers
 	case rsp.StatusCode == 401:
 		var headers SetSecretResponse401Headers
 		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
@@ -15531,6 +15784,16 @@ func ParseGetVariableResponse(rsp *http.Response) (*GetVariableResponse, error) 
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers GetVariableResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
 	case rsp.StatusCode == 401:
 		var headers GetVariableResponse401Headers
 		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
@@ -15595,6 +15858,13 @@ func ParseSetVariableResponse(rsp *http.Response) (*SetVariableResponse, error) 
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 412:
+		var dest PreconditionFailed
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON412 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -15605,6 +15875,26 @@ func ParseSetVariableResponse(rsp *http.Response) (*SetVariableResponse, error) 
 	}
 
 	switch {
+	case rsp.StatusCode == 200:
+		var headers SetVariableResponse200Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 201:
+		var headers SetVariableResponse201Headers
+		if values := rsp.Header.Values("ETag"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "ETag", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ETag = &value
+		}
+		response.Headers201 = &headers
 	case rsp.StatusCode == 401:
 		var headers SetVariableResponse401Headers
 		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
@@ -16772,7 +17062,7 @@ type ServerInterface interface {
 	GetSecret(w http.ResponseWriter, r *http.Request, name SecretName)
 	// SetSecret Set a secret's value
 	// (PUT /api/v1/secrets/{name})
-	SetSecret(w http.ResponseWriter, r *http.Request, name SecretName)
+	SetSecret(w http.ResponseWriter, r *http.Request, name SecretName, params SetSecretParams)
 	// ListServices List services
 	// (GET /api/v1/services)
 	ListServices(w http.ResponseWriter, r *http.Request, params ListServicesParams)
@@ -16817,7 +17107,7 @@ type ServerInterface interface {
 	GetVariable(w http.ResponseWriter, r *http.Request, name VariableName)
 	// SetVariable Set a variable's value
 	// (PUT /api/v1/variables/{name})
-	SetVariable(w http.ResponseWriter, r *http.Request, name VariableName)
+	SetVariable(w http.ResponseWriter, r *http.Request, name VariableName, params SetVariableParams)
 	// ListVolumes List volumes
 	// (GET /api/v1/volumes)
 	ListVolumes(w http.ResponseWriter, r *http.Request, params ListVolumesParams)
@@ -17336,8 +17626,32 @@ func (siw *ServerInterfaceWrapper) SetSecret(w http.ResponseWriter, r *http.Requ
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SetSecretParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SetSecret(w, r, name)
+		siw.Handler.SetSecret(w, r, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17825,8 +18139,32 @@ func (siw *ServerInterfaceWrapper) SetVariable(w http.ResponseWriter, r *http.Re
 
 	r = r.WithContext(ctx)
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SetVariableParams
+
+	headers := r.Header
+
+	// ------------- Optional header parameter "If-Match" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("If-Match")]; found {
+		var IfMatch IfMatch
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandlerFunc(w, r, &TooManyValuesForParamError{ParamName: "If-Match", Count: n})
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "If-Match", valueList[0], &IfMatch, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "If-Match", Err: err})
+			return
+		}
+
+		params.IfMatch = &IfMatch
+
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SetVariable(w, r, name)
+		siw.Handler.SetVariable(w, r, name, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19724,15 +20062,25 @@ type GetSecretResponseObject interface {
 	VisitGetSecretResponse(w http.ResponseWriter) error
 }
 
-type GetSecret200JSONResponse GetSecretResult
+type GetSecret200ResponseHeaders struct {
+	ETag *string
+}
+
+type GetSecret200JSONResponse struct {
+	Body    GetSecretResult
+	Headers GetSecret200ResponseHeaders
+}
 
 func (response GetSecret200JSONResponse) VisitGetSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
@@ -19800,37 +20148,58 @@ func (response GetSecret500JSONResponse) VisitGetSecretResponse(w http.ResponseW
 }
 
 type SetSecretRequestObject struct {
-	Name SecretName `json:"name"`
-	Body *SetSecretJSONRequestBody
+	Name   SecretName `json:"name"`
+	Params SetSecretParams
+	Body   *SetSecretJSONRequestBody
 }
 
 type SetSecretResponseObject interface {
 	VisitSetSecretResponse(w http.ResponseWriter) error
 }
 
-type SetSecret200JSONResponse SetSecretResult
+type SetSecret200ResponseHeaders struct {
+	ETag *string
+}
+
+type SetSecret200JSONResponse struct {
+	Body    SetSecretResult
+	Headers SetSecret200ResponseHeaders
+}
 
 func (response SetSecret200JSONResponse) VisitSetSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type SetSecret201JSONResponse SetSecretResult
+type SetSecret201ResponseHeaders struct {
+	ETag *string
+}
+
+type SetSecret201JSONResponse struct {
+	Body    SetSecretResult
+	Headers SetSecret201ResponseHeaders
+}
 
 func (response SetSecret201JSONResponse) VisitSetSecretResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
@@ -19877,6 +20246,20 @@ func (response SetSecret403JSONResponse) VisitSetSecretResponse(w http.ResponseW
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetSecret412JSONResponse struct{ PreconditionFailedJSONResponse }
+
+func (response SetSecret412JSONResponse) VisitSetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -20976,15 +21359,25 @@ type GetVariableResponseObject interface {
 	VisitGetVariableResponse(w http.ResponseWriter) error
 }
 
-type GetVariable200JSONResponse GetVariableResult
+type GetVariable200ResponseHeaders struct {
+	ETag *string
+}
+
+type GetVariable200JSONResponse struct {
+	Body    GetVariableResult
+	Headers GetVariable200ResponseHeaders
+}
 
 func (response GetVariable200JSONResponse) VisitGetVariableResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
@@ -21052,37 +21445,58 @@ func (response GetVariable500JSONResponse) VisitGetVariableResponse(w http.Respo
 }
 
 type SetVariableRequestObject struct {
-	Name VariableName `json:"name"`
-	Body *SetVariableJSONRequestBody
+	Name   VariableName `json:"name"`
+	Params SetVariableParams
+	Body   *SetVariableJSONRequestBody
 }
 
 type SetVariableResponseObject interface {
 	VisitSetVariableResponse(w http.ResponseWriter) error
 }
 
-type SetVariable200JSONResponse SetVariableResult
+type SetVariable200ResponseHeaders struct {
+	ETag *string
+}
+
+type SetVariable200JSONResponse struct {
+	Body    SetVariableResult
+	Headers SetVariable200ResponseHeaders
+}
 
 func (response SetVariable200JSONResponse) VisitSetVariableResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(200)
 	_, err := buf.WriteTo(w)
 	return err
 }
 
-type SetVariable201JSONResponse SetVariableResult
+type SetVariable201ResponseHeaders struct {
+	ETag *string
+}
+
+type SetVariable201JSONResponse struct {
+	Body    SetVariableResult
+	Headers SetVariable201ResponseHeaders
+}
 
 func (response SetVariable201JSONResponse) VisitSetVariableResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.ETag != nil {
+		w.Header().Set("ETag", fmt.Sprint(*response.Headers.ETag))
+	}
 	w.WriteHeader(201)
 	_, err := buf.WriteTo(w)
 	return err
@@ -21129,6 +21543,20 @@ func (response SetVariable403JSONResponse) VisitSetVariableResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetVariable412JSONResponse struct{ PreconditionFailedJSONResponse }
+
+func (response SetVariable412JSONResponse) VisitSetVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(412)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -23184,10 +23612,11 @@ func (sh *strictHandler) GetSecret(w http.ResponseWriter, r *http.Request, name 
 }
 
 // SetSecret operation middleware
-func (sh *strictHandler) SetSecret(w http.ResponseWriter, r *http.Request, name SecretName) {
+func (sh *strictHandler) SetSecret(w http.ResponseWriter, r *http.Request, name SecretName, params SetSecretParams) {
 	var request SetSecretRequestObject
 
 	request.Name = name
+	request.Params = params
 
 	var body SetSecretJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -23585,10 +24014,11 @@ func (sh *strictHandler) GetVariable(w http.ResponseWriter, r *http.Request, nam
 }
 
 // SetVariable operation middleware
-func (sh *strictHandler) SetVariable(w http.ResponseWriter, r *http.Request, name VariableName) {
+func (sh *strictHandler) SetVariable(w http.ResponseWriter, r *http.Request, name VariableName, params SetVariableParams) {
 	var request SetVariableRequestObject
 
 	request.Name = name
+	request.Params = params
 
 	var body SetVariableJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

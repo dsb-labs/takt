@@ -27,6 +27,10 @@ type (
 		UsedBy []string
 		// Arbitrary key-value pairs attached to the variable.
 		Labels map[string]string
+		// The entity tag identifying this version of the variable, which a
+		// conditional set hands back in WithIfMatch. Empty on one read from a list,
+		// which reports no tag per item.
+		ETag string
 		// The time the variable was created.
 		CreatedAt time.Time
 		// The time the variable last changed, by its value or its labels.
@@ -67,21 +71,33 @@ func checkVariableName(name string) error {
 // Setting a variable to the value it already holds does nothing, so a caller that
 // sets every variable on every run does not restart the workloads reading them. A
 // value that did change replaces those workloads, and reaches them as they start.
-func (c *Client) SetVariable(ctx context.Context, name, value string, labels map[string]string) (Variable, bool, error) {
+//
+// Pass WithIfMatch to condition the set on the tag a get reported, which is refused
+// with ErrVariableChanged when the variable has moved on since.
+func (c *Client) SetVariable(ctx context.Context, name, value string, labels map[string]string, options ...ApplyOption) (Variable, bool, error) {
 	if err := checkVariableName(name); err != nil {
 		return Variable{}, false, err
 	}
 
-	resp, err := c.api.SetVariableWithResponse(ctx, name, api.VariableSpec{Value: value, Labels: wireLabels(labels)})
+	resp, err := c.api.SetVariableWithResponse(ctx, name, &api.SetVariableParams{IfMatch: ifMatch(options)},
+		api.VariableSpec{Value: value, Labels: wireLabels(labels)})
 	if err != nil {
 		return Variable{}, false, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
 	case resp.JSON201 != nil:
-		return newVariable(resp.JSON201.Variable), true, nil
+		set := newVariable(resp.JSON201.Variable)
+		set.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return set, true, nil
 	case resp.JSON200 != nil:
-		return newVariable(resp.JSON200.Variable), false, nil
+		set := newVariable(resp.JSON200.Variable)
+		set.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return set, false, nil
+	case resp.JSON412 != nil:
+		return Variable{}, false, fmt.Errorf("%s: %w", resp.JSON412.Error, ErrVariableChanged)
 	case resp.JSON400 != nil:
 		return Variable{}, false, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON500 != nil:
@@ -105,7 +121,10 @@ func (c *Client) GetVariable(ctx context.Context, name string) (Variable, error)
 
 	switch {
 	case resp.JSON200 != nil:
-		return newVariable(resp.JSON200.Variable), nil
+		got := newVariable(resp.JSON200.Variable)
+		got.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return got, nil
 	case resp.JSON404 != nil:
 		return Variable{}, fmt.Errorf("%s: %w", resp.JSON404.Error, ErrVariableNotFound)
 	case resp.JSON500 != nil:

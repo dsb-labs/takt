@@ -85,6 +85,45 @@ func TestClient_SetSecret(t *testing.T) {
 	}
 }
 
+// TestClient_SetSecret_Conditional covers what a secret does with the
+// conditional write every apply shares.
+func TestClient_SetSecret_Conditional(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sends the tag and reports the new one", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, `"3"`, r.Header.Get("If-Match"))
+
+			w.Header().Set("ETag", `"4"`)
+			writeJSON(t, w, http.StatusOK, api.SetSecretResult{Secret: apiSecret("db-password")})
+		})
+
+		secret, _, err := c.SetSecret(t.Context(), "db-password", []byte("hunter2"), nil, client.WithIfMatch(`"3"`))
+		require.NoError(t, err)
+		assert.Equal(t, `"4"`, secret.ETag)
+	})
+
+	t.Run("sends no tag without the option", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Empty(t, r.Header.Get("If-Match"))
+
+			writeJSON(t, w, http.StatusCreated, api.SetSecretResult{Secret: apiSecret("db-password")})
+		})
+
+		_, _, err := c.SetSecret(t.Context(), "db-password", []byte("hunter2"), nil)
+		require.NoError(t, err)
+	})
+
+	t.Run("reports a stale tag", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusPreconditionFailed, api.ErrorResponse{Error: "the secret changed since it was read"})
+		})
+
+		_, _, err := c.SetSecret(t.Context(), "db-password", []byte("hunter2"), nil, client.WithIfMatch(`"3"`))
+		assert.ErrorIs(t, err, client.ErrSecretChanged)
+	})
+}
+
 func TestClient_GetSecret(t *testing.T) {
 	t.Parallel()
 
@@ -96,6 +135,7 @@ func TestClient_GetSecret(t *testing.T) {
 			stored := apiSecret("db-password")
 			stored.UsedBy = new([]string{"example"})
 
+			w.Header().Set("ETag", `"4"`)
 			writeJSON(t, w, http.StatusOK, api.GetSecretResult{Secret: stored})
 		})
 
@@ -103,6 +143,9 @@ func TestClient_GetSecret(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "db-password", secret.Name)
 		assert.Equal(t, []string{"example"}, secret.UsedBy)
+		// The tag is reported exactly as the header carried it, so a set can
+		// present it back without re-quoting.
+		assert.Equal(t, `"4"`, secret.ETag)
 	})
 
 	t.Run("reports one that does not exist", func(t *testing.T) {

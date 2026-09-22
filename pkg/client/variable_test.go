@@ -86,6 +86,45 @@ func TestClient_SetVariable(t *testing.T) {
 	}
 }
 
+// TestClient_SetVariable_Conditional covers what a variable does with the
+// conditional write every apply shares.
+func TestClient_SetVariable_Conditional(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sends the tag and reports the new one", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, `"3"`, r.Header.Get("If-Match"))
+
+			w.Header().Set("ETag", `"4"`)
+			writeJSON(t, w, http.StatusOK, api.SetVariableResult{Variable: apiVariable("log-level", "info")})
+		})
+
+		variable, _, err := c.SetVariable(t.Context(), "log-level", "info", nil, client.WithIfMatch(`"3"`))
+		require.NoError(t, err)
+		assert.Equal(t, `"4"`, variable.ETag)
+	})
+
+	t.Run("sends no tag without the option", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Empty(t, r.Header.Get("If-Match"))
+
+			writeJSON(t, w, http.StatusCreated, api.SetVariableResult{Variable: apiVariable("log-level", "info")})
+		})
+
+		_, _, err := c.SetVariable(t.Context(), "log-level", "info", nil)
+		require.NoError(t, err)
+	})
+
+	t.Run("reports a stale tag", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusPreconditionFailed, api.ErrorResponse{Error: "the variable changed since it was read"})
+		})
+
+		_, _, err := c.SetVariable(t.Context(), "log-level", "info", nil, client.WithIfMatch(`"3"`))
+		assert.ErrorIs(t, err, client.ErrVariableChanged)
+	})
+}
+
 func TestClient_GetVariable(t *testing.T) {
 	t.Parallel()
 
@@ -97,6 +136,7 @@ func TestClient_GetVariable(t *testing.T) {
 			stored := apiVariable("log-level", "debug")
 			stored.UsedBy = new([]string{"example"})
 
+			w.Header().Set("ETag", `"4"`)
 			writeJSON(t, w, http.StatusOK, api.GetVariableResult{Variable: stored})
 		})
 
@@ -106,6 +146,7 @@ func TestClient_GetVariable(t *testing.T) {
 		assert.Equal(t, "log-level", variable.Name)
 		assert.Equal(t, "debug", variable.Value)
 		assert.Equal(t, []string{"example"}, variable.UsedBy)
+		assert.Equal(t, `"4"`, variable.ETag)
 	})
 
 	t.Run("returns one holding nothing", func(t *testing.T) {

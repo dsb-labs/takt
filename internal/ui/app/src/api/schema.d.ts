@@ -506,6 +506,11 @@ export interface paths {
      *     A value that did change moves the revision, which moves the specification
      *     hash of every workload reading the secret. Those workloads are then replaced
      *     by the reconciler, and the new value reaches them as they start.
+     *
+     *     The `If-Match` header makes the set conditional: carrying the tag read
+     *     from the matching get, it is refused with a 412 when the secret has
+     *     moved on since. Omitting it sets unconditionally, which is what
+     *     creating one has to do — there is no tag yet to name.
      */
     put: operations["setSecret"];
     post?: never;
@@ -583,6 +588,11 @@ export interface paths {
      *     A value that did change moves the specification hash of every workload
      *     reading the variable. Those workloads are then replaced by the reconciler,
      *     and the new value reaches them as they start.
+     *
+     *     The `If-Match` header makes the set conditional: carrying the tag read
+     *     from the matching get, it is refused with a 412 when the variable has
+     *     moved on since. Omitting it sets unconditionally, which is what
+     *     creating one has to do — there is no tag yet to name.
      */
     put: operations["setVariable"];
     post?: never;
@@ -833,9 +843,12 @@ export interface paths {
      *
      *     The `If-Match` header must carry the tag of the document being
      *     replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
-     *     than silently clobbering a concurrent apply. The document itself
-     *     carries no version field: it would go stale the moment the server
-     *     accepted it.
+     *     than silently clobbering a concurrent apply. It is required here
+     *     where a resource apply may omit it: the policy always exists, so
+     *     there is always a tag to name, and an apply that named none would be
+     *     a lost update on its way to happening. The document itself carries
+     *     no version field: it would go stale the moment the server accepted
+     *     it.
      */
     put: operations["applyACLPolicy"];
     post?: never;
@@ -3974,6 +3987,11 @@ export interface operations {
       /** @description The requested secret. */
       200: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -3989,7 +4007,19 @@ export interface operations {
   setSecret: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /**
+         * @description The tag of the resource being replaced, as read from the ETag header of
+         *     the matching get. An apply carrying one is refused with a 412 when the
+         *     resource has moved on since, rather than writing over whatever landed
+         *     in between.
+         *
+         *     Optional everywhere but on the policy document, which refuses an apply
+         *     without it. A resource apply that omits it is unconditional, because a
+         *     caller creating something has no tag to name yet.
+         */
+        "If-Match"?: components["parameters"]["IfMatch"];
+      };
       path: {
         /** @description The name that identifies the secret. */
         name: components["parameters"]["SecretName"];
@@ -4002,9 +4032,14 @@ export interface operations {
       };
     };
     responses: {
-      /** @description The secret was updated. */
+      /** @description The secret was updated, or was unchanged. */
       200: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -4014,6 +4049,11 @@ export interface operations {
       /** @description The secret was created. */
       201: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -4023,6 +4063,7 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      412: components["responses"]["PreconditionFailed"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4120,6 +4161,11 @@ export interface operations {
       /** @description The requested variable. */
       200: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -4135,7 +4181,19 @@ export interface operations {
   setVariable: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /**
+         * @description The tag of the resource being replaced, as read from the ETag header of
+         *     the matching get. An apply carrying one is refused with a 412 when the
+         *     resource has moved on since, rather than writing over whatever landed
+         *     in between.
+         *
+         *     Optional everywhere but on the policy document, which refuses an apply
+         *     without it. A resource apply that omits it is unconditional, because a
+         *     caller creating something has no tag to name yet.
+         */
+        "If-Match"?: components["parameters"]["IfMatch"];
+      };
       path: {
         /** @description The name that identifies the variable. */
         name: components["parameters"]["VariableName"];
@@ -4148,9 +4206,14 @@ export interface operations {
       };
     };
     responses: {
-      /** @description The variable was updated. */
+      /** @description The variable was updated, or was unchanged. */
       200: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -4160,6 +4223,11 @@ export interface operations {
       /** @description The variable was created. */
       201: {
         headers: {
+          /**
+           * @description The tag identifying this version of the resource, to be handed
+           *     back in the `If-Match` header of a conditional apply.
+           */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -4169,6 +4237,7 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      412: components["responses"]["PreconditionFailed"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4473,8 +4542,10 @@ export interface operations {
       200: {
         headers: {
           /**
-           * @description The tag identifying this exact document, derived from it, so a
-           *     pipeline reading twice sees a stable value.
+           * @description The tag identifying this version of the document, to be handed
+           *     back in the `If-Match` header of the apply. It counts the
+           *     applies that changed the document, so it is `"0"` before any
+           *     apply and moves only when one changes something.
            */
           ETag?: string;
           [name: string]: unknown;

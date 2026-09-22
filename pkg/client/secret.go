@@ -29,6 +29,10 @@ type (
 		UsedBy []string
 		// Arbitrary key-value pairs attached to the secret.
 		Labels map[string]string
+		// The entity tag identifying this version of the secret, which a conditional
+		// set hands back in WithIfMatch. Empty on one read from a list, which reports
+		// no tag per item. Unlike the revision it moves on a relabel too.
+		ETag string
 		// The time the secret was created.
 		CreatedAt time.Time
 		// The time the secret last changed, by its value or its labels. The revision
@@ -70,21 +74,33 @@ func checkSecretName(name string) error {
 // Setting a secret to the value it already holds does nothing, so a caller that sets
 // every secret on every run does not restart the workloads reading them. A value that
 // did change replaces those workloads, and reaches them as they start.
-func (c *Client) SetSecret(ctx context.Context, name string, value []byte, labels map[string]string) (Secret, bool, error) {
+//
+// Pass WithIfMatch to condition the set on the tag a get reported, which is refused
+// with ErrSecretChanged when the secret has moved on since.
+func (c *Client) SetSecret(ctx context.Context, name string, value []byte, labels map[string]string, options ...ApplyOption) (Secret, bool, error) {
 	if err := checkSecretName(name); err != nil {
 		return Secret{}, false, err
 	}
 
-	resp, err := c.api.SetSecretWithResponse(ctx, name, api.SecretSpec{Value: string(value), Labels: wireLabels(labels)})
+	resp, err := c.api.SetSecretWithResponse(ctx, name, &api.SetSecretParams{IfMatch: ifMatch(options)},
+		api.SecretSpec{Value: string(value), Labels: wireLabels(labels)})
 	if err != nil {
 		return Secret{}, false, fmt.Errorf("failed to send the request: %w", err)
 	}
 
 	switch {
 	case resp.JSON201 != nil:
-		return newSecret(resp.JSON201.Secret), true, nil
+		set := newSecret(resp.JSON201.Secret)
+		set.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return set, true, nil
 	case resp.JSON200 != nil:
-		return newSecret(resp.JSON200.Secret), false, nil
+		set := newSecret(resp.JSON200.Secret)
+		set.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return set, false, nil
+	case resp.JSON412 != nil:
+		return Secret{}, false, fmt.Errorf("%s: %w", resp.JSON412.Error, ErrSecretChanged)
 	case resp.JSON400 != nil:
 		return Secret{}, false, newError(http.StatusBadRequest, resp.JSON400)
 	case resp.JSON500 != nil:
@@ -108,7 +124,10 @@ func (c *Client) GetSecret(ctx context.Context, name string) (Secret, error) {
 
 	switch {
 	case resp.JSON200 != nil:
-		return newSecret(resp.JSON200.Secret), nil
+		got := newSecret(resp.JSON200.Secret)
+		got.ETag = resp.HTTPResponse.Header.Get("ETag")
+
+		return got, nil
 	case resp.JSON404 != nil:
 		return Secret{}, fmt.Errorf("%s: %w", resp.JSON404.Error, ErrSecretNotFound)
 	case resp.JSON500 != nil:
