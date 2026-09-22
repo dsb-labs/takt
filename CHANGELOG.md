@@ -8,8 +8,19 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Added
+
+- `takt workload events --since` reads only the events a workload was last
+  seen at after the given time, which a poller uses to pick up where it left
+  off ([#89](https://github.com/dsb-labs/takt/issues/89),
+  [#114](https://github.com/dsb-labs/takt/pull/114)).
+
 ### Changed
 
+- Every operation requiring a role documents the 401 and 403 it can answer
+  with, where most of them named neither
+  ([#89](https://github.com/dsb-labs/takt/issues/89),
+  [#114](https://github.com/dsb-labs/takt/pull/114)).
 - Every response carries a content security policy, refuses framing and type
   sniffing, and insists on TLS when reached over it. A browser page's origin is
   accepted only from `localhost` or a loopback address, where any address
