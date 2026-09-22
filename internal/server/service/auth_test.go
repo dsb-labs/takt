@@ -47,7 +47,7 @@ func TestAuthService_Authenticate(t *testing.T) {
 		tokens.EXPECT().Touch(mock.Anything, "id", mock.Anything).Return(nil).Once()
 
 		policies := NewMockPolicyReader(t)
-		policies.EXPECT().Get(mock.Anything).Return(grantAll, "tag", nil).Once()
+		policies.EXPECT().Get(mock.Anything).Return(service.Policy{Spec: grantAll, Version: 1}, nil).Once()
 
 		identity, err := newTestAuthService(t, tokens, policies, nil).Authenticate(t.Context(), credential)
 		require.NoError(t, err)
@@ -65,7 +65,7 @@ func TestAuthService_Authenticate(t *testing.T) {
 		tokens.EXPECT().Touch(mock.Anything, "id", mock.Anything).Return(nil).Once()
 
 		policies := NewMockPolicyReader(t)
-		policies.EXPECT().Get(mock.Anything).Return(grantAll, "tag", nil).Once()
+		policies.EXPECT().Get(mock.Anything).Return(service.Policy{Spec: grantAll, Version: 1}, nil).Once()
 
 		// Authenticated with no role is a real state: whoami reports it, so a
 		// principal can see exactly where onboarding stopped.
@@ -125,7 +125,7 @@ func TestAuthService_Authenticate(t *testing.T) {
 		}, nil).Once()
 
 		policies := NewMockPolicyReader(t)
-		policies.EXPECT().Get(mock.Anything).Return(grantAll, "tag", nil).Once()
+		policies.EXPECT().Get(mock.Anything).Return(service.Policy{Spec: grantAll, Version: 1}, nil).Once()
 
 		// The mock asserts no Touch, since it was never told to expect one.
 		_, err := newTestAuthService(t, tokens, policies, nil).Authenticate(t.Context(), credential)
@@ -176,7 +176,7 @@ func TestAuthService_LoginOIDC(t *testing.T) {
 		}, nil).Once()
 
 		policies := NewMockPolicyReader(t)
-		policies.EXPECT().Get(mock.Anything).Return(policy, "tag", nil).Once()
+		policies.EXPECT().Get(mock.Anything).Return(service.Policy{Spec: policy, Version: 1}, nil).Once()
 
 		tokens := NewMockTokenRepository(t)
 		tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(token database.Token) bool {
@@ -200,7 +200,7 @@ func TestAuthService_LoginOIDC(t *testing.T) {
 		verifier.EXPECT().Verify(mock.Anything, "raw").Return(map[string]any{"sub": "abc"}, nil).Once()
 
 		policies := NewMockPolicyReader(t)
-		policies.EXPECT().Get(mock.Anything).Return(policy, "tag", nil).Once()
+		policies.EXPECT().Get(mock.Anything).Return(service.Policy{Spec: policy, Version: 1}, nil).Once()
 
 		_, _, err := newTestAuthService(t, NewMockTokenRepository(t), policies, verifier).LoginOIDC(t.Context(), "raw")
 		assert.ErrorIs(t, err, service.ErrInvalidCredential)
@@ -254,7 +254,7 @@ func TestAuthService_LoginCode(t *testing.T) {
 			Return(map[string]any{"email": "david@dsb.dev"}, nil).Once()
 
 		policies := NewMockPolicyReader(t)
-		policies.EXPECT().Get(mock.Anything).Return(policy, "tag", nil).Once()
+		policies.EXPECT().Get(mock.Anything).Return(service.Policy{Spec: policy, Version: 1}, nil).Once()
 
 		tokens := NewMockTokenRepository(t)
 		tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(token database.Token) bool {
@@ -316,7 +316,7 @@ func TestAuthService_LoginToken(t *testing.T) {
 		})).Return(database.Token{ID: "session-id", Type: "client", Source: "session", Principal: "prometheus"}, nil).Once()
 
 		policies := NewMockPolicyReader(t)
-		policies.EXPECT().Get(mock.Anything).Return(grantAll, "tag", nil).Once()
+		policies.EXPECT().Get(mock.Anything).Return(service.Policy{Spec: grantAll, Version: 1}, nil).Once()
 
 		minted, session, err := newTestAuthService(t, tokens, policies, nil).LoginToken(t.Context(), credential)
 		require.NoError(t, err)

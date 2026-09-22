@@ -14,6 +14,9 @@ import (
 var (
 	// ErrVariableNotFound is returned when no variable exists with the requested name.
 	ErrVariableNotFound = errors.New("variable not found")
+	// ErrVariableChanged is returned when the variable a set was conditioned on is
+	// not the variable the database holds.
+	ErrVariableChanged = errors.New("variable changed since it was read")
 )
 
 type (
@@ -35,6 +38,9 @@ type (
 		Value string
 		// Arbitrary key-value pairs attached to the variable.
 		Labels map[string]string
+		// How many times the variable has been written, by its value or its labels.
+		// This is the entity tag a conditional set compares against.
+		Version int
 		// The time the variable was created.
 		CreatedAt time.Time
 		// The time the variable last changed, by its value or its labels.
@@ -53,45 +59,67 @@ func NewVariableRepository(db *sql.DB) *VariableRepository {
 	return &VariableRepository{db: db}
 }
 
-// Upsert stores value as the variable with the given name, returning the stored
-// variable.
+// Upsert stores the given variable, returning it as stored. The given variable's
+// identifier, version and timestamps are ignored: all of them are this
+// repository's to hand out.
+//
+// A non-zero ifMatch conditions the write on the stored version still being that
+// one, reporting ErrVariableChanged when it is not and ErrVariableNotFound when
+// there is no row to have the version at all. Zero writes unconditionally, which is
+// what a caller creating a variable has to do: there is no version yet to name.
 //
 // The creation time is preserved on a variable that already existed, so changing one
 // does not read as creating it again.
-func (r *VariableRepository) Upsert(ctx context.Context, name, value string, labels map[string]string) (Variable, error) {
+func (r *VariableRepository) Upsert(ctx context.Context, variable Variable, ifMatch int) (Variable, error) {
 	const q = `
-		INSERT INTO variable (id, name, value, labels, created_at, updated_at)
-		VALUES (?, ?, ?, jsonb(?), ?, ?)
+		INSERT INTO variable (id, name, value, labels, version, created_at, updated_at)
+		VALUES (?, ?, ?, jsonb(?), ?, ?, ?)
 		ON CONFLICT (name) DO UPDATE SET
 			value = excluded.value,
 			labels = excluded.labels,
+			version = excluded.version,
 			updated_at = excluded.updated_at
 		RETURNING id, created_at, updated_at
 	`
 
 	timestamp := formatTime(time.Now().UTC())
 
-	encoded, err := marshalLabels(labels)
+	encoded, err := marshalLabels(variable.Labels)
 	if err != nil {
 		return Variable{}, err
 	}
 
-	variable := Variable{
-		ID:     xid.New().String(),
-		Name:   name,
-		Value:  value,
-		Labels: labels,
-	}
+	variable.ID = xid.New().String()
 
 	var (
 		createdAt string
 		updatedAt string
 	)
 
-	err = r.db.QueryRowContext(ctx, q, variable.ID, name, value, encoded, timestamp, timestamp).
-		Scan(&variable.ID, &createdAt, &updatedAt)
+	err = transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
+		current, err := currentVersion(ctx, tx, "variable", variable.Name)
+		switch {
+		case err != nil:
+			return fmt.Errorf("failed to load variable: %w", err)
+		case current == 0 && ifMatch != 0:
+			return fmt.Errorf("%w: %s", ErrVariableNotFound, variable.Name)
+		case ifMatch != 0 && current != ifMatch:
+			return ErrVariableChanged
+		}
+
+		variable.Version = current + 1
+
+		err = tx.QueryRowContext(ctx, q, variable.ID, variable.Name, variable.Value, encoded,
+			variable.Version, timestamp, timestamp).
+			Scan(&variable.ID, &createdAt, &updatedAt)
+		if err != nil {
+			return fmt.Errorf("failed to upsert variable: %w", err)
+		}
+
+		return nil
+	})
 	if err != nil {
-		return Variable{}, fmt.Errorf("failed to upsert variable: %w", err)
+		return Variable{}, err
 	}
 
 	if variable.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
@@ -108,7 +136,11 @@ func (r *VariableRepository) Upsert(ctx context.Context, name, value string, lab
 // Get returns the variable with the given name, reporting ErrVariableNotFound when
 // no such variable exists.
 func (r *VariableRepository) Get(ctx context.Context, name string) (Variable, error) {
-	const q = `SELECT id, name, value, json(labels), created_at, updated_at FROM variable WHERE name = ?`
+	const q = `
+		SELECT id, name, value, json(labels), version, created_at, updated_at
+		FROM variable
+		WHERE name = ?
+	`
 
 	var (
 		variable  Variable
@@ -118,7 +150,7 @@ func (r *VariableRepository) Get(ctx context.Context, name string) (Variable, er
 	)
 
 	err := r.db.QueryRowContext(ctx, q, name).
-		Scan(&variable.ID, &variable.Name, &variable.Value, &labels, &createdAt, &updatedAt)
+		Scan(&variable.ID, &variable.Name, &variable.Value, &labels, &variable.Version, &createdAt, &updatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Variable{}, fmt.Errorf("%w: %s", ErrVariableNotFound, name)
@@ -154,7 +186,7 @@ func (r *VariableRepository) Get(ctx context.Context, name string) (Variable, er
 // anyway, so withholding it here would only mean reading each one again.
 func (r *VariableRepository) List(ctx context.Context, queries ...Query) ([]Variable, error) {
 	const q = `
-		SELECT id, name, value, json(labels), created_at, updated_at
+		SELECT id, name, value, json(labels), version, created_at, updated_at
 		FROM variable
 	`
 
@@ -180,7 +212,8 @@ func (r *VariableRepository) List(ctx context.Context, queries ...Query) ([]Vari
 			updatedAt string
 		)
 
-		if err = rows.Scan(&variable.ID, &variable.Name, &variable.Value, &labels, &createdAt, &updatedAt); err != nil {
+		err = rows.Scan(&variable.ID, &variable.Name, &variable.Value, &labels, &variable.Version, &createdAt, &updatedAt)
+		if err != nil {
 			return nil, fmt.Errorf("failed to scan variable: %w", err)
 		}
 

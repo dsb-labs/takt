@@ -15,8 +15,9 @@ type (
 	// exposes.
 	VariableService interface {
 		// Set should store value as the variable with the given name, reporting
-		// whether it was newly created.
-		Set(ctx context.Context, name, value string, labels map[string]string) (service.Variable, bool, error)
+		// whether it was newly created. A non-zero ifMatch should condition the
+		// set on the variable still being at that version.
+		Set(ctx context.Context, name, value string, labels map[string]string, ifMatch int) (service.Variable, bool, error)
 		// Get should return the variable with the given name.
 		Get(ctx context.Context, name string) (service.Variable, error)
 		// List should return the variables matching every one of the given
@@ -60,7 +61,7 @@ func (a *VariableAPI) SetVariable(ctx context.Context, request api.SetVariableRe
 		}, nil
 	}
 
-	variable, created, err := a.variables.Set(ctx, request.Name, request.Body.Value, labelsOf(request.Body.Labels))
+	variable, created, err := a.variables.Set(ctx, request.Name, request.Body.Value, labelsOf(request.Body.Labels), 0)
 	switch {
 	case errors.Is(err, service.ErrInvalidVariable):
 		return api.SetVariable400JSONResponse{

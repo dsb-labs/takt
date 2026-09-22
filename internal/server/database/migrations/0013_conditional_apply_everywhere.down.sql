@@ -1,0 +1,7 @@
+ALTER TABLE policy ADD COLUMN etag TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE policy DROP COLUMN version;
+
+ALTER TABLE variable DROP COLUMN version;
+
+ALTER TABLE secret DROP COLUMN version;

@@ -24,28 +24,30 @@ func newTestPolicyService(t *testing.T, policies service.PolicyRepository) *serv
 func TestPolicyService_Get(t *testing.T) {
 	t.Parallel()
 
-	t.Run("reports the empty policy before any apply", func(t *testing.T) {
+	// Before any apply there is no row, and version zero is how a caller names
+	// that state when it goes on to apply against it.
+	t.Run("reports the empty policy at version zero before any apply", func(t *testing.T) {
 		policies := NewMockPolicyRepository(t)
 		policies.EXPECT().Get(mock.Anything).Return(database.Policy{}, database.ErrNoPolicy).Once()
 
-		policy, etag, err := newTestPolicyService(t, policies).Get(t.Context())
+		policy, err := newTestPolicyService(t, policies).Get(t.Context())
 		require.NoError(t, err)
-		assert.Equal(t, manifest.Policy{Version: "v1"}, policy)
-		assert.NotEmpty(t, etag)
+		assert.Equal(t, manifest.Policy{Version: "v1"}, policy.Spec)
+		assert.Equal(t, 0, policy.Version)
 	})
 
-	t.Run("reports the stored policy and its tag", func(t *testing.T) {
+	t.Run("reports the stored policy and its version", func(t *testing.T) {
 		policies := NewMockPolicyRepository(t)
 		policies.EXPECT().Get(mock.Anything).Return(database.Policy{
 			Document: []byte(`{"version":"v1","grants":[{"principals":["prometheus"],"role":"viewer"}]}`),
-			ETag:     "tag-1",
+			Version:  3,
 		}, nil).Once()
 
-		policy, etag, err := newTestPolicyService(t, policies).Get(t.Context())
+		policy, err := newTestPolicyService(t, policies).Get(t.Context())
 		require.NoError(t, err)
-		assert.Equal(t, "tag-1", etag)
-		require.Len(t, policy.Grants, 1)
-		assert.Equal(t, manifest.RoleViewer, policy.Grants[0].Role)
+		assert.Equal(t, 3, policy.Version)
+		require.Len(t, policy.Spec.Grants, 1)
+		assert.Equal(t, manifest.RoleViewer, policy.Spec.Grants[0].Role)
 	})
 }
 
@@ -59,38 +61,37 @@ func TestPolicyService_Apply(t *testing.T) {
 		},
 	}
 
-	t.Run("applies a document against the stored tag", func(t *testing.T) {
-		policies := NewMockPolicyRepository(t)
-		policies.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, "tag-1").Return(nil).Once()
+	// The canonical form of valid, which is what reaches the repository and
+	// what it hands back.
+	document := []byte(`{"version":"v1","grants":[{"principals":["prometheus"],"role":"viewer"}]}`)
 
-		applied, etag, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, "tag-1")
+	t.Run("applies a document against the stored version", func(t *testing.T) {
+		policies := NewMockPolicyRepository(t)
+		policies.EXPECT().Apply(mock.Anything, mock.Anything, 1).
+			Return(database.Policy{Document: document, Version: 2}, nil).Once()
+
+		applied, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, 1)
 		require.NoError(t, err)
-		assert.Equal(t, valid, applied)
-		assert.NotEmpty(t, etag)
+		assert.Equal(t, valid, applied.Spec)
+		assert.Equal(t, 2, applied.Version)
 	})
 
-	// The empty document is never stored, so a caller conditioning on its tag
-	// is asking to replace the state where no row exists yet.
-	t.Run("maps the empty policy's tag to the first apply", func(t *testing.T) {
-		empty := NewMockPolicyRepository(t)
-		empty.EXPECT().Get(mock.Anything).Return(database.Policy{}, database.ErrNoPolicy).Once()
-
-		_, emptyETag, err := newTestPolicyService(t, empty).Get(t.Context())
-		require.NoError(t, err)
-
+	t.Run("applies the first document against version zero", func(t *testing.T) {
 		policies := NewMockPolicyRepository(t)
-		policies.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, "").Return(nil).Once()
+		policies.EXPECT().Apply(mock.Anything, mock.Anything, 0).
+			Return(database.Policy{Document: document, Version: 1}, nil).Once()
 
-		_, _, err = newTestPolicyService(t, policies).Apply(t.Context(), valid, emptyETag)
+		applied, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, 0)
 		require.NoError(t, err)
+		assert.Equal(t, 1, applied.Version)
 	})
 
-	t.Run("reports a stale tag", func(t *testing.T) {
+	t.Run("reports a stale version", func(t *testing.T) {
 		policies := NewMockPolicyRepository(t)
-		policies.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, "stale").
-			Return(database.ErrPolicyChanged).Once()
+		policies.EXPECT().Apply(mock.Anything, mock.Anything, 1).
+			Return(database.Policy{}, database.ErrPolicyChanged).Once()
 
-		_, _, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, "stale")
+		_, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, 1)
 		assert.ErrorIs(t, err, service.ErrPolicyChanged)
 	})
 
@@ -100,22 +101,16 @@ func TestPolicyService_Apply(t *testing.T) {
 			Grants:  []manifest.PolicyGrant{{Principals: []string{"someone"}, Role: "root"}},
 		}
 
-		_, _, err := newTestPolicyService(t, NewMockPolicyRepository(t)).Apply(t.Context(), invalid, "tag-1")
+		_, err := newTestPolicyService(t, NewMockPolicyRepository(t)).Apply(t.Context(), invalid, 1)
 		assert.ErrorIs(t, err, service.ErrInvalidPolicy)
 	})
 
-	t.Run("derives the same tag for the same document", func(t *testing.T) {
-		var tags []string
-		for range 2 {
-			policies := NewMockPolicyRepository(t)
-			policies.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, "tag-1").Return(nil).Once()
+	t.Run("hands the repository the canonical document", func(t *testing.T) {
+		policies := NewMockPolicyRepository(t)
+		policies.EXPECT().Apply(mock.Anything, document, 1).
+			Return(database.Policy{Document: document, Version: 2}, nil).Once()
 
-			_, etag, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, "tag-1")
-			require.NoError(t, err)
-
-			tags = append(tags, etag)
-		}
-
-		assert.Equal(t, tags[0], tags[1])
+		_, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, 1)
+		require.NoError(t, err)
 	})
 }

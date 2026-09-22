@@ -15,12 +15,13 @@ type (
 	// The PolicyService interface describes the policy operations the API
 	// exposes.
 	PolicyService interface {
-		// Get should return the current policy and its tag.
-		Get(ctx context.Context) (manifest.Policy, string, error)
-		// Apply should validate the policy and replace the current document
-		// with it, on the condition that ifMatch is the tag of the document
+		// Get should return the current policy, at version zero before any
+		// apply.
+		Get(ctx context.Context) (service.Policy, error)
+		// Apply should validate the document and replace the current one with
+		// it, on the condition that ifMatch is the version of the document
 		// being replaced.
-		Apply(ctx context.Context, policy manifest.Policy, ifMatch string) (manifest.Policy, string, error)
+		Apply(ctx context.Context, policy manifest.Policy, ifMatch int) (service.Policy, error)
 	}
 
 	// The ACLInitializer interface describes how the API mints the recovery
@@ -61,7 +62,7 @@ func NewACLAPI(config ACLAPIConfig) *ACLAPI {
 
 // GetACLPolicy returns the current policy document and its tag.
 func (a *ACLAPI) GetACLPolicy(ctx context.Context, _ api.GetACLPolicyRequestObject) (api.GetACLPolicyResponseObject, error) {
-	policy, etag, err := a.policies.Get(ctx)
+	policy, err := a.policies.Get(ctx)
 	if err != nil {
 		return api.GetACLPolicy500JSONResponse{
 			Error: internalError(a.logger, "get policy", err),
@@ -69,8 +70,8 @@ func (a *ACLAPI) GetACLPolicy(ctx context.Context, _ api.GetACLPolicyRequestObje
 	}
 
 	return api.GetACLPolicy200JSONResponse{
-		Body:    api.GetACLPolicyResult{Policy: wire.FromPolicy(policy)},
-		Headers: api.GetACLPolicy200ResponseHeaders{ETag: new(quoteETag(etag))},
+		Body:    api.GetACLPolicyResult{Policy: wire.FromPolicy(policy.Spec)},
+		Headers: api.GetACLPolicy200ResponseHeaders{ETag: new(versionETag(policy.Version))},
 	}, nil
 }
 
@@ -85,14 +86,22 @@ func (a *ACLAPI) ApplyACLPolicy(ctx context.Context, request api.ApplyACLPolicyR
 
 	// Declared optional in the document so its absence lands here rather
 	// than in the router, and refused because an unconditional apply is a
-	// lost-update on its way to happening.
-	if request.Params.IfMatch == nil || *request.Params.IfMatch == "" {
+	// lost-update on its way to happening. Zero is a tag here, unlike on a
+	// named resource: it is what a get reports before the first apply, and
+	// the first apply has to carry it back.
+	ifMatch, present, ok := parseIfMatch(request.Params.IfMatch)
+	switch {
+	case !present:
 		return api.ApplyACLPolicy400JSONResponse{
 			Error: "the If-Match header is required, carrying the tag read from GET /api/v1/acl",
 		}, nil
+	case !ok:
+		return api.ApplyACLPolicy400JSONResponse{
+			Error: "the If-Match header must carry a tag read from GET /api/v1/acl",
+		}, nil
 	}
 
-	policy, etag, err := a.policies.Apply(ctx, wire.ToPolicy(*request.Body), unquoteETag(*request.Params.IfMatch))
+	policy, err := a.policies.Apply(ctx, wire.ToPolicy(*request.Body), ifMatch)
 	switch {
 	case errors.Is(err, service.ErrInvalidPolicy):
 		return api.ApplyACLPolicy400JSONResponse{
@@ -109,8 +118,8 @@ func (a *ACLAPI) ApplyACLPolicy(ctx context.Context, request api.ApplyACLPolicyR
 	}
 
 	return api.ApplyACLPolicy200JSONResponse{
-		Body:    api.ApplyACLPolicyResult{Policy: wire.FromPolicy(policy)},
-		Headers: api.ApplyACLPolicy200ResponseHeaders{ETag: new(quoteETag(etag))},
+		Body:    api.ApplyACLPolicyResult{Policy: wire.FromPolicy(policy.Spec)},
+		Headers: api.ApplyACLPolicy200ResponseHeaders{ETag: new(versionETag(policy.Version))},
 	}, nil
 }
 

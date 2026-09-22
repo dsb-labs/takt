@@ -18,8 +18,9 @@ type (
 	// cannot ask.
 	SecretService interface {
 		// Set should store value as the secret with the given name, reporting whether
-		// it was newly created.
-		Set(ctx context.Context, name string, value []byte, labels map[string]string) (service.Secret, bool, error)
+		// it was newly created. A non-zero ifMatch should condition the set on the
+		// secret still being at that version.
+		Set(ctx context.Context, name string, value []byte, labels map[string]string, ifMatch int) (service.Secret, bool, error)
 		// Get should return the secret with the given name, without its value.
 		Get(ctx context.Context, name string) (service.Secret, error)
 		// List should return the secrets matching every one of the given
@@ -63,7 +64,7 @@ func (a *SecretAPI) SetSecret(ctx context.Context, request api.SetSecretRequestO
 		}, nil
 	}
 
-	secret, created, err := a.secrets.Set(ctx, request.Name, []byte(request.Body.Value), labelsOf(request.Body.Labels))
+	secret, created, err := a.secrets.Set(ctx, request.Name, []byte(request.Body.Value), labelsOf(request.Body.Labels), 0)
 	switch {
 	case errors.Is(err, service.ErrInvalidSecret):
 		return api.SetSecret400JSONResponse{

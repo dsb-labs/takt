@@ -52,13 +52,13 @@ func TestACLAPI_GetACLPolicy(t *testing.T) {
 
 	t.Run("returns the policy with its tag", func(t *testing.T) {
 		policies := NewMockPolicyService(t)
-		policies.EXPECT().Get(mock.Anything).Return(grantViewer, "tag-1", nil).Once()
+		policies.EXPECT().Get(mock.Anything).Return(service.Policy{Spec: grantViewer, Version: 1}, nil).Once()
 
 		resp := doACL(t, policies, NewMockACLInitializer(t),
 			httptest.NewRequest(http.MethodGet, "/api/v1/acl", nil))
 
 		require.Equal(t, http.StatusOK, resp.Code)
-		assert.Equal(t, `"tag-1"`, resp.Header().Get("ETag"))
+		assert.Equal(t, `"1"`, resp.Header().Get("ETag"))
 		assert.JSONEq(t, `{
 			"policy": {
 				"version": "v1",
@@ -69,7 +69,7 @@ func TestACLAPI_GetACLPolicy(t *testing.T) {
 
 	t.Run("scrubs an internal failure", func(t *testing.T) {
 		policies := NewMockPolicyService(t)
-		policies.EXPECT().Get(mock.Anything).Return(manifest.Policy{}, "", assert.AnError).Once()
+		policies.EXPECT().Get(mock.Anything).Return(service.Policy{}, assert.AnError).Once()
 
 		resp := doACL(t, policies, NewMockACLInitializer(t),
 			httptest.NewRequest(http.MethodGet, "/api/v1/acl", nil))
@@ -100,43 +100,62 @@ func TestACLAPI_ApplyACLPolicy(t *testing.T) {
 		policies := NewMockPolicyService(t)
 		// The quotes the header carries are stripped before the service sees
 		// the tag.
-		policies.EXPECT().Apply(mock.Anything, grantViewer, "tag-1").
-			Return(grantViewer, "tag-2", nil).Once()
+		policies.EXPECT().Apply(mock.Anything, grantViewer, 1).
+			Return(service.Policy{Spec: grantViewer, Version: 2}, nil).Once()
 
-		resp := apply(t, policies, `"tag-1"`)
+		resp := apply(t, policies, `"1"`)
 		require.Equal(t, http.StatusOK, resp.Code)
-		assert.Equal(t, `"tag-2"`, resp.Header().Get("ETag"))
+		assert.Equal(t, `"2"`, resp.Header().Get("ETag"))
 	})
 
 	t.Run("accepts a bare tag without quotes", func(t *testing.T) {
 		policies := NewMockPolicyService(t)
-		policies.EXPECT().Apply(mock.Anything, grantViewer, "tag-1").
-			Return(grantViewer, "tag-2", nil).Once()
+		policies.EXPECT().Apply(mock.Anything, grantViewer, 1).
+			Return(service.Policy{Spec: grantViewer, Version: 2}, nil).Once()
 
-		resp := apply(t, policies, "tag-1")
+		resp := apply(t, policies, "1")
 		require.Equal(t, http.StatusOK, resp.Code)
 	})
 
 	t.Run("refuses a stale tag", func(t *testing.T) {
 		policies := NewMockPolicyService(t)
-		policies.EXPECT().Apply(mock.Anything, mock.Anything, "stale").
-			Return(manifest.Policy{}, "", service.ErrPolicyChanged).Once()
+		policies.EXPECT().Apply(mock.Anything, mock.Anything, 1).
+			Return(service.Policy{}, service.ErrPolicyChanged).Once()
 
-		resp := apply(t, policies, "stale")
+		resp := apply(t, policies, `"1"`)
 		require.Equal(t, http.StatusPreconditionFailed, resp.Code)
 	})
 
 	t.Run("refuses an invalid document", func(t *testing.T) {
 		policies := NewMockPolicyService(t)
-		policies.EXPECT().Apply(mock.Anything, mock.Anything, "tag-1").
-			Return(manifest.Policy{}, "", service.ErrInvalidPolicy).Once()
+		policies.EXPECT().Apply(mock.Anything, mock.Anything, 1).
+			Return(service.Policy{}, service.ErrInvalidPolicy).Once()
 
-		resp := apply(t, policies, "tag-1")
+		resp := apply(t, policies, "1")
 		require.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 
 	t.Run("refuses an apply without the If-Match header", func(t *testing.T) {
 		resp := apply(t, NewMockPolicyService(t), "")
+		require.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	// Zero is the tag a get reports before any apply, so the first apply
+	// carries it back where a named resource's first apply carries nothing.
+	t.Run("applies the first document against version zero", func(t *testing.T) {
+		policies := NewMockPolicyService(t)
+		policies.EXPECT().Apply(mock.Anything, grantViewer, 0).
+			Return(service.Policy{Spec: grantViewer, Version: 1}, nil).Once()
+
+		resp := apply(t, policies, `"0"`)
+		require.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, `"1"`, resp.Header().Get("ETag"))
+	})
+
+	t.Run("refuses a tag that is not a version", func(t *testing.T) {
+		// The service expects no call: a tag takt never issued is refused before
+		// anything is read or written.
+		resp := apply(t, NewMockPolicyService(t), `"not-a-version"`)
 		require.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 }

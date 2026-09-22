@@ -2,12 +2,11 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/pkg/manifest"
@@ -27,10 +26,24 @@ type (
 	PolicyRepository interface {
 		// Get should return the applied policy.
 		Get(ctx context.Context) (database.Policy, error)
-		// Apply should replace the policy with the given document and tag, on
-		// the condition that the stored tag still equals previousETag. An
-		// empty previousETag means no policy is expected to exist yet.
-		Apply(ctx context.Context, document []byte, etag, previousETag string) error
+		// Apply should replace the policy with the given document, on the
+		// condition that the stored version is still ifMatch, where zero
+		// names the state before any apply. An unchanged document should be
+		// left as it is, version included.
+		Apply(ctx context.Context, document []byte, ifMatch int) (database.Policy, error)
+	}
+
+	// The Policy type is the service's view of the policy: the document that
+	// was applied, together with the version the server counts for it.
+	Policy struct {
+		// The document as applied. Before any apply it is the empty document:
+		// version v1, no grants, which grants nothing to anyone.
+		Spec manifest.Policy
+		// How many applies have changed the document, which the API reports
+		// as its entity tag. Zero before any apply.
+		Version int
+		// The time the document was last applied. Zero before any apply.
+		UpdatedAt time.Time
 	}
 
 	// The PolicyService type owns the access-control policy document.
@@ -57,81 +70,56 @@ func NewPolicyService(config PolicyServiceConfig) *PolicyService {
 	}
 }
 
-// Get returns the current policy and the tag a conditional apply presents
-// back. Before any apply, the policy is the empty document: version v1, no
-// grants, which grants nothing to anyone.
-func (s *PolicyService) Get(ctx context.Context) (manifest.Policy, string, error) {
+// Get returns the current policy. Before any apply, it is the empty document
+// at version zero, which is the tag a first apply carries back.
+func (s *PolicyService) Get(ctx context.Context) (Policy, error) {
 	stored, err := s.policies.Get(ctx)
 	switch {
 	case errors.Is(err, database.ErrNoPolicy):
-		return emptyPolicy()
+		return Policy{Spec: manifest.Policy{Version: "v1"}}, nil
 	case err != nil:
-		return manifest.Policy{}, "", err
+		return Policy{}, err
 	}
 
-	var policy manifest.Policy
-	if err = json.Unmarshal(stored.Document, &policy); err != nil {
-		return manifest.Policy{}, "", fmt.Errorf("failed to decode the stored policy: %w", err)
-	}
-
-	return policy, stored.ETag, nil
+	return hydratePolicy(stored)
 }
 
-// Apply validates the policy and replaces the current document with it, on
-// the condition that ifMatch is the tag of the document being replaced. The
-// whole document replaces, so a grant absent from it is revoked.
+// Apply validates the document and replaces the current one with it, on the
+// condition that ifMatch is the version of the document being replaced, where
+// zero is the empty policy no apply has yet replaced. The whole document
+// replaces, so a grant absent from it is revoked.
 //
-// Returns the applied policy and its new tag, which is what a get would now
-// report.
-func (s *PolicyService) Apply(ctx context.Context, policy manifest.Policy, ifMatch string) (manifest.Policy, string, error) {
+// Returns the policy as applied, which is what a get would now report. An
+// apply that changes nothing leaves the version where it is.
+func (s *PolicyService) Apply(ctx context.Context, policy manifest.Policy, ifMatch int) (Policy, error) {
 	if err := manifest.ValidatePolicy(policy); err != nil {
-		return manifest.Policy{}, "", fmt.Errorf("%w: %v", ErrInvalidPolicy, err)
+		return Policy{}, fmt.Errorf("%w: %v", ErrInvalidPolicy, err)
 	}
 
 	document, err := json.Marshal(policy)
 	if err != nil {
-		return manifest.Policy{}, "", fmt.Errorf("failed to encode policy: %w", err)
+		return Policy{}, fmt.Errorf("failed to encode policy: %w", err)
 	}
 
-	// The empty document is never stored, so its tag maps back to the "no row
-	// yet" condition the repository expresses as an empty previous tag.
-	previous := ifMatch
-	if _, emptyETag, emptyErr := emptyPolicy(); emptyErr == nil && ifMatch == emptyETag {
-		previous = ""
-	}
-
-	etag := policyETag(document)
-
-	err = s.policies.Apply(ctx, document, etag, previous)
+	stored, err := s.policies.Apply(ctx, document, ifMatch)
 	switch {
 	case errors.Is(err, database.ErrPolicyChanged):
-		return manifest.Policy{}, "", ErrPolicyChanged
+		return Policy{}, ErrPolicyChanged
 	case err != nil:
-		return manifest.Policy{}, "", err
+		return Policy{}, err
 	}
 
-	s.logger.With("etag", etag, "grants", len(policy.Grants)).Info("policy applied")
+	s.logger.With("version", stored.Version, "grants", len(policy.Grants)).Info("policy applied")
 
-	return policy, etag, nil
+	return hydratePolicy(stored)
 }
 
-// emptyPolicy returns the policy a server holds before any apply, with the
-// tag derived from it the same way an applied document's is.
-func emptyPolicy() (manifest.Policy, string, error) {
-	policy := manifest.Policy{Version: "v1"}
-
-	document, err := json.Marshal(policy)
-	if err != nil {
-		return manifest.Policy{}, "", fmt.Errorf("failed to encode the empty policy: %w", err)
+// hydratePolicy decodes a stored policy into the service's view of it.
+func hydratePolicy(stored database.Policy) (Policy, error) {
+	var spec manifest.Policy
+	if err := json.Unmarshal(stored.Document, &spec); err != nil {
+		return Policy{}, fmt.Errorf("failed to decode the stored policy: %w", err)
 	}
 
-	return policy, policyETag(document), nil
-}
-
-// policyETag derives the tag for a canonical policy document. Derived rather
-// than counted, so a pipeline reading the policy twice sees the same tag.
-func policyETag(document []byte) string {
-	sum := sha256.Sum256(document)
-
-	return hex.EncodeToString(sum[:])
+	return Policy{Spec: spec, Version: stored.Version, UpdatedAt: stored.UpdatedAt}, nil
 }
