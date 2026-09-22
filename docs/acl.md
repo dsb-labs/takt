@@ -86,12 +86,19 @@ grants:
 ```
 
 Before any apply, the policy is the empty `version: v1` document, which grants
-nothing to anyone. `takt acl get` returns the canonical current document, and
-its output is valid input to `takt acl apply`.
+nothing to anyone. `takt acl get` returns the canonical current document under
+`Spec`, and that document is valid input to `takt acl apply`:
+
+```sh
+takt acl get | jq .Spec > policy.yaml
+```
 
 Two applies cannot silently overwrite each other. The apply is conditional on
 the policy not having changed since it was read, so the loser of a race gets
-an error to re-run rather than a lost update.
+an error to re-run rather than a lost update. The tag `acl get` prints as
+`ETag` is what the condition names, and `takt acl apply --if-match` carries it
+back when the read to condition on is an earlier one. See
+[acl apply](cli.md#acl-apply).
 
 ## Roles
 
