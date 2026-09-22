@@ -2492,6 +2492,8 @@ components:
           $ref: "#/components/schemas/HealthSpec"
         resources:
           $ref: "#/components/schemas/ResourcesSpec"
+        logs:
+          $ref: "#/components/schemas/LogsSpec"
         container:
           $ref: "#/components/schemas/ContainerSpec"
         exec:
@@ -2648,6 +2650,33 @@ components:
           description: The most processes and threads the workload may create.
           minimum: 1
           examples: [100]
+
+    LogsSpec:
+      type: object
+      description: |
+        The cap on what the workload's output may grow to. Absent means none, so
+        the output grows as it always did.
+
+        It sits alongside the runtime blocks because how much a workload may write
+        is a question about the workload, and the cap means the same thing on
+        either runtime: the output is rotated at the size, and only so many files
+        are kept. A container's is applied by the daemon's logging driver. An exec
+        workload's is applied by takt against the file the process writes.
+      required: [maxSize]
+      properties:
+        maxSize:
+          type: string
+          description: |
+            The size the output is rotated at, written as a size such as "10m".
+          examples: ["10m"]
+        maxFiles:
+          type: integer
+          description: |
+            How many files of output are kept, the one being written included.
+            One when omitted, which truncates the output at the size and keeps
+            nothing older.
+          minimum: 1
+          examples: [3]
 
     ScheduleSpec:
       type: object

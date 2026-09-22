@@ -88,6 +88,7 @@ func ToSpec(spec api.WorkloadSpec) (manifest.Spec, error) {
 	}
 
 	out.Resources = toResources(spec.Resources)
+	out.Logs = toLogs(spec.Logs)
 
 	if spec.Container != nil {
 		out.Container = &manifest.Container{Image: spec.Container.Image}
@@ -258,6 +259,23 @@ func toResources(spec *api.ResourcesSpec) *manifest.Resources {
 	return &resources
 }
 
+// toLogs maps a wire output cap onto the canonical shape.
+//
+// The size is carried across as written, for the reason a memory limit is.
+func toLogs(spec *api.LogsSpec) *manifest.Logs {
+	if spec == nil {
+		return nil
+	}
+
+	logs := manifest.Logs{MaxSize: spec.MaxSize}
+
+	if spec.MaxFiles != nil {
+		logs.MaxFiles = *spec.MaxFiles
+	}
+
+	return &logs
+}
+
 // toSchedule maps a wire schedule onto the canonical shape.
 func toSchedule(spec *api.ScheduleSpec) *manifest.Schedule {
 	if spec == nil {
@@ -325,6 +343,7 @@ func FromSpec(s manifest.Spec) api.WorkloadSpec {
 	spec.Restart = fromRestart(s.Restart)
 	spec.Health = fromHealth(s.Health)
 	spec.Resources = fromResources(s.Resources)
+	spec.Logs = fromLogs(s.Logs)
 
 	if len(s.Env) > 0 {
 		spec.Env = new(s.Env)
@@ -500,6 +519,21 @@ func fromResources(resources *manifest.Resources) *api.ResourcesSpec {
 	}
 	if resources.Pids != 0 {
 		spec.Pids = new(resources.Pids)
+	}
+
+	return &spec
+}
+
+// fromLogs maps the canonical output cap onto the wire format.
+func fromLogs(logs *manifest.Logs) *api.LogsSpec {
+	if logs == nil {
+		return nil
+	}
+
+	spec := api.LogsSpec{MaxSize: logs.MaxSize}
+
+	if logs.MaxFiles != 0 {
+		spec.MaxFiles = new(logs.MaxFiles)
 	}
 
 	return &spec

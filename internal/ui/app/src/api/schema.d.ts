@@ -1177,6 +1177,7 @@ export interface components {
       restart?: components["schemas"]["RestartSpec"];
       health?: components["schemas"]["HealthSpec"];
       resources?: components["schemas"]["ResourcesSpec"];
+      logs?: components["schemas"]["LogsSpec"];
       container?: components["schemas"]["ContainerSpec"];
       exec?: components["schemas"]["ExecSpec"];
     };
@@ -1320,6 +1321,30 @@ export interface components {
        * @example 100
        */
       pids?: number;
+    };
+    /**
+     * @description The cap on what the workload's output may grow to. Absent means none, so
+     *     the output grows as it always did.
+     *
+     *     It sits alongside the runtime blocks because how much a workload may write
+     *     is a question about the workload, and the cap means the same thing on
+     *     either runtime: the output is rotated at the size, and only so many files
+     *     are kept. A container's is applied by the daemon's logging driver. An exec
+     *     workload's is applied by takt against the file the process writes.
+     */
+    LogsSpec: {
+      /**
+       * @description The size the output is rotated at, written as a size such as "10m".
+       * @example 10m
+       */
+      maxSize: string;
+      /**
+       * @description How many files of output are kept, the one being written included.
+       *     One when omitted, which truncates the output at the size and keeps
+       *     nothing older.
+       * @example 3
+       */
+      maxFiles?: number;
     };
     /**
      * @description When a workload runs, rather than running it continuously.
