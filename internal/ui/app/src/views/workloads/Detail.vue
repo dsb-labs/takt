@@ -265,6 +265,14 @@ await workload.suspense().catch(() => {});
             <OverviewRow v-if="spec?.restart" label="Restart">{{
               spec.restart.policy
             }}</OverviewRow>
+            <!-- The cap on the output, in the terms the manifest names it: the
+                 size it rotates at and how many files that leaves on disk. A
+                 workload naming none has no row, since none is the default. -->
+            <OverviewRow v-if="spec?.logs" label="Logs">
+              rotated at {{ spec.logs.maxSize }},
+              {{ spec.logs.maxFiles ?? 1 }}
+              {{ (spec.logs.maxFiles ?? 1) === 1 ? "file" : "files" }} kept
+            </OverviewRow>
             <OverviewRow
               label="Created"
               :title="absoluteTime(workload.data.value.createdAt)"
