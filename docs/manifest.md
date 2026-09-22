@@ -42,6 +42,10 @@ resources:
   cpu: 0.5
   pids: 100
 
+logs:
+  maxSize: 10m
+  maxFiles: 3
+
 container:
   image: nginx:1.27-alpine
   command: ["nginx", "-g", "daemon off;"]
@@ -60,6 +64,7 @@ container:
 | `schedule` | no | When the workload runs, rather than running continuously. Not shown above, since a scheduled workload cannot declare a health check. |
 | `health` | no | How takt decides the workload is working. |
 | `resources` | no | The resource limits the workload runs under. |
+| `logs` | no | The cap on what the workload's output may grow to. |
 | `container` | one of | Run the workload as a Docker container. |
 | `exec` | one of | Run the workload as a command on the host. |
 
@@ -916,6 +921,55 @@ cgroup of its own, which needs the host to delegate a cgroup subtree to takt —
 running the server under systemd with `Delegate=yes` grants one, and
 [operating](operating.md#delegation) describes it. A host without one refuses the
 apply rather than accepting limits that would silently never apply.
+
+## Logs
+
+```yaml
+logs:
+  maxSize: 10m
+  maxFiles: 3
+```
+
+| Field | Required | Default | Description |
+|---|---|---|---|
+| `maxSize` | yes | | The size the output is rotated at, as a size such as `10m`. |
+| `maxFiles` | no | `1` | How many files of output are kept, the one being written included. |
+
+A workload that names no cap is not capped. There is no default: a cap takt invented
+would cut output nobody asked to cut, and a workload whose output is bounded by a
+limit the operator never set is harder to debug than one whose output grew. Name the
+block on a workload that writes continuously, and leave it off one that does not.
+
+`maxSize` is required. A block naming only `maxFiles` says nothing about when to
+rotate, so it is refused rather than given a size.
+
+`maxFiles` counts the file being written. `3` keeps the current output and the two
+rotations before it, so the workload holds up to three times `maxSize` on disk. The
+default of `1` keeps nothing older: the output is truncated at the size and what was
+written before is gone.
+
+Logs sit beside the runtime blocks because how much a workload may write is a
+question about the workload, and the cap means the same thing on either runtime.
+Where it differs is who applies it.
+
+A container's cap is applied by the Docker daemon, which rotates the container's log
+files itself. The daemon keeps whichever logging driver it was configured with, and
+only its file-backed drivers, `json-file` and `local`, rotate by size. A daemon
+logging through another driver, such as `journald`, refuses to create the container,
+and the workload reports the refusal as the instance failing to start. Cap the output
+of such a daemon in the daemon's own configuration instead.
+
+An exec workload's cap is applied by takt. The process writes to `output.log`
+directly, and takt copies the file aside and truncates it once a second when it has
+reached the size, so a chatty workload can overshoot the cap by what it writes in a
+second. Whatever the process writes in the instant between the copy and the truncate
+is lost. `takt workload logs` reads across the rotated files, so a tail taken just
+after a rotation still returns the lines asked for. [Operating](operating.md#exec-workload-directories)
+describes where the files sit.
+
+Changing the block replaces the workload's instances, the way any other change to the
+specification does. That is the only way a container's logging options can change,
+and it is what makes the exec runtime's rotation follow the manifest.
 
 ## Schedule
 

@@ -84,7 +84,8 @@ container:
 A workload names exactly one runtime block. `container:` runs an image and `exec:`
 runs a command on the host. Everything else applies to either. `resources:` applies
 to either too, though the exec runtime needs the host to delegate a cgroup subtree
-and refuses the limits when it does not.
+and refuses the limits when it does not. `logs:` caps what a workload's output may
+grow to, on either runtime.
 
 A `volumes` entry names a volume, a secret or a variable. A volume is storage. The
 other two are files holding the value takt stores under that name.

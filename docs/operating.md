@@ -348,6 +348,7 @@ under two separate trees:
 exec/workloads/<id>/<instance>/<version>/
   cwd/            the process's working directory
   output.log      the process's output, both streams combined
+  output.log.1    the output rotated out most recently, for a workload naming a cap
   previous.log    the output of the attempt this one replaced
 
 exec/state/<id>/<instance>/<version>/
@@ -367,14 +368,20 @@ the host as its own.
 what an operator types and reaches takt from places no manifest validated, so it is
 never a path component. It is read from inside a record when takt needs it.
 
-`output.log` grows for as long as the workload runs. takt does not rotate or truncate
-it, so a workload that writes continuously needs watching.
+`output.log` grows for as long as the workload runs, unless the manifest names a
+[`logs`](manifest.md#logs) block. With one, takt looks at the file once a second and
+rotates it when it has reached the size: the file is copied to `output.log.1`, older
+copies move up a number, and `output.log` is truncated in place. The process keeps
+writing through it all, so whatever it writes in the instant between the copy and the
+truncate is lost. A workload naming no cap is never rotated or truncated, so one that
+writes continuously needs either the block or watching.
 
 `previous.log` is the output of the attempt a replacement took the place of, which is
 what `takt workload logs --previous` reads. Stopping a workload moves `output.log` to it,
 so the attempt starting next writes to a file of its own rather than appending to the one
 before it. Only the most recent replaced attempt is kept, so this is one file rather than
-one per restart.
+one per restart. What the attempt had rotated out is removed at the same time, so the
+previous output is at most one cap's worth.
 
 `state.json` records the process identifier and the kernel's start time for that
 process. Both have to match for takt to claim the workload is still running. A process
