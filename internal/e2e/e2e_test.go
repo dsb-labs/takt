@@ -1441,6 +1441,73 @@ func (s *Suite) TestExecWorkloadIsStoppedOnDelete() {
 	}, convergeTimeout, 500*time.Millisecond, "the process outlived the workload it belonged to")
 }
 
+// TestContainerOutputIsCapped covers the logs block reaching the daemon, which is the
+// one place the cap on a container's output is applied.
+func (s *Suite) TestContainerOutputIsCapped() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name)
+	spec.Logs = &manifest.Logs{MaxSize: "1m", MaxFiles: 2}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	// Asked of docker rather than of takt, since what the manifest said and what the
+	// daemon will rotate on are the two things this test has to see agree.
+	ids := s.containers(name)
+	s.Require().NotEmpty(ids)
+
+	out, err := exec.Command("docker", "inspect", "--format", "{{.HostConfig.LogConfig.Config.max-size}} {{.HostConfig.LogConfig.Config.max-file}}", ids[0]).Output()
+	s.Require().NoError(err)
+	s.Equal("1m 2", strings.TrimSpace(string(out)))
+}
+
+// TestExecWorkloadOutputIsRotated covers the cap on an exec workload's output against a
+// real server, whose watch of the runtime is what rotates it.
+func (s *Suite) TestExecWorkloadOutputIsRotated() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.execSpec(name, "sh", "-c", `i=0; while :; do i=$((i+1)); echo "line $i"; sleep 0.005; done`)
+	spec.Logs = &manifest.Logs{MaxSize: "1k", MaxFiles: 2}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	// The rotated file sits beside the output in the workload's directory, which is
+	// named for an identifier the test does not know. The record beside it names the
+	// workload, so the directory is found through the record rather than guessed.
+	s.Require().Eventuallyf(func() bool {
+		matches, _ := filepath.Glob(filepath.Join(s.directory, "exec", "workloads", "*", "0", "*", "output.log.1"))
+		for _, match := range matches {
+			var recorded struct {
+				Workload string `json:"workload"`
+			}
+
+			record := strings.Replace(filepath.Dir(match), filepath.Join("exec", "workloads"), filepath.Join("exec", "state"), 1)
+
+			data, err := os.ReadFile(filepath.Join(record, "state.json"))
+			if err == nil && json.Unmarshal(data, &recorded) == nil && recorded.Workload == name {
+				return true
+			}
+		}
+
+		return false
+	}, convergeTimeout, 500*time.Millisecond, "the output of %q was never rotated", name)
+
+	// A read reaches into the rotated file, so a tail just after a rotation is not
+	// a handful of lines. The rotated file holds the cap's worth, which is over a
+	// hundred of these lines.
+	var out bytes.Buffer
+	s.Require().NoError(s.client.Logs(s.ctx(), &out, name, client.WithTail(1000)))
+	s.Greater(strings.Count(out.String(), "\n"), 100)
+}
+
 // TestExecWorkloadCannotReachTheDataDirectory covers the confinement every exec
 // workload runs under, against a real server holding real state.
 //
