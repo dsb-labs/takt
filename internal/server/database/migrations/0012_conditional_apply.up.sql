@@ -12,3 +12,15 @@ UPDATE volume SET updated_at = created_at WHERE updated_at = '';
 ALTER TABLE volume ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
 
 ALTER TABLE service ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE secret ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE variable ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+
+-- The policy's tag was a hash of the document. It becomes the same counter
+-- as everything else, so one tag format reaches every conditional write. The
+-- hash column goes with it: the document is what it was derived from, and it
+-- can be derived again if anything ever needs it.
+ALTER TABLE policy ADD COLUMN version INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE policy DROP COLUMN etag;

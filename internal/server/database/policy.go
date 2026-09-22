@@ -68,6 +68,11 @@ func (r *PolicyRepository) Apply(ctx context.Context, document []byte, ifMatch i
 		existing, err := getPolicy(ctx, tx)
 		switch {
 		case errors.Is(err, ErrNoPolicy):
+			// A caller naming a version has read a policy that is not there
+			// now, which is the same stale picture a wrong version is. The
+			// only way to get here is a tag from before the database was
+			// restored, and writing over a restore is not what that caller
+			// meant.
 			if ifMatch != 0 {
 				return ErrPolicyChanged
 			}
