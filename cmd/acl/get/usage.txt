@@ -1,6 +1,13 @@
-Get the canonical current policy document.
+Get the canonical current policy document and the tag it carries.
 
 Before any apply, the policy is the empty version-v1 document, which
-grants nothing to anyone. The output is valid input to "acl apply",
-since YAML reads JSON, so the current policy can be captured into the
-file a git repository tracks.
+grants nothing to anyone, at tag "0".
+
+The output nests the document under "Spec" beside its "ETag", the way
+"takt workload get" prints a workload. The document alone is valid input
+to "acl apply", since YAML reads JSON, so the live policy can be captured
+into the file a git repository tracks:
+
+  takt acl get | jq .Spec > policy.yaml
+
+The tag is what "acl apply --if-match" carries back.

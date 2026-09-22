@@ -2,6 +2,7 @@
 package apply
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -19,7 +20,9 @@ var usage string
 // Command returns the "acl apply" command used to replace the policy with
 // the document a file describes.
 func Command() *cobra.Command {
-	return &cobra.Command{
+	var ifMatch string
+
+	cmd := &cobra.Command{
 		Use:   "apply <file>",
 		Short: "Replace the policy with a document",
 		Long:  usage,
@@ -38,7 +41,7 @@ func Command() *cobra.Command {
 
 			c := client.FromContext(cmd.Context())
 
-			applied, _, err := c.ReplacePolicy(cmd.Context(), policy)
+			applied, err := apply(cmd.Context(), c, policy, ifMatch)
 			if err != nil {
 				return fmt.Errorf("failed to apply policy: %w", err)
 			}
@@ -49,4 +52,21 @@ func Command() *cobra.Command {
 			return enc.Encode(applied)
 		},
 	}
+
+	cmd.Flags().StringVar(&ifMatch, "if-match", "",
+		"apply only if the policy's tag still matches this one, as reported by \"takt acl get\"")
+
+	return cmd
+}
+
+// apply replaces the policy against the tag given, or against the tag the
+// server reports when none was. Either way the apply is conditional: the
+// difference is whether the caller's read or this command's is the one it
+// is conditioned on.
+func apply(ctx context.Context, c *client.Client, policy manifest.Policy, ifMatch string) (client.Policy, error) {
+	if ifMatch == "" {
+		return c.ReplacePolicy(ctx, policy)
+	}
+
+	return c.ApplyPolicy(ctx, policy, ifMatch)
 }
