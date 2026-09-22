@@ -94,7 +94,7 @@ func TestClient_ApplyPolicy(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, api.ApplyACLPolicyResult{Policy: body})
 		})
 
-		applied, err := c.ApplyPolicy(t.Context(), canonicalPolicy(), `"1"`)
+		applied, err := c.ApplyPolicy(t.Context(), canonicalPolicy(), client.WithIfMatch(`"1"`))
 		require.NoError(t, err)
 		assert.Equal(t, `"2"`, applied.ETag)
 		assert.Equal(t, canonicalPolicy(), applied.Spec)
@@ -105,7 +105,7 @@ func TestClient_ApplyPolicy(t *testing.T) {
 			writeJSON(t, w, http.StatusPreconditionFailed, api.ErrorResponse{Error: "the policy changed since it was read"})
 		})
 
-		_, err := c.ApplyPolicy(t.Context(), canonicalPolicy(), `"1"`)
+		_, err := c.ApplyPolicy(t.Context(), canonicalPolicy(), client.WithIfMatch(`"1"`))
 		assert.ErrorIs(t, err, client.ErrPolicyChanged)
 	})
 
@@ -116,16 +116,16 @@ func TestClient_ApplyPolicy(t *testing.T) {
 
 		invalid := manifest.Policy{Version: "v2"}
 
-		_, err := c.ApplyPolicy(t.Context(), invalid, `"1"`)
+		_, err := c.ApplyPolicy(t.Context(), invalid, client.WithIfMatch(`"1"`))
 		assert.Error(t, err)
 	})
 }
 
-func TestClient_ReplacePolicy(t *testing.T) {
+func TestClient_ApplyPolicy_ReadsTheTag(t *testing.T) {
 	t.Parallel()
 
-	// The get and the conditional apply run as one step, with the tag the
-	// get reported travelling into the apply's If-Match.
+	// Without WithIfMatch the get and the conditional apply run as one step,
+	// with the tag the get reported travelling into the apply's If-Match.
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -141,7 +141,7 @@ func TestClient_ReplacePolicy(t *testing.T) {
 		}
 	})
 
-	applied, err := c.ReplacePolicy(t.Context(), canonicalPolicy())
+	applied, err := c.ApplyPolicy(t.Context(), canonicalPolicy())
 	require.NoError(t, err)
 	assert.Equal(t, `"2"`, applied.ETag)
 	assert.Equal(t, canonicalPolicy(), applied.Spec)

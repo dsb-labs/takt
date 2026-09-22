@@ -3953,7 +3953,7 @@ func (s *Suite) TestAuthLifecycle() {
 	// first document to a server that grants nothing to anyone yet.
 	admin := s.clientWithToken(recovery)
 
-	_, err = admin.ReplacePolicy(s.ctx(), testPolicy)
+	_, err = admin.ApplyPolicy(s.ctx(), testPolicy)
 	s.Require().NoError(err)
 
 	_, viewerToken, err := admin.CreateToken(s.ctx(), "scraper")
@@ -4034,7 +4034,7 @@ func (s *Suite) TestWorkloadTokenMountAuthenticates() {
 
 	admin := s.clientWithToken(recovery)
 
-	_, err = admin.ReplacePolicy(s.ctx(), testPolicy)
+	_, err = admin.ApplyPolicy(s.ctx(), testPolicy)
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -4108,7 +4108,7 @@ func (s *Suite) TestWorkloadEnvTokenRotatesWithTheInstance() {
 
 	admin := s.clientWithToken(recovery)
 
-	_, err = admin.ReplacePolicy(s.ctx(), testPolicy)
+	_, err = admin.ApplyPolicy(s.ctx(), testPolicy)
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -4174,7 +4174,7 @@ func (s *Suite) TestDeletingAWorkloadRevokesItsTokens() {
 
 	admin := s.clientWithToken(recovery)
 
-	_, err = admin.ReplacePolicy(s.ctx(), testPolicy)
+	_, err = admin.ApplyPolicy(s.ctx(), testPolicy)
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -4224,15 +4224,15 @@ func (s *Suite) TestAuthPolicyConflict() {
 	s.Require().NoError(err)
 
 	// The first apply consumes the tag the second one still holds.
-	_, err = admin.ApplyPolicy(s.ctx(), testPolicy, current.ETag)
+	_, err = admin.ApplyPolicy(s.ctx(), testPolicy, client.WithIfMatch(current.ETag))
 	s.Require().NoError(err)
 
-	_, err = admin.ApplyPolicy(s.ctx(), testPolicy, current.ETag)
+	_, err = admin.ApplyPolicy(s.ctx(), testPolicy, client.WithIfMatch(current.ETag))
 	s.Require().ErrorIs(err, client.ErrPolicyChanged)
 
 	// The one-step form reads the fresh tag itself, which is the re-run the
 	// error asks for.
-	applied, err := admin.ReplacePolicy(s.ctx(), testPolicy)
+	applied, err := admin.ApplyPolicy(s.ctx(), testPolicy)
 	s.Require().NoError(err)
 	s.Equal(testPolicy, applied.Spec)
 }
@@ -4248,7 +4248,7 @@ func (s *Suite) TestAuthReset() {
 
 	admin := s.clientWithToken(recovery)
 
-	_, err = admin.ReplacePolicy(s.ctx(), testPolicy)
+	_, err = admin.ApplyPolicy(s.ctx(), testPolicy)
 	s.Require().NoError(err)
 
 	_, clientToken, err := admin.CreateToken(s.ctx(), "scraper")
@@ -4284,7 +4284,7 @@ func (s *Suite) TestAuthOIDC() {
 	recovery, err := s.client.InitACL(s.ctx())
 	s.Require().NoError(err)
 
-	_, err = s.clientWithToken(recovery).ReplacePolicy(s.ctx(), testPolicy)
+	_, err = s.clientWithToken(recovery).ApplyPolicy(s.ctx(), testPolicy)
 	s.Require().NoError(err)
 
 	// The CLI's flow discovers the issuer from the server rather than from

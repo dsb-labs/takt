@@ -2,7 +2,6 @@
 package apply
 
 import (
-	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -41,7 +40,7 @@ func Command() *cobra.Command {
 
 			c := client.FromContext(cmd.Context())
 
-			applied, err := apply(cmd.Context(), c, policy, ifMatch)
+			applied, err := c.ApplyPolicy(cmd.Context(), policy, client.WithIfMatch(ifMatch))
 			if err != nil {
 				return fmt.Errorf("failed to apply policy: %w", err)
 			}
@@ -57,16 +56,4 @@ func Command() *cobra.Command {
 		"apply only if the policy's tag still matches this one, as reported by \"takt acl get\"")
 
 	return cmd
-}
-
-// apply replaces the policy against the tag given, or against the tag the
-// server reports when none was. Either way the apply is conditional: the
-// difference is whether the caller's read or this command's is the one it
-// is conditioned on.
-func apply(ctx context.Context, c *client.Client, policy manifest.Policy, ifMatch string) (client.Policy, error) {
-	if ifMatch == "" {
-		return c.ReplacePolicy(ctx, policy)
-	}
-
-	return c.ApplyPolicy(ctx, policy, ifMatch)
 }
