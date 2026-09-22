@@ -1,0 +1,6 @@
+version: v1
+name: example
+logs:
+  maxSize: lots
+container:
+  image: example/example:latest

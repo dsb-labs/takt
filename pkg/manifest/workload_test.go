@@ -761,6 +761,50 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			Name: "a container manifest with an output cap",
+			File: "logs.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Logs)
+				assert.Equal(t, "10m", spec.Logs.MaxSize)
+				assert.Equal(t, 3, spec.Logs.MaxFiles)
+			},
+		},
+		{
+			// Either runtime rotates its output, so the cap is valid on an exec
+			// workload too.
+			Name: "an exec manifest with an output cap",
+			File: "logs_exec.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Logs)
+				assert.Equal(t, "1m", spec.Logs.MaxSize)
+				assert.Zero(t, spec.Logs.MaxFiles)
+			},
+		},
+		{
+			// An empty block asks for nothing, which leaving the section out already
+			// says.
+			Name:         "rejects a logs block naming no size",
+			File:         "logs_empty.yaml",
+			ExpectsError: true,
+		},
+		{
+			// How many files to keep says nothing about when to rotate, and a size
+			// takt invented would cap output nobody asked to cap.
+			Name:         "rejects a logs block naming only a file count",
+			File:         "logs_files_only.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects an output cap that is not a size",
+			File:         "logs_bad_size.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a negative file count",
+			File:         "logs_negative_files.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name: "a hardened container manifest",
 			File: "container_hardened.yaml",
 			Assert: func(t *testing.T, spec manifest.Spec) {
@@ -1192,6 +1236,7 @@ func TestSpec_JSON(t *testing.T) {
 					StartPeriod: 30 * time.Second,
 				},
 				Resources: &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 128},
+				Logs:      &manifest.Logs{MaxSize: "10m", MaxFiles: 3},
 				Container: &manifest.Container{
 					Image:    "ghcr.io/dsb-labs/api:v1",
 					Pull:     manifest.PullAlways,

@@ -1,0 +1,7 @@
+version: v1
+name: example
+logs:
+  maxSize: 10m
+  maxFiles: -1
+container:
+  image: example/example:latest
