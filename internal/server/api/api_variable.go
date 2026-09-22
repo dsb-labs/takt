@@ -8,16 +8,17 @@ import (
 
 	"github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 type (
 	// The VariableService interface describes the variable operations the API
 	// exposes.
 	VariableService interface {
-		// Set should store value as the variable with the given name, reporting
-		// whether it was newly created. A non-zero ifMatch should condition the
-		// set on the variable still being at that version.
-		Set(ctx context.Context, name, value string, labels map[string]string, ifMatch int) (service.Variable, bool, error)
+		// Set should store the given variable, reporting whether it was newly
+		// created. A non-zero ifMatch should condition the set on the variable
+		// still being at that version.
+		Set(ctx context.Context, variable manifest.Variable, ifMatch int) (service.Variable, bool, error)
 		// Get should return the variable with the given name.
 		Get(ctx context.Context, name string) (service.Variable, error)
 		// List should return the variables matching every one of the given
@@ -68,7 +69,11 @@ func (a *VariableAPI) SetVariable(ctx context.Context, request api.SetVariableRe
 		}, nil
 	}
 
-	variable, created, err := a.variables.Set(ctx, request.Name, request.Body.Value, labelsOf(request.Body.Labels), ifMatch)
+	variable, created, err := a.variables.Set(ctx, manifest.Variable{
+		Name:   request.Name,
+		Value:  request.Body.Value,
+		Labels: labelsOf(request.Body.Labels),
+	}, ifMatch)
 	switch {
 	case errors.Is(err, service.ErrInvalidVariable):
 		return api.SetVariable400JSONResponse{

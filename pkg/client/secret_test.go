@@ -12,6 +12,7 @@ import (
 
 	"github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/pkg/client"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestClient_SetSecret(t *testing.T) {
@@ -69,7 +70,7 @@ func TestClient_SetSecret(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
 			secret, created, err := newTestClient(t, tc.Handler).
-				SetSecret(t.Context(), "db-password", []byte("hunter2"), nil)
+				SetSecret(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")})
 			if tc.ExpectErr != nil {
 				assert.True(t, tc.ExpectErr(err), "unexpected error: %v", err)
 				return
@@ -98,7 +99,7 @@ func TestClient_SetSecret_Conditional(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, api.SetSecretResult{Secret: apiSecret("db-password")})
 		})
 
-		secret, _, err := c.SetSecret(t.Context(), "db-password", []byte("hunter2"), nil, client.WithIfMatch(`"3"`))
+		secret, _, err := c.SetSecret(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, client.WithIfMatch(`"3"`))
 		require.NoError(t, err)
 		assert.Equal(t, `"4"`, secret.ETag)
 	})
@@ -110,7 +111,7 @@ func TestClient_SetSecret_Conditional(t *testing.T) {
 			writeJSON(t, w, http.StatusCreated, api.SetSecretResult{Secret: apiSecret("db-password")})
 		})
 
-		_, _, err := c.SetSecret(t.Context(), "db-password", []byte("hunter2"), nil)
+		_, _, err := c.SetSecret(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")})
 		require.NoError(t, err)
 	})
 
@@ -119,7 +120,7 @@ func TestClient_SetSecret_Conditional(t *testing.T) {
 			writeJSON(t, w, http.StatusPreconditionFailed, api.ErrorResponse{Error: "the secret changed since it was read"})
 		})
 
-		_, _, err := c.SetSecret(t.Context(), "db-password", []byte("hunter2"), nil, client.WithIfMatch(`"3"`))
+		_, _, err := c.SetSecret(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, client.WithIfMatch(`"3"`))
 		assert.ErrorIs(t, err, client.ErrSecretChanged)
 	})
 }

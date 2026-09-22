@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/pkg/client"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // The largest value that will be read.
@@ -44,7 +45,8 @@ func Command() *cobra.Command {
 
 			c := client.FromContext(cmd.Context())
 
-			secret, _, err := c.SetSecret(cmd.Context(), args[0], value, labels, client.WithIfMatch(ifMatch))
+			secret, _, err := c.SetSecret(cmd.Context(),
+				manifest.Secret{Name: args[0], Value: value, Labels: labels}, client.WithIfMatch(ifMatch))
 			if err != nil {
 				return fmt.Errorf("failed to set secret: %w", err)
 			}

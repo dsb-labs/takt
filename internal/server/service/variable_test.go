@@ -12,6 +12,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // variableHolding matches the variable handed to an upsert by its name and
@@ -34,7 +35,7 @@ func TestVariableService_Set(t *testing.T) {
 			Return(database.Variable{Name: "log-level", Value: "debug"}, nil).Once()
 		variables.EXPECT().UsedBy(mock.Anything, "log-level").Return(nil, nil).Once()
 
-		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "debug", nil, 0)
+		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), manifest.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 		assert.True(t, created)
 		assert.Equal(t, "log-level", stored.Name)
@@ -50,7 +51,7 @@ func TestVariableService_Set(t *testing.T) {
 			Return(database.Variable{Name: "log-level", Value: "info"}, nil).Once()
 		variables.EXPECT().UsedBy(mock.Anything, "log-level").Return(nil, nil).Once()
 
-		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "info", nil, 0)
+		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), manifest.Variable{Name: "log-level", Value: "info"}, 0)
 		require.NoError(t, err)
 		assert.False(t, created)
 		assert.Equal(t, "info", stored.Value)
@@ -66,7 +67,7 @@ func TestVariableService_Set(t *testing.T) {
 		// Setting a variable to what it already holds writes nothing, so a tool that
 		// sets every variable on every run does not restart the fleet each time. The
 		// mock asserts no Upsert, since it was never told to expect one.
-		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "debug", nil, 0)
+		stored, created, err := newTestVariableService(t, variables).Set(t.Context(), manifest.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 		assert.False(t, created)
 		assert.Equal(t, "debug", stored.Value)
@@ -81,7 +82,7 @@ func TestVariableService_Set(t *testing.T) {
 			Return(database.Variable{Name: "log-level", Value: "info", Version: 4}, nil).Once()
 		variables.EXPECT().UsedBy(mock.Anything, "log-level").Return(nil, nil).Once()
 
-		stored, _, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "info", nil, 3)
+		stored, _, err := newTestVariableService(t, variables).Set(t.Context(), manifest.Variable{Name: "log-level", Value: "info"}, 3)
 		require.NoError(t, err)
 		assert.Equal(t, 4, stored.Version)
 	})
@@ -94,7 +95,7 @@ func TestVariableService_Set(t *testing.T) {
 
 		// Refused before anything is written, which the mock asserts by expecting
 		// no Upsert.
-		_, _, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "info", nil, 3)
+		_, _, err := newTestVariableService(t, variables).Set(t.Context(), manifest.Variable{Name: "log-level", Value: "info"}, 3)
 		assert.ErrorIs(t, err, service.ErrVariableChanged)
 	})
 
@@ -106,7 +107,7 @@ func TestVariableService_Set(t *testing.T) {
 		variables.EXPECT().Get(mock.Anything, "log-level").
 			Return(database.Variable{Name: "log-level", Value: "debug", Version: 4}, nil).Once()
 
-		_, _, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "debug", nil, 3)
+		_, _, err := newTestVariableService(t, variables).Set(t.Context(), manifest.Variable{Name: "log-level", Value: "debug"}, 3)
 		assert.ErrorIs(t, err, service.ErrVariableChanged)
 	})
 
@@ -116,7 +117,7 @@ func TestVariableService_Set(t *testing.T) {
 		variables.EXPECT().Get(mock.Anything, "log-level").
 			Return(database.Variable{}, database.ErrVariableNotFound).Once()
 
-		_, _, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "debug", nil, 1)
+		_, _, err := newTestVariableService(t, variables).Set(t.Context(), manifest.Variable{Name: "log-level", Value: "debug"}, 1)
 		assert.ErrorIs(t, err, service.ErrVariableChanged)
 	})
 
@@ -130,7 +131,7 @@ func TestVariableService_Set(t *testing.T) {
 		variables.EXPECT().Upsert(mock.Anything, variableHolding("log-level", "info"), 3).
 			Return(database.Variable{}, database.ErrVariableChanged).Once()
 
-		_, _, err := newTestVariableService(t, variables).Set(t.Context(), "log-level", "info", nil, 3)
+		_, _, err := newTestVariableService(t, variables).Set(t.Context(), manifest.Variable{Name: "log-level", Value: "info"}, 3)
 		assert.ErrorIs(t, err, service.ErrVariableChanged)
 	})
 
@@ -145,7 +146,7 @@ func TestVariableService_Set(t *testing.T) {
 
 		// An empty value is a value, and setting one is not the same as leaving the
 		// variable unset.
-		_, created, err := newTestVariableService(t, variables).Set(t.Context(), "empty", "", nil, 0)
+		_, created, err := newTestVariableService(t, variables).Set(t.Context(), manifest.Variable{Name: "empty", Value: ""}, 0)
 		require.NoError(t, err)
 		assert.True(t, created)
 	})
@@ -171,7 +172,7 @@ func TestVariableService_Set(t *testing.T) {
 			},
 		})
 
-		_, _, err := svc.Set(t.Context(), "log-level", "debug", nil, 0)
+		_, _, err := svc.Set(t.Context(), manifest.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"one", "two"}, rehashed)
 	})
@@ -202,7 +203,7 @@ func TestVariableService_Set(t *testing.T) {
 			},
 		})
 
-		_, _, err := svc.Set(t.Context(), "log-level", "debug", nil, 0)
+		_, _, err := svc.Set(t.Context(), manifest.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 	})
 
@@ -233,7 +234,7 @@ func TestVariableService_Set(t *testing.T) {
 
 		// The value has landed, so every reader that can be moved onto it is.
 		// The error still reports the one that was not.
-		_, _, err := svc.Set(t.Context(), "log-level", "debug", nil, 0)
+		_, _, err := svc.Set(t.Context(), manifest.Variable{Name: "log-level", Value: "debug"}, 0)
 		assert.ErrorContains(t, err, "one")
 		assert.Equal(t, []string{"two", "three"}, rehashed)
 	})
@@ -258,14 +259,14 @@ func TestVariableService_Set(t *testing.T) {
 
 		// The single UsedBy is the one hydrate makes for the response. Nothing is
 		// rehashed, because nothing about what the workload reads moved.
-		_, _, err := svc.Set(t.Context(), "log-level", "debug", nil, 0)
+		_, _, err := svc.Set(t.Context(), manifest.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
 		assert.Empty(t, rehashed)
 	})
 
 	t.Run("refuses a name takt would not accept", func(t *testing.T) {
 		_, _, err := newTestVariableService(t, NewMockVariableRepository(t)).
-			Set(t.Context(), "LOG_LEVEL", "debug", nil, 0)
+			Set(t.Context(), manifest.Variable{Name: "LOG_LEVEL", Value: "debug"}, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidVariable)
 	})
 }

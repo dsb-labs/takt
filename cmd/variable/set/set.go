@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/pkg/client"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // The largest value that will be read from a file or from standard input.
@@ -44,7 +45,8 @@ func Command() *cobra.Command {
 
 			c := client.FromContext(cmd.Context())
 
-			variable, _, err := c.SetVariable(cmd.Context(), args[0], value, labels, client.WithIfMatch(ifMatch))
+			variable, _, err := c.SetVariable(cmd.Context(),
+				manifest.Variable{Name: args[0], Value: value, Labels: labels}, client.WithIfMatch(ifMatch))
 			if err != nil {
 				return fmt.Errorf("failed to set variable: %w", err)
 			}

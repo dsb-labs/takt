@@ -105,8 +105,8 @@ func NewVariableService(config VariableServiceConfig) *VariableService {
 	}
 }
 
-// Set stores value as the variable with the given name, returning the stored
-// variable and whether it was newly created.
+// Set stores the given variable, returning it as stored and whether it was newly
+// created.
 //
 // Setting a variable to the value it already holds is a no-op: nothing reading it is
 // redeployed. That mirrors applying an unchanged manifest, and it means a
@@ -120,7 +120,8 @@ func NewVariableService(config VariableServiceConfig) *VariableService {
 // version, reporting ErrVariableChanged when it is not. A set that would change
 // nothing is still refused on a stale version: the caller's picture of the
 // variable is wrong either way, and saying so is the point.
-func (s *VariableService) Set(ctx context.Context, name, value string, labels map[string]string, ifMatch int) (Variable, bool, error) {
+func (s *VariableService) Set(ctx context.Context, spec manifest.Variable, ifMatch int) (Variable, bool, error) {
+	name, value, labels := spec.Name, spec.Value, spec.Labels
 	if !referenceNamePattern.MatchString(name) || len(name) > 63 {
 		return Variable{}, false, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidVariable)
 	}

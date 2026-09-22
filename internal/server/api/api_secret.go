@@ -8,6 +8,7 @@ import (
 
 	"github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 type (
@@ -17,10 +18,10 @@ type (
 	// to hand it to a workload that is starting, so the API is given an interface that
 	// cannot ask.
 	SecretService interface {
-		// Set should store value as the secret with the given name, reporting whether
-		// it was newly created. A non-zero ifMatch should condition the set on the
-		// secret still being at that version.
-		Set(ctx context.Context, name string, value []byte, labels map[string]string, ifMatch int) (service.Secret, bool, error)
+		// Set should store the given secret, reporting whether it was newly
+		// created. A non-zero ifMatch should condition the set on the secret still
+		// being at that version.
+		Set(ctx context.Context, secret manifest.Secret, ifMatch int) (service.Secret, bool, error)
 		// Get should return the secret with the given name, without its value.
 		Get(ctx context.Context, name string) (service.Secret, error)
 		// List should return the secrets matching every one of the given
@@ -71,7 +72,11 @@ func (a *SecretAPI) SetSecret(ctx context.Context, request api.SetSecretRequestO
 		}, nil
 	}
 
-	secret, created, err := a.secrets.Set(ctx, request.Name, []byte(request.Body.Value), labelsOf(request.Body.Labels), ifMatch)
+	secret, created, err := a.secrets.Set(ctx, manifest.Secret{
+		Name:   request.Name,
+		Value:  []byte(request.Body.Value),
+		Labels: labelsOf(request.Body.Labels),
+	}, ifMatch)
 	switch {
 	case errors.Is(err, service.ErrInvalidSecret):
 		return api.SetSecret400JSONResponse{

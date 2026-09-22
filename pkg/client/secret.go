@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 type (
@@ -68,8 +69,7 @@ func checkSecretName(name string) error {
 	return nil
 }
 
-// SetSecret stores value as the secret with the given name, reporting whether it was
-// newly created.
+// SetSecret stores the given secret, reporting whether it was newly created.
 //
 // Setting a secret to the value it already holds does nothing, so a caller that sets
 // every secret on every run does not restart the workloads reading them. A value that
@@ -77,13 +77,13 @@ func checkSecretName(name string) error {
 //
 // Pass WithIfMatch to condition the set on the tag a get reported, which is refused
 // with ErrSecretChanged when the secret has moved on since.
-func (c *Client) SetSecret(ctx context.Context, name string, value []byte, labels map[string]string, options ...ApplyOption) (Secret, bool, error) {
-	if err := checkSecretName(name); err != nil {
+func (c *Client) SetSecret(ctx context.Context, secret manifest.Secret, options ...ApplyOption) (Secret, bool, error) {
+	if err := checkSecretName(secret.Name); err != nil {
 		return Secret{}, false, err
 	}
 
-	resp, err := c.api.SetSecretWithResponse(ctx, name, &api.SetSecretParams{IfMatch: ifMatch(options)},
-		api.SecretSpec{Value: string(value), Labels: wireLabels(labels)})
+	resp, err := c.api.SetSecretWithResponse(ctx, secret.Name, &api.SetSecretParams{IfMatch: ifMatch(options)},
+		api.SecretSpec{Value: string(secret.Value), Labels: wireLabels(secret.Labels)})
 	if err != nil {
 		return Secret{}, false, fmt.Errorf("failed to send the request: %w", err)
 	}

@@ -166,8 +166,8 @@ func NewSecretService(config SecretServiceConfig) *SecretService {
 	}
 }
 
-// Set stores value as the secret with the given name, returning the stored secret
-// and whether it was newly created.
+// Set stores the given secret, returning it as stored and whether it was newly
+// created.
 //
 // Setting a secret to the value it already holds is a no-op: the revision stays put,
 // so nothing reading it is redeployed. That mirrors applying an unchanged manifest,
@@ -181,7 +181,8 @@ func NewSecretService(config SecretServiceConfig) *SecretService {
 // reporting ErrSecretChanged when it is not. A set that would change nothing is
 // still refused on a stale version: the caller's picture of the secret is wrong
 // either way, and saying so is the point.
-func (s *SecretService) Set(ctx context.Context, name string, value []byte, labels map[string]string, ifMatch int) (Secret, bool, error) {
+func (s *SecretService) Set(ctx context.Context, spec manifest.Secret, ifMatch int) (Secret, bool, error) {
+	name, value, labels := spec.Name, spec.Value, spec.Labels
 	if !referenceNamePattern.MatchString(name) || len(name) > 63 {
 		return Secret{}, false, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidSecret)
 	}

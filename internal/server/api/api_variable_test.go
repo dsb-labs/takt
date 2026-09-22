@@ -20,7 +20,16 @@ import (
 	"github.com/dsb-labs/takt/internal/server/api"
 	"github.com/dsb-labs/takt/internal/server/middleware"
 	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
+
+// variableNamed matches the variable handed to a set by its name and, when
+// one is given, its value.
+func variableNamed(name, value string) any {
+	return mock.MatchedBy(func(variable manifest.Variable) bool {
+		return variable.Name == name && (value == "" || variable.Value == value)
+	})
+}
 
 func TestVariableAPI_SetVariable(t *testing.T) {
 	t.Parallel()
@@ -38,7 +47,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			Target: "/api/v1/variables/log-level",
 			Body:   generated.VariableSpec{Value: "debug"},
 			SetupMocks: func(svc *MockVariableService) {
-				svc.EXPECT().Set(mock.Anything, "log-level", "debug", mock.Anything, 0).
+				svc.EXPECT().Set(mock.Anything, variableNamed("log-level", "debug"), 0).
 					Return(variable("log-level", "debug"), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
@@ -52,7 +61,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			Target: "/api/v1/variables/log-level",
 			Body:   generated.VariableSpec{Value: "info"},
 			SetupMocks: func(svc *MockVariableService) {
-				svc.EXPECT().Set(mock.Anything, "log-level", "info", mock.Anything, 0).
+				svc.EXPECT().Set(mock.Anything, variableNamed("log-level", "info"), 0).
 					Return(variable("log-level", "info"), false, nil).Once()
 			},
 			ExpectStatus: http.StatusOK,
@@ -64,7 +73,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			SetupMocks: func(svc *MockVariableService) {
 				// An empty variable is a value, not a missing one: a workload reading it
 				// gets an empty environment variable rather than none.
-				svc.EXPECT().Set(mock.Anything, "empty", "", mock.Anything, 0).
+				svc.EXPECT().Set(mock.Anything, variableNamed("empty", ""), 0).
 					Return(variable("empty", ""), true, nil).Once()
 			},
 			ExpectStatus: http.StatusCreated,
@@ -75,7 +84,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			Body:         generated.VariableSpec{Value: "debug"},
 			ExpectStatus: http.StatusBadRequest,
 			SetupMocks: func(svc *MockVariableService) {
-				svc.EXPECT().Set(mock.Anything, "LOG_LEVEL", mock.Anything, mock.Anything, 0).
+				svc.EXPECT().Set(mock.Anything, variableNamed("LOG_LEVEL", ""), 0).
 					Return(service.Variable{}, false, service.ErrInvalidVariable).Once()
 			},
 		},
@@ -85,7 +94,7 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 			Body:         generated.VariableSpec{Value: "debug"},
 			ExpectStatus: http.StatusInternalServerError,
 			SetupMocks: func(svc *MockVariableService) {
-				svc.EXPECT().Set(mock.Anything, "log-level", mock.Anything, mock.Anything, 0).
+				svc.EXPECT().Set(mock.Anything, variableNamed("log-level", ""), 0).
 					Return(service.Variable{}, false, errors.New("database is gone")).Once()
 			},
 		},
@@ -159,7 +168,7 @@ func TestVariableAPI_SetVariable_Conditional(t *testing.T) {
 		svc := NewMockVariableService(t)
 		// The quotes the header carries are stripped before the service sees the
 		// version.
-		svc.EXPECT().Set(mock.Anything, "log-level", "info", mock.Anything, 3).
+		svc.EXPECT().Set(mock.Anything, variableNamed("log-level", "info"), 3).
 			Return(stored, false, nil).Once()
 
 		resp := set(t, svc, `"3"`)
@@ -169,7 +178,7 @@ func TestVariableAPI_SetVariable_Conditional(t *testing.T) {
 
 	t.Run("refuses a tag the variable has moved past", func(t *testing.T) {
 		svc := NewMockVariableService(t)
-		svc.EXPECT().Set(mock.Anything, "log-level", "info", mock.Anything, 3).
+		svc.EXPECT().Set(mock.Anything, variableNamed("log-level", "info"), 3).
 			Return(service.Variable{}, false, service.ErrVariableChanged).Once()
 
 		resp := set(t, svc, `"3"`)
