@@ -95,6 +95,11 @@ They replace rather than merge, so setting a value without `--label` removes the
 the variable had. Labelling a variable replaces no workload: what redeploys a reader is
 the value it reads.
 
+A set can be conditioned on the variable not having changed since it was read.
+`takt variable get` prints an `ETag`, and `takt variable set --if-match` carrying it
+is refused when the variable has moved on since, rather than writing over whatever
+landed in between. See [variable set](cli.md#variable-set).
+
 ## Changing a value
 
 Setting a variable to a new value moves the specification hash of every workload

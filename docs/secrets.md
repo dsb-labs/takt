@@ -91,6 +91,12 @@ a workload manifest does.
 Labelling a secret is not rotating it. The revision stays put, so nothing reading the
 secret is replaced. See [Rotation](#rotation).
 
+A set can be conditioned on the secret not having changed since it was read.
+`takt secret get` prints an `ETag`, and `takt secret set --if-match` carrying it is
+refused when the secret has moved on since, rather than writing over whatever landed
+in between. The tag moves on any write, a relabel included, where the revision moves
+only with the value. See [secret set](cli.md#secret-set).
+
 ## Mounting a secret as a file
 
 Some secrets are files. A certificate, a private key, a service-account document: a

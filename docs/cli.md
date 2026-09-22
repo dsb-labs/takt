@@ -613,6 +613,7 @@ printf %s hunter2 | takt secret set db-password
 |---|---|
 | `--from-file`, `-f` | Read the value from this file rather than standard input. |
 | `--label`, `-l` | A `key=value` label to attach. Repeatable. |
+| `--if-match` | Set only while the secret still carries this tag. |
 
 Stores a value, encrypted. There is deliberately no flag that takes the value:
 arguments are visible to anything that can list processes on the host, and they land
@@ -637,6 +638,10 @@ place to put one.
 Setting a secret to the value it already holds does nothing, so a script that sets
 every secret on every run does not restart the workloads reading them. A value that
 did change replaces those workloads, and reaches them as they start.
+
+A secret carries an entity tag the same way a workload does, and `--if-match` reads
+the same. See [workload apply](#workload-apply). The tag moves on a relabel too,
+where the revision does not.
 
 ## secret list
 
@@ -664,7 +669,8 @@ takt secret get db-password
 ```
 
 Prints one secret. `Revision` changes whenever the value changes, which is how a
-rotation is confirmed without the value being shown.
+rotation is confirmed without the value being shown. `ETag` is the tag a conditional
+[secret set](#secret-set) hands back.
 
 ## secret delete
 
@@ -695,6 +701,7 @@ printf %s debug | takt variable set log-level
 |---|---|
 | `--from-file`, `-f` | Read the value from this file rather than the argument or standard input. |
 | `--label`, `-l` | A `key=value` label to attach. Repeatable. |
+| `--if-match` | Set only while the variable still carries this tag. |
 
 Stores a value as given. The value may be an argument here, where a secret's may not:
 arguments are visible to anything that can list processes and they land in shell
@@ -711,6 +718,9 @@ is the value it reads.
 Setting a variable to the value it already holds does nothing, so a script that sets
 every variable on every run does not restart the workloads reading them. A value that
 did change replaces those workloads, and reaches them as they start.
+
+A variable carries an entity tag the same way a workload does, and `--if-match` reads
+the same. See [workload apply](#workload-apply).
 
 ## variable list
 
@@ -737,7 +747,8 @@ query can reach only the labels, not the values the list reports.
 takt variable get log-level
 ```
 
-Prints one variable, including its value.
+Prints one variable, including its value. `ETag` is the tag a conditional
+[variable set](#variable-set) hands back.
 
 ## variable delete
 
@@ -808,24 +819,40 @@ at the host with the reset file. See
 
 ```sh
 takt acl get
-takt acl get > policy.yaml
+takt acl get | jq .Spec > policy.yaml
 ```
 
-Prints the canonical current policy document. The output is valid input to
-`acl apply`, so the live policy can be captured into the file a repository
-tracks. Requires the `admin` role.
+Prints the canonical current policy document under `Spec`, beside the `ETag` a
+conditional [acl apply](#acl-apply) hands back, the way `workload get` nests a
+workload's specification. The document alone is valid input to `acl apply`, so
+the live policy can be captured into the file a repository tracks. Requires the
+`admin` role.
+
+The tag counts the applies that changed the document. It is `"0"` before any
+apply, when the policy is the empty document that grants nothing to anyone.
 
 ## acl apply
 
 ```sh
 takt acl apply policy.yaml
+takt acl apply policy.yaml --if-match '"3"'
 ```
+
+| Flag | Description |
+|---|---|
+| `--if-match` | Apply only while the policy still carries this tag. |
 
 Replaces the whole policy with the document in the file. A grant absent from
 the file is revoked, with no prune step, and the change applies to the very
 next request. A concurrent apply is reported as an error to re-run rather
 than silently overwritten. Requires the `admin` role or the recovery token.
 See [Access control](acl.md#the-policy-document).
+
+The apply is always conditional. Without `--if-match` the command reads the
+tag itself just before applying, which refuses a concurrent apply but not a
+file captured before someone else's apply landed. Passing the tag `acl get`
+reported conditions the apply on that read instead, and takt refuses it when
+the policy has moved on since.
 
 ## auth login
 
