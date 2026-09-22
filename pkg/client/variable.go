@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 type (
@@ -65,8 +66,7 @@ func checkVariableName(name string) error {
 	return nil
 }
 
-// SetVariable stores value as the variable with the given name, reporting whether it
-// was newly created.
+// SetVariable stores the given variable, reporting whether it was newly created.
 //
 // Setting a variable to the value it already holds does nothing, so a caller that
 // sets every variable on every run does not restart the workloads reading them. A
@@ -74,13 +74,13 @@ func checkVariableName(name string) error {
 //
 // Pass WithIfMatch to condition the set on the tag a get reported, which is refused
 // with ErrVariableChanged when the variable has moved on since.
-func (c *Client) SetVariable(ctx context.Context, name, value string, labels map[string]string, options ...ApplyOption) (Variable, bool, error) {
-	if err := checkVariableName(name); err != nil {
+func (c *Client) SetVariable(ctx context.Context, variable manifest.Variable, options ...ApplyOption) (Variable, bool, error) {
+	if err := checkVariableName(variable.Name); err != nil {
 		return Variable{}, false, err
 	}
 
-	resp, err := c.api.SetVariableWithResponse(ctx, name, &api.SetVariableParams{IfMatch: ifMatch(options)},
-		api.VariableSpec{Value: value, Labels: wireLabels(labels)})
+	resp, err := c.api.SetVariableWithResponse(ctx, variable.Name, &api.SetVariableParams{IfMatch: ifMatch(options)},
+		api.VariableSpec{Value: variable.Value, Labels: wireLabels(variable.Labels)})
 	if err != nil {
 		return Variable{}, false, fmt.Errorf("failed to send the request: %w", err)
 	}

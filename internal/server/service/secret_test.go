@@ -14,6 +14,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/secret"
 	"github.com/dsb-labs/takt/internal/server/service"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // secretNamed matches the secret handed to an upsert by its name alone, for the
@@ -42,7 +43,7 @@ func TestSecretService_Set(t *testing.T) {
 		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return(nil, nil).Once()
 
 		stored, created, err := newTestSecretService(t, secrets, nil).
-			Set(t.Context(), "db-password", []byte("hunter2"), nil, 0)
+			Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, 0)
 		require.NoError(t, err)
 		assert.True(t, created)
 		assert.Equal(t, "db-password", stored.Name)
@@ -69,7 +70,7 @@ func TestSecretService_Set(t *testing.T) {
 		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return(nil, nil).Once()
 
 		stored, created, err := newTestSecretService(t, secrets, cipher).
-			Set(t.Context(), "db-password", []byte("hunter3"), nil, 0)
+			Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter3")}, 0)
 		require.NoError(t, err)
 		assert.False(t, created)
 		assert.NotEqual(t, "rev-one", revision)
@@ -91,7 +92,7 @@ func TestSecretService_Set(t *testing.T) {
 		// sets every secret on every run does not restart the fleet each time. The
 		// mock asserts no Upsert, since it was never told to expect one.
 		stored, created, err := newTestSecretService(t, secrets, cipher).
-			Set(t.Context(), "db-password", []byte("hunter2"), nil, 0)
+			Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, 0)
 		require.NoError(t, err)
 		assert.False(t, created)
 		assert.Equal(t, "rev-one", stored.Revision)
@@ -134,7 +135,7 @@ func TestSecretService_Set(t *testing.T) {
 		// Nothing is redeployed, which the mock asserts by never being told to
 		// expect a rehash.
 		stored, created, err := newTestSecretService(t, secrets, cipher).
-			Set(t.Context(), "db-password", []byte("hunter2"), map[string]string{"app": "api"}, 0)
+			Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2"), Labels: map[string]string{"app": "api"}}, 0)
 		require.NoError(t, err)
 		assert.False(t, created)
 		assert.Equal(t, "rev-one", stored.Revision)
@@ -145,7 +146,7 @@ func TestSecretService_Set(t *testing.T) {
 		// The rules are the workload's rules. The repository is never reached, which
 		// the mock asserts by expecting nothing.
 		_, _, err := newTestSecretService(t, NewMockSecretRepository(t), nil).
-			Set(t.Context(), "db-password", []byte("hunter2"), map[string]string{"takt.workload": "sneaky"}, 0)
+			Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2"), Labels: map[string]string{"takt.workload": "sneaky"}}, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidSecret)
 	})
 
@@ -171,7 +172,7 @@ func TestSecretService_Set(t *testing.T) {
 			},
 		})
 
-		_, _, err := svc.Set(t.Context(), "db-password", []byte("hunter2"), nil, 0)
+		_, _, err := svc.Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, 0)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"one", "two"}, rehashed)
 	})
@@ -203,7 +204,7 @@ func TestSecretService_Set(t *testing.T) {
 			},
 		})
 
-		_, _, err := svc.Set(t.Context(), "db-password", []byte("hunter2"), nil, 0)
+		_, _, err := svc.Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, 0)
 		require.NoError(t, err)
 	})
 
@@ -235,14 +236,14 @@ func TestSecretService_Set(t *testing.T) {
 
 		// The value has landed, so every reader that can be moved onto it is.
 		// The error still reports the one that was not.
-		_, _, err := svc.Set(t.Context(), "db-password", []byte("hunter2"), nil, 0)
+		_, _, err := svc.Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, 0)
 		assert.ErrorContains(t, err, "one")
 		assert.Equal(t, []string{"two", "three"}, rehashed)
 	})
 
 	t.Run("refuses a name takt would not accept", func(t *testing.T) {
 		_, _, err := newTestSecretService(t, NewMockSecretRepository(t), nil).
-			Set(t.Context(), "DB_PASSWORD", []byte("hunter2"), nil, 0)
+			Set(t.Context(), manifest.Secret{Name: "DB_PASSWORD", Value: []byte("hunter2")}, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidSecret)
 	})
 
@@ -260,7 +261,7 @@ func TestSecretService_Set(t *testing.T) {
 		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return(nil, nil).Once()
 
 		stored, _, err := newTestSecretService(t, secrets, cipher).
-			Set(t.Context(), "db-password", []byte("hunter3"), nil, 3)
+			Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter3")}, 3)
 		require.NoError(t, err)
 		assert.Equal(t, 4, stored.Version)
 	})
@@ -278,7 +279,7 @@ func TestSecretService_Set(t *testing.T) {
 		// Refused before anything is sealed or written, which the mock asserts by
 		// expecting no Upsert.
 		_, _, err = newTestSecretService(t, secrets, cipher).
-			Set(t.Context(), "db-password", []byte("hunter3"), nil, 3)
+			Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter3")}, 3)
 		assert.ErrorIs(t, err, service.ErrSecretChanged)
 	})
 
@@ -295,7 +296,7 @@ func TestSecretService_Set(t *testing.T) {
 			Return(database.Secret{Name: "db-password", Value: sealed, Revision: "rev-one", Version: 4}, nil).Once()
 
 		_, _, err = newTestSecretService(t, secrets, cipher).
-			Set(t.Context(), "db-password", []byte("hunter2"), nil, 3)
+			Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, 3)
 		assert.ErrorIs(t, err, service.ErrSecretChanged)
 	})
 
@@ -305,7 +306,7 @@ func TestSecretService_Set(t *testing.T) {
 			Return(database.Secret{}, database.ErrSecretNotFound).Once()
 
 		_, _, err := newTestSecretService(t, secrets, nil).
-			Set(t.Context(), "db-password", []byte("hunter2"), nil, 1)
+			Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, 1)
 		assert.ErrorIs(t, err, service.ErrSecretChanged)
 	})
 
@@ -324,7 +325,7 @@ func TestSecretService_Set(t *testing.T) {
 			Return(database.Secret{}, database.ErrSecretChanged).Once()
 
 		_, _, err = newTestSecretService(t, secrets, cipher).
-			Set(t.Context(), "db-password", []byte("hunter3"), nil, 3)
+			Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter3")}, 3)
 		assert.ErrorIs(t, err, service.ErrSecretChanged)
 	})
 
@@ -339,7 +340,7 @@ func TestSecretService_Set(t *testing.T) {
 
 		// A key rotated out from under the database leaves a value nothing can read.
 		// Re-sealing under the current key is more useful than refusing to move.
-		_, _, err := newTestSecretService(t, secrets, nil).Set(t.Context(), "db-password", []byte("hunter2"), nil, 0)
+		_, _, err := newTestSecretService(t, secrets, nil).Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, 0)
 		require.NoError(t, err)
 	})
 }

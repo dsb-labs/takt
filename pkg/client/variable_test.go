@@ -11,6 +11,7 @@ import (
 
 	"github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/pkg/client"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 func TestClient_SetVariable(t *testing.T) {
@@ -70,7 +71,7 @@ func TestClient_SetVariable(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
 			variable, created, err := newTestClient(t, tc.Handler).
-				SetVariable(t.Context(), "log-level", "debug", nil)
+				SetVariable(t.Context(), manifest.Variable{Name: "log-level", Value: "debug"})
 			if tc.ExpectErr != nil {
 				assert.True(t, tc.ExpectErr(err), "unexpected error: %v", err)
 				return
@@ -99,7 +100,7 @@ func TestClient_SetVariable_Conditional(t *testing.T) {
 			writeJSON(t, w, http.StatusOK, api.SetVariableResult{Variable: apiVariable("log-level", "info")})
 		})
 
-		variable, _, err := c.SetVariable(t.Context(), "log-level", "info", nil, client.WithIfMatch(`"3"`))
+		variable, _, err := c.SetVariable(t.Context(), manifest.Variable{Name: "log-level", Value: "info"}, client.WithIfMatch(`"3"`))
 		require.NoError(t, err)
 		assert.Equal(t, `"4"`, variable.ETag)
 	})
@@ -111,7 +112,7 @@ func TestClient_SetVariable_Conditional(t *testing.T) {
 			writeJSON(t, w, http.StatusCreated, api.SetVariableResult{Variable: apiVariable("log-level", "info")})
 		})
 
-		_, _, err := c.SetVariable(t.Context(), "log-level", "info", nil)
+		_, _, err := c.SetVariable(t.Context(), manifest.Variable{Name: "log-level", Value: "info"})
 		require.NoError(t, err)
 	})
 
@@ -120,7 +121,7 @@ func TestClient_SetVariable_Conditional(t *testing.T) {
 			writeJSON(t, w, http.StatusPreconditionFailed, api.ErrorResponse{Error: "the variable changed since it was read"})
 		})
 
-		_, _, err := c.SetVariable(t.Context(), "log-level", "info", nil, client.WithIfMatch(`"3"`))
+		_, _, err := c.SetVariable(t.Context(), manifest.Variable{Name: "log-level", Value: "info"}, client.WithIfMatch(`"3"`))
 		assert.ErrorIs(t, err, client.ErrVariableChanged)
 	})
 }

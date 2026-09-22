@@ -401,7 +401,7 @@ func (s *Suite) TestStopRemovesMountedValues() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("plaintext"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("plaintext")})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -1636,7 +1636,7 @@ func (s *Suite) TestDryRunOfAWorkloadReadingAVariable() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupVariable(variable) })
 
-	_, _, err := s.client.SetVariable(s.ctx(), variable, "first", nil)
+	_, _, err := s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "first"})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -1651,7 +1651,7 @@ func (s *Suite) TestDryRunOfAWorkloadReadingAVariable() {
 	s.Require().NoError(err)
 	s.False(before.Replaced)
 
-	_, _, err = s.client.SetVariable(s.ctx(), variable, "second", nil)
+	_, _, err = s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "second"})
 	s.Require().NoError(err)
 
 	after, err := s.client.DryRun(s.ctx(), spec)
@@ -1991,7 +1991,7 @@ func (s *Suite) TestWorkloadReadsASecret() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	stored, created, err := s.client.SetSecret(s.ctx(), secret, []byte("hunter2"), nil)
+	stored, created, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("hunter2")})
 	s.Require().NoError(err)
 	s.True(created)
 	s.NotEmpty(stored.Revision)
@@ -2031,7 +2031,7 @@ func (s *Suite) TestRotatingASecretRedeploysItsWorkload() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("first"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("first")})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -2049,7 +2049,7 @@ func (s *Suite) TestRotatingASecretRedeploysItsWorkload() {
 	s.Require().NoError(err)
 	s.Equal([]string{name}, held.UsedBy)
 
-	rotated, created, err := s.client.SetSecret(s.ctx(), secret, []byte("second"), nil)
+	rotated, created, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("second")})
 	s.Require().NoError(err)
 	s.False(created)
 	s.NotEqual(held.Revision, rotated.Revision)
@@ -2070,7 +2070,7 @@ func (s *Suite) TestUnchangedSecretIsNotRedeployed() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	first, _, err := s.client.SetSecret(s.ctx(), secret, []byte("unchanged"), nil)
+	first, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("unchanged")})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -2082,7 +2082,7 @@ func (s *Suite) TestUnchangedSecretIsNotRedeployed() {
 	before := s.awaitState(name, client.WorkloadStateRunning)
 	instance := s.awaitInstance(name)
 
-	again, created, err := s.client.SetSecret(s.ctx(), secret, []byte("unchanged"), nil)
+	again, created, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("unchanged")})
 	s.Require().NoError(err)
 	s.False(created)
 	s.Equal(first.Revision, again.Revision)
@@ -2119,7 +2119,7 @@ func (s *Suite) TestRelabellingASecretDoesNotRedeployIt() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	first, _, err := s.client.SetSecret(s.ctx(), secret, []byte("unchanged"), map[string]string{"app": "web"})
+	first, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("unchanged"), Labels: map[string]string{"app": "web"}})
 	s.Require().NoError(err)
 	s.Equal(map[string]string{"app": "web"}, first.Labels)
 
@@ -2134,8 +2134,11 @@ func (s *Suite) TestRelabellingASecretDoesNotRedeployIt() {
 
 	// The same value under different labels. The labels land and the revision does
 	// not move.
-	relabelled, created, err := s.client.SetSecret(s.ctx(), secret,
-		[]byte("unchanged"), map[string]string{"app": "api", "team": "platform"})
+	relabelled, created, err := s.client.SetSecret(s.ctx(), manifest.Secret{
+		Name:   secret,
+		Value:  []byte("unchanged"),
+		Labels: map[string]string{"app": "api", "team": "platform"},
+	})
 	s.Require().NoError(err)
 	s.False(created)
 	s.Equal(first.Revision, relabelled.Revision)
@@ -2143,7 +2146,7 @@ func (s *Suite) TestRelabellingASecretDoesNotRedeployIt() {
 
 	// Labels replace rather than merge, so setting the value with none removes them.
 	// The revision still holds.
-	cleared, _, err := s.client.SetSecret(s.ctx(), secret, []byte("unchanged"), nil)
+	cleared, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("unchanged")})
 	s.Require().NoError(err)
 	s.Equal(first.Revision, cleared.Revision)
 	s.Empty(cleared.Labels)
@@ -2245,7 +2248,7 @@ func (s *Suite) TestListQueryOnLabels() {
 	s.True(client.IsBadRequest(err), "expected a bad request error, got %v", err)
 
 	// The same query narrows the secret list.
-	_, _, err = s.client.SetSecret(s.ctx(), secret, []byte("held"), map[string]string{"suite": marker})
+	_, _, err = s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("held"), Labels: map[string]string{"suite": marker}})
 	s.Require().NoError(err)
 
 	secrets, err := s.client.ListSecrets(s.ctx(), "$.labels.suite="+marker)
@@ -2257,7 +2260,7 @@ func (s *Suite) TestListQueryOnLabels() {
 	s.True(client.IsBadRequest(err), "expected a bad request error, got %v", err)
 
 	// And the variable list.
-	_, _, err = s.client.SetVariable(s.ctx(), variable, "held", map[string]string{"suite": marker})
+	_, _, err = s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "held", Labels: map[string]string{"suite": marker}})
 	s.Require().NoError(err)
 
 	variables, err := s.client.ListVariables(s.ctx(), "$.labels.suite="+marker)
@@ -2276,7 +2279,7 @@ func (s *Suite) TestDeletingASecretInUseIsRefused() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("held"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("held")})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -2305,7 +2308,7 @@ func (s *Suite) TestDeletingASecretInUseIsRefused() {
 
 	// Re-creating it recovers the workload on its own, which is what the link
 	// outliving the secret is for.
-	_, created, err := s.client.SetSecret(s.ctx(), secret, []byte("restored"), nil)
+	_, created, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("restored")})
 	s.Require().NoError(err)
 	s.True(created)
 
@@ -2339,7 +2342,7 @@ func (s *Suite) TestSecretSurvivesAServerRestart() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	stored, _, err := s.client.SetSecret(s.ctx(), secret, []byte("across-restarts"), nil)
+	stored, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("across-restarts")})
 	s.Require().NoError(err)
 
 	s.restart(withDataDirectory(directory))
@@ -2381,7 +2384,7 @@ func (s *Suite) TestWorkloadReadsAVariable() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupVariable(variable) })
 
-	stored, created, err := s.client.SetVariable(s.ctx(), variable, "localhost", nil)
+	stored, created, err := s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "localhost"})
 	s.Require().NoError(err)
 	s.True(created)
 	s.Equal("localhost", stored.Value)
@@ -2427,10 +2430,10 @@ func (s *Suite) TestWorkloadReadsBothKinds() {
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 	s.T().Cleanup(func() { s.cleanupVariable(variable) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("hunter2"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("hunter2")})
 	s.Require().NoError(err)
 
-	_, _, err = s.client.SetVariable(s.ctx(), variable, "db.internal", nil)
+	_, _, err = s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "db.internal"})
 	s.Require().NoError(err)
 
 	spec := s.jobSpec(name, manifest.RestartNever, 0)
@@ -2462,7 +2465,7 @@ func (s *Suite) TestChangingAVariableRedeploysItsWorkload() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupVariable(variable) })
 
-	_, _, err := s.client.SetVariable(s.ctx(), variable, "first", nil)
+	_, _, err := s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "first"})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -2480,7 +2483,7 @@ func (s *Suite) TestChangingAVariableRedeploysItsWorkload() {
 	s.Require().NoError(err)
 	s.Equal([]string{name}, held.UsedBy)
 
-	changed, created, err := s.client.SetVariable(s.ctx(), variable, "second", nil)
+	changed, created, err := s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "second"})
 	s.Require().NoError(err)
 	s.False(created)
 	s.Equal("second", changed.Value)
@@ -2501,7 +2504,7 @@ func (s *Suite) TestUnchangedVariableIsNotRedeployed() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupVariable(variable) })
 
-	first, _, err := s.client.SetVariable(s.ctx(), variable, "unchanged", nil)
+	first, _, err := s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "unchanged"})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -2513,7 +2516,7 @@ func (s *Suite) TestUnchangedVariableIsNotRedeployed() {
 	before := s.awaitState(name, client.WorkloadStateRunning)
 	instance := s.awaitInstance(name)
 
-	again, created, err := s.client.SetVariable(s.ctx(), variable, "unchanged", nil)
+	again, created, err := s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "unchanged"})
 	s.Require().NoError(err)
 	s.False(created)
 	s.Equal(first.UpdatedAt, again.UpdatedAt)
@@ -2545,7 +2548,7 @@ func (s *Suite) TestDeletingAVariableInUseIsRefused() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupVariable(variable) })
 
-	_, _, err := s.client.SetVariable(s.ctx(), variable, "held", nil)
+	_, _, err := s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "held"})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -2571,7 +2574,7 @@ func (s *Suite) TestDeletingAVariableInUseIsRefused() {
 	s.ErrorIs(err, client.ErrVariableNotFound)
 
 	// Re-creating it recovers the workload, which had been left unable to start.
-	_, _, err = s.client.SetVariable(s.ctx(), variable, "held", nil)
+	_, _, err = s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "held"})
 	s.Require().NoError(err)
 
 	s.awaitState(name, client.WorkloadStateRunning)
@@ -2603,7 +2606,7 @@ func (s *Suite) TestVariableSurvivesAServerRestart() {
 
 	directory := s.directory
 
-	stored, _, err := s.client.SetVariable(s.ctx(), variable, "persisted", nil)
+	stored, _, err := s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "persisted"})
 	s.Require().NoError(err)
 
 	s.restart(withDataDirectory(directory))
@@ -2792,10 +2795,10 @@ func (s *Suite) TestWorkloadMountsValues() {
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 	s.T().Cleanup(func() { s.cleanupVariable(variable) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte(`{"key":"hunter2"}`), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte(`{"key":"hunter2"}`)})
 	s.Require().NoError(err)
 
-	_, _, err = s.client.SetVariable(s.ctx(), variable, `{"level":"debug"}`, nil)
+	_, _, err = s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: `{"level":"debug"}`})
 	s.Require().NoError(err)
 
 	spec := s.jobSpec(name, manifest.RestartNever, 0)
@@ -2851,7 +2854,7 @@ func (s *Suite) TestReadOnlyRootfsLeavesMountsUsable() {
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 	s.T().Cleanup(func() { s.cleanupVolume(volume) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("hunter2"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("hunter2")})
 	s.Require().NoError(err)
 
 	created, err := s.client.ApplyVolume(s.ctx(), manifest.Volume{Version: "v1", Name: volume})
@@ -2888,7 +2891,7 @@ func (s *Suite) TestChangingAMountedValueRedeploysItsWorkload() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("first"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("first")})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -2900,7 +2903,7 @@ func (s *Suite) TestChangingAMountedValueRedeploysItsWorkload() {
 	s.awaitState(name, client.WorkloadStateRunning)
 	original := s.instanceID(name)
 
-	_, created, err := s.client.SetSecret(s.ctx(), secret, []byte("second"), nil)
+	_, created, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("second")})
 	s.Require().NoError(err)
 	s.False(created)
 
@@ -2932,7 +2935,7 @@ func (s *Suite) TestSignallingAMountedValueKeepsTheWorkload() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("first"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("first")})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -2948,7 +2951,7 @@ func (s *Suite) TestSignallingAMountedValueKeepsTheWorkload() {
 	original := s.instanceID(name)
 	s.Require().Equal("first", s.mountedFile(name, "/var/secret"))
 
-	_, created, err := s.client.SetSecret(s.ctx(), secret, []byte("second"), nil)
+	_, created, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("second")})
 	s.Require().NoError(err)
 	s.False(created)
 
@@ -2976,7 +2979,7 @@ func (s *Suite) TestDeletingAWorkloadRemovesItsMountedValues() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("on-disk"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("on-disk")})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -3024,7 +3027,7 @@ func (s *Suite) TestExecWorkloadMountsAValue() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("exec-mounted"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("exec-mounted")})
 	s.Require().NoError(err)
 
 	// The relative path, as for a mounted volume: making the absolute one resolve there
@@ -3170,7 +3173,7 @@ func (s *Suite) TestBackupRestoresANode() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	stored, _, err := s.client.SetSecret(s.ctx(), secret, []byte("survives-a-restore"), nil)
+	stored, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("survives-a-restore")})
 	s.Require().NoError(err)
 
 	_, _, err = s.client.Apply(s.ctx(), s.containerSpec(name))
@@ -3326,7 +3329,7 @@ func (s *Suite) TestRekeyKeepsSecretsReadable() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	stored, _, err := s.client.SetSecret(s.ctx(), secret, []byte("survives-a-rekey"), nil)
+	stored, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("survives-a-rekey")})
 	s.Require().NoError(err)
 
 	rekey, err := s.client.Rekey(s.ctx())
@@ -3365,7 +3368,7 @@ func (s *Suite) TestRekeyDoesNotRedeployWorkloads() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("unchanged-by-a-rekey"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("unchanged-by-a-rekey")})
 	s.Require().NoError(err)
 
 	spec := s.containerSpec(name)
@@ -3408,7 +3411,7 @@ func (s *Suite) TestRekeySurvivesAServerRestart() {
 	s.T().Cleanup(func() { s.cleanup(name) })
 	s.T().Cleanup(func() { s.cleanupSecret(secret) })
 
-	_, _, err := s.client.SetSecret(s.ctx(), secret, []byte("across-a-rekey"), nil)
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("across-a-rekey")})
 	s.Require().NoError(err)
 
 	rekey, err := s.client.Rekey(s.ctx())
@@ -3924,7 +3927,7 @@ func (s *Suite) TestAuthDisabled() {
 	name := s.variableName()
 	defer s.cleanupVariable(name)
 
-	_, _, err = s.client.SetVariable(s.ctx(), name, "value", nil)
+	_, _, err = s.client.SetVariable(s.ctx(), manifest.Variable{Name: name, Value: "value"})
 	s.Require().NoError(err)
 }
 
@@ -3974,7 +3977,7 @@ func (s *Suite) TestAuthLifecycle() {
 	name := s.variableName()
 	defer s.cleanupVariable(name)
 
-	_, _, err = viewer.SetVariable(s.ctx(), name, "value", nil)
+	_, _, err = viewer.SetVariable(s.ctx(), manifest.Variable{Name: name, Value: "value"})
 	s.Require().True(client.IsForbidden(err), "expected 403, got %v", err)
 
 	_, err = viewer.ListTokens(s.ctx())
@@ -3987,7 +3990,7 @@ func (s *Suite) TestAuthLifecycle() {
 	s.Equal("viewer", identity.Role)
 
 	// The operator drives resource lifecycle.
-	_, _, err = operator.SetVariable(s.ctx(), name, "value", nil)
+	_, _, err = operator.SetVariable(s.ctx(), manifest.Variable{Name: name, Value: "value"})
 	s.Require().NoError(err)
 
 	// Revocation is immediate: the token list names the viewer's credential,
