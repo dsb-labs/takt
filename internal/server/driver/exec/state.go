@@ -47,6 +47,16 @@ type state struct {
 	// Recorded so that the cgroup can be removed by a server that did not create
 	// it: the process outlives the server, and its limits have to outlive it too.
 	Cgroup string `json:"cgroup,omitempty"`
+	// The size the output is rotated at, in bytes, zero for a workload naming no
+	// cap.
+	//
+	// Recorded so that the rotation outlives the server that started the process:
+	// an adopted process has no specification in hand, and its output keeps growing
+	// under whichever server is running.
+	LogMaxSize int64 `json:"logMaxSize,omitempty"`
+	// How many files of output are kept, the one being written included. Zero
+	// means one.
+	LogMaxFiles int `json:"logMaxFiles,omitempty"`
 	// Whether the process has ended, and how.
 	Ended bool `json:"ended"`
 	// The exit code, meaningful only when Ended.

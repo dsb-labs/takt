@@ -29,6 +29,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/docker/go-units"
+
 	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
@@ -415,6 +417,22 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		recorded.Cgroup = limits.path
 	}
 
+	if w.Spec.Logs != nil {
+		// Validation proved the size parses, so an error here means the stored
+		// specification and the rules have diverged rather than that the operator
+		// made a mistake.
+		size, err := units.RAMInBytes(w.Spec.Logs.MaxSize)
+		if err != nil {
+			_ = d.kill(cmd.Process.Pid)
+			limits.discard()
+
+			return "", fmt.Errorf("failed to parse output cap %q: %w", w.Spec.Logs.MaxSize, err)
+		}
+
+		recorded.LogMaxSize = size
+		recorded.LogMaxFiles = w.Spec.Logs.MaxFiles
+	}
+
 	if err = writeState(recordPath, recorded); err != nil {
 		_ = d.kill(cmd.Process.Pid)
 		limits.discard()
@@ -746,6 +764,15 @@ func (d *Driver) keep(id string, r record) error {
 	err = os.Rename(filepath.Join(workload, outputFile), filepath.Join(workload, previousFile))
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to keep the previous output: %w", pathless(err))
+	}
+
+	// What was rotated out goes with the working directory. The previous output is
+	// kept so that an operator can read why the attempt ended, and the end of it is
+	// in the file just moved. Keeping the rest would hold a second cap's worth per
+	// attempt, and a restart at the same version would otherwise inherit rotated
+	// files from an attempt that is no longer the previous one.
+	if err = removeRotated(filepath.Join(workload, outputFile)); err != nil {
+		return err
 	}
 
 	return retain(r.path)
@@ -1163,16 +1190,25 @@ func (d *Driver) Usage(_ context.Context, id, _ string) (map[string]driver.Usage
 // There is no event stream to subscribe to, so the driver is its own source: the
 // goroutine waiting on a process reports its exit. A process adopted from an earlier
 // server produces no event, and the reconciler's ticker covers that.
+//
+// The same goroutine rotates the output of every workload naming a cap. It is the
+// one long-lived goroutine the driver has, and it lives for exactly as long as the
+// server is watching the runtime, which is how long output should be rotated for.
 func (d *Driver) Watch(ctx context.Context) (<-chan driver.Event, error) {
 	out := make(chan driver.Event)
 
 	go func() {
 		defer close(out)
 
+		ticker := time.NewTicker(rotateInterval)
+		defer ticker.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-ticker.C:
+				d.rotate()
 			case event := <-d.events:
 				select {
 				case out <- event:

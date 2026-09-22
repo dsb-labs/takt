@@ -1636,3 +1636,155 @@ func newVolume(t *testing.T, name string) string {
 
 	return path
 }
+
+// TestDriver_Logs_Rotation covers the output cap. The process writes to its file
+// directly, so the driver rotates by looking, and looking happens on the goroutine
+// Watch starts: each test watches the driver so that rotation runs at all.
+func TestDriver_Logs_Rotation(t *testing.T) {
+	t.Parallel()
+
+	// A shell writing numbered lines continuously, which is what a chatty workload
+	// looks like. Numbered so a read can prove the lines came back in order across
+	// the rotation.
+	const chatty = `i=0; while :; do i=$((i+1)); echo "line $i"; sleep 0.005; done`
+
+	t.Run("rotates the output at the cap and reads across the rotation", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		_, err := d.Watch(t.Context())
+		require.NoError(t, err)
+
+		_, err = d.Start(t.Context(), withLogs(workload(t, "example", 1, "hash-one", chatty), manifest.Logs{MaxSize: "1k", MaxFiles: 2}))
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
+
+		// The cap is recorded with the process, so a server that adopts it after a
+		// restart keeps rotating without the specification in hand.
+		var recorded map[string]any
+		data, err := os.ReadFile(filepath.Join(root, "state", idOf(t), "0", "1", "state.json"))
+		require.NoError(t, err)
+		require.NoError(t, json.Unmarshal(data, &recorded))
+		assert.EqualValues(t, 1024, recorded["logMaxSize"])
+		assert.EqualValues(t, 2, recorded["logMaxFiles"])
+
+		output := filepath.Join(root, "workloads", idOf(t), "0", "1", "output.log")
+
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(output + ".1")
+
+			return err == nil
+		}, 10*time.Second, 50*time.Millisecond, "the output was never rotated")
+
+		// Two files are kept, the one being written included, so nothing older than
+		// the first rotated file exists.
+		_, err = os.Stat(output + ".2")
+		assert.True(t, os.IsNotExist(err), "more files were kept than the cap allows")
+
+		// A tail longer than the file being written reaches into the rotated one, so
+		// a read just after a rotation is not a handful of lines. The rotated file
+		// holds at least the cap's worth, which is over a hundred of these lines.
+		var out bytes.Buffer
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 1000}))
+
+		lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+		assert.Greater(t, len(lines), 100, "the tail did not reach into the rotated output")
+
+		// In order, whatever the rotation cut between. A line written in the instant
+		// between the copy and the truncate is lost rather than duplicated, so the
+		// numbers may skip but never go backwards.
+		previous := 0
+		for _, line := range lines {
+			number, err := strconv.Atoi(strings.TrimPrefix(line, "line "))
+			if err != nil {
+				// The rotation cuts at a byte, so the first line read may be the
+				// tail of one split across two files.
+				continue
+			}
+
+			assert.Greater(t, number, previous, "the lines came back out of order: %q", out.String())
+			previous = number
+		}
+	})
+
+	t.Run("truncates without keeping older output when one file is kept", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		_, err := d.Watch(t.Context())
+		require.NoError(t, err)
+
+		_, err = d.Start(t.Context(), withLogs(workload(t, "example", 1, "hash-one", chatty), manifest.Logs{MaxSize: "1k"}))
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = d.Discard(context.Background(), "", "example") })
+
+		// The first line is gone once the output has been truncated, and nothing
+		// holds it: a cap of one file keeps only what was written since.
+		require.Eventually(t, func() bool {
+			var out bytes.Buffer
+			if err := d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 1000}); err != nil {
+				return false
+			}
+
+			return out.Len() > 0 && !strings.Contains(out.String(), "line 1\n")
+		}, 10*time.Second, 50*time.Millisecond, "the output was never truncated")
+
+		_, err = os.Stat(filepath.Join(root, "workloads", idOf(t), "0", "1", "output.log.1"))
+		assert.True(t, os.IsNotExist(err), "a rotated file was kept with a cap of one")
+	})
+
+	t.Run("removes the rotated output when the workload is stopped", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		_, err := d.Watch(t.Context())
+		require.NoError(t, err)
+
+		_, err = d.Start(t.Context(), withLogs(workload(t, "example", 1, "hash-one", chatty), manifest.Logs{MaxSize: "1k", MaxFiles: 3}))
+		require.NoError(t, err)
+
+		output := filepath.Join(root, "workloads", idOf(t), "0", "1", "output.log")
+
+		require.Eventually(t, func() bool {
+			_, err := os.Stat(output + ".1")
+
+			return err == nil
+		}, 10*time.Second, 50*time.Millisecond, "the output was never rotated")
+
+		require.NoError(t, d.Stop(t.Context(), "", "example"))
+
+		// The end of the attempt's output is kept as the previous output, the way
+		// it is for a workload naming no cap. What was rotated out goes, so a stop
+		// holds one cap's worth per instance rather than several.
+		_, err = os.Stat(filepath.Join(root, "workloads", idOf(t), "0", "1", "previous.log"))
+		assert.NoError(t, err, "the previous output was not kept")
+
+		_, err = os.Stat(output + ".1")
+		assert.True(t, os.IsNotExist(err), "the rotated output outlived the attempt")
+	})
+
+	t.Run("leaves a workload naming no cap alone", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		_, err := d.Watch(t.Context())
+		require.NoError(t, err)
+
+		_, err = d.Start(t.Context(), workload(t, "example", 1, "hash-one", "seq 1 2000"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		// Well past a kilobyte, and untouched: the cap is the manifest's to name, and
+		// a workload naming none grows as it always did.
+		info, err := os.Stat(filepath.Join(root, "workloads", idOf(t), "0", "1", "output.log"))
+		require.NoError(t, err)
+		assert.Greater(t, info.Size(), int64(4096))
+	})
+}
+
+// withLogs sets the output cap on a workload, which lives beside the runtime block
+// rather than inside it.
+func withLogs(w driver.Workload, logs manifest.Logs) driver.Workload {
+	w.Spec.Logs = &logs
+
+	return w
+}
