@@ -1,0 +1,6 @@
+version: v1
+name: example
+logs:
+  maxSize: 1m
+exec:
+  command: ["/usr/local/bin/backup", "--target", "/data"]

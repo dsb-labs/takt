@@ -1,0 +1,5 @@
+version: v1
+name: example
+logs: {}
+container:
+  image: example/example:latest

@@ -137,6 +137,9 @@ type (
 		// unlimited workload stays what it is today. A runtime that cannot enforce
 		// them rejects them rather than ignoring them.
 		Resources *Resources `json:"resources,omitempty"`
+		// The cap on what the workload's output may grow to. Nil applies none, so
+		// the output grows as it always did.
+		Logs *Logs `json:"logs,omitempty"`
 		// The container to run. Exactly one runtime must be set.
 		Container *Container `json:"container,omitempty"`
 		// The command to run on the host. Exactly one runtime must be set.
@@ -186,6 +189,27 @@ type (
 		CPU float64 `json:"cpu,omitempty"`
 		// The most processes and threads the workload may create.
 		Pids int `json:"pids,omitempty"`
+	}
+
+	// The Logs type describes the cap on a workload's output.
+	//
+	// The cap sits beside the runtime blocks because how much a workload may write
+	// is a question about the workload, and the cap means the same thing on either
+	// runtime: the output is rotated at the size, and only so many files are kept.
+	Logs struct {
+		// The size the output is rotated at, written as a size such as "10m".
+		//
+		// Held as the operator wrote it rather than as a byte count, for the reason
+		// Resources.Memory is: the stored specification and its hash carry exactly
+		// what the manifest said.
+		//
+		// The yaml tags on this and the field below are explicit for the reason
+		// Health.StartPeriod's is.
+		MaxSize string `yaml:"maxSize" json:"maxSize,omitempty"`
+		// How many files of output are kept, the one being written included. Zero
+		// means one, so the output is truncated at the size and nothing older is
+		// kept.
+		MaxFiles int `yaml:"maxFiles" json:"maxFiles,omitempty"`
 	}
 
 	// The Container type describes the container a workload runs.
@@ -810,6 +834,10 @@ func ValidateWorkload(spec Spec) error {
 		return err
 	}
 
+	if err = validateLogs(spec.Logs); err != nil {
+		return err
+	}
+
 	switch runtime {
 	case RuntimeContainer:
 		return validateContainer(*spec.Container)
@@ -1157,6 +1185,31 @@ func acceptedSignals() string {
 	}
 
 	return strings.Join(names, ", ")
+}
+
+// validateLogs reports whether the workload's output cap is one takt can apply.
+//
+// The size is required rather than defaulted: a block naming only how many files to
+// keep says nothing about when to rotate, and inventing a size would cap output the
+// operator never asked to cap. Either runtime can rotate, so none is refused here.
+func validateLogs(logs *Logs) error {
+	if logs == nil {
+		return nil
+	}
+
+	if logs.MaxSize == "" {
+		return errors.New("invalid logs: maxSize is required")
+	}
+
+	if size, err := units.RAMInBytes(logs.MaxSize); err != nil || size <= 0 {
+		return fmt.Errorf("invalid logs: %q is not a size", logs.MaxSize)
+	}
+
+	if logs.MaxFiles < 0 {
+		return errors.New("invalid logs: maxFiles must not be negative")
+	}
+
+	return nil
 }
 
 // validateHealth reports whether the workload's health check is one its runtime can
