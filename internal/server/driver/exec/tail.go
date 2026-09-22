@@ -3,11 +3,13 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"time"
 )
 
@@ -31,23 +33,67 @@ const followInterval = 250 * time.Millisecond
 // The end of the file is read rather than the whole of it, so the cost of a request is
 // set by what was asked for rather than by how long the workload has been running. A
 // file larger than the window yields its last lines, which is what a tail means.
+//
+// A file that was rotated holds only what came after the rotation, so when it has
+// fewer lines than were asked for the rest come from the rotated files beside it,
+// newest first. The output was cut at a byte rather than a line, so a line split by
+// the rotation comes back whole once its two halves are written in order.
 func tailFile(out io.Writer, path string, lines int) (int64, error) {
+	size, window, found, err := readWindow(path)
+	if err != nil {
+		return 0, err
+	}
+
+	if !found {
+		// A workload that has produced no output yet, or one this driver does not
+		// run. Neither is a failure. A follow starts from the beginning of the file
+		// the workload has yet to write.
+		return 0, nil
+	}
+
+	chunks := [][]byte{lastLines(window, lines)}
+	remaining := lines - countLines(chunks[0])
+
+	for i := 1; remaining > 0; i++ {
+		_, window, found, err = readWindow(rotated(path, i))
+		if err != nil {
+			return 0, err
+		}
+
+		if !found {
+			break
+		}
+
+		chunk := lastLines(window, remaining)
+		chunks = append(chunks, chunk)
+		remaining -= countLines(chunk)
+	}
+
+	for _, chunk := range slices.Backward(chunks) {
+		if _, err = out.Write(chunk); err != nil {
+			return 0, fmt.Errorf("failed to write workload output: %w", err)
+		}
+	}
+
+	return size, nil
+}
+
+// readWindow returns the size of the file at path and the last tailWindow bytes of it.
+// A file that does not exist is reported as not found rather than as a failure.
+func readWindow(path string) (int64, []byte, bool, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// A workload that has produced no output yet, or one this driver does not
-			// run. Neither is a failure. A follow starts from the beginning of the file
-			// the workload has yet to write.
-			return 0, nil
+			return 0, nil, false, nil
 		}
 
-		return 0, fmt.Errorf("failed to open workload output: %w", err)
+		return 0, nil, false, fmt.Errorf("failed to open workload output: %w", err)
 	}
 	defer file.Close()
 
 	info, err := file.Stat()
 	if err != nil {
-		return 0, fmt.Errorf("failed to measure workload output: %w", err)
+		return 0, nil, false, fmt.Errorf("failed to measure workload output: %w", err)
 	}
 
 	size := info.Size()
@@ -57,14 +103,20 @@ func tailFile(out io.Writer, path string, lines int) (int64, error) {
 	// ReadAt reports the end of the file when it reads fewer bytes than asked for,
 	// which happens when the file is truncated between measuring and reading it.
 	if _, err = file.ReadAt(window, offset); err != nil && !errors.Is(err, io.EOF) {
-		return 0, fmt.Errorf("failed to read workload output: %w", err)
+		return 0, nil, false, fmt.Errorf("failed to read workload output: %w", err)
 	}
 
-	if _, err = out.Write(lastLines(window, lines)); err != nil {
-		return 0, fmt.Errorf("failed to write workload output: %w", err)
+	return size, window, true, nil
+}
+
+// countLines counts the lines in a buffer, an unterminated final line included.
+func countLines(data []byte) int {
+	count := bytes.Count(data, []byte{'\n'})
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		count++
 	}
 
-	return size, nil
+	return count
 }
 
 // followFile writes a file's output as it is appended, starting from offset, until the
