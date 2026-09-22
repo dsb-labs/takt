@@ -10,12 +10,12 @@ describes how an entry is written.
 
 ### Added
 
-- A workload, volume or service apply can name the version it expects to be
-  replacing, the way an `acl apply` already could. `takt workload get` prints
-  the resource's tag as `ETag`, `takt workload apply --if-match` carries it
-  back, and takt refuses the apply when the resource has moved on since
-  ([#89](https://github.com/dsb-labs/takt/issues/89),
-  [#114](https://github.com/dsb-labs/takt/pull/114)).
+- Every write can name the version it expects to be replacing, the way an
+  `acl apply` already could. `takt workload get` prints the resource's tag as
+  `ETag`, `takt workload apply --if-match` carries it back, and takt refuses
+  the apply when the resource has moved on since. Volume and service apply,
+  secret and variable set, and `acl apply` take the same flag
+  ([#89](https://github.com/dsb-labs/takt/issues/89)).
 - `takt workload events --since` reads only the events a workload was last
   seen at after the given time, which a poller uses to pick up where it left
   off ([#89](https://github.com/dsb-labs/takt/issues/89),
@@ -23,6 +23,11 @@ describes how an entry is written.
 
 ### Changed
 
+- **Breaking:** the policy's `ETag` is a count of the applies that changed
+  it, `"0"` before any apply, rather than a hash of the document. A tag read
+  before upgrading no longer matches. `takt acl get` prints the document under
+  `Spec` beside the tag, so capturing it into a file is now
+  `takt acl get | jq .Spec` ([#89](https://github.com/dsb-labs/takt/issues/89)).
 - Every operation requiring a role documents the 401 and 403 it can answer
   with, where most of them named neither
   ([#89](https://github.com/dsb-labs/takt/issues/89),
