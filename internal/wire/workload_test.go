@@ -70,6 +70,7 @@ func TestFromSpec(t *testing.T) {
 		assert.Nil(t, spec.Labels)
 		assert.Nil(t, spec.Restart)
 		assert.Nil(t, spec.Resources)
+		assert.Nil(t, spec.Logs)
 		require.NotNil(t, spec.Container)
 		assert.Nil(t, spec.Container.Pull)
 		assert.Nil(t, spec.Container.Command)
@@ -110,6 +111,7 @@ func TestFromSpec(t *testing.T) {
 			Ports:     []manifest.Port{{Name: "http", To: 8080, From: 4141, Protocol: manifest.ProtocolTCP}},
 			Env:       map[string]string{"EXAMPLE": "EXAMPLE"},
 			Resources: &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 100},
+			Logs:      &manifest.Logs{MaxSize: "10m", MaxFiles: 3},
 			Volumes: []manifest.VolumeMount{
 				{Name: "example-data", To: "/var/lib/example", ReadOnly: true},
 				{Path: "/mnt/media", To: "/media", ReadOnly: true, Propagation: "rslave"},

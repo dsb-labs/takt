@@ -1155,6 +1155,30 @@ type LoginResult struct {
 // it yet, for the same reason deleting a volume returns one.
 type LogoutResult = map[string]interface{}
 
+// LogsSpec The cap on what the workload's output may grow to. Absent means none, so
+// the output grows as it always did.
+//
+// It sits alongside the runtime blocks because how much a workload may write
+// is a question about the workload, and the cap means the same thing on
+// either runtime: the output is rotated at the size, and only so many files
+// are kept. A container's is applied by the daemon's logging driver. An exec
+// workload's is applied by takt against the file the process writes.
+type LogsSpec struct {
+	// MaxFiles How many files of output are kept, the one being written included.
+	// One when omitted, which truncates the output at the size and keeps
+	// nothing older.
+	//
+	//
+	// Examples: 3
+	MaxFiles *int `json:"maxFiles,omitempty"`
+
+	// MaxSize The size the output is rotated at, written as a size such as "10m".
+	//
+	//
+	// Examples: 10m
+	MaxSize string `json:"maxSize"`
+}
+
 // MountSignal The signal to send the workload when a mounted secret, variable or token changes,
 // rather than replacing its instance.
 //
@@ -2519,6 +2543,16 @@ type WorkloadSpec struct {
 	// The same rules everywhere. A label on a secret is as readable as the
 	// secret's name, which is worth knowing before putting anything in one.
 	Labels *Labels `json:"labels,omitempty"`
+
+	// Logs The cap on what the workload's output may grow to. Absent means none, so
+	// the output grows as it always did.
+	//
+	// It sits alongside the runtime blocks because how much a workload may write
+	// is a question about the workload, and the cap means the same thing on
+	// either runtime: the output is rotated at the size, and only so many files
+	// are kept. A container's is applied by the daemon's logging driver. An exec
+	// workload's is applied by takt against the file the process writes.
+	Logs *LogsSpec `json:"logs,omitempty"`
 
 	// Name The name that identifies the workload.
 	//
