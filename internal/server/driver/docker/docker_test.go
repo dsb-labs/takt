@@ -353,6 +353,62 @@ func TestDriver_Start(t *testing.T) {
 			},
 		},
 		{
+			// The type is left empty so the daemon keeps its configured driver,
+			// and the file count is only passed when the workload named one.
+			Name: "caps the container's output",
+			Workload: withLogs(
+				workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
+				manifest.Logs{MaxSize: "10m", MaxFiles: 3},
+			),
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						return host.LogConfig.Type == "" &&
+							host.LogConfig.Config["max-size"] == "10m" &&
+							host.LogConfig.Config["max-file"] == "3"
+					}),
+					mock.Anything, mock.Anything, "takt-example-1-0-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			Name: "passes no file count the workload did not name",
+			Workload: withLogs(
+				workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil),
+				manifest.Logs{MaxSize: "10m"},
+			),
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						_, named := host.LogConfig.Config["max-file"]
+
+						return host.LogConfig.Config["max-size"] == "10m" && !named
+					}),
+					mock.Anything, mock.Anything, "takt-example-1-0-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
 			// The option is applied by the driver rather than carried in the
 			// specification, so it holds for every container without moving the hash
 			// of a workload that exists already.
@@ -2097,6 +2153,14 @@ func withVolumes(w driver.Workload, volumes ...driver.Volume) driver.Workload {
 // runtime block rather than inside it.
 func withResources(w driver.Workload, resources manifest.Resources) driver.Workload {
 	w.Spec.Resources = &resources
+
+	return w
+}
+
+// withLogs sets the output cap on a workload, which lives beside the runtime block
+// rather than inside it.
+func withLogs(w driver.Workload, logs manifest.Logs) driver.Workload {
+	w.Spec.Logs = &logs
 
 	return w
 }

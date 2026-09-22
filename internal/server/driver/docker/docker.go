@@ -269,6 +269,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 			ReadonlyRootfs: spec.ReadOnly,
 			PidMode:        container.PidMode(spec.PidMode),
 			NetworkMode:    container.NetworkMode(spec.NetworkMode),
+			LogConfig:      logConfig(w.Spec.Logs),
 		},
 		nil, nil,
 		containerName(w.Name, w.Version, w.Instance, attempt),
@@ -1349,6 +1350,29 @@ func capabilities(names []string) []string {
 	}
 
 	return names
+}
+
+// logConfig maps a workload's output cap onto the options docker's file-backed
+// logging drivers rotate on.
+//
+// The driver's type is left empty so the daemon keeps whichever driver it was
+// configured with. The daemon validates the options against that driver when the
+// container is created, so a daemon logging somewhere that does not rotate by size,
+// journald for one, refuses the container rather than quietly keeping everything.
+// That refusal reaches the operator as the instance's failure to start, which is
+// what a cap that cannot be applied should look like.
+func logConfig(spec *manifest.Logs) container.LogConfig {
+	if spec == nil {
+		return container.LogConfig{}
+	}
+
+	options := map[string]string{"max-size": spec.MaxSize}
+
+	if spec.MaxFiles > 0 {
+		options["max-file"] = strconv.Itoa(spec.MaxFiles)
+	}
+
+	return container.LogConfig{Config: options}
 }
 
 // resources converts a specification's resource limits into the cgroup settings
