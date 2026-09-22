@@ -25,8 +25,11 @@ var usage string
 
 // Command returns the "secret set" command used to store a secret's value.
 func Command() *cobra.Command {
-	var file string
-	var labels map[string]string
+	var (
+		file    string
+		ifMatch string
+		labels  map[string]string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "set <name>",
@@ -41,7 +44,7 @@ func Command() *cobra.Command {
 
 			c := client.FromContext(cmd.Context())
 
-			secret, _, err := c.SetSecret(cmd.Context(), args[0], value, labels)
+			secret, _, err := c.SetSecret(cmd.Context(), args[0], value, labels, client.WithIfMatch(ifMatch))
 			if err != nil {
 				return fmt.Errorf("failed to set secret: %w", err)
 			}
@@ -57,6 +60,8 @@ func Command() *cobra.Command {
 	flags.StringVarP(&file, "from-file", "f", "", "read the value from this file rather than standard input")
 	flags.StringToStringVarP(&labels, "label", "l", nil,
 		"a key=value label to attach, repeatable. The labels given replace the ones stored")
+	flags.StringVar(&ifMatch, "if-match", "",
+		"set only if the secret's tag still matches this one, as reported by \"takt secret get\"")
 
 	return cmd
 }
