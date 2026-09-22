@@ -64,11 +64,22 @@ func (a *SecretAPI) SetSecret(ctx context.Context, request api.SetSecretRequestO
 		}, nil
 	}
 
-	secret, created, err := a.secrets.Set(ctx, request.Name, []byte(request.Body.Value), labelsOf(request.Body.Labels), 0)
+	ifMatch, ok := resourceIfMatch(request.Params.IfMatch)
+	if !ok {
+		return api.SetSecret400JSONResponse{
+			Error: "the If-Match header must carry a tag read from GET /api/v1/secrets/{name}",
+		}, nil
+	}
+
+	secret, created, err := a.secrets.Set(ctx, request.Name, []byte(request.Body.Value), labelsOf(request.Body.Labels), ifMatch)
 	switch {
 	case errors.Is(err, service.ErrInvalidSecret):
 		return api.SetSecret400JSONResponse{
 			Error: err.Error(),
+		}, nil
+	case errors.Is(err, service.ErrSecretChanged):
+		return api.SetSecret412JSONResponse{
+			Error: "the secret changed since it was read",
 		}, nil
 	case err != nil:
 		return api.SetSecret500JSONResponse{
@@ -80,10 +91,16 @@ func (a *SecretAPI) SetSecret(ctx context.Context, request api.SetSecretRequestO
 	// distinguishes them: an operator who expected to be rotating a secret should be
 	// able to tell that they created one instead.
 	if created {
-		return api.SetSecret201JSONResponse{Secret: newSecret(secret)}, nil
+		return api.SetSecret201JSONResponse{
+			Body:    api.SetSecretResult{Secret: newSecret(secret)},
+			Headers: api.SetSecret201ResponseHeaders{ETag: new(versionETag(secret.Version))},
+		}, nil
 	}
 
-	return api.SetSecret200JSONResponse{Secret: newSecret(secret)}, nil
+	return api.SetSecret200JSONResponse{
+		Body:    api.SetSecretResult{Secret: newSecret(secret)},
+		Headers: api.SetSecret200ResponseHeaders{ETag: new(versionETag(secret.Version))},
+	}, nil
 }
 
 // GetSecret returns the secret with the given name, without its value.
@@ -100,7 +117,10 @@ func (a *SecretAPI) GetSecret(ctx context.Context, request api.GetSecretRequestO
 		}, nil
 	}
 
-	return api.GetSecret200JSONResponse{Secret: newSecret(secret)}, nil
+	return api.GetSecret200JSONResponse{
+		Body:    api.GetSecretResult{Secret: newSecret(secret)},
+		Headers: api.GetSecret200ResponseHeaders{ETag: new(versionETag(secret.Version))},
+	}, nil
 }
 
 // ListSecrets returns the secrets matching the request's queries, or every

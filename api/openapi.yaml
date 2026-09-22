@@ -1166,6 +1166,13 @@ paths:
       responses:
         "200":
           description: The requested secret.
+          headers:
+            ETag:
+              description: |
+                The tag identifying this version of the resource, to be handed
+                back in the `If-Match` header of a conditional apply.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -1197,6 +1204,13 @@ paths:
         A value that did change moves the revision, which moves the specification
         hash of every workload reading the secret. Those workloads are then replaced
         by the reconciler, and the new value reaches them as they start.
+
+        The `If-Match` header makes the set conditional: carrying the tag read
+        from the matching get, it is refused with a 412 when the secret has
+        moved on since. Omitting it sets unconditionally, which is what
+        creating one has to do — there is no tag yet to name.
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
         content:
@@ -1205,13 +1219,27 @@ paths:
               $ref: "#/components/schemas/SecretSpec"
       responses:
         "200":
-          description: The secret was updated.
+          description: The secret was updated, or was unchanged.
+          headers:
+            ETag:
+              description: |
+                The tag identifying this version of the resource, to be handed
+                back in the `If-Match` header of a conditional apply.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SetSecretResult"
         "201":
           description: The secret was created.
+          headers:
+            ETag:
+              description: |
+                The tag identifying this version of the resource, to be handed
+                back in the `If-Match` header of a conditional apply.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -1222,6 +1250,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1343,6 +1373,13 @@ paths:
       responses:
         "200":
           description: The requested variable.
+          headers:
+            ETag:
+              description: |
+                The tag identifying this version of the resource, to be handed
+                back in the `If-Match` header of a conditional apply.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -1374,6 +1411,13 @@ paths:
         A value that did change moves the specification hash of every workload
         reading the variable. Those workloads are then replaced by the reconciler,
         and the new value reaches them as they start.
+
+        The `If-Match` header makes the set conditional: carrying the tag read
+        from the matching get, it is refused with a 412 when the variable has
+        moved on since. Omitting it sets unconditionally, which is what
+        creating one has to do — there is no tag yet to name.
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
         content:
@@ -1382,13 +1426,27 @@ paths:
               $ref: "#/components/schemas/VariableSpec"
       responses:
         "200":
-          description: The variable was updated.
+          description: The variable was updated, or was unchanged.
+          headers:
+            ETag:
+              description: |
+                The tag identifying this version of the resource, to be handed
+                back in the `If-Match` header of a conditional apply.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SetVariableResult"
         "201":
           description: The variable was created.
+          headers:
+            ETag:
+              description: |
+                The tag identifying this version of the resource, to be handed
+                back in the `If-Match` header of a conditional apply.
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -1399,6 +1457,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1815,8 +1875,10 @@ paths:
           headers:
             ETag:
               description: |
-                The tag identifying this exact document, derived from it, so a
-                pipeline reading twice sees a stable value.
+                The tag identifying this version of the document, to be handed
+                back in the `If-Match` header of the apply. It counts the
+                applies that changed the document, so it is `"0"` before any
+                apply and moves only when one changes something.
               schema:
                 type: string
           content:
@@ -1844,9 +1906,12 @@ paths:
 
         The `If-Match` header must carry the tag of the document being
         replaced, as read by `GET /api/v1/acl`. A stale tag is refused rather
-        than silently clobbering a concurrent apply. The document itself
-        carries no version field: it would go stale the moment the server
-        accepted it.
+        than silently clobbering a concurrent apply. It is required here
+        where a resource apply may omit it: the policy always exists, so
+        there is always a tag to name, and an apply that named none would be
+        a lost update on its way to happening. The document itself carries
+        no version field: it would go stale the moment the server accepted
+        it.
       parameters:
         - $ref: "#/components/parameters/IfMatch"
       requestBody:

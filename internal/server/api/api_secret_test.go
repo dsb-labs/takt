@@ -116,6 +116,75 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 	}
 }
 
+func TestSecretAPI_GetSecret_Tag(t *testing.T) {
+	t.Parallel()
+
+	got := secret("db-password")
+	got.Version = 4
+
+	svc := NewMockSecretService(t)
+	svc.EXPECT().Get(mock.Anything, "db-password").Return(got, nil).Once()
+
+	resp := doSecret(t, svc, http.MethodGet, "/api/v1/secrets/db-password", nil)
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	// The tag a conditional set hands back, so a get has to be where a caller
+	// reads it.
+	assert.Equal(t, `"4"`, resp.Header().Get("ETag"))
+}
+
+// TestSecretAPI_SetSecret_Conditional covers what a secret does with the
+// If-Match handling every conditional write shares.
+func TestSecretAPI_SetSecret_Conditional(t *testing.T) {
+	t.Parallel()
+
+	set := func(t *testing.T, svc *MockSecretService, ifMatch string) *httptest.ResponseRecorder {
+		t.Helper()
+
+		body, err := json.Marshal(generated.SecretSpec{Value: "hunter2"})
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/secrets/db-password", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if ifMatch != "" {
+			req.Header.Set("If-Match", ifMatch)
+		}
+
+		return doSecretRequest(t, svc, req)
+	}
+
+	t.Run("reports the set secret's version as its tag", func(t *testing.T) {
+		stored := secret("db-password")
+		stored.Version = 4
+
+		svc := NewMockSecretService(t)
+		// The quotes the header carries are stripped before the service sees the
+		// version.
+		svc.EXPECT().Set(mock.Anything, "db-password", []byte("hunter2"), mock.Anything, 3).
+			Return(stored, false, nil).Once()
+
+		resp := set(t, svc, `"3"`)
+		require.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, `"4"`, resp.Header().Get("ETag"))
+	})
+
+	t.Run("refuses a tag the secret has moved past", func(t *testing.T) {
+		svc := NewMockSecretService(t)
+		svc.EXPECT().Set(mock.Anything, "db-password", []byte("hunter2"), mock.Anything, 3).
+			Return(service.Secret{}, false, service.ErrSecretChanged).Once()
+
+		resp := set(t, svc, `"3"`)
+		require.Equal(t, http.StatusPreconditionFailed, resp.Code)
+	})
+
+	t.Run("refuses a tag that is not a version", func(t *testing.T) {
+		// The service expects no call: a tag takt never issued is refused before
+		// anything is read or written.
+		resp := set(t, NewMockSecretService(t), `"not-a-version"`)
+		require.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
 func TestSecretAPI_GetSecret(t *testing.T) {
 	t.Parallel()
 
@@ -426,6 +495,19 @@ func secret(name string) service.Secret {
 func doSecret(t *testing.T, svc *MockSecretService, method, target string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
 
+	req := httptest.NewRequest(method, target, body)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	return doSecretRequest(t, svc, req)
+}
+
+// doSecretRequest serves a request the caller built, for the cases that set a
+// header doSecret does not.
+func doSecretRequest(t *testing.T, svc *MockSecretService, req *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+
 	logger := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError}))
 
 	// The whole surface is registered even for a test about one resource, since the
@@ -440,11 +522,6 @@ func doSecret(t *testing.T, svc *MockSecretService, method, target string, body 
 		System:    api.NewSystemAPI(api.SystemAPIConfig{Logger: logger, DB: NewMockPinger(t), Observer: NewMockObserver(t)}),
 		Admin:     api.NewAdminAPI(api.AdminAPIConfig{Logger: logger, Admin: NewMockAdmin(t)}),
 	}).Register(mux)
-
-	req := httptest.NewRequest(method, target, body)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 
 	resp := httptest.NewRecorder()
 	// Served through the disabled-mode authenticate middleware, as the server

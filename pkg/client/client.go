@@ -50,6 +50,12 @@ var (
 	// ErrInvalidServiceName is returned when a name is not usable as a single
 	// segment of a request path.
 	ErrInvalidServiceName = errors.New("invalid service name")
+	// ErrSecretChanged is returned when a conditional set names a tag that is no
+	// longer the secret's.
+	ErrSecretChanged = errors.New("secret changed since it was read")
+	// ErrVariableChanged is returned when a conditional set names a tag that is no
+	// longer the variable's.
+	ErrVariableChanged = errors.New("variable changed since it was read")
 	// ErrSecretNotFound is returned when no secret exists with the given name.
 	ErrSecretNotFound = errors.New("secret not found")
 	// ErrSecretInUse is returned when a secret a workload reads is deleted without

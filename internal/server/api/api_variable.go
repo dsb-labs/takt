@@ -61,11 +61,22 @@ func (a *VariableAPI) SetVariable(ctx context.Context, request api.SetVariableRe
 		}, nil
 	}
 
-	variable, created, err := a.variables.Set(ctx, request.Name, request.Body.Value, labelsOf(request.Body.Labels), 0)
+	ifMatch, ok := resourceIfMatch(request.Params.IfMatch)
+	if !ok {
+		return api.SetVariable400JSONResponse{
+			Error: "the If-Match header must carry a tag read from GET /api/v1/variables/{name}",
+		}, nil
+	}
+
+	variable, created, err := a.variables.Set(ctx, request.Name, request.Body.Value, labelsOf(request.Body.Labels), ifMatch)
 	switch {
 	case errors.Is(err, service.ErrInvalidVariable):
 		return api.SetVariable400JSONResponse{
 			Error: err.Error(),
+		}, nil
+	case errors.Is(err, service.ErrVariableChanged):
+		return api.SetVariable412JSONResponse{
+			Error: "the variable changed since it was read",
 		}, nil
 	case err != nil:
 		return api.SetVariable500JSONResponse{
@@ -77,10 +88,16 @@ func (a *VariableAPI) SetVariable(ctx context.Context, request api.SetVariableRe
 	// distinguishes them: an operator who expected to be changing a variable should be
 	// able to tell that they created one instead.
 	if created {
-		return api.SetVariable201JSONResponse{Variable: newVariable(variable)}, nil
+		return api.SetVariable201JSONResponse{
+			Body:    api.SetVariableResult{Variable: newVariable(variable)},
+			Headers: api.SetVariable201ResponseHeaders{ETag: new(versionETag(variable.Version))},
+		}, nil
 	}
 
-	return api.SetVariable200JSONResponse{Variable: newVariable(variable)}, nil
+	return api.SetVariable200JSONResponse{
+		Body:    api.SetVariableResult{Variable: newVariable(variable)},
+		Headers: api.SetVariable200ResponseHeaders{ETag: new(versionETag(variable.Version))},
+	}, nil
 }
 
 // GetVariable returns the variable with the given name.
@@ -97,7 +114,10 @@ func (a *VariableAPI) GetVariable(ctx context.Context, request api.GetVariableRe
 		}, nil
 	}
 
-	return api.GetVariable200JSONResponse{Variable: newVariable(variable)}, nil
+	return api.GetVariable200JSONResponse{
+		Body:    api.GetVariableResult{Variable: newVariable(variable)},
+		Headers: api.GetVariable200ResponseHeaders{ETag: new(versionETag(variable.Version))},
+	}, nil
 }
 
 // ListVariables returns the variables matching the request's queries, or every

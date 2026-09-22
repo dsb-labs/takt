@@ -115,6 +115,75 @@ func TestVariableAPI_SetVariable(t *testing.T) {
 	}
 }
 
+func TestVariableAPI_GetVariable_Tag(t *testing.T) {
+	t.Parallel()
+
+	got := variable("log-level", "debug")
+	got.Version = 4
+
+	svc := NewMockVariableService(t)
+	svc.EXPECT().Get(mock.Anything, "log-level").Return(got, nil).Once()
+
+	resp := doVariable(t, svc, http.MethodGet, "/api/v1/variables/log-level", nil)
+	require.Equal(t, http.StatusOK, resp.Code)
+
+	// The tag a conditional set hands back, so a get has to be where a caller
+	// reads it.
+	assert.Equal(t, `"4"`, resp.Header().Get("ETag"))
+}
+
+// TestVariableAPI_SetVariable_Conditional covers what a variable does with the
+// If-Match handling every conditional write shares.
+func TestVariableAPI_SetVariable_Conditional(t *testing.T) {
+	t.Parallel()
+
+	set := func(t *testing.T, svc *MockVariableService, ifMatch string) *httptest.ResponseRecorder {
+		t.Helper()
+
+		body, err := json.Marshal(generated.VariableSpec{Value: "info"})
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/variables/log-level", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if ifMatch != "" {
+			req.Header.Set("If-Match", ifMatch)
+		}
+
+		return doVariableRequest(t, svc, req)
+	}
+
+	t.Run("reports the set variable's version as its tag", func(t *testing.T) {
+		stored := variable("log-level", "info")
+		stored.Version = 4
+
+		svc := NewMockVariableService(t)
+		// The quotes the header carries are stripped before the service sees the
+		// version.
+		svc.EXPECT().Set(mock.Anything, "log-level", "info", mock.Anything, 3).
+			Return(stored, false, nil).Once()
+
+		resp := set(t, svc, `"3"`)
+		require.Equal(t, http.StatusOK, resp.Code)
+		assert.Equal(t, `"4"`, resp.Header().Get("ETag"))
+	})
+
+	t.Run("refuses a tag the variable has moved past", func(t *testing.T) {
+		svc := NewMockVariableService(t)
+		svc.EXPECT().Set(mock.Anything, "log-level", "info", mock.Anything, 3).
+			Return(service.Variable{}, false, service.ErrVariableChanged).Once()
+
+		resp := set(t, svc, `"3"`)
+		require.Equal(t, http.StatusPreconditionFailed, resp.Code)
+	})
+
+	t.Run("refuses a tag that is not a version", func(t *testing.T) {
+		// The service expects no call: a tag takt never issued is refused before
+		// anything is read or written.
+		resp := set(t, NewMockVariableService(t), `"not-a-version"`)
+		require.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+}
+
 func TestVariableAPI_GetVariable(t *testing.T) {
 	t.Parallel()
 
@@ -338,6 +407,19 @@ func variable(name, value string) service.Variable {
 func doVariable(t *testing.T, svc *MockVariableService, method, target string, body io.Reader) *httptest.ResponseRecorder {
 	t.Helper()
 
+	req := httptest.NewRequest(method, target, body)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	return doVariableRequest(t, svc, req)
+}
+
+// doVariableRequest serves a request the caller built, for the cases that set a
+// header doVariable does not.
+func doVariableRequest(t *testing.T, svc *MockVariableService, req *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+
 	logger := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError}))
 
 	// The whole surface is registered even for a test about one resource, since the
@@ -352,11 +434,6 @@ func doVariable(t *testing.T, svc *MockVariableService, method, target string, b
 		System:    api.NewSystemAPI(api.SystemAPIConfig{Logger: logger, DB: NewMockPinger(t), Observer: NewMockObserver(t)}),
 		Admin:     api.NewAdminAPI(api.AdminAPIConfig{Logger: logger, Admin: NewMockAdmin(t)}),
 	}).Register(mux)
-
-	req := httptest.NewRequest(method, target, body)
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 
 	resp := httptest.NewRecorder()
 	// Served through the disabled-mode authenticate middleware, as the server
