@@ -22,3 +22,9 @@ Labels are replaced, not merged, the way a workload manifest replaces a
 workload's. Setting a value without --label removes the labels the variable
 had. Labelling one replaces no workload: what redeploys a reader is the
 value it reads.
+
+Pass --if-match the tag "takt variable get" reported for the variable
+being replaced, and the set is refused when the variable has moved on
+since, rather than writing over whatever landed in between. Without it
+a set writes unconditionally, which is what creating one has to do:
+there is no tag yet to name.
