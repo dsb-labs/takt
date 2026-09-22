@@ -20,6 +20,10 @@ describes how an entry is written.
   seen at after the given time, which a poller uses to pick up where it left
   off ([#89](https://github.com/dsb-labs/takt/issues/89),
   [#114](https://github.com/dsb-labs/takt/pull/114)).
+- A workload's `logs` block caps what its output may grow to, naming the
+  size it is rotated at and how many files are kept. A container's is
+  applied by the Docker daemon, and an exec workload's by takt against the
+  file the process writes ([#87](https://github.com/dsb-labs/takt/issues/87)).
 
 ### Changed
 
