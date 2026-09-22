@@ -65,16 +65,16 @@ func TestClient_GetPolicy(t *testing.T) {
 		assert.Equal(t, http.MethodGet, r.Method)
 		assert.Equal(t, "/api/v1/acl", r.URL.Path)
 
-		w.Header().Set("ETag", `"tag-1"`)
+		w.Header().Set("ETag", `"1"`)
 		writeJSON(t, w, http.StatusOK, api.GetACLPolicyResult{Policy: wirePolicy()})
 	})
 
-	policy, etag, err := c.GetPolicy(t.Context())
+	policy, err := c.GetPolicy(t.Context())
 	require.NoError(t, err)
 	// The tag is reported exactly as the header carried it, so an apply can
 	// present it back without re-quoting.
-	assert.Equal(t, `"tag-1"`, etag)
-	assert.Equal(t, canonicalPolicy(), policy)
+	assert.Equal(t, `"1"`, policy.ETag)
+	assert.Equal(t, canonicalPolicy(), policy.Spec)
 }
 
 func TestClient_ApplyPolicy(t *testing.T) {
@@ -84,20 +84,20 @@ func TestClient_ApplyPolicy(t *testing.T) {
 		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 			assert.Equal(t, http.MethodPut, r.Method)
 			assert.Equal(t, "/api/v1/acl", r.URL.Path)
-			assert.Equal(t, `"tag-1"`, r.Header.Get("If-Match"))
+			assert.Equal(t, `"1"`, r.Header.Get("If-Match"))
 
 			var body api.PolicySpec
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 			assert.Equal(t, "v1", body.Version)
 
-			w.Header().Set("ETag", `"tag-2"`)
+			w.Header().Set("ETag", `"2"`)
 			writeJSON(t, w, http.StatusOK, api.ApplyACLPolicyResult{Policy: body})
 		})
 
-		applied, etag, err := c.ApplyPolicy(t.Context(), canonicalPolicy(), `"tag-1"`)
+		applied, err := c.ApplyPolicy(t.Context(), canonicalPolicy(), `"1"`)
 		require.NoError(t, err)
-		assert.Equal(t, `"tag-2"`, etag)
-		assert.Equal(t, canonicalPolicy(), applied)
+		assert.Equal(t, `"2"`, applied.ETag)
+		assert.Equal(t, canonicalPolicy(), applied.Spec)
 	})
 
 	t.Run("reports a stale tag", func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestClient_ApplyPolicy(t *testing.T) {
 			writeJSON(t, w, http.StatusPreconditionFailed, api.ErrorResponse{Error: "the policy changed since it was read"})
 		})
 
-		_, _, err := c.ApplyPolicy(t.Context(), canonicalPolicy(), `"stale"`)
+		_, err := c.ApplyPolicy(t.Context(), canonicalPolicy(), `"1"`)
 		assert.ErrorIs(t, err, client.ErrPolicyChanged)
 	})
 
@@ -116,7 +116,7 @@ func TestClient_ApplyPolicy(t *testing.T) {
 
 		invalid := manifest.Policy{Version: "v2"}
 
-		_, _, err := c.ApplyPolicy(t.Context(), invalid, `"tag-1"`)
+		_, err := c.ApplyPolicy(t.Context(), invalid, `"1"`)
 		assert.Error(t, err)
 	})
 }
@@ -129,20 +129,20 @@ func TestClient_ReplacePolicy(t *testing.T) {
 	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			w.Header().Set("ETag", `"tag-1"`)
+			w.Header().Set("ETag", `"1"`)
 			writeJSON(t, w, http.StatusOK, api.GetACLPolicyResult{Policy: api.PolicySpec{Version: "v1"}})
 		case http.MethodPut:
-			assert.Equal(t, `"tag-1"`, r.Header.Get("If-Match"))
+			assert.Equal(t, `"1"`, r.Header.Get("If-Match"))
 
-			w.Header().Set("ETag", `"tag-2"`)
+			w.Header().Set("ETag", `"2"`)
 			writeJSON(t, w, http.StatusOK, api.ApplyACLPolicyResult{Policy: wirePolicy()})
 		default:
 			t.Fatalf("unexpected method %s", r.Method)
 		}
 	})
 
-	applied, etag, err := c.ReplacePolicy(t.Context(), canonicalPolicy())
+	applied, err := c.ReplacePolicy(t.Context(), canonicalPolicy())
 	require.NoError(t, err)
-	assert.Equal(t, `"tag-2"`, etag)
-	assert.Equal(t, canonicalPolicy(), applied)
+	assert.Equal(t, `"2"`, applied.ETag)
+	assert.Equal(t, canonicalPolicy(), applied.Spec)
 }

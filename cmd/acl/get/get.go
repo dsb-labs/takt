@@ -24,7 +24,7 @@ func Command() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c := client.FromContext(cmd.Context())
 
-			policy, _, err := c.GetPolicy(cmd.Context())
+			policy, err := c.GetPolicy(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("failed to get policy: %w", err)
 			}

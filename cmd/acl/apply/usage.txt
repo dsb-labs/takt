@@ -6,6 +6,13 @@ request. The document is read, then applied on the condition that the
 policy did not change in between, so two concurrent applies produce one
 winner and one error to re-run rather than a silent overwrite.
 
+Pass --if-match the tag "takt acl get" reported for the document being
+replaced, and the apply is conditioned on that read rather than on the
+one this command makes. That is what refuses a file captured before
+someone else's apply landed. Without it, the command reads the tag
+itself just before applying, which refuses a concurrent apply but not
+an older read.
+
 Requires the admin role or the recovery token, which is what makes a
 bad apply recoverable: the recovery token sits above the policy it
 fixes.
