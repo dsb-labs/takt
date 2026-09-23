@@ -1,11 +1,29 @@
 #!/usr/bin/env bash
 
-# Runs a command inside a delegated cgroup subtree, which is what lets takt
-# enforce resource limits on exec workloads. A command already inside one runs
-# unchanged, so the wrapper costs nothing where the environment is already
-# right. See the "Delegation" section of docs/operating.md.
+# Runs a command with what takt needs to run exec workloads: a delegated cgroup
+# subtree, which is what lets it enforce resource limits, and an ambient
+# CAP_SETGID, which is what lets it keep the server's groups from a workload.
+# A command already holding both runs unchanged, so the wrapper costs nothing
+# where the environment is already right. See the "Delegation" and
+# "Confinement" sections of docs/operating.md.
 
 set -e
+
+# Mirrors the server's own probe: a process in groups beyond its primary needs
+# CAP_SETGID in its ambient set to drop them from a workload. One in no other
+# group needs nothing, since there is nothing to drop.
+capable() {
+	local ambient
+
+	if [ -z "$(id -G | tr ' ' '\n' | grep -vx "$(id -g)")" ]; then
+		return 0
+	fi
+
+	ambient=$(awk '/^CapAmb:/ { print $2 }' /proc/self/status)
+
+	# CAP_SETGID is capability number 6.
+	[ $((0x$ambient & (1 << 6))) -ne 0 ]
+}
 
 # Mirrors the server's own probe: the subtree this process is in must offer the
 # memory, cpu and pids controllers, and must be writable.
@@ -38,6 +56,23 @@ delegated() {
 grantable() {
 	systemd-run --user --scope --quiet -p Delegate=yes true 2>/dev/null
 }
+
+# Raised the way the unit raises it for the server, as an ambient capability,
+# through capsh as this user with this environment. Attempted with sudo -n for
+# the reason lingering is below. pam_cap grants the same thing to a session
+# once, and a shell that has it never reaches this. See CONTRIBUTING.md.
+if ! capable; then
+	if [ -z "$TAKT_DELEGATED_CAPSH" ] && sudo -n true 2>/dev/null; then
+		export TAKT_DELEGATED_CAPSH=1
+
+		exec sudo -n -E env PATH="$PATH" capsh --keep=1 --user="$(id -un)" \
+			--inh=cap_setgid --addamb=cap_setgid -- -c 'exec "$0" "$@"' "$0" "$@"
+	fi
+
+	echo "this shell holds supplementary groups and no ambient CAP_SETGID, so exec workloads would inherit the groups" >&2
+	echo "grant the capability to your sessions through pam_cap, as CONTRIBUTING.md describes" >&2
+	exit 1
+fi
 
 if delegated; then
 	exec "$@"
