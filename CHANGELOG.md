@@ -146,6 +146,14 @@ describes how an entry is written.
   ([#83](https://github.com/dsb-labs/takt/issues/83),
   [#92](https://github.com/dsb-labs/takt/pull/92)).
 
+### Removed
+
+- The `idToken` form of `POST /api/v1/auth`, and the Go client's `Login`
+  method that sent it. The CLI and the UI log in through the code and token
+  exchanges, and a raw identity token carried no nonce binding it to either
+  ([#78](https://github.com/dsb-labs/takt/issues/78),
+  [#120](https://github.com/dsb-labs/takt/pull/120)).
+
 ## v0.8.0 - 2026-09-17
 
 ### Added
