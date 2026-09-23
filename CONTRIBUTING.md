@@ -197,23 +197,32 @@ The request and response types are generated from `api/openapi.yaml` into
 `src/api/schema.d.ts` and committed. After changing the spec, run `yarn generate`
 in `internal/ui/app` — CI fails on drift the same way it does for the Go code.
 
-## The capability the dev loop wants
+## The capabilities the dev loop wants
 
 Deleting a volume a container wrote as another user needs `CAP_DAC_OVERRIDE` — see
 [Deleting a volume a container wrote](docs/volumes.md#deleting-a-volume-a-container-wrote).
-A production server gets it from its systemd unit. A dev server started with `go run`
-has no unit, so give your own sessions the capability once through `pam_cap`:
+Keeping your groups from an `exec` workload needs `CAP_SETGID` — see
+[Confinement](docs/operating.md#confinement). A user in the `docker` group who
+lacks it cannot run `exec` workloads at all, and the tests that start one fail
+saying so. A production server gets both from its systemd unit. A dev server
+started with `go run` has no unit, so give your own sessions the capabilities
+once through `pam_cap`:
 
 ```sh
 # /etc/security/capability.conf, above the "none *" line. The ^ raises the
-# capability as ambient, so every process in the session holds it.
-^cap_dac_override <your-user>
+# capabilities as ambient, so every process in the session holds them.
+^cap_dac_override,cap_setgid <your-user>
 ```
 
 `pam_cap.so` is already in the PAM stack on Debian and Ubuntu. Log in again and
-check with `grep CapAmb /proc/self/status`, which reports `0000000000000002`.
-After that, volume deletion works under `go run` and in the tests, with nothing
-to redo when the binary is rebuilt.
+check with `grep CapAmb /proc/self/status`, which reports `0000000000000042`.
+After that, volume deletion and `exec` workloads work under `go run` and in the
+tests, with nothing to redo when the binary is rebuilt.
+
+The `make` targets go through `scripts/delegated.sh`, which asks for a delegated
+cgroup and for `CAP_SETGID` before running anything. Where the session holds
+neither and `sudo` needs no password, as on a CI runner, the script raises them
+itself. Where `sudo` would prompt, it stops and points here instead.
 
 One test watches the confinement trampoline strip this capability from a workload.
 The test grants itself a capability inside a user namespace, so it runs without any
