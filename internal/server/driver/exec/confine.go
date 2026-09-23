@@ -33,6 +33,17 @@ var (
 	// ErrNotConfined is returned when a workload could not be confined to the paths it
 	// was given, and so was not started.
 	ErrNotConfined = errors.New("workload could not be confined")
+	// ErrGroupsInherited is returned when the server holds supplementary groups it
+	// cannot keep from a workload.
+	//
+	// A workload runs as the server's user, and would otherwise hold every group that
+	// user is in. The packaged install puts the user in the docker group, and a
+	// workload holding it can run a privileged container. The ruleset does not cover
+	// this: connecting to a socket is not an operation that names a path, so the
+	// socket's own permissions are all that stand between a workload and the daemon.
+	// Dropping the groups takes CAP_SETGID, which the unit grants, so a server without
+	// it and with groups to drop refuses exec workloads rather than run them widened.
+	ErrGroupsInherited = errors.New("exec workloads would inherit the server's supplementary groups")
 )
 
 const (
@@ -186,9 +197,16 @@ func confine(in *os.File) error {
 		return fmt.Errorf("failed to confine the workload: %w", err)
 	}
 
-	// The kernel reads the ambient set of the thread that calls exec, so the drop
+	// The kernel reads the ambient set of the thread that calls exec, so the drops
 	// below and the exec must stay on one thread.
 	runtime.LockOSThread()
+
+	// Before the ambient set is cleared, because this is what CAP_SETGID is held
+	// for. The command keeps the primary group, which is the user's own, and loses
+	// every other one the server was put in.
+	if err := ungroup(); err != nil {
+		return err
+	}
 
 	// Ambient capabilities survive an exec, so without this the command would keep
 	// whatever a service manager granted the server. An operator grants
@@ -203,6 +221,72 @@ func confine(in *os.File) error {
 	// when it started the confinement. Nothing is added or removed here.
 	if err := syscall.Exec(rs.Command[0], rs.Command, os.Environ()); err != nil {
 		return fmt.Errorf("failed to execute %s: %w", rs.Command[0], err)
+	}
+
+	return nil
+}
+
+// ungroup drops this process's supplementary groups, leaving it in its primary group
+// alone.
+//
+// Nothing to do when there are none, which is also the one case a process without
+// CAP_SETGID passes: setgroups needs the capability even to drop to nothing, so a
+// server with groups and without it has no way to keep them from a workload.
+func ungroup() error {
+	extra, err := supplementary()
+	if err != nil {
+		return err
+	}
+
+	if len(extra) == 0 {
+		return nil
+	}
+
+	if err = unix.Setgroups(nil); err != nil {
+		return fmt.Errorf("%w: failed to drop groups %v: %w", ErrGroupsInherited, extra, err)
+	}
+
+	return nil
+}
+
+// supplementary returns the groups this process is in beyond its primary group.
+//
+// The primary group is left out because it is not a grant the server was given: it
+// is the user's own, and a workload running as the user holds it either way.
+func supplementary() ([]int, error) {
+	groups, err := unix.Getgroups()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read groups: %w", err)
+	}
+
+	primary := unix.Getgid()
+
+	return slices.DeleteFunc(groups, func(gid int) bool { return gid == primary }), nil
+}
+
+// ungroupable reports whether a process started from this one can drop its
+// supplementary groups: either there are none, or CAP_SETGID will reach it.
+//
+// The capability is read from the ambient set rather than the effective one, because
+// the ambient set is what survives the exec into the trampoline. Root needs no
+// capability, since the kernel grants every one to a uid of zero on exec.
+func ungroupable() error {
+	extra, err := supplementary()
+	if err != nil {
+		return err
+	}
+
+	if len(extra) == 0 || os.Geteuid() == 0 {
+		return nil
+	}
+
+	held, err := unix.PrctlRetInt(unix.PR_CAP_AMBIENT, unix.PR_CAP_AMBIENT_IS_SET, unix.CAP_SETGID, 0, 0)
+	if err != nil {
+		return fmt.Errorf("failed to read ambient capabilities: %w", err)
+	}
+
+	if held == 0 {
+		return fmt.Errorf("%w: groups %v are held and CAP_SETGID is not (see the AmbientCapabilities line of the unit)", ErrGroupsInherited, extra)
 	}
 
 	return nil
@@ -450,5 +534,7 @@ func Confinable() error {
 			ErrNotConfinable, abi, requiredABI)
 	}
 
-	return nil
+	// Part of the same question. A workload that holds the server's groups is not
+	// confined to what its ruleset names, whatever the kernel offers.
+	return ungroupable()
 }
