@@ -206,6 +206,24 @@ for it is reviewable where it lives.
 For the workloads that hold no token, nothing changes: identity is opt-in,
 and a workload without a reference holds no credential at all.
 
+## Reaching the API from a workload
+
+A workload on the host's network can reach the address the server listens
+on. Every `exec` workload is on it, and so is a container whose manifest sets
+`networkMode: host`. [Confinement](operating.md#confinement) restricts what
+an `exec` workload may read and write, and not where it may connect.
+
+With the `[auth]` block set, such a workload is a caller like any other. It
+authenticates with a token it holds, which is what
+[workload identity](#workload-identity) mounts, and the policy decides what
+that principal may do. Without a token it is refused.
+
+Without the `[auth]` block, there is no identity to be, and every caller
+holds the whole API. A workload on the host's network then applies,
+deletes and reads everything, and can read every secret in plain text. The
+server says so at startup when it finds such a workload with authentication
+off. Turning authentication on is what closes it.
+
 ## Losing the recovery token
 
 Recovery is a host-level act, so holding the machine is what proves the right
