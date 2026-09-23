@@ -22,6 +22,12 @@ binding it to a network:
 Set `hosts` to the name the proxy serves when you put one in front of takt. See
 [Configuration](configuration.md#http).
 
+takt does not rate limit its own endpoints. A client token cannot be guessed, so a
+flood of login attempts is a cost rather than a way in: each is a database read,
+and a login by authorization code is an exchange with the issuer as well. Where
+that cost matters, apply the limit in the proxy in front of takt. The proxy sees
+the client's address, which takt behind it does not.
+
 Encrypting secrets does not change this. An attacker who can reach the API can apply
 a workload that reads any secret, because that is what a workload is for. What
 encryption protects is the database file and a backup of it. See
