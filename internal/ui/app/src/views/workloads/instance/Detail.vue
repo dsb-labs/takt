@@ -260,7 +260,11 @@ await workload.suspense().catch(() => {});
 
       <div class="mt-6">
         <DetailCard title="Logs">
-          <LogViewer :workload="name" :instance="index" />
+          <LogViewer
+            :workload="name"
+            :instance="index"
+            :state="instance.state"
+          />
         </DetailCard>
       </div>
     </template>

@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 
+import type { InstanceState } from "@/api/types";
 import Tooltip from "@/components/Tooltip.vue";
 import { parser, type Span } from "@/lib/ansi";
+import { followPause } from "@/lib/format";
 
 // The viewer reads one instance, named by the page it sits on, rather than
 // offering a choice: a workload's output is read an instance at a time and
-// the page a reader is already on says which one they meant.
-const props = defineProps<{ workload: string; instance: number }>();
+// the page a reader is already on says which one they meant. The page also
+// says what state it last saw the instance in, which is how a follow tells
+// an instance that ended from one that has not started.
+const props = defineProps<{
+  workload: string;
+  instance: number;
+  state?: InstanceState;
+}>();
 
 const tail = ref(100);
 // How far back to read, in minutes. Zero reads everything the tail allows.
@@ -38,6 +46,9 @@ const followDisabled = computed(() => previous.value);
 const empty = computed(() => !lines.value.some((line) => line.length));
 
 let controller: AbortController | undefined;
+// Whether the follow loop unticked follow itself, which the watch below
+// reads so as not to reload on a change it did not make.
+let ended = false;
 
 function params(): string {
   const query = new URLSearchParams();
@@ -141,8 +152,13 @@ async function read(signal: AbortSignal) {
 }
 
 // load reads the logs, and while following keeps reading. A followed stream
-// ends when its instance ends — a restart replaces the instance — so the loop
-// marks the break, waits, and asks again rather than going quiet.
+// ends when the server has nothing more to send: the instance ended and a
+// restart is replacing it, or it has not started and there is nothing to
+// send yet. The loop marks the break, worded by what the page last saw of
+// the instance, waits, and asks again rather than going quiet. The state the
+// page holds is a poll behind the stream, so the first break after an
+// instance completes can still read as an ending; the next one, a poll
+// later, is worded right and ends the follow.
 async function load() {
   controller?.abort();
   const mine = new AbortController();
@@ -153,6 +169,7 @@ async function load() {
 
   for (;;) {
     loading.value = true;
+    let refusal: string | undefined;
     try {
       await read(mine.signal);
 
@@ -165,18 +182,25 @@ async function load() {
       if (mine.signal.aborted) return;
 
       // While following, a refusal is transient: the replacement instance may
-      // not exist yet. The loop retries instead of reporting it.
-      if (!follow.value) {
-        error.value = cause instanceof Error ? cause.message : String(cause);
-      }
+      // not exist yet. The loop retries instead of reporting it, and the
+      // break says what was refused rather than passing it off as an ending.
+      refusal = cause instanceof Error ? cause.message : String(cause);
+      if (!follow.value) error.value = refusal;
     } finally {
       loading.value = false;
     }
 
     if (!follow.value || mine.signal.aborted) return;
 
-    note("--- the instance ended, waiting for its replacement ---");
+    const pause = followPause(props.state, refusal);
+    note(`--- ${pause.text} ---`);
     await scrollToEnd();
+    if (pause.final) {
+      ended = true;
+      follow.value = false;
+      return;
+    }
+
     await sleep(2000, mine.signal);
     if (mine.signal.aborted) return;
   }
@@ -186,7 +210,17 @@ watch(followDisabled, (disabled) => {
   if (disabled) follow.value = false;
 });
 
-watch([tail, since, previous, follow, () => props.instance], () => void load());
+watch([tail, since, previous, follow, () => props.instance], () => {
+  // A follow the loop itself ended is not a change to reload on: the box
+  // already shows everything the instance wrote, and a reload would take
+  // the note saying why the follow ended with it.
+  if (ended) {
+    ended = false;
+    return;
+  }
+
+  void load();
+});
 
 void load();
 
