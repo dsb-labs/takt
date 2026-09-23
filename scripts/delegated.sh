@@ -37,11 +37,24 @@ grantable() {
 }
 
 # Raised the way the unit raises it for the server, as an ambient capability,
-# through capsh as this user with this environment. A terminal is asked for the
-# password, since the alternative is a suite that cannot run. Anything else,
-# which is what a CI runner is, gets sudo -n so nothing ever waits on a prompt.
-# pam_cap grants the same thing to a session once, and a shell that has it never
-# reaches this. See CONTRIBUTING.md.
+# through capsh as this user. sudo replaces the environment, and its -E is not
+# honoured everywhere, so the environment is saved first and restored by the
+# shell capsh starts: the user manager's address and the Go cache both live in
+# it. A terminal is asked for the password, since the alternative is a suite
+# that cannot run. Anything else, which is what a CI runner is, gets sudo -n so
+# nothing ever waits on a prompt. pam_cap grants the same thing to a session
+# once, and a shell that has it never reaches this. See CONTRIBUTING.md.
+raise() {
+	local environment
+	environment=$(mktemp)
+	export -p >"$environment"
+
+	exec sudo $1 capsh --keep=1 --user="$(id -un)" --inh=cap_setgid --addamb=cap_setgid \
+		-- -c '. "$1" && rm -f "$1" && shift && exec "$0" "$@"' "$0" "$environment" "${command[@]}"
+}
+
+command=("$@")
+
 if ! capable; then
 	if [ -n "$TAKT_DELEGATED_CAPSH" ]; then
 		echo "sudo and capsh ran, and this shell still holds no ambient CAP_SETGID" >&2
@@ -54,13 +67,11 @@ if ! capable; then
 		echo "exec workloads need CAP_SETGID to drop this user's groups, and this shell has no ambient one" >&2
 		echo "sudo is about to ask for your password to raise it for this run alone; pam_cap makes this permanent (see CONTRIBUTING.md)" >&2
 
-		exec sudo -E env PATH="$PATH" capsh --keep=1 --user="$(id -un)" \
-			--inh=cap_setgid --addamb=cap_setgid -- -c 'exec "$0" "$@"' "$0" "$@"
+		raise ""
 	fi
 
 	if sudo -n true 2>/dev/null; then
-		exec sudo -n -E env PATH="$PATH" capsh --keep=1 --user="$(id -un)" \
-			--inh=cap_setgid --addamb=cap_setgid -- -c 'exec "$0" "$@"' "$0" "$@"
+		raise -n
 	fi
 
 	echo "this shell holds supplementary groups and no ambient CAP_SETGID, so exec workloads would inherit the groups" >&2
