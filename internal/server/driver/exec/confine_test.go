@@ -5,6 +5,8 @@ package exec_test
 import (
 	"encoding/json"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -217,6 +220,40 @@ func TestConfine(t *testing.T) {
 
 		require.Empty(t, result.Status)
 		assert.Contains(t, result.Output, "Permission denied")
+	})
+
+	t.Run("reaches a unix socket the ruleset does not name", func(t *testing.T) {
+		// Landlock mediates operations that name a path, and connecting to a socket
+		// is not one of them: the path is resolved, but the connect is judged by the
+		// socket's own permissions. So a socket the user may open is open to every
+		// workload, whatever its ruleset says, and the docker socket is one such
+		// when the server's user is in the docker group. This pins the boundary
+		// confinement stops at, which is what the group drop exists to cover.
+		if _, err := osexec.LookPath("curl"); err != nil {
+			t.Skip("this test needs curl to connect to a unix socket from a shell")
+		}
+
+		socket := filepath.Join(t.TempDir(), "d.sock")
+
+		listener, err := net.Listen("unix", socket)
+		require.NoError(t, err)
+
+		server := &http.Server{
+			Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, "REACHED")
+			}),
+			ReadHeaderTimeout: time.Second,
+		}
+		t.Cleanup(func() { _ = server.Close() })
+
+		go func() { _ = server.Serve(listener) }()
+
+		result := trampoline(t, ruleset{
+			Command: []string{"/bin/sh", "-c", "curl -s --unix-socket " + socket + " http://takt/ 2>&1"},
+		})
+
+		require.Empty(t, result.Status)
+		assert.Contains(t, result.Output, "REACHED", "a confined command could not connect to a socket outside its ruleset, so the boundary has moved")
 	})
 
 	t.Run("strips the ambient capabilities the server was granted", func(t *testing.T) {
