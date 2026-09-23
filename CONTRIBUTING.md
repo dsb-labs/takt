@@ -219,10 +219,13 @@ check with `grep CapAmb /proc/self/status`, which reports `0000000000000042`.
 After that, volume deletion and `exec` workloads work under `go run` and in the
 tests, with nothing to redo when the binary is rebuilt.
 
-The `make` targets go through `scripts/delegated.sh`, which asks for a delegated
-cgroup and for `CAP_SETGID` before running anything. Where the session holds
-neither and `sudo` needs no password, as on a CI runner, the script raises them
-itself. Where `sudo` would prompt, it stops and points here instead.
+The `make` targets go through `scripts/delegated.sh`, which puts the command in a
+fresh delegated scope and raises `CAP_SETGID` for it before running anything. The
+scope is always its own rather than the shell's: a terminal's scope looks delegated
+too, and a server preparing it treats the terminal's processes as its own. Where the
+session lacks the capability, the script raises it through `sudo` and `capsh`. On a
+terminal that asks for your password once per run, and `pam_cap` is how you stop it
+asking. On a CI runner `sudo` needs no password and nothing waits on a prompt.
 
 One test watches the confinement trampoline strip this capability from a workload.
 The test grants itself a capability inside a user namespace, so it runs without any
