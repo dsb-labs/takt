@@ -188,11 +188,12 @@ under `/var/lib/takt`. One consequence is worth knowing — under
 
 The unit grants the server `CAP_DAC_OVERRIDE`, so `takt volume delete` can remove
 files a container wrote as another user, `CAP_CHOWN`, so a volume manifest can
-name another user as its owner, and `CAP_FOWNER`, so `takt volume apply` can
-change the mode of a directory it assigned away. The grants do not reach the
+name another user as its owner, `CAP_FOWNER`, so `takt volume apply` can change
+the mode of a directory it assigned away, and `CAP_SETGID`, so an `exec` workload
+can drop the `docker` group before its command runs. The grants do not reach the
 workloads. See
-[Deleting a volume a container wrote](volumes.md#deleting-a-volume-a-container-wrote)
-and [Ownership](volumes.md#ownership).
+[Deleting a volume a container wrote](volumes.md#deleting-a-volume-a-container-wrote),
+[Ownership](volumes.md#ownership) and [Confinement](#confinement).
 
 ### Not in a container
 
@@ -421,7 +422,7 @@ as the server's user, so granting it would let one workload read what another
 wrote there. A workload that insists on a temporary directory can be pointed
 at its own with `TMPDIR`.
 
-Everything else is refused, the rest of the data directory included. There is no
+Every other path is refused, the rest of the data directory included. There is no
 opt-out, and no reduced mode on a host that offers less: confinement that did nothing
 on some hosts would be a guarantee nobody could rely on.
 
@@ -445,9 +446,24 @@ before the command runs, so a capability granted to the server — see
 [Deleting a volume a container wrote](volumes.md#deleting-a-volume-a-container-wrote) — never
 reaches a workload.
 
-What it does not cover is anything not reached through a filesystem path. Signal
-scoping arrives in a later Landlock version than takt requires, so a confined workload
-can still send a signal to the server. The network is not restricted either.
+A workload starts in the server's primary group alone. The server's user is in the
+`docker` group on a packaged install, and a process in that group can run a
+privileged container, so a workload that kept the group would hold the host. The
+ruleset cannot close this: connecting to a socket is not an operation that names a
+path, so the socket's own permissions are all that stand between a workload and
+the daemon. takt drops the supplementary groups before the command runs instead.
+Dropping them takes `CAP_SETGID`, which the unit grants. **A server without it,
+whose user is in any group beyond its primary, refuses `exec` workloads** and says
+so at startup, in the same way a host without Landlock does. A server whose user
+is in no other group needs nothing. A workload already running when the server
+is upgraded keeps its groups until it is next started.
+
+What confinement does not cover is anything not reached through a filesystem path.
+Signal scoping arrives in a later Landlock version than takt requires, so a confined
+workload can still send a signal to the server. The network is not restricted
+either, and a workload on the host's network reaches the API. What that hands it
+is described under
+[Reaching the API from a workload](acl.md#reaching-the-api-from-a-workload).
 
 There is deliberately no grant for `/tmp`. It is shared by every process running as
 the same user, so granting it would let one workload read what another wrote there. A
