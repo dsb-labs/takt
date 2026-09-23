@@ -15,8 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/errgroup"
 
@@ -503,19 +501,14 @@ func Run(ctx context.Context, config Config) error {
 
 	server := &http.Server{
 		Addr: config.HTTP.Address,
-		// Outermost on purpose, outside even the middleware: a request the
-		// middleware refuses — an unpermitted host, an oversized body — is
-		// still a request the server answered, and one worth measuring.
-		// Outside the telemetry handler, which is the only place a handler can still
-		// reach the connection's own writer: everything below wraps it, and none of
-		// those wrappers carries a write deadline.
-		Handler: middleware.Stream(otelhttp.NewHandler(middleware.Headers(config.ServedOverTLS())(middleware.Wrap(mux, logger, config.HTTP.Hosts, authenticator)), "takt",
-			otelhttp.WithMeterProvider(tel.MeterProvider()),
-			otelhttp.WithTracerProvider(tel.TracerProvider()),
-			otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(
-				propagation.TraceContext{}, propagation.Baggage{},
-			)),
-		)),
+		Handler: middleware.Wrap(mux, middleware.Config{
+			Logger:         logger,
+			Hosts:          config.HTTP.Hosts,
+			Authenticator:  authenticator,
+			TLS:            config.ServedOverTLS(),
+			MeterProvider:  tel.MeterProvider(),
+			TracerProvider: tel.TracerProvider(),
+		}),
 		// A client that opens a connection and then stalls — mid-header, mid-body, or
 		// while reading a response — otherwise holds it indefinitely. These bound how
 		// long any one request may occupy the server.
