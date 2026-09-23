@@ -27,6 +27,17 @@ describes how an entry is written.
 
 ### Changed
 
+- An `exec` workload no longer inherits the groups the server's user is in.
+  The packaged install puts that user in the `docker` group, and a workload
+  holding it could run a privileged container. The unit now grants
+  `CAP_SETGID` for the drop. A server started without it, as a user in any
+  group beyond its primary, refuses `exec` workloads and says so at startup.
+  A workload already running when the server is upgraded keeps its groups
+  until it is next started
+  ([#73](https://github.com/dsb-labs/takt/issues/73)).
+- The server warns at startup when authentication is off and a workload
+  shares the host's network, since such a workload reaches the API with
+  every permission ([#73](https://github.com/dsb-labs/takt/issues/73)).
 - **Breaking:** the policy's `ETag` is a count of the applies that changed
   it, `"0"` before any apply, rather than a hash of the document. A tag read
   before upgrading no longer matches. `takt acl get` prints the document under
