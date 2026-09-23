@@ -7,42 +7,93 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+)
+
+type (
+	// The Config type contains fields used to configure the middleware Wrap puts in
+	// front of a handler.
+	Config struct {
+		// The logger requests and recovered panics are reported to.
+		Logger *slog.Logger
+		// The hosts a request may name, which Guard checks it against.
+		Hosts []string
+		// The authenticator a bearer credential is resolved with. Nil means the
+		// configuration carries no [auth] block, and every request proceeds
+		// unidentified.
+		Authenticator Authenticator
+		// Whether the server is reached over TLS, which is what decides whether a
+		// browser is told to insist on it.
+		TLS bool
+		// The provider request metrics are recorded through. Nil uses the global one.
+		MeterProvider metric.MeterProvider
+		// The provider request spans are recorded through. Nil uses the global one.
+		TracerProvider trace.TracerProvider
+	}
 )
 
 // Wrap returns handler with the middleware the server puts in front of it.
 //
 // The order is what this exists to hold still. Each entry wraps what came before, so
-// the list runs innermost first and a request meets it bottom to top: a body is bounded
-// before anything reads it, the host is checked before a handler runs, and Recovery sits
-// directly around the handler where a panic is actually likely to come from.
+// the chain runs innermost first and a request meets it bottom to top: a body is
+// bounded before anything reads it, the host is checked before a handler runs, and
+// Recovery sits directly around the handler where a panic is actually likely to come
+// from.
 //
 // Recovery being innermost is deliberate rather than incidental. A panic that unwound
 // past Logging would leave no record of the request that caused it, and the answer to
 // "which request killed this" is the reason the log line is worth having at all.
-func Wrap(handler http.Handler, logger *slog.Logger, hosts []string, authenticator Authenticator) http.Handler {
-	for _, middleware := range []func(http.Handler) http.Handler{
-		Recovery(logger),
+func Wrap(handler http.Handler, config Config) http.Handler {
+	chain := []func(http.Handler) http.Handler{
+		Recovery(config.Logger),
 		// Outside Recovery, so the 500 a recovered panic writes goes through
 		// the compressor the response's headers already promised.
 		Gzip,
-		Logging(logger),
+		Logging(config.Logger),
 		// Directly inside Guard, so a credential is only ever read from a request
-		// that named this server. A nil authenticator means the configuration
-		// carries no [auth] block, and every request proceeds as it did before
-		// the layer existed.
-		Authenticate(authenticator),
+		// that named this server.
+		Authenticate(config.Authenticator),
 		// Ahead of anything that reaches a handler. Reaching this API is enough to run
 		// code on the host, and listening on loopback does not establish that the
 		// operator is who asked — a browser sends a request there on behalf of whatever
 		// page it was told to.
-		Guard(logger, hosts),
+		Guard(config.Logger, config.Hosts),
 		RequireJSON,
 		Limit,
-	} {
+		Headers(config.TLS),
+		// Outside everything the server's own middleware refuses: a request refused
+		// for an unpermitted host or an oversized body is still a request the server
+		// answered, and one worth measuring.
+		telemetry(config),
+		// Outermost, because it is the only place a handler can still reach the
+		// connection's own writer. Everything inside wraps it, and none of the
+		// wrappers carries a write deadline.
+		Stream,
+	}
+
+	for _, middleware := range chain {
 		handler = middleware(handler)
 	}
 
 	return handler
+}
+
+// telemetry returns middleware that records a span and the request metrics for
+// every request, and reads the trace context a caller propagated.
+func telemetry(config Config) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return otelhttp.NewHandler(next, "takt",
+			otelhttp.WithMeterProvider(config.MeterProvider),
+			otelhttp.WithTracerProvider(config.TracerProvider),
+			otelhttp.WithPropagators(propagation.NewCompositeTextMapPropagator(
+				propagation.TraceContext{}, propagation.Baggage{},
+			)),
+		)
+	}
 }
 
 // writeError writes an error response in the shape the API returns for every
