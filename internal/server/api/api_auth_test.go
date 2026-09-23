@@ -138,14 +138,6 @@ func TestAuthAPI_Login(t *testing.T) {
 		assert.Contains(t, cookie, "HttpOnly")
 	})
 
-	t.Run("exchanges an oidc identity", func(t *testing.T) {
-		svc := NewMockAuthService(t)
-		svc.EXPECT().LoginOIDC(mock.Anything, "raw").Return(minted, "takt_c_session", nil).Once()
-
-		resp := login(t, svc, `{"idToken": "raw"}`)
-		require.Equal(t, http.StatusOK, resp.Code)
-	})
-
 	t.Run("exchanges an authorization code from the cli flow", func(t *testing.T) {
 		svc := NewMockAuthService(t)
 		svc.EXPECT().LoginCode(mock.Anything, "abc", "verifier", "http://127.0.0.1:8250/oidc/callback").
@@ -178,7 +170,7 @@ func TestAuthAPI_Login(t *testing.T) {
 	})
 
 	t.Run("refuses a body naming both exchanges", func(t *testing.T) {
-		resp := login(t, NewMockAuthService(t), `{"idToken": "raw", "token": "takt_c_secret"}`)
+		resp := login(t, NewMockAuthService(t), `{"code": "abc", "token": "takt_c_secret"}`)
 		require.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 
@@ -189,10 +181,14 @@ func TestAuthAPI_Login(t *testing.T) {
 
 	t.Run("reports oidc is not configured", func(t *testing.T) {
 		svc := NewMockAuthService(t)
-		svc.EXPECT().LoginOIDC(mock.Anything, "raw").
+		svc.EXPECT().LoginCode(mock.Anything, "abc", "verifier", "http://127.0.0.1:8250/oidc/callback").
 			Return(service.Token{}, "", service.ErrOIDCDisabled).Once()
 
-		resp := login(t, svc, `{"idToken": "raw"}`)
+		resp := login(t, svc, `{
+			"code": "abc",
+			"verifier": "verifier",
+			"redirectUri": "http://127.0.0.1:8250/oidc/callback"
+		}`)
 		require.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -66,78 +65,6 @@ func TestClient_WhoAmI(t *testing.T) {
 	}
 }
 
-func TestClient_Login(t *testing.T) {
-	t.Parallel()
-
-	expires := time.Now().UTC().Add(12 * time.Hour).Truncate(time.Second)
-
-	tt := []struct {
-		Name               string
-		Handler            http.HandlerFunc
-		Expected           client.Login
-		ExpectOIDCMissing  bool
-		ExpectUnauthorized bool
-	}{
-		{
-			Name: "exchanges an identity for a token",
-			Handler: func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, http.MethodPost, r.Method)
-				assert.Equal(t, "/api/v1/auth", r.URL.Path)
-
-				var body api.LoginRequest
-				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-				require.NotNil(t, body.IDToken)
-				assert.Equal(t, "raw", *body.IDToken)
-				assert.Nil(t, body.Token)
-
-				writeJSON(t, w, http.StatusOK, api.LoginResult{
-					Credential: "takt_c_secret",
-					Principal:  "david@dsb.dev",
-					ExpiresAt:  expires,
-				})
-			},
-			Expected: client.Login{
-				Credential: "takt_c_secret",
-				Principal:  "david@dsb.dev",
-				ExpiresAt:  expires,
-			},
-		},
-		{
-			Name: "reports oidc is not configured",
-			Handler: func(w http.ResponseWriter, _ *http.Request) {
-				writeJSON(t, w, http.StatusBadRequest, api.ErrorResponse{Error: "oidc is not configured"})
-			},
-			ExpectOIDCMissing: true,
-		},
-		{
-			Name: "reports an identity the server refused",
-			Handler: func(w http.ResponseWriter, _ *http.Request) {
-				writeJSON(t, w, http.StatusUnauthorized, api.ErrorResponse{Error: "invalid credential"})
-			},
-			ExpectUnauthorized: true,
-		},
-	}
-
-	for _, tc := range tt {
-		t.Run(tc.Name, func(t *testing.T) {
-			login, err := newTestClient(t, tc.Handler).Login(t.Context(), "raw")
-			switch {
-			case tc.ExpectOIDCMissing:
-				assert.ErrorIs(t, err, client.ErrOIDCNotConfigured)
-
-				return
-			case tc.ExpectUnauthorized:
-				assert.True(t, client.IsUnauthorized(err))
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Equal(t, tc.Expected, login)
-		})
-	}
-}
-
 func TestClient_LoginCode(t *testing.T) {
 	t.Parallel()
 
@@ -152,7 +79,7 @@ func TestClient_LoginCode(t *testing.T) {
 			require.NotNil(t, body.Verifier)
 			require.NotNil(t, body.RedirectURI)
 			assert.Equal(t, "abc", *body.Code)
-			assert.Nil(t, body.IDToken)
+			assert.Nil(t, body.Token)
 
 			writeJSON(t, w, http.StatusOK, api.LoginResult{
 				Credential: "takt_c_secret",

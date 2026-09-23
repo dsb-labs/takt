@@ -73,33 +73,6 @@ func (c *Client) WhoAmI(ctx context.Context) (Identity, error) {
 	}
 }
 
-// Login exchanges a verified OIDC identity token for a short-lived client
-// token, reporting ErrOIDCNotConfigured when the server has no issuer to
-// verify it against.
-func (c *Client) Login(ctx context.Context, idToken string) (Login, error) {
-	resp, err := c.api.LoginWithResponse(ctx, api.LoginRequest{IDToken: new(idToken)})
-	if err != nil {
-		return Login{}, fmt.Errorf("failed to send the request: %w", err)
-	}
-
-	switch {
-	case resp.JSON200 != nil:
-		return Login{
-			Credential: resp.JSON200.Credential,
-			Principal:  resp.JSON200.Principal,
-			ExpiresAt:  resp.JSON200.ExpiresAt,
-		}, nil
-	case resp.JSON400 != nil:
-		return Login{}, fmt.Errorf("%s: %w", resp.JSON400.Error, ErrOIDCNotConfigured)
-	case resp.JSON401 != nil:
-		return Login{}, newError(http.StatusUnauthorized, resp.JSON401)
-	case resp.JSON500 != nil:
-		return Login{}, newError(http.StatusInternalServerError, resp.JSON500)
-	default:
-		return Login{}, newError(resp.StatusCode(), nil)
-	}
-}
-
 // LoginCode trades an authorization code from a loopback flow for a
 // short-lived client token. The server performs the exchange with the
 // issuer, because the exchange is what needs the client secret and the
