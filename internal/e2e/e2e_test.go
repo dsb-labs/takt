@@ -66,6 +66,16 @@ const (
 func TestMain(m *testing.M) {
 	execdriver.Confine()
 
+	// Refused before any test runs, rather than skipped. The driver takes the cgroup
+	// it was started in for its delegated subtree, and a terminal's own scope
+	// qualifies: run there, the suite moves the terminal's processes into the leaf
+	// it makes and runs workloads beside them, and terminals have died that way.
+	// The script sets this for the scope it makes, and nothing else should.
+	if os.Getenv("TAKT_DELEGATED_SCOPE") == "" {
+		fmt.Fprintln(os.Stderr, `this suite prepares the cgroup it is started in: run it through "make e2e" or scripts/delegated.sh`)
+		os.Exit(1)
+	}
+
 	os.Exit(m.Run())
 }
 
