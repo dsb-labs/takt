@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 
 # Runs a command with what takt needs to run exec workloads: a delegated cgroup
-# subtree, which is what lets it enforce resource limits, and an ambient
-# CAP_SETGID, which is what lets it keep the server's groups from a workload.
-# A command already holding both runs unchanged, so the wrapper costs nothing
-# where the environment is already right. See the "Delegation" and
-# "Confinement" sections of docs/operating.md.
+# subtree of its own, which is what lets it enforce resource limits, and an
+# ambient CAP_SETGID, which is what lets it keep the server's groups from a
+# workload. See the "Delegation" and "Confinement" sections of docs/operating.md.
+#
+# The subtree is always a fresh scope, never the one this shell is in. A
+# terminal's own scope looks delegated too, since the user manager hands every
+# app scope the controllers, and a server preparing it treats the scope as its
+# own: it moves the terminal's processes into the leaf it makes and runs the
+# suite's workloads beside them. Terminals have died with the suite that way.
 
 set -e
 
@@ -25,31 +29,6 @@ capable() {
 	[ $((0x$ambient & (1 << 6))) -ne 0 ]
 }
 
-# Mirrors the server's own probe: the subtree this process is in must offer the
-# memory, cpu and pids controllers, and must be writable.
-delegated() {
-	local path root controllers controller
-
-	path=$(grep '^0::' /proc/self/cgroup | cut -d: -f3-) || return 1
-	root="/sys/fs/cgroup${path}"
-
-	# A shell already inside the server's leaf is inside a prepared subtree,
-	# and the delegation is the parent.
-	if [ "$(basename "$root")" = "main" ]; then
-		root=$(dirname "$root")
-	fi
-
-	controllers=" $(cat "$root/cgroup.controllers" 2>/dev/null) "
-	for controller in memory cpu pids; do
-		case "$controllers" in
-		*" $controller "*) ;;
-		*) return 1 ;;
-		esac
-	done
-
-	[ -w "$root" ] && [ -w "$root/cgroup.subtree_control" ]
-}
-
 # Asks systemd for a scope with a command that does nothing, so a host that
 # cannot grant one fails here with the message below rather than as a failing
 # command.
@@ -58,13 +37,28 @@ grantable() {
 }
 
 # Raised the way the unit raises it for the server, as an ambient capability,
-# through capsh as this user with this environment. Attempted with sudo -n for
-# the reason lingering is below. pam_cap grants the same thing to a session
-# once, and a shell that has it never reaches this. See CONTRIBUTING.md.
+# through capsh as this user with this environment. A terminal is asked for the
+# password, since the alternative is a suite that cannot run. Anything else,
+# which is what a CI runner is, gets sudo -n so nothing ever waits on a prompt.
+# pam_cap grants the same thing to a session once, and a shell that has it never
+# reaches this. See CONTRIBUTING.md.
 if ! capable; then
-	if [ -z "$TAKT_DELEGATED_CAPSH" ] && sudo -n true 2>/dev/null; then
-		export TAKT_DELEGATED_CAPSH=1
+	if [ -n "$TAKT_DELEGATED_CAPSH" ]; then
+		echo "sudo and capsh ran, and this shell still holds no ambient CAP_SETGID" >&2
+		exit 1
+	fi
 
+	export TAKT_DELEGATED_CAPSH=1
+
+	if [ -t 0 ]; then
+		echo "exec workloads need CAP_SETGID to drop this user's groups, and this shell has no ambient one" >&2
+		echo "sudo is about to ask for your password to raise it for this run alone; pam_cap makes this permanent (see CONTRIBUTING.md)" >&2
+
+		exec sudo -E env PATH="$PATH" capsh --keep=1 --user="$(id -un)" \
+			--inh=cap_setgid --addamb=cap_setgid -- -c 'exec "$0" "$@"' "$0" "$@"
+	fi
+
+	if sudo -n true 2>/dev/null; then
 		exec sudo -n -E env PATH="$PATH" capsh --keep=1 --user="$(id -un)" \
 			--inh=cap_setgid --addamb=cap_setgid -- -c 'exec "$0" "$@"' "$0" "$@"
 	fi
@@ -74,9 +68,12 @@ if ! capable; then
 	exit 1
 fi
 
-if delegated; then
+# The scope this script made, which the command is now inside.
+if [ -n "$TAKT_DELEGATED_SCOPE" ]; then
 	exec "$@"
 fi
+
+export TAKT_DELEGATED_SCOPE=1
 
 if grantable; then
 	exec systemd-run --user --scope --quiet -p Delegate=yes "$@"
