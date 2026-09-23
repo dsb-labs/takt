@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { bytes, cores, percent, pluralize, usageStyles } from "@/lib/format";
+import {
+  bytes,
+  cores,
+  followPause,
+  percent,
+  pluralize,
+  usageStyles,
+} from "@/lib/format";
 
 describe("cores", () => {
   it.each([
@@ -82,5 +89,34 @@ describe("usageStyles", () => {
   it("warns at four fifths and alarms at nineteen twentieths", () => {
     expect(usageStyles(80, 100)).toContain("amber");
     expect(usageStyles(95, 100)).toContain("rose");
+  });
+});
+
+describe("followPause", () => {
+  it.each([
+    ["pending", "the instance has not started yet, waiting for it", false],
+    ["running", "the instance ended, waiting for its replacement", false],
+    ["exited", "the instance ended, waiting for its replacement", false],
+    ["failed", "the instance ended, waiting for its replacement", false],
+    [
+      "terminating",
+      "the instance is being torn down, waiting for its replacement",
+      false,
+    ],
+    ["completed", "the instance completed and is not being replaced", true],
+    // The state can be unknown when the page's read has not landed yet, and
+    // an ended stream is then read the way it was before the state was asked.
+    [undefined, "the instance ended, waiting for its replacement", false],
+  ] as const)("words a %s instance", (state, text, final) => {
+    expect(followPause(state)).toEqual({ text, final });
+  });
+
+  // A refused read is not an ending, whatever state the instance is in: the
+  // server said what was missing, and that is what the reader is told.
+  it("repeats a refusal rather than reporting an ending", () => {
+    expect(followPause("running", 'workload "web" does not exist')).toEqual({
+      text: 'workload "web" does not exist, retrying',
+      final: false,
+    });
   });
 });
