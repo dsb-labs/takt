@@ -714,10 +714,11 @@ export interface paths {
     put?: never;
     /**
      * Exchange an identity for a short-lived token
-     * @description Mints a short-lived client token. The exchange accepts either an OIDC
-     *     identity token, verified against the configured issuer, or an existing
-     *     client token, which is how the browser UI trades the standing
-     *     credential pasted into it for a session that expires on its own.
+     * @description Mints a short-lived client token. The exchange accepts either an
+     *     authorization code from the CLI's loopback flow, which the server
+     *     trades with the configured issuer, or an existing client token, which
+     *     is how the browser UI trades the standing credential pasted into it
+     *     for a session that expires on its own.
      *
      *     With `cookie` set, the response also carries the credential as an
      *     HttpOnly session cookie, which is what the UI stores. The credential
@@ -2463,17 +2464,11 @@ export interface components {
       recovery: boolean;
     };
     /**
-     * @description The exchange a login performs. Exactly one of `idToken`, `token` and
-     *     `code` must be present; which one it is selects the exchange, and
-     *     `code` brings `verifier` and `redirectUri` with it.
+     * @description The exchange a login performs. Exactly one of `token` and `code` must
+     *     be present; which one it is selects the exchange, and `code` brings
+     *     `verifier` and `redirectUri` with it.
      */
     LoginRequest: {
-      /**
-       * @description A raw OIDC identity token, verified against the configured
-       *     issuer. The principal and groups are derived from its claims as
-       *     the policy maps them.
-       */
-      idToken?: string;
       /**
        * @description An existing client token, exchanged for a session bound to the
        *     same principal. This is how the browser UI trades a pasted

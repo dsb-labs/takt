@@ -25,7 +25,8 @@ type (
 	// API exposes.
 	AuthService interface {
 		// LoginOIDC should exchange a verified OIDC identity for a
-		// short-lived client token.
+		// short-lived client token. The browser flow's callback calls it
+		// with the identity token the server's own code exchange earned.
 		LoginOIDC(ctx context.Context, rawIDToken string) (service.Token, string, error)
 		// LoginToken should exchange an existing client token for a
 		// short-lived session token bound to the same principal.
@@ -138,11 +139,9 @@ func (a *AuthAPI) Login(ctx context.Context, request api.LoginRequestObject) (ap
 	// exchanges falls through to the refusal rather than silently picking
 	// one.
 	switch {
-	case request.Body.IDToken != nil && request.Body.Token == nil && request.Body.Code == nil:
-		token, credential, err = a.svc.LoginOIDC(ctx, *request.Body.IDToken)
-	case request.Body.Token != nil && request.Body.IDToken == nil && request.Body.Code == nil:
+	case request.Body.Token != nil && request.Body.Code == nil:
 		token, credential, err = a.svc.LoginToken(ctx, *request.Body.Token)
-	case request.Body.Code != nil && request.Body.IDToken == nil && request.Body.Token == nil:
+	case request.Body.Code != nil && request.Body.Token == nil:
 		if request.Body.Verifier == nil || request.Body.RedirectURI == nil {
 			return api.Login400JSONResponse{
 				Error: "a code exchange requires verifier and redirectUri",
@@ -152,7 +151,7 @@ func (a *AuthAPI) Login(ctx context.Context, request api.LoginRequestObject) (ap
 		token, credential, err = a.svc.LoginCode(ctx, *request.Body.Code, *request.Body.Verifier, *request.Body.RedirectURI)
 	default:
 		return api.Login400JSONResponse{
-			Error: "exactly one of idToken, token and code is required",
+			Error: "exactly one of token and code is required",
 		}, nil
 	}
 
