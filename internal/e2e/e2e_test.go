@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -4353,11 +4354,11 @@ func (s *Suite) TestAuthReset() {
 	s.Equal("viewer", identity.Role)
 }
 
-// TestAuthOIDC proves the whole exchange: an identity token signed by the
-// issuer becomes a short-lived client token whose principal and groups come
-// from the claims the policy maps.
+// TestAuthOIDC proves the whole exchange: an authorization code becomes an
+// identity token signed by the issuer, which becomes a short-lived client
+// token whose principal and groups come from the claims the policy maps.
 func (s *Suite) TestAuthOIDC() {
-	issuer, sign := s.fakeIssuer()
+	issuer, sign, answer := s.fakeIssuer()
 
 	s.restart(withOIDC(issuer, "takt"))
 
@@ -4374,12 +4375,16 @@ func (s *Suite) TestAuthOIDC() {
 	s.Equal(issuer, discovered.Issuer)
 	s.Equal("takt", discovered.ClientID)
 
-	// The infra group carries admin through the policy's group grant, so the
+	// The CLI's flow ends at the authorization code: the server performs the
+	// exchange, because the exchange is what needs the client secret. The
+	// infra group carries admin through the policy's group grant, so the
 	// login proves the groups claim travelled from the identity token.
-	login, err := s.client.Login(s.ctx(), sign(map[string]any{
+	answer("infra-code", sign(map[string]any{
 		"email":  "david@example.com",
 		"groups": []string{"infra"},
 	}))
+
+	login, err := s.client.LoginCode(s.ctx(), "infra-code", "any-verifier", "http://127.0.0.1:8250/oidc/callback")
 	s.Require().NoError(err)
 	s.Equal("david@example.com", login.Principal)
 	s.False(login.ExpiresAt.IsZero())
@@ -4390,28 +4395,31 @@ func (s *Suite) TestAuthOIDC() {
 	s.Equal("admin", identity.Role)
 	s.Contains(identity.Groups, "infra")
 
-	// An identity signed by somebody else is refused.
-	_, wrongSign := s.fakeIssuer()
+	// An identity signed by somebody else is refused, even when the issuer
+	// hands it over in exchange for a code.
+	_, wrongSign, _ := s.fakeIssuer()
 
-	_, err = s.client.Login(s.ctx(), wrongSign(map[string]any{"email": "forger@example.com"}))
+	answer("forged-code", wrongSign(map[string]any{"email": "forger@example.com"}))
+
+	_, err = s.client.LoginCode(s.ctx(), "forged-code", "any-verifier", "http://127.0.0.1:8250/oidc/callback")
 	s.Require().True(client.IsUnauthorized(err), "expected 401 for a foreign signature, got %v", err)
 
-	// The CLI's flow ends at the authorization code: the server performs the
-	// exchange, because the exchange is what needs the client secret. The
-	// fake issuer's token endpoint answers any code with a signed identity.
-	codeLogin, err := s.client.LoginCode(s.ctx(), "any-code", "any-verifier", "http://127.0.0.1:8250/oidc/callback")
-	s.Require().NoError(err)
-	s.Equal("operator@example.com", codeLogin.Principal)
+	// A code the issuer never handed out is refused by the issuer, and the
+	// refusal reaches the caller as an invalid credential.
+	_, err = s.client.LoginCode(s.ctx(), "unknown-code", "any-verifier", "http://127.0.0.1:8250/oidc/callback")
+	s.Require().True(client.IsUnauthorized(err), "expected 401 for an unknown code, got %v", err)
 
 	// A redirect that is not loopback would make the server an exchange
 	// oracle for codes obtained some other way, so it is refused.
-	_, err = s.client.LoginCode(s.ctx(), "any-code", "any-verifier", "https://evil.example.com/callback")
+	_, err = s.client.LoginCode(s.ctx(), "infra-code", "any-verifier", "https://evil.example.com/callback")
 	s.Require().True(client.IsBadRequest(err), "expected 400 for a foreign redirect, got %v", err)
 }
 
 // fakeIssuer runs an OIDC issuer for the test: a discovery document, a JWKS,
-// and a signer that mints identity tokens the way the real one would.
-func (s *Suite) fakeIssuer() (string, func(claims map[string]any) string) {
+// a signer that mints identity tokens the way the real one would, and a
+// token endpoint that answers each authorization code with the identity the
+// test registered for it.
+func (s *Suite) fakeIssuer() (string, func(claims map[string]any) string, func(code, idToken string)) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	s.Require().NoError(err)
 
@@ -4468,17 +4476,32 @@ func (s *Suite) fakeIssuer() (string, func(claims map[string]any) string) {
 		return serialized
 	}
 
-	// The token endpoint answers any authorization code with a signed
-	// identity, standing in for the exchange the server performs on the
-	// CLI's behalf.
-	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+	// The token endpoint stands in for the exchange the server performs on
+	// the CLI's behalf. It answers a registered code with the identity the
+	// test chose for it, and refuses any other the way a real issuer would.
+	var answers sync.Map
+
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+
+		idToken, ok := answers.Load(r.FormValue("code"))
+		if !ok {
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_grant"})
+
+			return
+		}
+
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "access",
 			"token_type":   "bearer",
-			"id_token":     sign(map[string]any{"email": "operator@example.com"}),
+			"id_token":     idToken,
 		})
 	})
 
-	return issuer.URL, sign
+	answer := func(code, idToken string) {
+		answers.Store(code, idToken)
+	}
+
+	return issuer.URL, sign, answer
 }
