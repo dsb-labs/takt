@@ -1,4 +1,4 @@
-import type { HealthStatus } from "@/api/types";
+import type { HealthStatus, InstanceState } from "@/api/types";
 
 // Formatting helpers shared by the views.
 
@@ -106,3 +106,44 @@ export const healthStyles: Record<HealthStatus, string> = {
   unhealthy: "text-rose-700 dark:text-rose-400",
   starting: "text-sky-700 dark:text-sky-400",
 };
+
+// followPause words the break between one followed read of a workload's
+// logs and the next. A followed stream ends whenever the server has nothing
+// more to send, and that says nothing on its own about why: the instance may
+// have ended, may not have started, or the read may have been refused. The
+// stream cannot say which, so the pause is worded by what the workload
+// reports the instance to be, and by whether the read was refused at all. A
+// refusal is repeated as the server put it, since it names what is missing.
+//
+// A completed instance is the one break a follow does not come back from:
+// its policy asks for no replacement, so there is nothing to wait for and the
+// pause says so as final.
+export function followPause(
+  state: InstanceState | undefined,
+  refusal?: string,
+): { text: string; final: boolean } {
+  if (refusal) return { text: `${refusal}, retrying`, final: false };
+
+  switch (state) {
+    case "pending":
+      return {
+        text: "the instance has not started yet, waiting for it",
+        final: false,
+      };
+    case "terminating":
+      return {
+        text: "the instance is being torn down, waiting for its replacement",
+        final: false,
+      };
+    case "completed":
+      return {
+        text: "the instance completed and is not being replaced",
+        final: true,
+      };
+    default:
+      return {
+        text: "the instance ended, waiting for its replacement",
+        final: false,
+      };
+  }
+}
