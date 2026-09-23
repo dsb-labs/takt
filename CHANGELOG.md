@@ -70,6 +70,10 @@ describes how an entry is written.
 
 ### Fixed
 
+- Following the logs of an instance that had not started reported that it
+  had ended and was waiting for a replacement
+  ([#41](https://github.com/dsb-labs/takt/issues/41),
+  [#119](https://github.com/dsb-labs/takt/pull/119)).
 - A specification change to a workload running several instances replaced them
   all within a second, since every replacement's own start woke the next pass.
   The next instance now waits until the last replacement has stayed up for ten
