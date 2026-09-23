@@ -33,6 +33,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/service"
 	"github.com/dsb-labs/takt/internal/server/telemetry"
 	"github.com/dsb-labs/takt/internal/ui"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // Run starts the takt server using the given configuration and blocks until the
@@ -155,6 +156,23 @@ func Run(ctx context.Context, config Config) error {
 
 		if !initialised {
 			logger.Warn("authentication is enabled and the acl is not initialised: the first caller of `takt acl init` will hold the recovery token")
+		}
+	}
+
+	// Without the [auth] block, reaching the API is holding all of it. Every exec
+	// workload shares the host's network, as does a container that asked for it, so
+	// each of those reaches the API as nobody with every permission. Reported at
+	// startup for the reason the recovery token is: an operator who applied such a
+	// workload with authentication off should learn what that handed it.
+	if config.Auth == nil {
+		exposed, err := hostNetworked(ctx, workloads)
+		if err != nil {
+			return err
+		}
+
+		if len(exposed) > 0 {
+			logger.With("workloads", exposed).
+				Warn("authentication is off, and these workloads share the host's network, so each reaches the api with every permission")
 		}
 	}
 
@@ -726,4 +744,34 @@ func currentKey(ctx context.Context, keys *secret.Store, recorded *database.Encr
 	}
 
 	return id, nil
+}
+
+// hostNetworked returns the names of the workloads that share the host's network:
+// every exec workload, and every container that asked for the host's network.
+//
+// A workload marked for deletion is left out, since its instances are on their way
+// down and it cannot be applied again under that name.
+func hostNetworked(ctx context.Context, workloads *database.WorkloadRepository) ([]string, error) {
+	rows, err := workloads.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workloads: %w", err)
+	}
+
+	var names []string
+	for _, row := range rows {
+		if !row.DeletedAt.IsZero() {
+			continue
+		}
+
+		spec, err := manifest.DecodeWorkload(row.Spec)
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode workload %q: %w", row.Name, err)
+		}
+
+		if spec.Exec != nil || (spec.Container != nil && spec.Container.NetworkMode == "host") {
+			names = append(names, row.Name)
+		}
+	}
+
+	return names, nil
 }
