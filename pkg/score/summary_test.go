@@ -38,6 +38,15 @@ func TestSummarise(t *testing.T) {
 	}, score.Summarise(rendered))
 }
 
+func TestSummarise_Empty(t *testing.T) {
+	t.Parallel()
+
+	summary := score.Summarise(score.Rendered{})
+	assert.NotNil(t, summary.Required)
+	assert.NotNil(t, summary.Secrets)
+	assert.NotNil(t, summary.Principals)
+}
+
 func TestPrincipals(t *testing.T) {
 	t.Parallel()
 

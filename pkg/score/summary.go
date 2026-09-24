@@ -46,8 +46,8 @@ func Summarise(rendered Rendered) Summary {
 		Workloads:  make([]string, 0, len(rendered.Workloads)),
 		Services:   make([]string, 0, len(rendered.Services)),
 		Variables:  make([]string, 0, len(rendered.Variables)),
-		Required:   slices.Clone(rendered.Required),
-		Secrets:    slices.Clone(rendered.Secrets),
+		Required:   append([]string{}, rendered.Required...),
+		Secrets:    append([]string{}, rendered.Secrets...),
 		Principals: Principals(rendered.Workloads),
 	}
 
