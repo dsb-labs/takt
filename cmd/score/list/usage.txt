@@ -1,0 +1,11 @@
+List the installs of scores the server holds.
+
+Every resource a score applies carries a label naming the install and one
+naming the release. This groups everything by the install label and
+reports the resources under each, with every release found in the group.
+More than one release under an install means an apply failed partway and
+the next one has not finished the job.
+
+Nothing here reads a score. A resource applied by hand with the label set
+is listed like any other, which is also what --adopt on an apply leaves
+behind.
