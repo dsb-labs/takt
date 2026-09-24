@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/dsb-labs/takt/cmd/score/apply"
+	delcmd "github.com/dsb-labs/takt/cmd/score/delete"
+	"github.com/dsb-labs/takt/cmd/score/list"
 	"github.com/dsb-labs/takt/cmd/score/render"
 	"github.com/dsb-labs/takt/cmd/score/show"
 )
@@ -20,7 +22,7 @@ var usage string
 func Command() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "score",
-		Short: "Render, inspect, apply and delete scores",
+		Short: "Render, inspect, apply, list and delete scores",
 		Long:  usage,
 	}
 
@@ -28,6 +30,8 @@ func Command() *cobra.Command {
 		render.Command(),
 		show.Command(),
 		apply.Command(),
+		delcmd.Command(),
+		list.Command(),
 	)
 
 	return cmd

@@ -23,9 +23,17 @@ missing secret is set: one that exists is left alone, since setting it
 again would redeploy every workload reading it. Without a terminal, or
 with --no-input, a missing secret fails the apply naming every one.
 
+Pass --prune to delete, once everything is applied, whatever carries this
+install's label that the score no longer names. That is how a manifest
+removed from the score leaves the server. Pruning destroys in reverse
+order, waiting for each workload, and asks first because a volume goes
+with its data; --yes skips the question. Prune compares against the
+rendered set, so it is only as safe as the render is repeatable.
+
 A failure partway stops at once. There is no rollback: the output says
 what landed, and the next apply carries on from there.
 
   takt score apply ./blog
   takt score apply ./blog --values prod.yaml --as blog-prod
   takt score apply ./blog --secret db-password=@./password --no-input
+  takt score apply ./blog --prune --yes

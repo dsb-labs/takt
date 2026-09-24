@@ -1,0 +1,20 @@
+Delete every resource an install of a score applied.
+
+The install is found by its label, so it can be removed without the
+directory or the values that produced it. Services go first, then
+workloads with each before the workloads it references, then variables,
+then volumes. Each workload is waited for before the next step, since a
+volume a workload mounts and a variable a workload reads are both refused
+while the workload holds them.
+
+Volumes are deleted with the data they hold. Backups are your business,
+and this is the one thing in takt that destroys stored data, so the
+command prints what it will delete and asks first. Pass --yes to skip the
+question, which is the non-interactive form. Without a terminal and
+without --yes, nothing is deleted.
+
+A failure partway stops at once, and the output says what was deleted
+before it. Running the command again carries on from there.
+
+  takt score delete blog
+  takt score delete blog-prod --yes --timeout 10m

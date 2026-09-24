@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -17,6 +18,15 @@ import (
 //go:embed usage.txt
 var usage string
 
+// The result type is what a successful apply prints: what was applied, and
+// what pruning removed.
+type result struct {
+	// The resources applied, in order.
+	Applied []score.Node
+	// The resources pruned, in order. Empty without --prune.
+	Pruned []score.Node
+}
+
 // Command returns the "score apply" command used to render a score and apply
 // every resource in it.
 func Command() *cobra.Command {
@@ -26,6 +36,9 @@ func Command() *cobra.Command {
 		name    string
 		adopt   bool
 		noInput bool
+		prune   bool
+		yes     bool
+		timeout time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -63,14 +76,22 @@ func Command() *cobra.Command {
 
 			report, err := score.Apply(cmd.Context(), c, rendered, applyOptions...)
 			if err != nil {
-				printReport(cmd.ErrOrStderr(), report)
+				printNodes(cmd.ErrOrStderr(), "applied before the failure:", report.Applied)
 				return fmt.Errorf("failed to apply score: %w", err)
+			}
+
+			out := result{Applied: report.Applied, Pruned: []score.Node{}}
+			if prune {
+				out.Pruned, err = pruneInstall(cmd, c, rendered, yes, timeout)
+				if err != nil {
+					return err
+				}
 			}
 
 			enc := json.NewEncoder(cmd.OutOrStdout())
 			enc.SetIndent("", "  ")
 
-			return enc.Encode(report)
+			return enc.Encode(out)
 		},
 	}
 
@@ -80,6 +101,9 @@ func Command() *cobra.Command {
 	flags.BoolVar(&adopt, "adopt", false, "take over resources that exist without this score's label rather than refusing them")
 	flags.StringArrayVar(&secrets, "secret", nil, "a declared secret to set from a file if it is missing, as name=@path, repeatable")
 	flags.BoolVar(&noInput, "no-input", false, "never prompt for a missing secret, and fail naming every one instead")
+	flags.BoolVar(&prune, "prune", false, "after applying, delete what carries this install's label that the score no longer names")
+	flags.BoolVarP(&yes, "yes", "y", false, "prune without asking first")
+	flags.DurationVar(&timeout, "timeout", 5*time.Minute, "how long to wait for a prune, workload teardown included")
 
 	return cmd
 }
@@ -95,15 +119,15 @@ func printFailure(w io.Writer, rendered score.Rendered, err error) {
 	fmt.Fprintf(w, "# %s\n%s\n", document.Source, document.Numbered())
 }
 
-// printReport says what landed before a failed apply, so an operator knows
-// what state the server was left in.
-func printReport(w io.Writer, report score.Report) {
-	if len(report.Applied) == 0 {
+// printNodes lists nodes under a heading, for saying what landed or what went
+// before a failure so an operator knows what state the server was left in.
+func printNodes(w io.Writer, heading string, nodes []score.Node) {
+	if len(nodes) == 0 {
 		return
 	}
 
-	fmt.Fprintln(w, "applied before the failure:")
-	for _, node := range report.Applied {
+	fmt.Fprintln(w, heading)
+	for _, node := range nodes {
 		fmt.Fprintf(w, "  %s\n", node)
 	}
 }
