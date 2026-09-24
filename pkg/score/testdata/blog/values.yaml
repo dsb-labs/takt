@@ -1,0 +1,7 @@
+image: example/blog:1.4.0
+motd: hello
+web:
+  replicas: 2
+  logLevel: info
+worker:
+  enabled: false

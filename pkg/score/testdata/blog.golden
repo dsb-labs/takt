@@ -1,0 +1,80 @@
+---
+# Source: pgdata.yaml
+version: v1
+name: blog-pgdata
+
+---
+# Source: db.yaml
+version: v1
+name: blog-db
+
+labels:
+  app: blog
+
+ports:
+  - name: pg
+    to: 5432
+
+env:
+  POSTGRES_PASSWORD: ${secret:db-password}
+
+volumes:
+  - name: blog-pgdata
+    to: /var/lib/postgresql/data
+
+container:
+  image: postgres:17-alpine
+
+---
+# Source: web.yaml
+version: v1
+name: blog-web
+
+count: 2
+
+labels:
+  app: blog
+  tier: web
+
+ports:
+  - name: http
+    to: 8080
+
+env:
+  LOG_LEVEL: info
+  DATABASE_URL: postgres://postgres:${secret:db-password}@${workload:blog-db:pg}/app
+  RELEASE: 1.4.0
+
+volumes:
+  - var: web-config
+    to: /etc/blog/web.json
+    signal: SIGHUP
+
+container:
+  image: example/blog:1.4.0
+---
+# Source: web.yaml
+# A second document in the same file, to prove a stream yields several
+# resources.
+version: v1
+name: blog-cron
+
+schedule:
+  cron: "0 * * * *"
+
+container:
+  image: example/blog:1.4.0
+  command:
+    - tidy
+
+---
+# Source: web.service.yaml
+version: v1
+name: blog
+
+target:
+  labels:
+    app: blog
+    tier: web
+  port: 8080
+

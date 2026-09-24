@@ -1,0 +1,4 @@
+web:
+  replicas: 3
+worker:
+  enabled: true

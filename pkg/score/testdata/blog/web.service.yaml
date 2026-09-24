@@ -1,0 +1,8 @@
+version: v1
+name: {{ .Score.Name }}
+
+target:
+  labels:
+    app: {{ .Score.Name }}
+    tier: web
+  port: 8080

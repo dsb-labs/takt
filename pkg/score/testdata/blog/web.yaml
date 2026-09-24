@@ -1,0 +1,38 @@
+version: v1
+name: {{ .Score.Name }}-web
+
+count: {{ .Values.web.replicas }}
+
+labels:
+  app: {{ .Score.Name }}
+  tier: web
+
+ports:
+  - name: http
+    to: 8080
+
+env:
+  LOG_LEVEL: {{ .Values.web.logLevel }}
+  DATABASE_URL: postgres://postgres:${secret:db-password}@${workload:{{ .Score.Name }}-db:pg}/app
+  RELEASE: {{ .Score.Release }}
+
+volumes:
+  - var: web-config
+    to: /etc/blog/web.json
+    signal: SIGHUP
+
+container:
+  image: {{ .Values.image }}
+---
+# A second document in the same file, to prove a stream yields several
+# resources.
+version: v1
+name: {{ .Score.Name }}-cron
+
+schedule:
+  cron: "0 * * * *"
+
+container:
+  image: {{ .Values.image }}
+  command:
+    - tidy

@@ -1,0 +1,7 @@
+version: v1
+name: blog
+release: 1.0.0
+variables:
+  - name: config
+    file: config.json
+    value: inline

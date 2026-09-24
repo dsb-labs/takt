@@ -1,0 +1,19 @@
+version: v1
+name: {{ .Score.Name }}-db
+
+labels:
+  app: {{ .Score.Name }}
+
+ports:
+  - name: pg
+    to: 5432
+
+env:
+  POSTGRES_PASSWORD: ${secret:db-password}
+
+volumes:
+  - name: {{ .Score.Name }}-pgdata
+    to: /var/lib/postgresql/data
+
+container:
+  image: postgres:17-alpine
