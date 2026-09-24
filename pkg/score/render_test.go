@@ -191,7 +191,8 @@ func TestRender(t *testing.T) {
 	})
 
 	t.Run("impure template functions are not available", func(t *testing.T) {
-		for _, call := range []string{"now", "env \"HOME\"", "uuidv4", "randAlpha 4", "randInt 1 10", "genPrivateKey \"rsa\""} {
+		calls := []string{"now", "env \"HOME\"", "uuidv4", "randAlpha 4", "randInt 1 10", "genPrivateKey \"rsa\""}
+		for _, call := range calls {
 			loaded := writeScore(t, map[string]string{
 				"score.yaml": "version: v1\nname: pure\nrelease: 1.0.0\nvariables:\n  - name: v\n    value: '{{ " + call + " }}'\n",
 			})
