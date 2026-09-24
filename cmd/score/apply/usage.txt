@@ -13,8 +13,19 @@ something else, and applying over it is refused. Pass --adopt to take
 such resources over, which is how a deployment applied by hand becomes a
 score without deleting it first.
 
+A secret the score declares has to be set before anything is applied, and
+no value for one ever enters a score or a values file. A declared secret
+that is not set yet is prompted for, without echo, before anything else
+happens. Pass --secret name=@path to read one from a file instead, which
+is the non-interactive form. A value written inline as name=value is
+refused, for the reason "takt secret set" takes no value argument. Only a
+missing secret is set: one that exists is left alone, since setting it
+again would redeploy every workload reading it. Without a terminal, or
+with --no-input, a missing secret fails the apply naming every one.
+
 A failure partway stops at once. There is no rollback: the output says
 what landed, and the next apply carries on from there.
 
   takt score apply ./blog
   takt score apply ./blog --values prod.yaml --as blog-prod
+  takt score apply ./blog --secret db-password=@./password --no-input
