@@ -1,0 +1,5 @@
+version: v1
+name: blog
+release: 1.0.0
+workloads:
+  - ../outside.yaml

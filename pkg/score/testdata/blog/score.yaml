@@ -1,0 +1,24 @@
+version: v1
+name: blog
+release: 1.4.0
+
+volumes:
+  - pgdata.yaml
+
+workloads:
+  - db.yaml
+  - web.yaml
+  - worker.yaml
+
+services:
+  - web.service.yaml
+
+variables:
+  - name: web-config
+    file: files/web.json
+  - name: motd
+    value: "{{ .Values.motd | upper }}"
+  - name: db-host
+
+secrets:
+  - name: db-password

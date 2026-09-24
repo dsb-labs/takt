@@ -1,0 +1,8 @@
+{{- if .Values.worker.enabled }}
+version: v1
+name: {{ .Score.Name }}-worker
+container:
+  image: {{ .Values.image }}
+  command:
+    - work
+{{- end }}

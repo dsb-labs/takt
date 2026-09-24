@@ -1,0 +1,5 @@
+{
+  "package": "{{ .Score.Package }}",
+  "release": "{{ .Score.Release }}",
+  "logLevel": "{{ .Values.web.logLevel }}"
+}
