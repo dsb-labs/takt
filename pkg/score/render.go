@@ -404,23 +404,33 @@ func funcs() template.FuncMap {
 }
 
 // split divides a rendered file into its YAML documents, on the document
-// separator alone on a line. A file with no separator is one document.
+// separator alone on a line. A file with no separator is one document. Each
+// document ends with a newline, so the text reads the same printed alone or
+// in a stream.
 func split(text string) []string {
 	var documents []string
 
-	var current strings.Builder
+	var lines []string
 	for line := range strings.SplitSeq(text, "\n") {
 		if strings.TrimRight(line, " \t\r") == "---" {
-			documents = append(documents, current.String())
-			current.Reset()
+			documents = append(documents, join(lines))
+			lines = lines[:0]
 			continue
 		}
 
-		current.WriteString(line)
-		current.WriteString("\n")
+		lines = append(lines, line)
 	}
 
-	return append(documents, current.String())
+	return append(documents, join(lines))
+}
+
+func join(lines []string) string {
+	document := strings.Join(lines, "\n")
+	if document != "" && !strings.HasSuffix(document, "\n") {
+		document += "\n"
+	}
+
+	return document
 }
 
 // isEmpty reports whether a document holds no content: nothing, or only

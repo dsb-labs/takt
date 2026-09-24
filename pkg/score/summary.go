@@ -76,7 +76,7 @@ func Summarise(rendered Rendered) Summary {
 // A token needs nothing to exist before a workload asserts it, so this is not a
 // precondition. It is what an operator reads to know what the policy must grant.
 func Principals(workloads []manifest.Spec) []string {
-	var principals []string
+	principals := make([]string, 0)
 	for _, workload := range workloads {
 		// Render has already validated every workload, so the references parse.
 		references, _ := manifest.References(workload)
