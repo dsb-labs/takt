@@ -1,8 +1,10 @@
 package e2e_test
 
 import (
-	"fmt"
+	"bytes"
+	"embed"
 	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/dsb-labs/takt/pkg/client"
@@ -15,107 +17,50 @@ import (
 // secret it declares. The worker is behind a value, so a later render drops it
 // and prune has something to remove.
 //
-// The score file itself is not templated, so the install name is formatted
-// into the variable and secret entries. The manifests read it as .Score.Name.
-const (
-	scoreFile = `version: v1
-name: journey
-release: 1.0.0
-volumes:
-  - data.yaml
-workloads:
-  - db.yaml
-  - web.yaml
-  - worker.yaml
-services:
-  - web.service.yaml
-variables:
-  - name: %[1]s-config
-    value: "level={{ .Values.level }}"
-  - name: %[1]s-host
-secrets:
-  - name: %[1]s-password
-`
-	scoreValues = `level: info
-worker: true
-`
-	scoreVolume = `version: v1
-name: {{ .Score.Name }}-data
-`
-	scoreDB = `version: v1
-name: {{ .Score.Name }}-db
-labels:
-  app: {{ .Score.Name }}
-ports:
-  - name: http
-    to: 80
-container:
-  image: ` + testImage + `
-`
-	scoreWeb = `version: v1
-name: {{ .Score.Name }}-web
-labels:
-  app: {{ .Score.Name }}
-  tier: web
-ports:
-  - name: http
-    to: 80
-env:
-  DB: ${workload:{{ .Score.Name }}-db:http}
-  HOST: ${var:{{ .Score.Name }}-host}
-  PASSWORD: ${secret:{{ .Score.Name }}-password}
-volumes:
-  - name: {{ .Score.Name }}-data
-    to: /data
-  - var: {{ .Score.Name }}-config
-    to: /etc/app/config
-container:
-  image: ` + testImage + `
-`
-	scoreWorker = `{{- if .Values.worker }}
-version: v1
-name: {{ .Score.Name }}-worker
-labels:
-  app: {{ .Score.Name }}
-container:
-  image: ` + testImage + `
-{{- end }}
-`
-	scoreService = `version: v1
-name: {{ .Score.Name }}
-target:
-  labels:
-    app: {{ .Score.Name }}
-    tier: web
-  port: 80
-`
-)
+// The score file itself is not templated, so the install name is written into
+// its variable and secret entries as the files are copied out, and the test
+// image into the values. The manifests read the name as .Score.Name.
+//
+//go:embed testdata/score
+var scoreFiles embed.FS
+
+// writeScore copies the embedded score into a directory of its own, with the
+// install name and the test image filled in, and returns the directory.
+func (s *Suite) writeScore(name string) string {
+	directory := s.T().TempDir()
+
+	entries, err := scoreFiles.ReadDir("testdata/score")
+	s.Require().NoError(err)
+
+	for _, entry := range entries {
+		content, err := scoreFiles.ReadFile(path.Join("testdata", "score", entry.Name()))
+		s.Require().NoError(err)
+
+		content = bytes.ReplaceAll(content, []byte("INSTALL"), []byte(name))
+		content = bytes.ReplaceAll(content, []byte("IMAGE"), []byte(testImage))
+		s.Require().NoError(os.WriteFile(filepath.Join(directory, entry.Name()), content, 0o600))
+	}
+
+	return directory
+}
 
 // TestScoreJourney covers a score's whole life: applied in dependency order
 // with its requirements checked first, pruned when a manifest leaves it, listed
 // by its label, and deleted in reverse order with its data.
 func (s *Suite) TestScoreJourney() {
 	name := s.workloadName()
-	for _, suffix := range []string{"-db", "-web", "-worker"} {
-		s.T().Cleanup(func() { s.cleanup(name + suffix) })
+
+	workloads := []string{name + "-db", name + "-web", name + "-worker"}
+	for _, workload := range workloads {
+		s.T().Cleanup(func() { s.cleanup(workload) })
 	}
+
 	s.T().Cleanup(func() { s.cleanupVariable(name + "-host") })
 	s.T().Cleanup(func() { s.cleanupVariable(name + "-config") })
 	s.T().Cleanup(func() { s.cleanupSecret(name + "-password") })
 	s.T().Cleanup(func() { s.cleanupVolume(name + "-data") })
 
-	directory := s.T().TempDir()
-	for file, content := range map[string]string{
-		"score.yaml":       fmt.Sprintf(scoreFile, name),
-		"values.yaml":      scoreValues,
-		"data.yaml":        scoreVolume,
-		"db.yaml":          scoreDB,
-		"web.yaml":         scoreWeb,
-		"worker.yaml":      scoreWorker,
-		"web.service.yaml": scoreService,
-	} {
-		s.Require().NoError(os.WriteFile(filepath.Join(directory, file), []byte(content), 0o600))
-	}
+	directory := s.writeScore(name)
 
 	rendered, err := score.Build(directory, nil, score.WithName(name))
 	s.Require().NoError(err)

@@ -1,0 +1,24 @@
+version: v1
+name: {{ .Score.Name }}-web
+
+labels:
+  app: {{ .Score.Name }}
+  tier: web
+
+ports:
+  - name: http
+    to: 80
+
+env:
+  DB: ${workload:{{ .Score.Name }}-db:http}
+  HOST: ${var:{{ .Score.Name }}-host}
+  PASSWORD: ${secret:{{ .Score.Name }}-password}
+
+volumes:
+  - name: {{ .Score.Name }}-data
+    to: /data
+  - var: {{ .Score.Name }}-config
+    to: /etc/app/config
+
+container:
+  image: {{ .Values.image }}

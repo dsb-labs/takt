@@ -1,0 +1,24 @@
+version: v1
+name: journey
+release: 1.0.0
+
+volumes:
+  - data.yaml
+
+workloads:
+  - db.yaml
+  - web.yaml
+  - worker.yaml
+
+services:
+  - web.service.yaml
+
+# The score file is not templated, so the install name is written in by
+# the test before the score is loaded.
+variables:
+  - name: INSTALL-config
+    value: "level={{ .Values.level }}"
+  - name: INSTALL-host
+
+secrets:
+  - name: INSTALL-password

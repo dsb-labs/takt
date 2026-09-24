@@ -1,0 +1,3 @@
+image: IMAGE
+level: info
+worker: true
