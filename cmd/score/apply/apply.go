@@ -21,9 +21,11 @@ var usage string
 // every resource in it.
 func Command() *cobra.Command {
 	var (
-		values []string
-		name   string
-		adopt  bool
+		values  []string
+		secrets []string
+		name    string
+		adopt   bool
+		noInput bool
 	)
 
 	cmd := &cobra.Command{
@@ -50,6 +52,15 @@ func Command() *cobra.Command {
 
 			c := client.FromContext(cmd.Context())
 
+			preconditions, err := score.Check(cmd.Context(), c, rendered)
+			if err != nil {
+				return fmt.Errorf("failed to check score: %w", err)
+			}
+
+			if err = setSecrets(cmd, c, rendered, preconditions.Missing, secrets, noInput); err != nil {
+				return err
+			}
+
 			report, err := score.Apply(cmd.Context(), c, rendered, applyOptions...)
 			if err != nil {
 				printReport(cmd.ErrOrStderr(), report)
@@ -67,6 +78,8 @@ func Command() *cobra.Command {
 	flags.StringArrayVarP(&values, "values", "f", nil, "a values file merged over the score's defaults, repeatable, later files winning")
 	flags.StringVar(&name, "as", "", "the name to install the score as, which templates read as .Score.Name (default the score's name)")
 	flags.BoolVar(&adopt, "adopt", false, "take over resources that exist without this score's label rather than refusing them")
+	flags.StringArrayVar(&secrets, "secret", nil, "a declared secret to set from a file if it is missing, as name=@path, repeatable")
+	flags.BoolVar(&noInput, "no-input", false, "never prompt for a missing secret, and fail naming every one instead")
 
 	return cmd
 }
