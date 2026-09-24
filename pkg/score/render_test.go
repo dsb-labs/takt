@@ -257,4 +257,14 @@ func TestBuild(t *testing.T) {
 		_, err := score.Build(filepath.Join("testdata", "blog"), []string{"missing.yaml"})
 		assert.Error(t, err)
 	})
+
+	t.Run("reports a render that does not plan", func(t *testing.T) {
+		loaded := writeScore(t, map[string]string{
+			"score.yaml": "version: v1\nname: bad\nrelease: 1.0.0\nworkloads:\n  - web.yaml\n",
+			"web.yaml":   "version: v1\nname: web\nenv:\n  PW: ${secret:pw}\ncontainer:\n  image: example\n",
+		})
+
+		_, err := score.Build(loaded.Directory, nil)
+		assert.ErrorIs(t, err, score.ErrUndeclared)
+	})
 }

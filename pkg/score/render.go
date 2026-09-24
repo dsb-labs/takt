@@ -449,7 +449,9 @@ func isEmpty(text string) (bool, error) {
 }
 
 // Build loads the score at location, merges its values with the given values
-// files and renders it: the three steps every command takes, in one call.
+// files, renders it and checks that the result plans: the steps every command
+// takes, in one call. A cycle or an undeclared dependency is reported here, so
+// a render or a show fails the same way an apply would.
 //
 // On a render failure the returned Rendered is what Render returned, so the
 // failing document is still there to print.
@@ -464,5 +466,14 @@ func Build(location string, values []string, options ...Option) (Rendered, error
 		return Rendered{}, err
 	}
 
-	return Render(loaded, merged, options...)
+	rendered, err := Render(loaded, merged, options...)
+	if err != nil {
+		return rendered, err
+	}
+
+	if _, err = NewPlan(rendered); err != nil {
+		return rendered, err
+	}
+
+	return rendered, nil
 }
