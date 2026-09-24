@@ -67,16 +67,29 @@ func validateHeader(v, name string) error {
 		return err
 	}
 
+	if err := ValidateName(name); err != nil {
+		return fmt.Errorf("invalid manifest: %w", err)
+	}
+
+	return nil
+}
+
+// ValidateName reports whether a name is one takt will hold a resource under.
+//
+// Exported because the grammar reaches further than manifests: a score's install
+// name is templated into workload names and principals, so it is held to the same
+// rule where it is parsed rather than failing later inside a rendered manifest.
+func ValidateName(name string) error {
 	if name == "" {
-		return errors.New("invalid manifest: name is required")
+		return errors.New("name is required")
 	}
 
 	if len(name) > 63 {
-		return errors.New("invalid manifest: name must be at most 63 characters")
+		return errors.New("name must be at most 63 characters")
 	}
 
 	if !namePattern.MatchString(name) {
-		return errors.New("invalid manifest: name must be lowercase alphanumeric, optionally separated by dashes")
+		return errors.New("name must be lowercase alphanumeric, optionally separated by dashes")
 	}
 
 	return nil
