@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/dsb-labs/takt/cmd/score/apply"
 	"github.com/dsb-labs/takt/cmd/score/render"
 	"github.com/dsb-labs/takt/cmd/score/show"
 )
@@ -26,6 +27,7 @@ func Command() *cobra.Command {
 	cmd.AddCommand(
 		render.Command(),
 		show.Command(),
+		apply.Command(),
 	)
 
 	return cmd
