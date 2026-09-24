@@ -8,6 +8,8 @@ describes how an entry is written.
 
 ## Unreleased
 
+## v0.9.0 - 2026-09-24
+
 ### Added
 
 - Every write can name the version it expects to be replacing, the way an
