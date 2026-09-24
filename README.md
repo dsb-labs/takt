@@ -174,6 +174,7 @@ dependency keeps working without being re-applied.
 - [Manifest reference](docs/manifest.md) — every field a workload can name.
 - [Command line](docs/cli.md) — every command and flag.
 - [Moving from docker compose](docs/compose.md) — what each piece of a compose file becomes.
+- [Scores](docs/score.md) — bundling manifests, rendered from values and applied as one.
 - [Services](docs/services.md) — reporting the addresses of a labelled set of instances for a load balancer.
 - [Volumes](docs/volumes.md) — directories that outlive the workloads mounting them.
 - [Secrets](docs/secrets.md) — storing a value a workload can read and you cannot.
