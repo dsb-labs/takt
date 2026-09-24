@@ -1,0 +1,13 @@
+Show what a score contains once rendered, applying nothing.
+
+Reports the install name and release, the volumes, workloads and services
+the score would apply, the variables it sets and the ones it requires, the
+secrets it declares, and the principals its workloads assert through token
+references. The last two are what to check before an apply: every declared
+secret must be set, and the access policy must grant each principal what
+its workload needs.
+
+Rendering needs no server, so this works anywhere the score does.
+
+  takt score show ./blog
+  takt score show ./blog --values prod.yaml --as blog-prod

@@ -1,0 +1,17 @@
+Render a score's manifests and print them, applying nothing.
+
+The output is one multi-document YAML stream, each document preceded by a
+comment naming the file it came from. A file that rendered to nothing but
+whitespace and comments is left out. The stream is the rendered text as
+written, before the score labels are attached, so it reads like the source
+files rather than like a re-serialisation of them.
+
+Rendering needs no server. Review a change by rendering before and after
+it and diffing the two, or keep the rendered output in git beside the
+score.
+
+  takt score render ./blog
+  takt score render ./blog --values prod.yaml --as blog-prod
+
+A render that fails inside a manifest prints that document with line
+numbers on standard error, so the line the error names can be found.
