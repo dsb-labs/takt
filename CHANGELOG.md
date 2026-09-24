@@ -15,7 +15,9 @@ describes how an entry is written.
   order. `takt score render`, `show`, `apply`, `list` and `delete` are the
   verbs. Everything a score applies carries a `score` and a `score.release`
   label, and `apply --prune` and `delete` work from them. The server is
-  unchanged ([#112](https://github.com/dsb-labs/takt/issues/112)).
+  unchanged. See [Scores](docs/score.md)
+  ([#112](https://github.com/dsb-labs/takt/issues/112),
+  [#124](https://github.com/dsb-labs/takt/pull/124)).
 
 ## v0.9.0 - 2026-09-24
 
