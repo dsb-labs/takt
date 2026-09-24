@@ -90,6 +90,10 @@ var (
 	ErrDuplicateName = errors.New("duplicate name")
 	// ErrReservedLabel is returned when a manifest sets a label the score owns.
 	ErrReservedLabel = errors.New("reserved label")
+	// ErrInvalidDocument is returned when a rendered document does not parse as
+	// the manifest kind the score listed it under. The document is the last in
+	// the returned Rendered, so a caller can print it beside the error.
+	ErrInvalidDocument = errors.New("invalid document")
 )
 
 // The Sprig helpers that survive its hermetic filter but still depend on
@@ -238,7 +242,7 @@ func each[T any](r renderer, rendered *Rendered, paths []string, parse func(io.R
 			empty, err := isEmpty(document.Text)
 			if err != nil {
 				rendered.Documents = append(rendered.Documents, document)
-				return fmt.Errorf("failed to parse %s: %w", path, err)
+				return fmt.Errorf("%w: failed to parse %s: %w", ErrInvalidDocument, path, err)
 			}
 
 			document.Skipped = empty
@@ -250,7 +254,7 @@ func each[T any](r renderer, rendered *Rendered, paths []string, parse func(io.R
 
 			resource, err := parse(strings.NewReader(document.Text))
 			if err != nil {
-				return fmt.Errorf("failed to parse %s: %w", path, err)
+				return fmt.Errorf("%w: %s: %w", ErrInvalidDocument, path, err)
 			}
 
 			name, labels := identity(&resource)
@@ -432,4 +436,23 @@ func isEmpty(text string) (bool, error) {
 	default:
 		return node.Kind == 0, nil
 	}
+}
+
+// Build loads the score at location, merges its values with the given values
+// files and renders it: the three steps every command takes, in one call.
+//
+// On a render failure the returned Rendered is what Render returned, so the
+// failing document is still there to print.
+func Build(location string, values []string, options ...Option) (Rendered, error) {
+	loaded, err := Load(location)
+	if err != nil {
+		return Rendered{}, err
+	}
+
+	merged, err := loaded.Values(values...)
+	if err != nil {
+		return Rendered{}, err
+	}
+
+	return Render(loaded, merged, options...)
 }

@@ -149,7 +149,7 @@ func TestRender(t *testing.T) {
 		})
 
 		rendered, err := score.Render(loaded, nil)
-		require.Error(t, err)
+		require.ErrorIs(t, err, score.ErrInvalidDocument)
 		assert.Contains(t, err.Error(), "web.yaml")
 
 		require.Len(t, rendered.Documents, 1)
@@ -235,4 +235,26 @@ func stream(rendered score.Rendered) string {
 	}
 
 	return out.String()
+}
+
+func TestBuild(t *testing.T) {
+	t.Parallel()
+
+	t.Run("loads, merges and renders", func(t *testing.T) {
+		rendered, err := score.Build(filepath.Join("testdata", "blog"), []string{filepath.Join("testdata", "blog-overrides.yaml")}, score.WithName("staging"))
+		require.NoError(t, err)
+
+		assert.Equal(t, "staging", rendered.Name)
+		assert.Len(t, rendered.Workloads, 4)
+	})
+
+	t.Run("reports a score that does not exist", func(t *testing.T) {
+		_, err := score.Build(filepath.Join("testdata", "missing"), nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("reports a values file that does not exist", func(t *testing.T) {
+		_, err := score.Build(filepath.Join("testdata", "blog"), []string{"missing.yaml"})
+		assert.Error(t, err)
+	})
 }
