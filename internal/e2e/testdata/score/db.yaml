@@ -1,0 +1,12 @@
+version: v1
+name: {{ .Score.Name }}-db
+
+labels:
+  app: {{ .Score.Name }}
+
+ports:
+  - name: http
+    to: 80
+
+container:
+  image: {{ .Values.image }}

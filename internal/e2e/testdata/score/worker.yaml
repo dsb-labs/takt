@@ -1,0 +1,10 @@
+{{- if .Values.worker }}
+version: v1
+name: {{ .Score.Name }}-worker
+
+labels:
+  app: {{ .Score.Name }}
+
+container:
+  image: {{ .Values.image }}
+{{- end }}
