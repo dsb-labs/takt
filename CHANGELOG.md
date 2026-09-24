@@ -8,6 +8,15 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Added
+
+- A score bundles the manifests, variables and secrets of one deployment,
+  rendered from a values file with Go templates and applied in dependency
+  order. `takt score render`, `show`, `apply`, `list` and `delete` are the
+  verbs. Everything a score applies carries a `score` and a `score.release`
+  label, and `apply --prune` and `delete` work from them. The server is
+  unchanged ([#112](https://github.com/dsb-labs/takt/issues/112)).
+
 ## v0.9.0 - 2026-09-24
 
 ### Added
