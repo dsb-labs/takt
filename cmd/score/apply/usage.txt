@@ -1,0 +1,20 @@
+Render a score and apply every resource in it, in dependency order.
+
+The score is rendered and every manifest validated before the server is
+contacted, then its requirements are checked all at once: a variable the
+score requires, a secret it declares, or a volume or workload a manifest
+names that the score does not apply. Nothing is applied while any of them
+is missing, and the error names every one. Volumes are applied first,
+then variables, then workloads with each after the workloads it
+references, then services.
+
+A resource that already exists without this score's label belongs to
+something else, and applying over it is refused. Pass --adopt to take
+such resources over, which is how a deployment applied by hand becomes a
+score without deleting it first.
+
+A failure partway stops at once. There is no rollback: the output says
+what landed, and the next apply carries on from there.
+
+  takt score apply ./blog
+  takt score apply ./blog --values prod.yaml --as blog-prod
