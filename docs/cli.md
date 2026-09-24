@@ -24,6 +24,12 @@ takt service list                       List services                        (al
 takt service get <name>                 Show a single service
 takt service delete <name>              Delete a service                     (alias: rm)
 
+takt score render <location>            Render a score's manifests and print them
+takt score show <location>              Show what a score contains once rendered
+takt score apply <location>             Render a score and apply every resource in it
+takt score list                         List the installs of scores the server holds (alias: ls)
+takt score delete <name>                Delete every resource an install applied (alias: rm)
+
 takt node get                           Show the node the server runs on
 
 takt secret set <name>                  Set a secret's value
@@ -583,6 +589,112 @@ takt service delete web
 
 The workloads the service selected keep running. What stops is the service reporting
 their addresses.
+
+## score render
+
+```sh
+takt score render ./blog
+takt score render ./blog --values prod.yaml --as blog-prod
+```
+
+| Flag | Description |
+|---|---|
+| `--values`, `-f` | A values file merged over the score's defaults. Repeatable, later files winning. |
+| `--as` | The name to install the score as, which templates read as `.Score.Name`. Defaults to the score's name. |
+
+Renders every manifest the score names and prints them as one multi-document
+stream, each document preceded by a comment naming the file it came from. A file
+that rendered to nothing is left out. Nothing is applied and no server is
+contacted.
+
+The location is a directory holding a `score.yaml`, or the path of the score
+file itself. A `--values` path is relative to the working directory, like every
+other path the CLI takes.
+
+A render that fails inside a manifest prints that document with line numbers on
+standard error. See [Scores](score.md).
+
+## score show
+
+```sh
+takt score show ./blog
+takt score show ./blog --values prod.yaml --as blog-prod
+```
+
+Takes the same flags as `score render`. Prints, as JSON, the install name and
+release, the volumes, workloads and services the score would apply, the
+variables it sets and the ones it requires, the secrets it declares, and the
+principals its workloads assert through token references. The last two are what
+to check before an apply.
+
+## score apply
+
+```sh
+takt score apply ./blog
+takt score apply ./blog --values prod.yaml --as blog-prod
+takt score apply ./blog --secret db-password=@./password --no-input
+takt score apply ./blog --prune --yes
+```
+
+| Flag | Description |
+|---|---|
+| `--values`, `-f` | A values file merged over the score's defaults. Repeatable. |
+| `--as` | The name to install the score as. Defaults to the score's name. |
+| `--secret` | A declared secret to set from a file if it is missing, as `name=@path`. Repeatable. |
+| `--no-input` | Never prompt for a missing secret. Fail naming every one instead. |
+| `--adopt` | Take over resources that exist without this score's label rather than refusing them. |
+| `--prune` | After applying, delete what carries this install's label that the score no longer names. |
+| `--yes`, `-y` | Prune without asking first. |
+| `--timeout` | How long to wait for a prune, workload teardown included. Default `5m`. |
+
+Renders the score, validates every manifest, checks every requirement and
+ownership, sets any missing secret, then applies in dependency order: volumes,
+variables, workloads with each after the ones it references, services. Nothing
+is applied while a requirement is missing or a resource is unowned, and the
+error names every one.
+
+A missing secret is prompted for without echo. `--secret name=value` is refused,
+for the reason `secret set` takes no value argument. Only a missing secret is
+set, since setting one that exists would redeploy every reader.
+
+A failure partway stops at once with no rollback. The output names what landed
+before the failure. On success the output is what was applied and what was
+pruned, as JSON.
+
+Pruning destroys in reverse order and asks first, because a volume goes with its
+data. Without a terminal and without `--yes`, nothing is pruned. See
+[Scores](score.md).
+
+## score list
+
+```sh
+takt score list
+```
+
+Prints every install as JSON: its name, every release found under it, and the
+volumes, variables, workloads and services carrying its label. More than one
+release under an install means an apply failed partway.
+
+## score delete
+
+```sh
+takt score delete blog
+takt score delete blog-prod --yes --timeout 10m
+```
+
+| Flag | Description |
+|---|---|
+| `--yes`, `-y` | Delete without asking first. |
+| `--timeout` | How long to wait for the whole delete, workload teardown included. Default `5m`. |
+
+Deletes every resource carrying the install's label in reverse dependency
+order, waiting for each workload before the next step. Volumes are deleted with
+the data they hold, so the command prints what it will delete and asks first.
+Without a terminal and without `--yes`, nothing is deleted. A required variable
+or a declared secret is not the score's, and stays.
+
+The output is what was deleted, as JSON. A failure partway stops at once and
+names what went before it. See [Scores](score.md).
 
 ## node get
 
