@@ -2,7 +2,6 @@
 # Source: pgdata.yaml
 version: v1
 name: blog-pgdata
-
 ---
 # Source: db.yaml
 version: v1
@@ -24,7 +23,6 @@ volumes:
 
 container:
   image: postgres:17-alpine
-
 ---
 # Source: web.yaml
 version: v1
@@ -66,7 +64,6 @@ container:
   image: example/blog:1.4.0
   command:
     - tidy
-
 ---
 # Source: web.service.yaml
 version: v1
@@ -77,4 +74,3 @@ target:
     app: blog
     tier: web
   port: 8080
-
