@@ -134,7 +134,9 @@ use, or keep one file per workload.
 
 **`docker compose up` as one operation.** Apply each manifest. The order only
 matters for volumes, which must exist before a workload mounts them. Everything
-else converges whatever order it arrives in.
+else converges whatever order it arrives in. A [score](score.md) names the
+manifests together and applies them in one command, in dependency order, which
+is the closer match for a compose file.
 
 ## What you gain
 
