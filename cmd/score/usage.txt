@@ -1,0 +1,14 @@
+Render, inspect, apply and delete scores.
+
+A score is a file naming the manifests, variables and secrets that make up
+one deployment, with Go templating over a values file. Rendering it
+produces ordinary manifests, and applying it is ordinary API calls in
+dependency order. The server never learns what a score is: every resource
+a score applies carries a "score" label holding the install name and a
+"score.release" label holding the release, and those labels are what
+delete, prune and list work from.
+
+A location is a directory holding a score.yaml, or the path of the score
+file itself. Paths inside the score are relative to it. A values.yaml
+beside the score holds the defaults, and each --values file is merged
+over it in order.

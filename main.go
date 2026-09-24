@@ -17,6 +17,7 @@ import (
 	"github.com/dsb-labs/takt/cmd/auth"
 	"github.com/dsb-labs/takt/cmd/dev"
 	"github.com/dsb-labs/takt/cmd/node"
+	"github.com/dsb-labs/takt/cmd/score"
 	"github.com/dsb-labs/takt/cmd/secret"
 	"github.com/dsb-labs/takt/cmd/serve"
 	"github.com/dsb-labs/takt/cmd/service"
@@ -104,6 +105,7 @@ func main() {
 		workload.Command(),
 		volume.Command(),
 		service.Command(),
+		score.Command(),
 		node.Command(),
 		secret.Command(),
 		variable.Command(),
