@@ -60,7 +60,7 @@ await service.suspense().catch(() => {});
     </template>
 
     <template v-if="service.data.value">
-      <div class="mt-6 grid gap-6 xl:grid-cols-2">
+      <div class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
         <DetailCard title="Overview">
           <dl
             class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"

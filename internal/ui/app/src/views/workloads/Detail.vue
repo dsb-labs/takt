@@ -245,7 +245,7 @@ await workload.suspense().catch(() => {});
     <template v-if="workload.data.value">
       <ErrorBanner v-if="actionError" :message="actionError" />
 
-      <div class="mt-6 grid gap-6 xl:grid-cols-2">
+      <div class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
         <DetailCard title="Overview">
           <dl
             class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
@@ -340,7 +340,7 @@ await workload.suspense().catch(() => {});
         <LabelsCard :labels="spec?.labels" target="/workloads" />
       </div>
 
-      <div class="mt-6 grid gap-6 xl:grid-cols-2">
+      <div class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
         <DetailCard title="Instances">
           <p
             v-if="!workload.data.value.instances?.length"

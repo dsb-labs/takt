@@ -29,7 +29,7 @@ await node.suspense().catch(() => {});
     />
 
     <template v-if="node.data.value">
-      <div class="grid gap-6 xl:grid-cols-2">
+      <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <DetailCard title="Memory" class="min-w-0">
           <div class="px-4 pt-4 pb-2">
             <CapacityBar
