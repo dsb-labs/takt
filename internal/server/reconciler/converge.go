@@ -378,9 +378,15 @@ func portsDrifted(instances []driver.Instance, rows []database.Port) bool {
 	return false
 }
 
-// slotPorts returns the port rows one instance of a workload holds.
+// slotPorts returns the port rows one instance of a workload holds, as of the most
+// recent pass to read them.
 func (r *Reconciler) slotPorts(row database.Workload, index int) []database.Port {
-	return slices.DeleteFunc(slices.Clone(r.allocations[row.ID]), func(port database.Port) bool {
+	allocations := r.allocations.Load()
+	if allocations == nil {
+		return nil
+	}
+
+	return slices.DeleteFunc(slices.Clone((*allocations)[row.ID]), func(port database.Port) bool {
 		return port.Instance != index
 	})
 }

@@ -210,16 +210,36 @@ type (
 		tracer      trace.Tracer
 		instruments instruments
 
-		// The port allocations the current pass converges against, written once as
-		// a pass begins and read by the converges it spawns. Unguarded because
-		// passes never overlap: the loop's goroutine writes it before anything
-		// concurrent reads it.
-		allocations map[string][]database.Port
+		// The port allocations the most recent pass read, replaced wholesale as
+		// each pass begins. A converge outlives the pass that spawned it, so one
+		// may read the allocations a later pass wrote. That is the newer truth
+		// about the same rows, and never a map mid-write.
+		allocations atomic.Pointer[map[string][]database.Port]
 
-		// Guards backoff and restarts, which are the only state a pass
-		// carries between workloads and so the only things converging them
+		// Bounds how many converges act at once, across passes rather than
+		// within one. The runtime behind them is a single daemon, and a pass
+		// that spawned an unbounded number of stops against it would be trading
+		// a slow pass for a saturated daemon.
+		slots chan struct{}
+		// Counts the goroutines a pass spawned and the loop has not waited for:
+		// the converges, the orphan stops, and the completion that counts the
+		// pass once they finish. Run waits on it before returning, so none
+		// outlives the reconciler.
+		work sync.WaitGroup
+		// Closed once the most recent pass has been counted as complete. Only
+		// the loop's goroutine touches it, on its way to spawning the next
+		// completion, which waits on it so passes are counted in order.
+		completed chan struct{}
+
+		// Guards backoff, restarts and converging, which are the only state a
+		// pass carries between workloads and so the only things converging them
 		// concurrently can contend on.
 		mux sync.Mutex
+		// The workloads a converge spawned by an earlier pass is still acting
+		// on. A pass leaves such a workload alone: the state it observed is
+		// mid-change, and two converges acting on one workload would race each
+		// other for its slots.
+		converging map[string]struct{}
 		// How long to wait before restarting each instance that keeps failing.
 		// Keyed per instance, so one instance crashing does not pace the others.
 		backoff map[slot]backoff
@@ -250,6 +270,10 @@ type (
 		// Counts completed passes, so that a caller can tell a pass has finished
 		// rather than inferring it from something a pass happens to do first.
 		passes atomic.Uint64
+		// Counts the passes the loop has run, whether or not their converges
+		// have finished, for the work a pass does every so often. Only the
+		// loop's goroutine touches it.
+		began uint64
 
 		// Guards observations, separately from mux so a caller polling readiness
 		// never contends with a pass's backoff bookkeeping.
@@ -339,13 +363,14 @@ type (
 )
 
 const (
-	// How long a pass will wait on the driver before giving up on it.
+	// How long a converge will wait on the driver before giving up on it.
 	//
-	// A pass is serial across workloads, so a driver that never answers doesn't just
-	// delay one workload — it stops every other workload converging behind it, and a
-	// docker daemon that has wedged will do exactly that. The deadline is generous
-	// enough for a slow daemon under load and short enough that a stuck one costs a
-	// pass rather than the node.
+	// A converge holds its workload for as long as the driver takes to answer, and
+	// holds one of the slots every converge shares, so a driver that never answers
+	// doesn't just delay one workload — it holds a slot the rest queue behind, and
+	// a docker daemon that has wedged will do exactly that. The deadline is
+	// generous enough for a slow daemon under load and short enough that a stuck
+	// one costs a converge rather than the node.
 	//
 	// Starting a workload gets its own, longer deadline: it may have to pull an image
 	// first, which is legitimately slow and not a sign that anything is wrong.
@@ -392,14 +417,27 @@ func New(config Config) *Reconciler {
 		verdicts:     make(map[slot]health.Status),
 		unhealthy:    make(map[slot]string),
 		restarts:     make(map[string]struct{}),
+		converging:   make(map[string]struct{}),
 		observations: observations,
 		subscribers:  make(map[chan struct{}]struct{}),
 		tracer:       telemetry.Tracer(config.TracerProvider, scope),
 		instruments:  newInstruments(telemetry.Meter(config.MeterProvider, scope)),
+		slots:        make(chan struct{}, convergeLimit()),
+		// Closed from the start, so the first pass has no earlier pass to wait
+		// on before it is counted.
+		completed: closed(),
 		// Buffered so that a caller signalling a change never blocks: a pass is
 		// already pending, which is all the signal conveys.
 		nudge: make(chan struct{}, 1),
 	}
+}
+
+// closed returns a channel that is already closed.
+func closed() chan struct{} {
+	done := make(chan struct{})
+	close(done)
+
+	return done
 }
 
 // Restart records that a workload's instances should be replaced on the next
@@ -469,6 +507,12 @@ func (r *Reconciler) Notify() {
 // events behind it are collected for a short window first, so a burst coalesces
 // into one pass rather than queueing one each. A verdict is held for the same
 // window, since the instances of one workload tend to come up together.
+//
+// A pass decides and the converges it spawns act, and the pass does not wait for
+// them. Stopping an instance takes as long as its grace period, and a pass that
+// waited on one would hold every other workload's restart, replacement and
+// deletion behind it. The converges run on until ctx is cancelled, and this
+// waits for them before returning so none outlives the reconciler.
 func (r *Reconciler) Run(ctx context.Context) error {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -477,6 +521,8 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	defer r.work.Wait()
 
 	// Nil without a checker, which a select never receives from.
 	var verdicts <-chan struct{}
@@ -516,12 +562,14 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	}
 }
 
-// Passes reports how many reconciliation passes have completed.
+// Passes reports how many reconciliation passes have completed, converges
+// included.
 //
 // A pass observes the runtimes before it acts, so nothing a pass does first says that
-// it has finished — and workloads are converged concurrently, so the last of them may
-// still be in flight when the loop moves on. This counts what a caller actually wants
-// to know.
+// it has finished — and the converges it spawns outlive it, so the loop moving on
+// says nothing either. A pass is counted once every converge it spawned has
+// finished, and after the pass before it was counted, so the count says how many
+// passes have done all they set out to do.
 func (r *Reconciler) Passes() uint64 {
 	return r.passes.Load()
 }
@@ -530,12 +578,13 @@ func (r *Reconciler) Passes() uint64 {
 // looked at the fleet, until ctx ends. It is the push form of Passes, for a
 // caller that wants to act on what a pass found rather than count them.
 //
-// A pass signals twice: once it has observed the drivers, and again once it has
-// finished acting on what it saw. The first is what makes a subscriber prompt.
-// A pass acting on a new workload pulls its image, and a subscriber waiting for
-// the end of that would learn of a change that had nothing to do with the pull
-// only once the pull was done. The second is what reports the pass's own work,
-// since starting and stopping instances is what most changes the fleet.
+// A pass signals twice: once it has observed the drivers, and again once the
+// converges it spawned have finished acting on what it saw. The first is what
+// makes a subscriber prompt. A pass acting on a new workload pulls its image, and
+// a subscriber waiting for the end of that would learn of a change that had
+// nothing to do with the pull only once the pull was done. The second is what
+// reports the pass's own work, since starting and stopping instances is what most
+// changes the fleet.
 //
 // The signal says "look again" and nothing more. What such a caller wants is the
 // hydrated view of the fleet — health folded in, ports resolved, retained
@@ -586,6 +635,10 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 
 	ctx, span := r.tracer.Start(ctx, "reconcile")
 
+	// The converges this pass spawns, which the pass does not wait for and its
+	// completion does.
+	var spawned sync.WaitGroup
+
 	defer func() {
 		// Always set, so a TraceQL filter on the attribute needs no special
 		// case for the passes that went wrong.
@@ -601,8 +654,8 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 		r.instruments.passes.Add(ctx, 1, set)
 		r.instruments.passDuration.Record(ctx, time.Since(started).Seconds(), set)
 
-		r.passes.Add(1)
-		r.looked()
+		r.began++
+		r.complete(&spawned)
 	}()
 
 	rows, err := r.workloads.List(ctx)
@@ -667,17 +720,19 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 		observed[instance.Workload] = append(observed[instance.Workload], r.checked(ctx, instance))
 	}
 
-	// Read once per pass rather than per workload. Written before the converges
-	// spawn, so they read it without contention.
-	r.allocations = nil
+	// Read once per pass rather than per workload, and published before the
+	// converges spawn, so they read it without contention.
+	allocations := make(map[string][]database.Port)
 	if r.ports != nil {
-		if r.allocations, err = r.ports.ListAll(ctx); err != nil {
+		if allocations, err = r.ports.ListAll(ctx); err != nil {
 			outcome = outcomeObserveFailed
 			r.logger.With("error", err).Error("failed to read workload ports")
 
 			return
 		}
 	}
+
+	r.allocations.Store(&allocations)
 
 	r.measure(ctx, rows, observed)
 	r.register(rows, observed)
@@ -687,7 +742,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 		desired[row.Name] = struct{}{}
 	}
 
-	r.convergeAll(ctx, rows, observed, indexes)
+	skipped := r.convergeAll(ctx, &spawned, rows, observed, indexes)
 
 	// A pass cut short by shutdown stops here. The sweep and the prune would run
 	// against a cancelled context, and every failure they reported would be the
@@ -703,14 +758,86 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 			continue
 		}
 
+		if !r.begin(workload) {
+			skipped++
+
+			continue
+		}
+
 		r.logger.With("workload", workload).Debug("stopping orphaned workload")
 
-		if err = r.stopOrphan(ctx, workload); err != nil {
-			r.logger.With("workload", workload, "error", err).Error("failed to stop orphaned workload")
-		}
+		r.spawn(&spawned, func() {
+			defer r.finish(workload)
+
+			if err := r.stopOrphan(ctx, workload); err != nil {
+				r.logger.With("workload", workload, "error", err).Error("failed to stop orphaned workload")
+			}
+		})
 	}
 
+	span.SetAttributes(attribute.Int("takt.skipped", skipped))
+
 	r.prune(rows)
+}
+
+// complete counts the pass once the converges it spawned have finished, and tells
+// the subscribers the pass has finished acting.
+//
+// Passes are counted in the order they ran. A pass that spawned nothing would
+// otherwise be counted ahead of one still stopping an instance, and a caller
+// waiting on the count to know that work was done would be told it was while it
+// was still in flight.
+func (r *Reconciler) complete(spawned *sync.WaitGroup) {
+	previous := r.completed
+	done := make(chan struct{})
+	r.completed = done
+
+	r.work.Go(func() {
+		defer close(done)
+
+		spawned.Wait()
+		<-previous
+
+		r.passes.Add(1)
+		r.looked()
+	})
+}
+
+// spawn runs fn on a goroutine of its own, counted against the pass that spawned
+// it and against the reconciler, so the pass can be counted complete once it
+// finishes and Run can wait for it before returning.
+func (r *Reconciler) spawn(spawned *sync.WaitGroup, fn func()) {
+	spawned.Add(1)
+
+	r.work.Go(func() {
+		defer spawned.Done()
+
+		fn()
+	})
+}
+
+// begin claims a workload for a converge, reporting false when one spawned by an
+// earlier pass still holds it.
+func (r *Reconciler) begin(workload string) bool {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	if _, ok := r.converging[workload]; ok {
+		return false
+	}
+
+	r.converging[workload] = struct{}{}
+
+	return true
+}
+
+// finish releases a workload once the converge holding it has finished, so the
+// next pass acts on it again.
+func (r *Reconciler) finish(workload string) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	delete(r.converging, workload)
 }
 
 // prune removes the mounted values of workloads that no longer exist.
@@ -731,7 +858,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 func (r *Reconciler) prune(rows []database.Workload) {
 	const every = 64
 
-	if r.mounts == nil || r.passes.Load()%every != 0 {
+	if r.mounts == nil || r.began%every != 0 {
 		return
 	}
 
@@ -786,24 +913,44 @@ func (r *Reconciler) measure(ctx context.Context, rows []database.Workload, obse
 // should not open a thousand connections to a daemon that will queue them anyway, and
 // a bound keeps the load takt offers a runtime a property of the server rather than of
 // how many workloads happen to exist.
-func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, observed map[string][]driver.Instance, indexes map[string]map[int]struct{}) {
-	var wg sync.WaitGroup
-
-	slots := make(chan struct{}, convergeLimit())
+//
+// The pass does not wait for the converges. What they wait on — a grace period, a
+// daemon under load — is time the loop would otherwise spend not looking, and a
+// workload deleted or crashing while one instance sat out its grace period used to
+// wait the whole period to be seen. A workload still held by an earlier pass's
+// converge is skipped, and the count of those is returned for the pass's span: the
+// observation it was made from is mid-change, and a second converge would race the
+// first for its slots. The next pass after the converge finishes acts on it.
+func (r *Reconciler) convergeAll(
+	ctx context.Context,
+	spawned *sync.WaitGroup,
+	rows []database.Workload,
+	observed map[string][]driver.Instance,
+	indexes map[string]map[int]struct{},
+) int {
+	var skipped int
 
 	for _, row := range rows {
-		select {
-		case slots <- struct{}{}:
-		case <-ctx.Done():
-			// Shutting down. Whatever has not been reached converges on the next
-			// server's first pass, which is what level-triggered reconciliation means.
-			wg.Wait()
+		if !r.begin(row.Name) {
+			r.logger.With("workload", row.Name).Debug("leaving a workload an earlier pass is still converging")
+			skipped++
 
-			return
+			continue
 		}
 
-		wg.Go(func() {
-			defer func() { <-slots }()
+		r.spawn(spawned, func() {
+			defer r.finish(row.Name)
+
+			// A slot is taken here rather than before spawning, so a pass never
+			// waits on a converge for one to come free. Shutting down releases
+			// whatever is queued: it converges on the next server's first pass,
+			// which is what level-triggered reconciliation means.
+			select {
+			case r.slots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-r.slots }()
 
 			ctx, span := r.tracer.Start(ctx, "converge",
 				trace.WithAttributes(attribute.String("takt.workload", row.Name)))
@@ -844,10 +991,10 @@ func (r *Reconciler) convergeAll(ctx context.Context, rows []database.Workload, 
 		})
 	}
 
-	wg.Wait()
+	return skipped
 }
 
-// convergeLimit reports how many workloads a pass converges at once.
+// convergeLimit reports how many workloads are converged at once.
 //
 // Scaled to the machine rather than fixed, since the work is mostly waiting and the
 // right number is about how much a runtime will accept at once rather than about how

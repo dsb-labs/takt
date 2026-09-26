@@ -49,8 +49,15 @@ arrives during a pass coalesces into the next one. One pass also runs at startup
 so a workload applied before a restart is running again without waiting for the
 first tick.
 
+A pass decides, and the converges it spawns act. The pass does not wait for
+them. Stopping an instance takes as long as its grace period, and a pass that
+waited on one would hold every other workload's restart, replacement and
+deletion behind it. A workload whose converge is still running when the next
+pass looks is left alone by that pass, and the first pass after the converge
+finishes acts on it again.
+
 A pass tells its subscribers twice: once it has observed the drivers, and again
-once it has finished acting on what it saw. The signal says only that the loop
+once the converges it spawned have finished. The signal says only that the loop
 has looked at the fleet, and a subscriber reads what it wants to know for
 itself. A followed [services list](services.md#following-the-list) is one: it
 re-reads its services on each signal and writes a line when they changed. The
@@ -83,8 +90,9 @@ is the opposite: a workload deleted while the server was down leaves only a
 retained remnant, and one left out there would never be reaped.
 
 Workloads then converge concurrently, bounded to the machine's CPU count with a
-floor of four. Failures affect one workload: a converge that returns an error is
-logged, recorded as an event against the workload, and retried by the next pass.
+floor of four. The bound counts every converge in flight, whichever pass spawned
+it. Failures affect one workload: a converge that returns an error is logged,
+recorded as an event against the workload, and retried by the next pass.
 
 ## Converging one workload
 
