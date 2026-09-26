@@ -19,6 +19,14 @@ describes how an entry is written.
   ([#112](https://github.com/dsb-labs/takt/issues/112),
   [#124](https://github.com/dsb-labs/takt/pull/124)).
 
+### Fixed
+
+- A reconciliation pass waited on every instance it stopped, so one instance
+  sitting out its grace period held every other workload's restart,
+  replacement and deletion for as long as the grace period took. A pass now
+  spawns that work and moves on, and the pass duration metric no longer
+  carries it ([#125](https://github.com/dsb-labs/takt/issues/125)).
+
 ## v0.9.0 - 2026-09-24
 
 ### Added
