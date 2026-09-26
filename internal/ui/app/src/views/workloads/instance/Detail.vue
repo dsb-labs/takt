@@ -103,7 +103,7 @@ await workload.suspense().catch(() => {});
     </p>
 
     <template v-else>
-      <div class="mt-6 grid gap-6 xl:grid-cols-2">
+      <div class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
         <DetailCard title="Overview" class="min-w-0">
           <dl
             class="divide-y divide-slate-100 text-sm dark:divide-slate-800/50"
@@ -192,7 +192,7 @@ await workload.suspense().catch(() => {});
       <!-- The two charts share a row of their own, so memory and CPU are read
            against each other rather than wherever the cards above them
            happen to end. -->
-      <div class="mt-6 grid gap-6 sm:grid-cols-2">
+      <div class="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
         <DetailCard title="Memory" class="min-w-0">
           <UsageChart
             :series="memory"
