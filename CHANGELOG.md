@@ -8,6 +8,8 @@ describes how an entry is written.
 
 ## Unreleased
 
+## v0.10.0 - 2026-09-27
+
 ### Added
 
 - A score bundles the manifests, variables and secrets of one deployment,
