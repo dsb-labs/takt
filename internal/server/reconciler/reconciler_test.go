@@ -4430,3 +4430,130 @@ func (r *testRecorder) data(reason event.Reason) []byte {
 
 	return r.recorded[reason][0]
 }
+
+func TestReconciler_Run_DoesNotWaitOnAConverge(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	// The stored specification has moved on from the running instance, so the
+	// pass stops it and starts a replacement.
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+		storedWorkload("example", "hash-two"),
+	}, nil)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return []driver.Instance{
+				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning},
+			}, nil
+		})
+
+	// The stop sits out a grace period, which is what a pass used to wait on.
+	// Exactly once: the passes that run while it is held must leave the workload
+	// alone rather than stop it again.
+	stopping := make(chan struct{})
+	release := make(chan struct{})
+
+	d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).
+		RunAndReturn(func(context.Context, string, string, int) error {
+			close(stopping)
+			<-release
+
+			return nil
+		}).Once()
+	d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	select {
+	case <-stopping:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the instance was not stopped")
+	}
+
+	// Passes keep running while the stop is held, and skip the workload it holds.
+	r.Notify()
+	passes.wait(t, 2)
+
+	// A pass is only counted once its converges have finished, so none has.
+	assert.Zero(t, r.Passes(), "a pass was counted complete while its converge was still stopping an instance")
+
+	close(release)
+	awaitPasses(t, r, 2)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
+func TestReconciler_Run_WaitsForConvergesOnShutdown(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+		storedWorkload("example", "hash-one"),
+	}, nil)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+	d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+	// The start ignores its context, as a driver mid-call may, so the only way
+	// Run can return before it is by not waiting for it.
+	starting := make(chan struct{})
+	release := make(chan struct{})
+
+	d.EXPECT().Start(mock.Anything, mock.Anything).
+		RunAndReturn(func(context.Context, driver.Workload) (string, error) {
+			close(starting)
+			<-release
+
+			return "container-one", nil
+		}).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	select {
+	case <-starting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the instance was not started")
+	}
+
+	cancel()
+
+	select {
+	case <-done:
+		t.Fatal("run returned while a converge was still starting an instance")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	require.NoError(t, <-done)
+}
