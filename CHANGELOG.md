@@ -25,7 +25,8 @@ describes how an entry is written.
   sitting out its grace period held every other workload's restart,
   replacement and deletion for as long as the grace period took. A pass now
   spawns that work and moves on, and the pass duration metric no longer
-  carries it ([#125](https://github.com/dsb-labs/takt/issues/125)).
+  carries it ([#125](https://github.com/dsb-labs/takt/issues/125),
+  [#127](https://github.com/dsb-labs/takt/pull/127)).
 
 ## v0.9.0 - 2026-09-24
 
