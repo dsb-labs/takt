@@ -27,6 +27,10 @@ describes how an entry is written.
   spawns that work and moves on, and the pass duration metric no longer
   carries it ([#125](https://github.com/dsb-labs/takt/issues/125),
   [#127](https://github.com/dsb-labs/takt/pull/127)).
+- On a window narrower than the two-column layout, a long value in a
+  detail card widened every card in its row past the page. A workload's
+  command was the value most likely to do it. The value now ends in an
+  ellipsis and the cards keep to the page.
 
 ## v0.9.0 - 2026-09-24
 
