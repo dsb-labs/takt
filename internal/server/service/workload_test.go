@@ -1279,6 +1279,7 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 	tt := []struct {
 		Name      string
 		Policy    manifest.RestartPolicy
+		Cron      string
 		Instances []driver.Instance
 		Expected  state.Workload
 	}{
@@ -1338,6 +1339,26 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			},
 			Expected: state.Running,
 		},
+		{
+			// The schedule runs it again rather than the policy, so between
+			// occurrences the run has done what was asked of it.
+			Name:   "a scheduled clean exit under always is completed",
+			Policy: manifest.RestartAlways,
+			Cron:   "0 2 * * *",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateExited},
+			},
+			Expected: state.Completed,
+		},
+		{
+			Name:   "a scheduled failure is still failed",
+			Policy: manifest.RestartAlways,
+			Cron:   "0 2 * * *",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateFailed, ExitCode: 1},
+			},
+			Expected: state.Failed,
+		},
 	}
 
 	for _, tc := range tt {
@@ -1347,6 +1368,9 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 			row := storedWorkload("example")
 			spec := containerSpec("example", "example/example:latest")
 			spec.Restart = &manifest.Restart{Policy: tc.Policy}
+			if tc.Cron != "" {
+				spec.Schedule = &manifest.Schedule{Cron: tc.Cron}
+			}
 
 			encoded, err := json.Marshal(spec)
 			require.NoError(t, err)

@@ -884,10 +884,11 @@ func (r *Reconciler) measure(ctx context.Context, rows []database.Workload, obse
 	counts := make(map[state.Workload]int, len(state.Workloads))
 	for _, row := range rows {
 		policy := restartPolicy(row)
+		onSchedule := scheduled(row)
 
 		instances := slices.Clone(observed[row.Name])
 		for i := range instances {
-			instances[i].State = state.Completion(instances[i], policy)
+			instances[i].State = state.Completion(instances[i], policy, onSchedule)
 		}
 
 		counts[state.Of(instances, !row.DeletedAt.IsZero(), !row.SuspendedAt.IsZero())]++

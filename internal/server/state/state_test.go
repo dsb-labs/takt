@@ -57,10 +57,11 @@ func TestCompletion(t *testing.T) {
 	t.Parallel()
 
 	tt := []struct {
-		Name     string
-		Instance driver.Instance
-		Policy   manifest.RestartPolicy
-		Expected driver.State
+		Name      string
+		Instance  driver.Instance
+		Policy    manifest.RestartPolicy
+		Scheduled bool
+		Expected  driver.State
 	}{
 		// A clean exit the policy retires is what the workload was asked for.
 		{Name: "a clean exit under never is completed", Instance: driver.Instance{State: driver.StateExited}, Policy: manifest.RestartNever, Expected: driver.StateCompleted},
@@ -71,11 +72,16 @@ func TestCompletion(t *testing.T) {
 		{Name: "a failure under never stays failed", Instance: driver.Instance{State: driver.StateFailed, ExitCode: 1}, Policy: manifest.RestartNever, Expected: driver.StateFailed},
 		// The policy describes what happens when work ends, and this has not.
 		{Name: "a running instance is untouched", Instance: driver.Instance{State: driver.StateRunning}, Policy: manifest.RestartNever, Expected: driver.StateRunning},
+		// The schedule runs it again, not the policy, so the run did what the
+		// occurrence asked of it whatever the policy would say.
+		{Name: "a scheduled clean exit under always is completed", Instance: driver.Instance{State: driver.StateExited}, Policy: manifest.RestartAlways, Scheduled: true, Expected: driver.StateCompleted},
+		// A failed occurrence is retried by the policy, and either way it failed.
+		{Name: "a scheduled failure stays failed", Instance: driver.Instance{State: driver.StateFailed, ExitCode: 1}, Policy: manifest.RestartAlways, Scheduled: true, Expected: driver.StateFailed},
 	}
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			assert.Equal(t, tc.Expected, state.Completion(tc.Instance, &manifest.Restart{Policy: tc.Policy}))
+			assert.Equal(t, tc.Expected, state.Completion(tc.Instance, &manifest.Restart{Policy: tc.Policy}, tc.Scheduled))
 		})
 	}
 }

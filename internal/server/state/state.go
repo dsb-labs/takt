@@ -32,7 +32,8 @@ const (
 	// will run it again.
 	Stopped Workload = "stopped"
 	// Completed is a workload whose run finished, which is the end a job is meant
-	// to reach.
+	// to reach. A scheduled workload reads as completed between occurrences, since
+	// its next run is the schedule's doing rather than a restart.
 	Completed Workload = "completed"
 	// Failed is a workload whose instance ended badly.
 	Failed Workload = "failed"
@@ -55,18 +56,28 @@ var Workloads = []Workload{
 }
 
 // Completion reports the state an ended instance reads as once its workload's
-// restart policy has had its say.
+// restart policy and schedule have had their say.
 //
-// Only a clean exit the policy retires becomes completed. An instance that exited
-// non-zero stays failed however the policy treats it, because how a workload ended and
-// whether it runs again are separate facts: a job retired under "never" still has to
-// say that it failed, or an operator reading it would see a success.
+// Only a clean exit that will not be restarted becomes completed. An instance that
+// exited non-zero stays failed however the policy treats it, because how a workload
+// ended and whether it runs again are separate facts: a job retired under "never"
+// still has to say that it failed, or an operator reading it would see a success.
+//
+// A scheduled workload's clean exit is always completed. The schedule outranks the
+// restart policy on a clean exit, so the reconciler does not restart it and the
+// policy has nothing to say. Reporting it as exited would call it a workload waiting
+// for a restart that is never coming, and would have the state between occurrences
+// depend on a policy the schedule ignores.
 //
 // An instance still running is untouched. The policy describes what happens when work
 // ends, and this one has not ended.
-func Completion(instance driver.Instance, restart *manifest.Restart) driver.State {
+func Completion(instance driver.Instance, restart *manifest.Restart, scheduled bool) driver.State {
 	if instance.State != driver.StateExited {
 		return instance.State
+	}
+
+	if scheduled {
+		return driver.StateCompleted
 	}
 
 	// Attempts are not counted here. A workload that gave up has ended, and how it

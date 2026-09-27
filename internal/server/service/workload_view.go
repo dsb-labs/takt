@@ -251,9 +251,10 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 	// The restart policy is applied after it, on the instances that have ended. An
 	// instance the policy retires is finished with, so a stale health result must not
 	// reopen the question of whether it is working.
+	scheduled := spec.Schedule != nil
 	for i := range instances {
 		instances[i].State = healthState(instances[i].State, healths[instances[i].Index])
-		instances[i].State = state.Completion(instances[i], policy)
+		instances[i].State = state.Completion(instances[i], policy, scheduled)
 	}
 
 	// A suspended workload's occurrences will not happen, so none is reported: a
