@@ -10,6 +10,8 @@ directory = "/var/lib/takt"
 [docker]
 host = "tcp://localhost:2375"
 config-file = "/etc/takt/docker-config.json"
+prune = false
+prune-delay = "2h"
 
 [reconcile]
 interval = "30s"

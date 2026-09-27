@@ -226,6 +226,8 @@ func Run(ctx context.Context, config Config) error {
 		Client:         dockerClient,
 		Bind:           config.Workload.Bind,
 		ConfigFile:     config.Docker.ConfigFile,
+		Prune:          config.Docker.Prune,
+		PruneDelay:     config.Docker.PruneDelay,
 		MeterProvider:  tel.MeterProvider(),
 		TracerProvider: tel.TracerProvider(),
 	})

@@ -113,6 +113,17 @@ type (
 		// pull happens rather than at startup, and an absent file means anonymous
 		// pulls.
 		ConfigFile string `toml:"config-file"`
+		// Whether the images no workload names and no container uses are removed.
+		// Images only: a container, a volume, a network and the build cache are
+		// never touched.
+		//
+		// On by default, because the daemon's images are takt's to reap the way
+		// host ports are its to allocate, and a disk filling with the images of
+		// every tag ever bumped is the failure that goes unnoticed for months.
+		Prune bool `toml:"prune"`
+		// How long an image is left alone after nothing references it, so that a
+		// tag bumped and reverted within the delay does not pull the image again.
+		PruneDelay time.Duration `toml:"prune-delay"`
 	}
 
 	// The ExecConfig type contains configuration for the exec runtime.
@@ -283,6 +294,10 @@ func DefaultConfig() Config {
 		},
 		Data: DataConfig{
 			Directory: defaultDataDir(),
+		},
+		Docker: DockerConfig{
+			Prune:      true,
+			PruneDelay: time.Hour,
 		},
 		Reconcile: ReconcileConfig{
 			Interval:      10 * time.Second,
@@ -539,6 +554,10 @@ func (c DockerConfig) validate() error {
 	// not checked: an absent file means anonymous pulls.
 	if c.ConfigFile != "" && !filepath.IsAbs(c.ConfigFile) {
 		return fmt.Errorf("docker config file must be absolute, got %q", c.ConfigFile)
+	}
+
+	if c.PruneDelay < 0 {
+		return errors.New("docker prune delay must not be negative")
 	}
 
 	return nil
