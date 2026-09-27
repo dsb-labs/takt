@@ -2972,8 +2972,7 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
 		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
 
-		passes := newCounter()
-		d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(nil, nil)
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
 
 		delivers := newCounter()
 		mounts.EXPECT().Deliver(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
@@ -3006,11 +3005,14 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 
 		go func() { done <- r.Run(ctx) }()
 
-		passes.wait(t, 1)
+		// Completed passes rather than observed ones, since the converge that
+		// delivers runs on after the pass has observed. Cancelling on the third
+		// observation could otherwise land before the first delivery.
+		awaitPasses(t, r, 1)
 
-		for i := 2; i <= 3; i++ {
+		for i := uint64(2); i <= 3; i++ {
 			r.Notify()
-			passes.wait(t, i)
+			awaitPasses(t, r, i)
 		}
 
 		cancel()
