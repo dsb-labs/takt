@@ -978,7 +978,7 @@ func TestReconciler_Run_ProbesThePublishedAddress(t *testing.T) {
 			repo := NewMockWorkloadRepository(t)
 			ports := NewMockPortRepository(t)
 			checker := newMockChecker(t)
-			d := NewMockDriver(t)
+			d := newMockDriver(t)
 
 			checked := storedWorkload("example", "hash-one")
 			checked.ID = "workload-one"
@@ -1251,6 +1251,7 @@ func TestReconciler_Run_RoutesByRuntime(t *testing.T) {
 
 	container, other := newMockDriver(t), NewMockDriver(t)
 	other.EXPECT().Name().Return("other").Maybe()
+	other.EXPECT().Prune(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	repo := NewMockWorkloadRepository(t)
 
@@ -1435,6 +1436,7 @@ func TestReconciler_Run_StopsOnlyTheDriverThatRunsIt(t *testing.T) {
 
 	container, other := newMockDriver(t), NewMockDriver(t)
 	other.EXPECT().Name().Return("other").Maybe()
+	other.EXPECT().Prune(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	repo := NewMockWorkloadRepository(t)
 
@@ -1493,6 +1495,7 @@ func TestReconciler_Run_StopsAnOrphanOnEveryDriver(t *testing.T) {
 
 	container, other := newMockDriver(t), NewMockDriver(t)
 	other.EXPECT().Name().Return("other").Maybe()
+	other.EXPECT().Prune(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	repo := NewMockWorkloadRepository(t)
 	repo.EXPECT().List(mock.Anything).Return(nil, nil)
@@ -3428,6 +3431,69 @@ func TestReconciler_Run_HoldsFirstStartForDependency(t *testing.T) {
 	})
 }
 
+func TestReconciler_Run_PrunesEveryDriver(t *testing.T) {
+	t.Parallel()
+
+	container, other := NewMockDriver(t), NewMockDriver(t)
+	container.EXPECT().Name().Return(docker.Name).Maybe()
+	other.EXPECT().Name().Return("other").Maybe()
+
+	repo := NewMockWorkloadRepository(t)
+
+	// A workload on each runtime, both suspended so nothing starts: every stored
+	// specification reaches every driver whatever its state, since which of them
+	// a driver holds anything for is the driver's to decide.
+	suspended := storedWorkload("suspended", "hash-one")
+	suspended.SuspendedAt = time.Now().UTC()
+
+	worker := storedWorkload("worker", "hash-two")
+	worker.Spec = []byte(`{"version":"v1","name":"worker","exec":{"command":["worker"]}}`)
+	worker.SuspendedAt = time.Now().UTC()
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{suspended, worker}, nil)
+
+	for _, d := range []*MockDriver{container, other} {
+		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+	}
+
+	// Once each, on the first pass. The second pass below is not one of the
+	// occasional ones, so it asks nothing.
+	pruned := make(chan []manifest.Spec, 2)
+	for _, d := range []*MockDriver{container, other} {
+		d.EXPECT().Prune(mock.Anything, mock.Anything).Run(func(_ context.Context, keep []manifest.Spec) {
+			pruned <- keep
+		}).Return(nil).Once()
+	}
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: container, "other": other},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	awaitPasses(t, r, 1)
+
+	for range 2 {
+		keep := <-pruned
+		require.Len(t, keep, 2)
+		assert.Equal(t, "suspended", keep[0].Name)
+		assert.Equal(t, "worker", keep[1].Name)
+	}
+
+	r.Notify()
+	awaitPasses(t, r, 2)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_RevokesWorkloadTokens(t *testing.T) {
 	t.Parallel()
 
@@ -4356,6 +4422,7 @@ func newMockDriver(t *testing.T) *MockDriver {
 
 	d := NewMockDriver(t)
 	d.EXPECT().Name().Return(docker.Name).Maybe()
+	d.EXPECT().Prune(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 	return d
 }

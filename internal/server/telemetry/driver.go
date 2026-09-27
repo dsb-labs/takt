@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
 // The name driver spans are created under, which describes the code declaring
@@ -41,6 +42,9 @@ type (
 		Observe(ctx context.Context) ([]driver.Instance, error)
 		// Watch should report changes to the driver's instances.
 		Watch(ctx context.Context) (<-chan driver.Event, error)
+		// Prune should remove what the driver holds that none of the given
+		// specifications need.
+		Prune(ctx context.Context, keep []manifest.Spec) error
 	}
 
 	// The tracedDriver type is the wrapper WrapDriver returns.
@@ -171,6 +175,17 @@ func (t *tracedDriver) Observe(ctx context.Context) ([]driver.Instance, error) {
 	end(span, err)
 
 	return instances, err
+}
+
+// Prune removes what the wrapped driver holds that none of the given
+// specifications need.
+func (t *tracedDriver) Prune(ctx context.Context, keep []manifest.Spec) error {
+	ctx, span := t.span(ctx, "driver.prune")
+
+	err := t.next.Prune(ctx, keep)
+	end(span, err)
+
+	return err
 }
 
 // Watch reports changes to the wrapped driver's instances.

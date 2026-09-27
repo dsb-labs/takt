@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/dsb-labs/takt/internal/server/driver"
+	"github.com/dsb-labs/takt/pkg/manifest"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -272,6 +273,63 @@ func (_c *MockDriver_Observe_Call) Return(instances []driver.Instance, err error
 }
 
 func (_c *MockDriver_Observe_Call) RunAndReturn(run func(ctx context.Context) ([]driver.Instance, error)) *MockDriver_Observe_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Prune provides a mock function for the type MockDriver
+func (_mock *MockDriver) Prune(ctx context.Context, keep []manifest.Spec) error {
+	ret := _mock.Called(ctx, keep)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Prune")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []manifest.Spec) error); ok {
+		r0 = returnFunc(ctx, keep)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockDriver_Prune_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Prune'
+type MockDriver_Prune_Call struct {
+	*mock.Call
+}
+
+// Prune is a helper method to define mock.On call
+//   - ctx context.Context
+//   - keep []manifest.Spec
+func (_e *MockDriver_Expecter) Prune(ctx any, keep any) *MockDriver_Prune_Call {
+	return &MockDriver_Prune_Call{Call: _e.mock.On("Prune", ctx, keep)}
+}
+
+func (_c *MockDriver_Prune_Call) Run(run func(ctx context.Context, keep []manifest.Spec)) *MockDriver_Prune_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 []manifest.Spec
+		if args[1] != nil {
+			arg1 = args[1].([]manifest.Spec)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDriver_Prune_Call) Return(err error) *MockDriver_Prune_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockDriver_Prune_Call) RunAndReturn(run func(ctx context.Context, keep []manifest.Spec) error) *MockDriver_Prune_Call {
 	_c.Call.Return(run)
 	return _c
 }
