@@ -39,6 +39,16 @@ A pinned port fails differently. A port another workload holds is refused when
 the manifest is applied, naming the holder, and so is a port a daemon on the host
 already listens on.
 
+## `host path allowed read-only`
+
+The mount sits beneath a prefix `allow-host-paths` grants for reading only, and
+does not say `readOnly: true`. Either add the field, or have the operator list the
+tree without the `:ro` suffix. The message names the prefix that decided. An `exec`
+workload cannot mount anything read-only, so none of its path mounts may sit beneath
+a read-only prefix. At apply the manifest is refused and nothing is stored. At start
+the refusal is in the workload's events, since the tree can change in between. See
+[Configuration](configuration.md#workload).
+
 ## `kernel does not support confining exec workloads`
 
 The server logs this at startup, and refuses every `exec` workload with it. The
