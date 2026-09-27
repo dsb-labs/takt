@@ -205,7 +205,7 @@ type (
 		reallocate  func(ctx context.Context, workload string, instance int) (bool, error)
 		now         func() time.Time
 		interval    time.Duration
-		hostPaths   []string
+		hostPaths   []driver.HostPath
 		nudge       chan struct{}
 		tracer      trace.Tracer
 		instruments instruments
@@ -336,7 +336,7 @@ type (
 		// The prefixes a path mount may sit beneath. Each path mount is resolved
 		// against them as an instance starts, so a link swapped in after the apply
 		// cannot carry the mount elsewhere.
-		AllowHostPaths []string
+		AllowHostPaths []driver.HostPath
 		// Reports the current time, which every timing decision a pass makes reads
 		// from. May be nil, in which case the wall clock is used.
 		//

@@ -55,7 +55,7 @@ func TestNewWorkload(t *testing.T) {
 				{Path: filepath.Join(root, "media"), To: "/media", ReadOnly: true},
 				{Path: filepath.Join(root, "run", "docker.sock"), To: "/var/run/docker.sock"},
 			},
-		}), []string{filepath.Join(root, "media"), filepath.Join(root, "var", "run", "docker.sock")})
+		}), []driver.HostPath{{Path: filepath.Join(root, "media")}, {Path: filepath.Join(root, "var", "run", "docker.sock")}})
 		require.NoError(t, err)
 
 		// The path as written is what the mount is called, since a path mount has
@@ -78,7 +78,7 @@ func TestNewWorkload(t *testing.T) {
 			Name:      "example",
 			Container: &manifest.Container{Image: "example/example:latest"},
 			Volumes:   []manifest.VolumeMount{{Path: filepath.Join(root, "media", "escape"), To: "/host"}},
-		}), []string{filepath.Join(root, "media")})
+		}), []driver.HostPath{{Path: filepath.Join(root, "media")}})
 		assert.ErrorIs(t, err, driver.ErrHostPathDenied)
 	})
 }
@@ -96,84 +96,193 @@ func TestResolveHostPath(t *testing.T) {
 	tt := []struct {
 		Name         string
 		Path         string
-		Prefixes     []string
+		Prefixes     []driver.HostPath
+		ReadOnly     bool
 		Expected     string
-		ExpectsError bool
+		ExpectsError error
 	}{
 		{
 			Name:     "a path under a prefix",
 			Path:     filepath.Join(root, "mnt", "media", "films"),
-			Prefixes: []string{filepath.Join(root, "mnt", "media")},
+			Prefixes: []driver.HostPath{{Path: filepath.Join(root, "mnt", "media")}},
 			Expected: filepath.Join(root, "mnt", "media", "films"),
 		},
 		{
 			Name:     "the prefix itself",
 			Path:     filepath.Join(root, "mnt", "media"),
-			Prefixes: []string{filepath.Join(root, "mnt", "media")},
+			Prefixes: []driver.HostPath{{Path: filepath.Join(root, "mnt", "media")}},
 			Expected: filepath.Join(root, "mnt", "media"),
 		},
 		{
 			Name:     "a root prefix opens everything",
 			Path:     filepath.Join(root, "mnt", "media", "escape", "etc"),
-			Prefixes: []string{"/"},
+			Prefixes: []driver.HostPath{{Path: "/"}},
 			Expected: filepath.Join(root, "etc"),
 		},
 		{
 			// The sibling shares the prefix as a string but not as a directory.
 			Name:         "a sibling sharing the prefix as text",
 			Path:         filepath.Join(root, "mnt", "media-cache"),
-			Prefixes:     []string{filepath.Join(root, "mnt", "media")},
-			ExpectsError: true,
+			Prefixes:     []driver.HostPath{{Path: filepath.Join(root, "mnt", "media")}},
+			ExpectsError: driver.ErrHostPathDenied,
 		},
 		{
 			// A link beneath the allowed directory points at the root of the tree,
 			// so what the mount reaches is not what the prefix covers.
 			Name:         "a link under the prefix reaching outside it",
 			Path:         filepath.Join(root, "mnt", "media", "escape", "var"),
-			Prefixes:     []string{filepath.Join(root, "mnt", "media")},
-			ExpectsError: true,
+			Prefixes:     []driver.HostPath{{Path: filepath.Join(root, "mnt", "media")}},
+			ExpectsError: driver.ErrHostPathDenied,
 		},
 		{
 			// The leaf does not exist, but the link above it does, and it is the
 			// link that decides where the mount reaches.
 			Name:         "a missing leaf under a link reaching outside",
 			Path:         filepath.Join(root, "mnt", "media", "escape", "missing"),
-			Prefixes:     []string{filepath.Join(root, "mnt", "media")},
-			ExpectsError: true,
+			Prefixes:     []driver.HostPath{{Path: filepath.Join(root, "mnt", "media")}},
+			ExpectsError: driver.ErrHostPathDenied,
 		},
 		{
 			// /var/run is a link to /run on most hosts, and either spelling of the
 			// socket should be covered by either spelling of the prefix.
 			Name:     "a path through a link the prefix names directly",
 			Path:     filepath.Join(root, "run", "docker.sock"),
-			Prefixes: []string{filepath.Join(root, "var", "run", "docker.sock")},
+			Prefixes: []driver.HostPath{{Path: filepath.Join(root, "var", "run", "docker.sock")}},
 			Expected: filepath.Join(root, "var", "run", "docker.sock"),
 		},
 		{
 			Name:     "a prefix that is itself a link",
 			Path:     filepath.Join(root, "mnt", "media", "films"),
-			Prefixes: []string{filepath.Join(root, "mnt", "library")},
+			Prefixes: []driver.HostPath{{Path: filepath.Join(root, "mnt", "library")}},
 			Expected: filepath.Join(root, "mnt", "media", "films"),
 		},
 		{
 			Name:     "a path that does not exist yet under a prefix",
 			Path:     filepath.Join(root, "mnt", "media", "later", "deeper"),
-			Prefixes: []string{filepath.Join(root, "mnt", "media")},
+			Prefixes: []driver.HostPath{{Path: filepath.Join(root, "mnt", "media")}},
 			Expected: filepath.Join(root, "mnt", "media", "later", "deeper"),
 		},
 		{
 			Name:         "no prefixes",
 			Path:         filepath.Join(root, "mnt", "media"),
+			ExpectsError: driver.ErrHostPathDenied,
+		},
+		{
+			Name:     "a read-only mount under a read-only prefix",
+			Path:     filepath.Join(root, "mnt", "media", "films"),
+			Prefixes: []driver.HostPath{{Path: filepath.Join(root, "mnt", "media"), ReadOnly: true}},
+			ReadOnly: true,
+			Expected: filepath.Join(root, "mnt", "media", "films"),
+		},
+		{
+			Name:         "a writable mount under a read-only prefix",
+			Path:         filepath.Join(root, "mnt", "media", "films"),
+			Prefixes:     []driver.HostPath{{Path: filepath.Join(root, "mnt", "media"), ReadOnly: true}},
+			ExpectsError: driver.ErrHostPathReadOnly,
+		},
+		{
+			// The read-only root would refuse this mount on its own, but the
+			// more specific prefix is the one that decides.
+			Name: "a writable mount under a writable prefix beneath a read-only root",
+			Path: filepath.Join(root, "mnt", "media", "films"),
+			Prefixes: []driver.HostPath{
+				{Path: "/", ReadOnly: true},
+				{Path: filepath.Join(root, "mnt", "media")},
+			},
+			Expected: filepath.Join(root, "mnt", "media", "films"),
+		},
+		{
+			// Listed the other way round, to show that order does not decide.
+			Name: "a writable mount outside the writable prefix beneath a read-only root",
+			Path: filepath.Join(root, "var", "run"),
+			Prefixes: []driver.HostPath{
+				{Path: filepath.Join(root, "mnt", "media")},
+				{Path: "/", ReadOnly: true},
+			},
+			ExpectsError: driver.ErrHostPathReadOnly,
+		},
+		{
+			// The link reaches the read-only prefix, so what it reaches is what is
+			// judged, and a writable mount of it is refused.
+			Name: "a writable mount through a link into a read-only prefix",
+			Path: filepath.Join(root, "mnt", "library", "films"),
+			Prefixes: []driver.HostPath{
+				{Path: filepath.Join(root, "mnt", "media"), ReadOnly: true},
+			},
+			ExpectsError: driver.ErrHostPathReadOnly,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			actual, err := driver.ResolveHostPath(tc.Path, tc.ReadOnly, tc.Prefixes)
+			if tc.ExpectsError != nil {
+				assert.ErrorIs(t, err, tc.ExpectsError)
+				assert.Empty(t, actual)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.Expected, actual)
+		})
+	}
+}
+
+func TestParseHostPath(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name         string
+		Entry        string
+		Expected     driver.HostPath
+		ExpectsError bool
+	}{
+		{
+			Name:     "a bare prefix",
+			Entry:    "/mnt/media",
+			Expected: driver.HostPath{Path: "/mnt/media"},
+		},
+		{
+			Name:     "a read-only prefix",
+			Entry:    "/:ro",
+			Expected: driver.HostPath{Path: "/", ReadOnly: true},
+		},
+		{
+			// A colon anywhere but the suffix is part of the path.
+			Name:     "a colon inside the path",
+			Entry:    "/mnt/a:b/c",
+			Expected: driver.HostPath{Path: "/mnt/a:b/c"},
+		},
+		{
+			Name:     "a prefix spelt writable",
+			Entry:    "/mnt/media:rw",
+			Expected: driver.HostPath{Path: "/mnt/media"},
+		},
+		{
+			// Only docker's pair is recognised, so anything else after a colon is
+			// a path that happens to end that way.
+			Name:     "a suffix that is neither",
+			Entry:    "/mnt/media:z",
+			Expected: driver.HostPath{Path: "/mnt/media:z"},
+		},
+		{
+			Name:         "a relative prefix",
+			Entry:        "media",
+			ExpectsError: true,
+		},
+		{
+			Name:         "the suffix alone",
+			Entry:        ":ro",
 			ExpectsError: true,
 		},
 	}
 
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
-			actual, err := driver.ResolveHostPath(tc.Path, tc.Prefixes)
+			actual, err := driver.ParseHostPath(tc.Entry)
 			if tc.ExpectsError {
-				assert.ErrorIs(t, err, driver.ErrHostPathDenied)
-				assert.Empty(t, actual)
+				assert.Error(t, err)
+				assert.Zero(t, actual)
 				return
 			}
 

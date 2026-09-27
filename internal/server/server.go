@@ -21,6 +21,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/api"
 	"github.com/dsb-labs/takt/internal/server/certificate"
 	"github.com/dsb-labs/takt/internal/server/database"
+	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/driver/docker"
 	"github.com/dsb-labs/takt/internal/server/driver/exec"
 	"github.com/dsb-labs/takt/internal/server/health"
@@ -42,6 +43,14 @@ func Run(ctx context.Context, config Config) error {
 	startedAt := time.Now()
 
 	if err := config.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	// Validation already proved every entry parses, so this cannot fail. Parsed
+	// once here rather than on every check, and handed to both places that gate
+	// a path mount so they cannot disagree about what an entry means.
+	hostPaths, err := driver.ParseHostPaths(config.Workload.AllowHostPaths)
+	if err != nil {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
@@ -331,7 +340,7 @@ func Run(ctx context.Context, config Config) error {
 			return svc.ReallocateInstance(ctx, workload, instance)
 		},
 		Interval:       config.Reconcile.Interval,
-		AllowHostPaths: config.Workload.AllowHostPaths,
+		AllowHostPaths: hostPaths,
 		MeterProvider:  tel.MeterProvider(),
 		TracerProvider: tel.TracerProvider(),
 	})
@@ -448,7 +457,7 @@ func Run(ctx context.Context, config Config) error {
 		Checker:        checker,
 		Reconciler:     reconcile,
 		Events:         events,
-		AllowHostPaths: config.Workload.AllowHostPaths,
+		AllowHostPaths: hostPaths,
 	})
 
 	serviceSvc := service.NewServiceService(service.ServiceServiceConfig{

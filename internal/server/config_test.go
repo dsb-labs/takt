@@ -45,7 +45,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "/etc/takt/keys", config.Secrets.Keys)
 				assert.Equal(t, "/etc/takt/keys", config.KeysPath())
 				assert.Equal(t, []string{"/opt/runtime", "/nix/store"}, config.Exec.AllowPaths)
-				assert.Equal(t, []string{"/mnt/media", "/var/run/docker.sock"}, config.Workload.AllowHostPaths)
+				assert.Equal(t, []string{"/mnt/media", "/var/run/docker.sock", "/:ro"}, config.Workload.AllowHostPaths)
 				assert.Equal(t, "http://collector.example.com:4318", config.Telemetry.OTLPEndpoint)
 				assert.Equal(t, "debug", config.Logging.Level)
 				require.NotNil(t, config.Auth)
@@ -319,7 +319,14 @@ func TestConfig_Validate(t *testing.T) {
 		},
 		{
 			Name:   "absolute prefixes a path mount may sit beneath",
-			Mutate: func(c *server.Config) { c.Workload.AllowHostPaths = []string{"/mnt/media"} },
+			Mutate: func(c *server.Config) { c.Workload.AllowHostPaths = []string{"/mnt/media", "/:ro"} },
+		},
+		{
+			// The suffix is read before the prefix is judged, so what is left has
+			// to be a path.
+			Name:         "a read-only suffix with no prefix before it",
+			Mutate:       func(c *server.Config) { c.Workload.AllowHostPaths = []string{":ro"} },
+			ExpectsError: true,
 		},
 		{
 			// A path mount's own path must be absolute, so a relative prefix could

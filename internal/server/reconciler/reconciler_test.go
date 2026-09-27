@@ -2313,7 +2313,7 @@ func TestReconciler_Run_RefusesHostPathReachingOutsideThePrefixes(t *testing.T) 
 		Workloads:      repo,
 		Events:         recorder,
 		Interval:       time.Hour,
-		AllowHostPaths: []string{filepath.Join(root, "media")},
+		AllowHostPaths: []driver.HostPath{{Path: filepath.Join(root, "media")}},
 	})
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -2331,6 +2331,66 @@ func TestReconciler_Run_RefusesHostPathReachingOutsideThePrefixes(t *testing.T) 
 	require.NoError(t, <-done)
 
 	assert.Contains(t, string(recorder.data(event.RestartPaced)), "host path not allowed")
+}
+
+func TestReconciler_Run_RefusesWritableHostPathUnderReadOnlyPrefix(t *testing.T) {
+	t.Parallel()
+
+	d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
+
+	// The mount sat under the writable prefix when it was applied. A link swapped
+	// in since carries it into the tree the read-only root covers, and the mount
+	// never asked to be read-only, so the start is refused and says which prefix
+	// decided.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, os.Mkdir(filepath.Join(root, "media"), 0o755))
+	require.NoError(t, os.Mkdir(filepath.Join(root, "etc"), 0o755))
+	require.NoError(t, os.Symlink(filepath.Join(root, "etc"), filepath.Join(root, "media", "escape")))
+
+	row := storedWorkload("example", "hash-one")
+	row.Spec, err = json.Marshal(manifest.Spec{
+		Version:   "v1",
+		Name:      "example",
+		Container: &manifest.Container{Image: "example/example:latest"},
+		Volumes:   []manifest.VolumeMount{{Path: filepath.Join(root, "media", "escape"), To: "/host"}},
+	})
+	require.NoError(t, err)
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+	d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Events:    recorder,
+		Interval:  time.Hour,
+		AllowHostPaths: []driver.HostPath{
+			{Path: filepath.Join(root, "media")},
+			{Path: root, ReadOnly: true},
+		},
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	require.Eventually(t, func() bool {
+		return recorder.count(event.RestartPaced) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+
+	cancel()
+	require.NoError(t, <-done)
+
+	data := string(recorder.data(event.RestartPaced))
+	assert.Contains(t, data, "host path allowed read-only")
+	assert.Contains(t, data, root)
 }
 
 func TestReconciler_Run_PacesFailedStarts(t *testing.T) {

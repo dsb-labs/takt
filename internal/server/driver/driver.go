@@ -34,7 +34,63 @@ var (
 	// ErrHostPathDenied is returned when a path mount reaches outside every prefix
 	// the server's configuration allows.
 	ErrHostPathDenied = errors.New("host path not allowed")
+
+	// ErrHostPathReadOnly is returned when a path mount reaches a prefix the server's
+	// configuration grants for reading only, and the mount did not ask for that.
+	ErrHostPathReadOnly = errors.New("host path allowed read-only")
 )
+
+// The HostPath type is one entry of the server's allow-host-paths configuration:
+// a prefix a path mount may sit beneath, and whether the grant is for reading only.
+type HostPath struct {
+	// The absolute prefix.
+	Path string
+	// Whether a mount beneath the prefix must be read-only.
+	ReadOnly bool
+}
+
+// ParseHostPath reads one allow-host-paths entry. A trailing ":ro" marks the
+// prefix as granted for reading only, the way docker's own volume flag does, and
+// the bare form keeps its meaning: any mount beneath it, writable or not. ":rw"
+// spells the bare form out, so someone reaching for docker's pair is not handed a
+// prefix that ends in ":rw".
+//
+// Only those suffixes are recognised. A colon anywhere else is part of the path,
+// since a path may contain one.
+func ParseHostPath(entry string) (HostPath, error) {
+	path, readOnly := strings.CutSuffix(entry, ":ro")
+	if !readOnly {
+		path, _ = strings.CutSuffix(entry, ":rw")
+	}
+
+	// Absolute, because a path mount's own path must be and a relative prefix
+	// could never match one.
+	if !filepath.IsAbs(path) {
+		return HostPath{}, fmt.Errorf("allowed host path must be absolute, got %q", entry)
+	}
+
+	return HostPath{Path: path, ReadOnly: readOnly}, nil
+}
+
+// ParseHostPaths reads every allow-host-paths entry, stopping at the first that
+// cannot be read.
+func ParseHostPaths(entries []string) ([]HostPath, error) {
+	if len(entries) == 0 {
+		return nil, nil
+	}
+
+	paths := make([]HostPath, 0, len(entries))
+	for _, entry := range entries {
+		path, err := ParseHostPath(entry)
+		if err != nil {
+			return nil, err
+		}
+
+		paths = append(paths, path)
+	}
+
+	return paths, nil
+}
 
 // The State type describes the state of a single instance as reported by its driver.
 type State string
@@ -285,7 +341,7 @@ type (
 // links followed, so what a driver binds is what was checked. The tree can change
 // between an apply and a start, and a link swapped in beneath an allowed prefix
 // would otherwise carry the mount wherever it pointed.
-func NewWorkload(row database.Workload, hostPaths []string) (Workload, error) {
+func NewWorkload(row database.Workload, hostPaths []HostPath) (Workload, error) {
 	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return Workload{}, err
@@ -350,7 +406,7 @@ func NewWorkload(row database.Workload, hostPaths []string) (Workload, error) {
 					ReadOnly: mount.ReadOnly,
 				})
 			case manifest.MountPath:
-				host, err := ResolveHostPath(mount.Path, hostPaths)
+				host, err := ResolveHostPath(mount.Path, mount.ReadOnly, hostPaths)
 				if err != nil {
 					return Workload{}, err
 				}
@@ -378,23 +434,47 @@ func NewWorkload(row database.Workload, hostPaths []string) (Workload, error) {
 // that does not exist yet is resolved as far as it does, since a mount may name
 // something that appears later. A prefix of / opens everything.
 //
-// Returns ErrHostPathDenied when the path sits under no prefix.
-func ResolveHostPath(path string, prefixes []string) (string, error) {
+// The most specific prefix the path sits under is the one that decides. A
+// read-only / beside a writable /mnt/media then means a mount under /mnt/media may
+// write and one under /etc may not, where the first match to be listed would let
+// either entry shadow the other. readOnly is what the mount asked for, and a prefix
+// granted for reading only refuses a mount that did not ask.
+//
+// Returns ErrHostPathDenied when the path sits under no prefix, and
+// ErrHostPathReadOnly when the prefix it sits under is granted read-only and the
+// mount is not.
+func ResolveHostPath(path string, readOnly bool, prefixes []HostPath) (string, error) {
 	resolved, err := resolve(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve host path %q: %w", path, err)
 	}
 
+	var matched HostPath
+	var found bool
+	var depth int
 	for _, prefix := range prefixes {
-		root, err := resolve(prefix)
+		root, err := resolve(prefix.Path)
 		if err != nil {
-			return "", fmt.Errorf("failed to resolve allowed host path %q: %w", prefix, err)
+			return "", fmt.Errorf("failed to resolve allowed host path %q: %w", prefix.Path, err)
 		}
 
-		if root == string(filepath.Separator) || resolved == root ||
-			strings.HasPrefix(resolved, root+string(filepath.Separator)) {
-			return resolved, nil
+		if root != string(filepath.Separator) && resolved != root &&
+			!strings.HasPrefix(resolved, root+string(filepath.Separator)) {
+			continue
 		}
+
+		if !found || len(root) > depth {
+			matched, found, depth = prefix, true, len(root)
+		}
+	}
+
+	switch {
+	case found && matched.ReadOnly && !readOnly:
+		return "", fmt.Errorf("%w: %q is under %q, which this server's workload allow-host-paths "+
+			"configuration grants for reading only, so the mount must say readOnly: true",
+			ErrHostPathReadOnly, path, matched.Path)
+	case found:
+		return resolved, nil
 	}
 
 	if resolved != filepath.Clean(path) {

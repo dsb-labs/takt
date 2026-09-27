@@ -249,7 +249,7 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec manifest.Spec
 			// The path is stored as written. It is resolved again as each instance
 			// starts, since the tree can change in between, and the driver is handed
 			// what that resolution reaches.
-			if _, err := driver.ResolveHostPath(mount.Path, s.hostPaths); err != nil {
+			if _, err := driver.ResolveHostPath(mount.Path, mount.ReadOnly, s.hostPaths); err != nil {
 				return spec, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 			}
 
