@@ -141,6 +141,14 @@ type (
 		// Events make convergence prompt. This bounds how long a missed one can
 		// go unnoticed.
 		Interval time.Duration `toml:"interval"`
+		// How long a workload's first start is held for the instance of a workload
+		// it references to pass its health check, before it is started anyway.
+		//
+		// A reader started beside a slow database would otherwise start, fail to
+		// connect, exit and be restarted on the paced backoff until the database
+		// answered, and a deployment doing what it was told would look broken.
+		// Zero disables the hold.
+		ReadinessWait time.Duration `toml:"readiness-wait"`
 	}
 
 	// The WorkloadConfig type contains configuration for the workloads takt runs:
@@ -277,7 +285,8 @@ func DefaultConfig() Config {
 			Directory: defaultDataDir(),
 		},
 		Reconcile: ReconcileConfig{
-			Interval: 10 * time.Second,
+			Interval:      10 * time.Second,
+			ReadinessWait: 5 * time.Minute,
 		},
 		Workload: WorkloadConfig{
 			// Every interface, unlike the API. A workload's port exists to be
@@ -450,6 +459,10 @@ func (c DataConfig) validate() error {
 func (c ReconcileConfig) validate() error {
 	if c.Interval <= 0 {
 		return errors.New("reconcile interval must be greater than zero")
+	}
+
+	if c.ReadinessWait < 0 {
+		return errors.New("reconcile readiness wait must not be negative")
 	}
 
 	return nil

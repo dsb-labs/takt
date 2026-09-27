@@ -340,6 +340,7 @@ func Run(ctx context.Context, config Config) error {
 			return svc.ReallocateInstance(ctx, workload, instance)
 		},
 		Interval:       config.Reconcile.Interval,
+		ReadinessWait:  config.Reconcile.ReadinessWait,
 		AllowHostPaths: hostPaths,
 		MeterProvider:  tel.MeterProvider(),
 		TracerProvider: tel.TracerProvider(),
