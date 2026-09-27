@@ -958,8 +958,9 @@ func (s *Suite) TestScheduledWorkloadRunsOnItsSchedule() {
 	first := s.awaitInstance(name)
 
 	// The workload ends and is left alone rather than restarted, because a run that
-	// ended cleanly did what its occurrence asked of it.
-	s.awaitState(name, client.WorkloadStateStopped)
+	// ended cleanly did what its occurrence asked of it. It reads as completed
+	// rather than stopped, since the schedule brings it back rather than a restart.
+	s.awaitState(name, client.WorkloadStateCompleted)
 
 	// Once it has run, takt reports when it runs again.
 	workload, err := s.client.Get(s.ctx(), name)
