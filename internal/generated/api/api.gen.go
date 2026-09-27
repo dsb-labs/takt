@@ -969,9 +969,11 @@ type Instance struct {
 	// terminating while it is being torn down, which happens when an outdated
 	// instance is replaced or its workload is deleted.
 	//
-	// An instance is completed when it ended and its workload's restart policy
-	// says not to run it again. Exited says only that it ended, which is what the
-	// driver observed. Completed adds what the policy makes of that.
+	// An instance is completed when it ended cleanly and nothing will restart it,
+	// whether because its workload's restart policy says not to run it again or
+	// because the workload runs on a schedule. Exited says only that it ended,
+	// which is what the driver observed. Completed adds what the server makes of
+	// that.
 	State InstanceState `json:"state"`
 
 	// Usage What the instance is consuming, beside the limits its specification asked
@@ -1004,9 +1006,11 @@ type InstanceHealth struct {
 // terminating while it is being torn down, which happens when an outdated
 // instance is replaced or its workload is deleted.
 //
-// An instance is completed when it ended and its workload's restart policy
-// says not to run it again. Exited says only that it ended, which is what the
-// driver observed. Completed adds what the policy makes of that.
+// An instance is completed when it ended cleanly and nothing will restart it,
+// whether because its workload's restart policy says not to run it again or
+// because the workload runs on a schedule. Exited says only that it ended,
+// which is what the driver observed. Completed adds what the server makes of
+// that.
 type InstanceState string
 
 // InstanceUsage What the instance is consuming, beside the limits its specification asked
@@ -2329,8 +2333,9 @@ type Workload struct {
 	// terminating while they are being torn down, failed when an instance exited
 	// non-zero, and stopped when none are running.
 	//
-	// A completed workload has ended and will not be restarted, which its restart
-	// policy asked for. That is distinct from stopped, where nothing is running and
+	// A completed workload has ended and will not be restarted, either because its
+	// restart policy asked for that or because it runs on a schedule and waits for
+	// its next occurrence. That is distinct from stopped, where nothing is running and
 	// the server intends to fix it.
 	//
 	// A suspended workload was stopped by an operator and stays down until it is
@@ -2620,8 +2625,9 @@ type WorkloadSpec struct {
 // terminating while they are being torn down, failed when an instance exited
 // non-zero, and stopped when none are running.
 //
-// A completed workload has ended and will not be restarted, which its restart
-// policy asked for. That is distinct from stopped, where nothing is running and
+// A completed workload has ended and will not be restarted, either because its
+// restart policy asked for that or because it runs on a schedule and waits for
+// its next occurrence. That is distinct from stopped, where nothing is running and
 // the server intends to fix it.
 //
 // A suspended workload was stopped by an operator and stays down until it is
