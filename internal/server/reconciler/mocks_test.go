@@ -12,6 +12,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/health"
 	"github.com/dsb-labs/takt/internal/server/mount"
+	"github.com/dsb-labs/takt/internal/server/resolve"
 	"github.com/dsb-labs/takt/pkg/manifest"
 	mock "github.com/stretchr/testify/mock"
 )
@@ -1049,6 +1050,86 @@ func (_c *MockResolver_Resolve_Call) Return(stringToString map[string]string, er
 }
 
 func (_c *MockResolver_Resolve_Call) RunAndReturn(run func(ctx context.Context, env map[string]string, readerID string, reader string, readerInstance int) (map[string]string, error)) *MockResolver_Resolve_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Targets provides a mock function for the type MockResolver
+func (_mock *MockResolver) Targets(ctx context.Context, env map[string]string, reader string, readerInstance int) ([]resolve.Target, error) {
+	ret := _mock.Called(ctx, env, reader, readerInstance)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Targets")
+	}
+
+	var r0 []resolve.Target
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, map[string]string, string, int) ([]resolve.Target, error)); ok {
+		return returnFunc(ctx, env, reader, readerInstance)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, map[string]string, string, int) []resolve.Target); ok {
+		r0 = returnFunc(ctx, env, reader, readerInstance)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]resolve.Target)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, map[string]string, string, int) error); ok {
+		r1 = returnFunc(ctx, env, reader, readerInstance)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockResolver_Targets_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Targets'
+type MockResolver_Targets_Call struct {
+	*mock.Call
+}
+
+// Targets is a helper method to define mock.On call
+//   - ctx context.Context
+//   - env map[string]string
+//   - reader string
+//   - readerInstance int
+func (_e *MockResolver_Expecter) Targets(ctx any, env any, reader any, readerInstance any) *MockResolver_Targets_Call {
+	return &MockResolver_Targets_Call{Call: _e.mock.On("Targets", ctx, env, reader, readerInstance)}
+}
+
+func (_c *MockResolver_Targets_Call) Run(run func(ctx context.Context, env map[string]string, reader string, readerInstance int)) *MockResolver_Targets_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 map[string]string
+		if args[1] != nil {
+			arg1 = args[1].(map[string]string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockResolver_Targets_Call) Return(targets []resolve.Target, err error) *MockResolver_Targets_Call {
+	_c.Call.Return(targets, err)
+	return _c
+}
+
+func (_c *MockResolver_Targets_Call) RunAndReturn(run func(ctx context.Context, env map[string]string, reader string, readerInstance int) ([]resolve.Target, error)) *MockResolver_Targets_Call {
 	_c.Call.Return(run)
 	return _c
 }

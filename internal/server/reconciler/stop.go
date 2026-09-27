@@ -84,6 +84,7 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 	// Backoff would otherwise outlive the workload, pacing the restarts of a later
 	// workload that happens to reuse the name.
 	r.settleAll(row.Name)
+	r.forgetStarted(row.Name)
 
 	// A restart asked for before the deletion landed dies with the workload, for
 	// the same reason: it would otherwise lie in wait for a later workload that
@@ -254,6 +255,8 @@ func (r *Reconciler) discardInstance(ctx context.Context, row database.Workload,
 	delete(r.exits, key)
 	delete(r.verdicts, key)
 	delete(r.unhealthy, key)
+	delete(r.started, key)
+	delete(r.held, key)
 	r.mux.Unlock()
 
 	if r.checker != nil {

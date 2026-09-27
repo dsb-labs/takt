@@ -22,6 +22,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/health"
 	"github.com/dsb-labs/takt/internal/server/mount"
+	"github.com/dsb-labs/takt/internal/server/resolve"
 	"github.com/dsb-labs/takt/internal/server/state"
 	"github.com/dsb-labs/takt/internal/server/telemetry"
 	"github.com/dsb-labs/takt/pkg/manifest"
@@ -111,6 +112,10 @@ type (
 		// instance's expected hash covers: each instance may resolve a reference
 		// to a different address, so staleness has to be judged against its own.
 		Addresses(ctx context.Context, env map[string]string, reader string, readerInstance int) (map[string]string, error)
+		// Targets should return the instance of each workload referenced in env
+		// that the reader's instance lands on, which is what the reader's first
+		// start waits on.
+		Targets(ctx context.Context, env map[string]string, reader string, readerInstance int) ([]resolve.Target, error)
 	}
 
 	// The Mounts interface describes how the reconciler turns the secrets and
@@ -205,6 +210,7 @@ type (
 		reallocate  func(ctx context.Context, workload string, instance int) (bool, error)
 		now         func() time.Time
 		interval    time.Duration
+		readiness   time.Duration
 		hostPaths   []driver.HostPath
 		nudge       chan struct{}
 		tracer      trace.Tracer
@@ -215,6 +221,11 @@ type (
 		// may read the allocations a later pass wrote. That is the newer truth
 		// about the same rows, and never a map mid-write.
 		allocations atomic.Pointer[map[string][]database.Port]
+		// The stored workloads the most recent pass read, keyed by name and
+		// replaced wholesale as each pass begins, on the same terms as the
+		// allocations. A reader's first start reads its target's specification
+		// from here rather than asking the repository again per slot.
+		rows atomic.Pointer[map[string]database.Workload]
 
 		// Bounds how many converges act at once, across passes rather than
 		// within one. The runtime behind them is a single daemon, and a pass
@@ -263,6 +274,14 @@ type (
 		// the ending be recorded as the check's doing rather than as an exit the
 		// process never made.
 		unhealthy map[slot]string
+		// The version each slot most recently started, so that the readiness
+		// gate holds a slot's first start under a version and nothing after it.
+		// A restart after a crash and a replacement after a change are not held:
+		// the reader was talking to its target a moment ago.
+		started map[slot]int
+		// When each held slot was first held, for the bounded wait. Cleared when
+		// the slot starts.
+		held map[slot]time.Time
 		// The workloads whose instances an operator asked to have replaced,
 		// consumed by the next pass over each. In memory rather than stored,
 		// because a request the server loses can simply be made again.
@@ -333,6 +352,10 @@ type (
 		Reallocate func(ctx context.Context, workload string, instance int) (bool, error)
 		// How often a full reconciliation pass runs regardless of events.
 		Interval time.Duration
+		// How long a reader's first start is held for the instance it references
+		// to pass its health check before it is started anyway. Zero disables the
+		// hold, so a reader starts as soon as its reference resolves.
+		ReadinessWait time.Duration
 		// The prefixes a path mount may sit beneath. Each path mount is resolved
 		// against them as an instance starts, so a link swapped in after the apply
 		// cannot carry the mount elsewhere.
@@ -411,12 +434,15 @@ func New(config Config) *Reconciler {
 		reallocate:   config.Reallocate,
 		now:          clock(config.Now),
 		interval:     config.Interval,
+		readiness:    config.ReadinessWait,
 		hostPaths:    config.AllowHostPaths,
 		backoff:      make(map[slot]backoff),
 		exits:        make(map[slot]string),
 		verdicts:     make(map[slot]health.Status),
 		unhealthy:    make(map[slot]string),
 		restarts:     make(map[string]struct{}),
+		started:      make(map[slot]int),
+		held:         make(map[slot]time.Time),
 		converging:   make(map[string]struct{}),
 		observations: observations,
 		subscribers:  make(map[chan struct{}]struct{}),
@@ -668,6 +694,13 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	}
 
 	span.SetAttributes(attribute.Int("takt.workloads", len(rows)))
+
+	byName := make(map[string]database.Workload, len(rows))
+	for _, row := range rows {
+		byName[row.Name] = row
+	}
+
+	r.rows.Store(&byName)
 
 	observeCtx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
