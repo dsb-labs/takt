@@ -14,7 +14,8 @@ describes how an entry is written.
   so a path mount beneath it is accepted only when it says `readOnly: true`. The
   most specific prefix decides, which lets `/:ro` open the whole host to a workload
   that observes it without opening it for writing
-  ([#134](https://github.com/dsb-labs/takt/issues/134)).
+  ([#134](https://github.com/dsb-labs/takt/issues/134),
+  [#137](https://github.com/dsb-labs/takt/pull/137)).
 
 ### Fixed
 
