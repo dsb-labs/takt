@@ -34,6 +34,7 @@ func TestWrapDriver(t *testing.T) {
 		d.EXPECT().DiscardInstance(mock.Anything, "id", "web", 1).Return(nil)
 		d.EXPECT().Signal(mock.Anything, "id", "web", "HUP").Return(nil)
 		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+		d.EXPECT().Prune(mock.Anything, mock.Anything).Return(nil)
 
 		wrapped := telemetry.WrapDriver(d, provider)
 
@@ -47,6 +48,7 @@ func TestWrapDriver(t *testing.T) {
 
 		_, err = wrapped.Observe(ctx)
 		require.NoError(t, err)
+		require.NoError(t, wrapped.Prune(ctx, nil))
 
 		names := make([]string, 0, len(spans.Ended()))
 		for _, span := range spans.Ended() {
@@ -56,7 +58,7 @@ func TestWrapDriver(t *testing.T) {
 
 		assert.Equal(t, []string{
 			"driver.start", "driver.stop", "driver.discard",
-			"driver.stop", "driver.discard", "driver.signal", "driver.observe",
+			"driver.stop", "driver.discard", "driver.signal", "driver.observe", "driver.prune",
 		}, names)
 	})
 

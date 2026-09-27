@@ -76,6 +76,14 @@ type (
 		// Watch should report changes to the driver's instances so that the
 		// reconciler can converge sooner than its next scheduled pass.
 		Watch(ctx context.Context) (<-chan driver.Event, error)
+		// Prune should remove what the driver holds that none of the given
+		// specifications need — for a container runtime, the images no workload
+		// names and no container uses. A driver holding nothing of the kind
+		// should do nothing.
+		//
+		// The specifications are every stored workload's, whichever runtime each
+		// names, so a driver decides for itself what it holds for one.
+		Prune(ctx context.Context, keep []manifest.Spec) error
 	}
 
 	// The WorkloadRepository interface describes the persistence operations the
@@ -400,6 +408,10 @@ const (
 	driverTimeout = 30 * time.Second
 	// How long starting a workload may take, including pulling its image.
 	startTimeout = 10 * time.Minute
+	// How long a driver may take to remove what it holds for no workload. Longer
+	// than an ordinary call, since removing an image is work the daemon does
+	// rather than a question it answers, and one prune may remove several.
+	pruneTimeout = 5 * time.Minute
 )
 
 // clock returns the function a reconciler reads the time from, defaulting to the wall
@@ -810,7 +822,7 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 
 	span.SetAttributes(attribute.Int("takt.skipped", skipped))
 
-	r.prune(rows)
+	r.prune(ctx, &spawned, rows)
 }
 
 // complete counts the pass once the converges it spawned have finished, and tells
@@ -873,36 +885,66 @@ func (r *Reconciler) finish(workload string) {
 	delete(r.converging, workload)
 }
 
-// prune removes the mounted values of workloads that no longer exist.
+// prune removes what exists for no workload: the mounted values of workloads that
+// no longer exist, and whatever each driver holds that no stored workload needs.
 //
-// A teardown removes them itself, so this is for the case that teardown cannot cover: a
-// server that stopped between stopping the work and removing the row leaves files whose
-// workload is gone, and a secret's plaintext should not sit on the disk waiting for
-// something to notice.
+// A teardown removes a workload's values itself, so the first is for the case that
+// teardown cannot cover: a server that stopped between stopping the work and removing
+// the row leaves files whose workload is gone, and a secret's plaintext should not sit
+// on the disk waiting for something to notice. The second is for what no teardown
+// covers at all: an image left behind by a tag bump, a rebuilt tag or a deleted
+// workload, which nothing removes until the disk fills.
 //
-// That is a condition a server recovers from rather than one that arises while it runs,
-// so this reads the disk on the first pass and then only occasionally. Doing it every
-// pass cost two directory reads per pass forever — on a host where nothing has ever been
-// mounted, two failing syscalls — to answer a question whose answer only changes when a
-// server stops at exactly the wrong moment.
+// Neither is a condition that arises on every pass, so this runs on the first pass and
+// then only occasionally. Doing it every pass cost two directory reads and a listing
+// of every image per pass forever to answer a question whose answer changes rarely.
 //
-// Failures are logged rather than returned. Nothing is worse off for the files
-// remaining, and a later pass tries again.
-func (r *Reconciler) prune(rows []database.Workload) {
+// The drivers are asked on a goroutine of the pass's rather than in it. Removing an
+// image is a request the daemon may take a while over, and a pass held open for it
+// is a pass not looking. Failures are logged rather than returned. Nothing is worse
+// off for what remains, and a later pass tries again.
+func (r *Reconciler) prune(ctx context.Context, spawned *sync.WaitGroup, rows []database.Workload) {
 	const every = 64
 
-	if r.mounts == nil || r.began%every != 0 {
+	if r.began%every != 0 {
 		return
 	}
 
-	keep := make([]string, 0, len(rows))
-	for _, row := range rows {
-		keep = append(keep, row.ID)
+	if r.mounts != nil {
+		keep := make([]string, 0, len(rows))
+		for _, row := range rows {
+			keep = append(keep, row.ID)
+		}
+
+		if err := r.mounts.Prune(keep); err != nil {
+			r.logger.With("error", err).Error("failed to remove the mounted values of workloads that no longer exist")
+		}
 	}
 
-	if err := r.mounts.Prune(keep); err != nil {
-		r.logger.With("error", err).Error("failed to remove the mounted values of workloads that no longer exist")
+	// Every specification or none: a driver handed a partial list would remove
+	// what the missing workload needs.
+	specs := make([]manifest.Spec, 0, len(rows))
+	for _, row := range rows {
+		spec, err := manifest.DecodeWorkload(row.Spec)
+		if err != nil {
+			r.logger.With("workload", row.Name, "error", err).Error("failed to decode workload, leaving what the drivers hold alone")
+
+			return
+		}
+
+		specs = append(specs, spec)
 	}
+
+	r.spawn(spawned, func() {
+		ctx, cancel := context.WithTimeout(ctx, pruneTimeout)
+		defer cancel()
+
+		for name, d := range r.drivers {
+			if err := d.Prune(ctx, specs); err != nil {
+				r.logger.With("driver", name, "error", err).Error("failed to remove what the driver holds for no workload")
+			}
+		}
+	})
 }
 
 // measure records the number of workloads in each state.

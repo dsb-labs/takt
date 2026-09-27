@@ -1034,6 +1034,13 @@ func (d *Driver) kill(pid int) error {
 	return nil
 }
 
+// Prune does nothing. A process has no image to leave behind: what an exec
+// workload runs is a command on the host, which is the operator's to install and
+// remove.
+func (d *Driver) Prune(context.Context, []manifest.Spec) error {
+	return nil
+}
+
 // Observe reports an instance for every workload the driver has a record of.
 //
 // The records are the source of truth rather than the supervised set, because a
