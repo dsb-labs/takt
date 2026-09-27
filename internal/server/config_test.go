@@ -33,6 +33,8 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "/var/lib/takt", config.Data.Directory)
 				assert.Equal(t, "tcp://localhost:2375", config.Docker.Host)
 				assert.Equal(t, "/etc/takt/docker-config.json", config.Docker.ConfigFile)
+				assert.False(t, config.Docker.Prune)
+				assert.Equal(t, 2*time.Hour, config.Docker.PruneDelay)
 				assert.Equal(t, 30*time.Second, config.Reconcile.Interval)
 				assert.Equal(t, 2*time.Minute, config.Reconcile.ReadinessWait)
 				assert.Equal(t, []string{"takt.example.com"}, config.HTTP.Hosts)
@@ -318,6 +320,15 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			Name:         "a negative readiness wait",
 			Mutate:       func(c *server.Config) { c.Reconcile.ReadinessWait = -time.Minute },
+			ExpectsError: true,
+		},
+		{
+			Name:   "no prune delay",
+			Mutate: func(c *server.Config) { c.Docker.PruneDelay = 0 },
+		},
+		{
+			Name:         "a negative prune delay",
+			Mutate:       func(c *server.Config) { c.Docker.PruneDelay = -time.Hour },
 			ExpectsError: true,
 		},
 		{
