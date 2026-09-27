@@ -254,6 +254,10 @@ func (r *Reconciler) convergeSlot(ctx context.Context, row database.Workload, in
 	}
 
 	if len(instances) == 0 {
+		if r.notReady(ctx, row, index) {
+			return false, nil
+		}
+
 		return false, r.attempt(ctx, row, index)
 	}
 

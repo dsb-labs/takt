@@ -108,6 +108,7 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 
 	r.logger.With("workload", row.Name, "id", id, "instance", index, "version", row.Version).Info("workload started")
 	r.record(ctx, row.Name, reason, event.Fields{Instance: index})
+	r.markStarted(row.Name, index, row.Version)
 
 	// After the start rather than before it. A replacement's files are written
 	// alongside those the instance being replaced is still reading, and sweeping them

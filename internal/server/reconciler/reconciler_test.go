@@ -27,6 +27,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/health"
 	"github.com/dsb-labs/takt/internal/server/mount"
 	"github.com/dsb-labs/takt/internal/server/reconciler"
+	"github.com/dsb-labs/takt/internal/server/resolve"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
@@ -3183,6 +3184,248 @@ func TestReconciler_Run_RemovesMountedValuesWhenSuspended(t *testing.T) {
 
 	cancel()
 	require.NoError(t, <-done)
+}
+
+// readinessFixture holds what the readiness tests share: a reader referencing a
+// target that declares a health check, whose verdict and whose observed instances
+// the test steers between passes.
+type readinessFixture struct {
+	driver   *MockDriver
+	repo     *MockWorkloadRepository
+	checker  *MockChecker
+	env      *MockResolver
+	recorder *testRecorder
+
+	// Whether the target's instance has passed its check, read on every pass.
+	healthy atomic.Bool
+	// The instances the driver reports for the reader, replaced by the test.
+	mux      sync.Mutex
+	observed []driver.Instance
+	// Counts the reader's starts, and the hash the most recent one carried: the
+	// slot's expected hash folds in the resolved address, so an observed instance
+	// has to carry it to read as current.
+	starts atomic.Int32
+	hash   atomic.Pointer[string]
+	// The time the reconciler reads, advanced by the test for the bounded wait.
+	now atomic.Pointer[time.Time]
+}
+
+// newReadinessFixture builds the fixture. The target declares a check unless
+// unchecked is set, which is the case with nothing to wait on.
+func newReadinessFixture(t *testing.T, unchecked bool) *readinessFixture {
+	t.Helper()
+
+	f := &readinessFixture{
+		driver:   newMockDriver(t),
+		repo:     NewMockWorkloadRepository(t),
+		checker:  newMockChecker(t),
+		env:      NewMockResolver(t),
+		recorder: newTestRecorder(t),
+	}
+
+	f.now.Store(new(time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)))
+
+	target := storedWorkload("db", "hash-db")
+	if !unchecked {
+		target.Spec = specWithCheckedPort("db", "")
+	}
+
+	env := map[string]string{"DSN": "postgres://${workload:db:pg}/app"}
+
+	reader := storedWorkload("api", "hash-api")
+	reader.Spec = specWithEnv("api", env)
+
+	f.repo.EXPECT().List(mock.Anything).Return([]database.Workload{target, reader}, nil)
+	f.driver.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+	// The target runs throughout, so the only thing a pass decides is whether the
+	// reader starts. Its verdict is what the reader waits on.
+	f.driver.EXPECT().Observe(mock.Anything).RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+		f.mux.Lock()
+		defer f.mux.Unlock()
+
+		return append([]driver.Instance{
+			{ID: "db-one", Workload: "db", SpecHash: "hash-db", State: driver.StateRunning},
+		}, f.observed...), nil
+	})
+
+	f.checker.EXPECT().Result("db", 0).RunAndReturn(func(string, int) (health.Result, bool) {
+		if f.healthy.Load() {
+			return health.Result{Status: health.StatusHealthy}, true
+		}
+
+		// Still in its start period, which is what a target coming up looks like
+		// and which does not have the pass replace it.
+		return health.Result{Status: health.StatusStarting, Error: "connection refused"}, true
+	}).Maybe()
+	f.checker.EXPECT().Result("api", mock.Anything).Return(health.Result{}, false).Maybe()
+	f.checker.EXPECT().Forget(mock.Anything).Maybe()
+	f.checker.EXPECT().ForgetInstance(mock.Anything, mock.Anything).Maybe()
+
+	f.env.EXPECT().Targets(mock.Anything, env, "api", 0).
+		Return([]resolve.Target{{Workload: "db", Instance: 0}}, nil).Maybe()
+	f.env.EXPECT().Addresses(mock.Anything, env, "api", 0).
+		Return(map[string]string{"${workload:db:pg}": "127.0.0.1:20432"}, nil).Maybe()
+	f.env.EXPECT().Resolve(mock.Anything, env, mock.Anything, "api", 0).
+		Return(map[string]string{"DSN": "postgres://127.0.0.1:20432/app"}, nil).Maybe()
+
+	f.driver.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
+		return w.Name == "api"
+	})).RunAndReturn(func(_ context.Context, w driver.Workload) (string, error) {
+		f.starts.Add(1)
+		f.hash.Store(new(w.SpecHash))
+
+		return "api-one", nil
+	}).Maybe()
+	f.driver.EXPECT().StopInstance(mock.Anything, mock.Anything, "api", 0).Return(nil).Maybe()
+
+	return f
+}
+
+// run starts a reconciler over the fixture with the given readiness wait and
+// returns it with a function that stops it.
+func (f *readinessFixture) run(t *testing.T, wait time.Duration) (*reconciler.Reconciler, func()) {
+	t.Helper()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:        newTestLogger(t),
+		Drivers:       map[string]reconciler.Driver{docker.Name: f.driver},
+		Workloads:     f.repo,
+		Env:           f.env,
+		Checker:       f.checker,
+		Events:        f.recorder,
+		Interval:      time.Hour,
+		ReadinessWait: wait,
+		Now:           func() time.Time { return *f.now.Load() },
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	return r, func() {
+		cancel()
+		require.NoError(t, <-done)
+	}
+}
+
+// observe replaces the instances the driver reports for the reader.
+func (f *readinessFixture) observe(instances ...driver.Instance) {
+	f.mux.Lock()
+	defer f.mux.Unlock()
+
+	f.observed = instances
+}
+
+func TestReconciler_Run_HoldsFirstStartForDependency(t *testing.T) {
+	t.Parallel()
+
+	t.Run("holds until the target passes its check, then starts", func(t *testing.T) {
+		f := newReadinessFixture(t, false)
+		r, stop := f.run(t, 5*time.Minute)
+		defer stop()
+
+		awaitPasses(t, r, 1)
+		assert.Zero(t, f.starts.Load(), "the reader started before its target was ready")
+		assert.Equal(t, 1, f.recorder.count(event.DependencyNotReady))
+		assert.Zero(t, f.recorder.count(event.RestartPaced), "a hold is not a backoff")
+		assert.Contains(t, string(f.recorder.data(event.DependencyNotReady)), `"name":"db"`)
+		assert.Contains(t, string(f.recorder.data(event.DependencyNotReady)), `"error":"connection refused"`)
+
+		// Held again while the target stays down, recorded again for coalescing to
+		// count.
+		r.Notify()
+		awaitPasses(t, r, 2)
+		assert.Zero(t, f.starts.Load())
+		assert.Equal(t, 2, f.recorder.count(event.DependencyNotReady))
+
+		f.healthy.Store(true)
+		r.Notify()
+		awaitPasses(t, r, 3)
+		assert.Equal(t, int32(1), f.starts.Load(), "the reader did not start once its target passed")
+		assert.Zero(t, f.recorder.count(event.DependencyWaitGivenUp))
+	})
+
+	t.Run("does not hold a second start under the same version", func(t *testing.T) {
+		f := newReadinessFixture(t, false)
+		f.healthy.Store(true)
+
+		r, stop := f.run(t, 5*time.Minute)
+		defer stop()
+
+		awaitPasses(t, r, 1)
+		require.Equal(t, int32(1), f.starts.Load())
+
+		// The instance is gone and the target is failing. The reader was talking to
+		// it a moment ago, so this is a restart with nothing to wait on.
+		f.healthy.Store(false)
+		r.Notify()
+		awaitPasses(t, r, 2)
+		assert.Equal(t, int32(2), f.starts.Load(), "a restart was held")
+		assert.Zero(t, f.recorder.count(event.DependencyNotReady))
+	})
+
+	t.Run("does not hold a restart after a crash", func(t *testing.T) {
+		f := newReadinessFixture(t, false)
+		f.healthy.Store(true)
+
+		r, stop := f.run(t, 5*time.Minute)
+		defer stop()
+
+		awaitPasses(t, r, 1)
+		require.Equal(t, int32(1), f.starts.Load())
+
+		// The instance crashed and the target is failing. The crash is paced by the
+		// backoff, which is the restart path's own, and not by the gate.
+		f.observe(driver.Instance{ID: "api-one", Workload: "api", SpecHash: *f.hash.Load(), State: driver.StateFailed, ExitCode: 1})
+		f.healthy.Store(false)
+		r.Notify()
+		awaitPasses(t, r, 2)
+		assert.Equal(t, int32(2), f.starts.Load(), "a restart was held")
+		assert.Zero(t, f.recorder.count(event.DependencyNotReady))
+	})
+
+	t.Run("starts anyway once the wait is up", func(t *testing.T) {
+		f := newReadinessFixture(t, false)
+		r, stop := f.run(t, time.Minute)
+		defer stop()
+
+		awaitPasses(t, r, 1)
+		require.Zero(t, f.starts.Load())
+
+		f.now.Store(new(f.now.Load().Add(30 * time.Second)))
+		r.Notify()
+		awaitPasses(t, r, 2)
+		require.Zero(t, f.starts.Load(), "the reader started before the wait was up")
+
+		f.now.Store(new(f.now.Load().Add(30 * time.Second)))
+		r.Notify()
+		awaitPasses(t, r, 3)
+		assert.Equal(t, int32(1), f.starts.Load(), "the reader was held past the wait")
+		assert.Equal(t, 1, f.recorder.count(event.DependencyWaitGivenUp))
+		assert.Contains(t, string(f.recorder.data(event.DependencyWaitGivenUp)), `"delay":60000000000`)
+	})
+
+	t.Run("does not wait on a target with no check", func(t *testing.T) {
+		f := newReadinessFixture(t, true)
+		r, stop := f.run(t, 5*time.Minute)
+		defer stop()
+
+		awaitPasses(t, r, 1)
+		assert.Equal(t, int32(1), f.starts.Load())
+		assert.Zero(t, f.recorder.count(event.DependencyNotReady))
+	})
+
+	t.Run("is off when the wait is zero", func(t *testing.T) {
+		f := newReadinessFixture(t, false)
+		r, stop := f.run(t, 0)
+		defer stop()
+
+		awaitPasses(t, r, 1)
+		assert.Equal(t, int32(1), f.starts.Load())
+		assert.Zero(t, f.recorder.count(event.DependencyNotReady))
+	})
 }
 
 func TestReconciler_Run_RevokesWorkloadTokens(t *testing.T) {
