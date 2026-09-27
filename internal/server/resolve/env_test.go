@@ -283,6 +283,50 @@ func newTestEnvResolverWithTokens(t *testing.T, tokens resolve.TokenMinter) *res
 	})
 }
 
+func TestEnvResolver_Targets(t *testing.T) {
+	t.Parallel()
+
+	t.Run("names each referenced instance once", func(t *testing.T) {
+		workloads, ports := NewMockWorkloadLocator(t), NewMockPortLocator(t)
+
+		workloads.EXPECT().Get(mock.Anything, "postgres").
+			Return(database.Workload{ID: "workload-one", Name: "postgres"}, nil)
+		ports.EXPECT().List(mock.Anything, "workload-one").Return([]database.Port{
+			{WorkloadID: "workload-one", Name: "pg", Container: 5432, Host: 20432, Protocol: "tcp", Dynamic: true},
+			{WorkloadID: "workload-one", Name: "metrics", Container: 9090, Host: 20090, Protocol: "tcp", Dynamic: true},
+		}, nil)
+
+		// Two ports of one target, a reference to the host alone, and a secret:
+		// one instance of one workload is what the reader waits on.
+		targets, err := newTestEnvResolverWithAddresses(t, workloads, ports).Targets(t.Context(), map[string]string{
+			"DSN":     "postgres://app@${workload:postgres:pg}/app",
+			"METRICS": "http://${workload:postgres:metrics}",
+			"HOST":    "${workload:postgres}",
+			"PASS":    "${secret:db-password}",
+		}, "reader", 0)
+		require.NoError(t, err)
+		assert.Equal(t, []resolve.Target{{Workload: "postgres", Instance: 0}}, targets)
+	})
+
+	t.Run("names nothing for an environment referencing no workload", func(t *testing.T) {
+		targets, err := newTestEnvResolverWithAddresses(t, NewMockWorkloadLocator(t), NewMockPortLocator(t)).
+			Targets(t.Context(), map[string]string{"PASS": "${secret:db-password}"}, "reader", 0)
+		require.NoError(t, err)
+		assert.Empty(t, targets)
+	})
+
+	t.Run("reports a workload that does not exist", func(t *testing.T) {
+		workloads, ports := NewMockWorkloadLocator(t), NewMockPortLocator(t)
+
+		workloads.EXPECT().Get(mock.Anything, "postgres").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		_, err := newTestEnvResolverWithAddresses(t, workloads, ports).
+			Targets(t.Context(), map[string]string{"DSN": "${workload:postgres:pg}"}, "reader", 0)
+		assert.ErrorIs(t, err, database.ErrWorkloadNotFound)
+	})
+}
+
 func newTestEnvResolverWithAddresses(t *testing.T, workloads resolve.WorkloadLocator, ports resolve.PortLocator) *resolve.EnvResolver {
 	t.Helper()
 

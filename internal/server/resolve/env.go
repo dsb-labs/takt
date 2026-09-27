@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/pkg/manifest"
@@ -187,6 +188,38 @@ func (r *EnvResolver) Addresses(ctx context.Context, env map[string]string, read
 	}
 
 	return addresses, nil
+}
+
+// Targets returns the instance of each referenced workload that the given instance
+// of the reader lands on, with duplicates folded. A reference naming no port lands
+// on no instance in particular and is left out.
+//
+// This exists for the reconciler, which holds a reader's first start until the
+// instances it will talk to have passed their health checks.
+func (r *EnvResolver) Targets(ctx context.Context, env map[string]string, reader string, readerInstance int) ([]Target, error) {
+	if r.workloads == nil || len(env) == 0 {
+		return nil, nil
+	}
+
+	found, err := manifest.References(manifest.Spec{Env: env})
+	if err != nil {
+		return nil, err
+	}
+
+	var targets []Target
+
+	for _, reference := range manifest.Of(found, manifest.KindWorkload) {
+		target, ok, err := r.workloads.Target(ctx, reference, reader, readerInstance)
+		if err != nil {
+			return nil, err
+		}
+
+		if ok && !slices.Contains(targets, target) {
+			targets = append(targets, target)
+		}
+	}
+
+	return targets, nil
 }
 
 // value reads what the reference names from whichever store holds that kind,

@@ -2,6 +2,7 @@ package resolve_test
 
 import (
 	"log/slog"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -119,6 +120,19 @@ func TestAddressResolver_Address(t *testing.T) {
 
 		assert.Len(t, seen, 3, "each reader instance reached a target instance of its own")
 
+		// The instance Target names is the one Address dialled, so the readiness
+		// gate waits on the instance the reader will talk to.
+		for readerInstance := range 3 {
+			target, ok, err := svc.Target(t.Context(), reference, "api", readerInstance)
+			require.NoError(t, err)
+			require.True(t, ok)
+			assert.Equal(t, "postgres", target.Workload)
+
+			address, err := svc.Address(t.Context(), reference, "api", readerInstance)
+			require.NoError(t, err)
+			assert.Equal(t, "10.0.0.5:"+strconv.Itoa(20432+target.Instance), address)
+		}
+
 		// Deterministic: the same reader resolves the same address every time, so a
 		// dry run and an apply cannot disagree.
 		first, err := svc.Address(t.Context(), reference, "api", 0)
@@ -127,6 +141,15 @@ func TestAddressResolver_Address(t *testing.T) {
 		again, err := svc.Address(t.Context(), reference, "api", 0)
 		require.NoError(t, err)
 		assert.Equal(t, first, again)
+	})
+
+	t.Run("names no target for a reference naming no port", func(t *testing.T) {
+		workloads, ports := NewMockWorkloadLocator(t), NewMockPortLocator(t)
+
+		_, ok, err := newTestAddressResolver(t, workloads, ports).
+			Target(t.Context(), manifest.Reference{Kind: manifest.KindWorkload, Name: "postgres"}, "reader", 0)
+		require.NoError(t, err)
+		assert.False(t, ok)
 	})
 
 	t.Run("reports a workload that does not exist", func(t *testing.T) {

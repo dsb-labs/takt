@@ -60,6 +60,15 @@ type (
 		address   string
 	}
 
+	// The Target type names the instance of a referenced workload a reader lands
+	// on, which is what a reader's readiness is judged against.
+	Target struct {
+		// The name of the referenced workload.
+		Workload string
+		// The index of the instance the reader's arithmetic picked.
+		Instance int
+	}
+
 	// The AddressResolverConfig type contains fields used to construct an
 	// AddressResolver.
 	AddressResolverConfig struct {
@@ -106,38 +115,16 @@ func NewAddressResolver(config AddressResolverConfig) *AddressResolver {
 // Returns database.ErrWorkloadNotFound when nothing holds the name, or
 // ErrPortNotPublished when the workload holds it but publishes no such port.
 func (r *AddressResolver) Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error) {
-	row, err := r.workloads.Get(ctx, reference.Name)
-	switch {
-	case errors.Is(err, database.ErrWorkloadNotFound):
-		return "", fmt.Errorf("%w: %s", database.ErrWorkloadNotFound, reference.Name)
-	case err != nil:
-		return "", fmt.Errorf("failed to load workload: %w", err)
-	}
-
-	published, err := r.ports.List(ctx, row.ID)
+	_, published, err := r.published(ctx, reference)
 	if err != nil {
-		return "", fmt.Errorf("failed to read workload ports: %w", err)
-	}
-
-	if len(published) == 0 {
-		return "", fmt.Errorf("%w: workload %s publishes no ports", ErrPortNotPublished, reference.Name)
+		return "", err
 	}
 
 	if reference.Port == "" {
 		return r.address, nil
 	}
 
-	// The count is read from the rows rather than by decoding the specification:
-	// every instance holds rows, so the highest index says how many there are, and
-	// the rows are what is being chosen between anyway.
-	count := 1
-	for _, port := range published {
-		if port.Instance >= count {
-			count = port.Instance + 1
-		}
-	}
-
-	slot := pick(reader, readerInstance, count)
+	slot := pick(reader, readerInstance, countOf(published))
 
 	for _, port := range published {
 		if port.Instance != slot {
@@ -150,6 +137,66 @@ func (r *AddressResolver) Address(ctx context.Context, reference manifest.Refere
 	}
 
 	return "", fmt.Errorf("%w: workload %s does not publish %s", ErrPortNotPublished, reference.Name, reference.Port)
+}
+
+// Target returns which instance of the referenced workload the given instance of
+// the reader lands on, by the same arithmetic Address uses. A reference naming no
+// port resolves to the host alone and lands on no instance in particular, so it
+// reports false.
+//
+// This exists for the reconciler, which holds a reader's first start until the
+// instance it will talk to is ready. Returns the errors Address does.
+func (r *AddressResolver) Target(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (Target, bool, error) {
+	if reference.Port == "" {
+		return Target{}, false, nil
+	}
+
+	row, published, err := r.published(ctx, reference)
+	if err != nil {
+		return Target{}, false, err
+	}
+
+	return Target{Workload: row.Name, Instance: pick(reader, readerInstance, countOf(published))}, true, nil
+}
+
+// published reads the referenced workload and the ports it publishes, refusing a
+// workload that publishes none: such a workload is reachable at no address, so a
+// reference to one could never mean anything.
+func (r *AddressResolver) published(ctx context.Context, reference manifest.Reference) (database.Workload, []database.Port, error) {
+	row, err := r.workloads.Get(ctx, reference.Name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return database.Workload{}, nil, fmt.Errorf("%w: %s", database.ErrWorkloadNotFound, reference.Name)
+	case err != nil:
+		return database.Workload{}, nil, fmt.Errorf("failed to load workload: %w", err)
+	}
+
+	published, err := r.ports.List(ctx, row.ID)
+	if err != nil {
+		return database.Workload{}, nil, fmt.Errorf("failed to read workload ports: %w", err)
+	}
+
+	if len(published) == 0 {
+		return database.Workload{}, nil, fmt.Errorf("%w: workload %s publishes no ports", ErrPortNotPublished, reference.Name)
+	}
+
+	return row, published, nil
+}
+
+// countOf reads how many instances a workload runs from the ports it publishes.
+//
+// Read from the rows rather than by decoding the specification: every instance
+// holds rows, so the highest index says how many there are, and the rows are what
+// is being chosen between anyway.
+func countOf(published []database.Port) int {
+	count := 1
+	for _, port := range published {
+		if port.Instance >= count {
+			count = port.Instance + 1
+		}
+	}
+
+	return count
 }
 
 // pick chooses which of a target's instances a reader lands on.
