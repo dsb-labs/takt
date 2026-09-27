@@ -3576,6 +3576,8 @@ components:
         - restartPaced
         - restartGaveUp
         - referenceUnresolved
+        - dependencyNotReady
+        - dependencyWaitGivenUp
         # The reasons a workload restarted.
         - specificationModified
         - portsDrifted

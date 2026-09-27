@@ -2123,6 +2123,8 @@ export interface components {
       | "restartPaced"
       | "restartGaveUp"
       | "referenceUnresolved"
+      | "dependencyNotReady"
+      | "dependencyWaitGivenUp"
       | "specificationModified"
       | "portsDrifted"
       | "hashMoved"

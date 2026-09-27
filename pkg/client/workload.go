@@ -315,6 +315,12 @@ const (
 	// EventReferenceUnresolved indicates something the specification refers to could
 	// not be read, such as a pinned image reference.
 	EventReferenceUnresolved EventReason = "referenceUnresolved"
+	// EventDependencyNotReady indicates the server is holding the workload's first
+	// start until the instance of a workload it references passes its health check.
+	EventDependencyNotReady EventReason = "dependencyNotReady"
+	// EventDependencyWaitGivenUp indicates the server started the workload without
+	// waiting any longer for the instance it references to pass its health check.
+	EventDependencyWaitGivenUp EventReason = "dependencyWaitGivenUp"
 )
 
 // The reasons a workload restarted.
