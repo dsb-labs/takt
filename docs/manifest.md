@@ -1005,7 +1005,9 @@ whatever the last run did, so the policy applies only between occurrences. There
 retries a run that failed.
 
 A run that ended cleanly is not restarted. Starting it again would run the workload at
-a time its schedule does not name.
+a time its schedule does not name. The workload reads as `completed` until its next
+occurrence, whatever its restart policy says. A run that failed reads as `failed`
+until the policy retries it or the next occurrence replaces it.
 
 Occurrences missed while the server was down are missed. The occurrence takt runs is
 the first after the last run, so a workload down for several does not run once for each.
