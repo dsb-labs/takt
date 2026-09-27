@@ -25,6 +25,11 @@ describes how an entry is written.
   ([#134](https://github.com/dsb-labs/takt/issues/134),
   [#137](https://github.com/dsb-labs/takt/pull/137)).
 
+- The server removes the images no workload names and no container uses, an
+  hour after they became unreferenced. `prune` and `prune-delay` under
+  `[docker]` turn it off or change the delay
+  ([#133](https://github.com/dsb-labs/takt/issues/133)).
+
 ### Fixed
 
 - A scheduled workload read as `stopped` between occurrences, which describes

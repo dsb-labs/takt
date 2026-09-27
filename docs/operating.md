@@ -246,6 +246,40 @@ The database holds desired state only. What is actually running is observed from
 runtime when asked, so nothing persisted can go stale against reality. A restarted
 server needs no recovery of takt's own bookkeeping.
 
+## Images
+
+takt removes the images on the daemon that nothing references. A tag bump, a rebuilt
+tag under `pull: always` and a deleted workload each leave an image behind, and nothing
+else would remove it until the disk filled. Images only: a container, a volume, a
+network and the build cache are never touched, so `takt workload logs --previous`
+still reads the retained attempt.
+
+An image stays while any of these holds:
+
+- A workload's `container.image` names it, in any state. A suspended workload resumes,
+  a scheduled one recurs, and one held in backoff starts again. Each would pull its
+  image back.
+- A container uses it, whoever created the container and whether or not it is running.
+  A `docker run` by hand, a compose stack beside takt and the attempt takt retains for
+  a workload's previous output all hold their images. Docker refuses to remove such an
+  image without `--force`, and takt never forces.
+- It became unreferenced less than `prune-delay` ago, an hour by default.
+
+The retained container holds the image a replacement left behind for one more
+generation. When the next replacement removes that container, the image goes on the
+next prune after the delay.
+
+What that leaves exposed is a tagged image with no container and no manifest: a
+`docker build` nobody has run yet, or a `docker pull` made ahead of time. The delay
+covers the build-then-run cycle, and the worst outcome is a pull. Set `prune = false`
+under `[docker]` on a host where images are managed by hand. See
+[Configuration](configuration.md#docker).
+
+The prune runs from the reconciler on its first pass and about every ten minutes after
+that, so an image goes between the delay and the delay plus that interval. An image has
+no workload to record an event against, so a removal is a log line at `info` naming the
+image and its size, and two counters under [Scraping](#scraping).
+
 ## Backups
 
 ```sh
@@ -794,6 +828,9 @@ The metrics to alert on first:
 - `takt_ports_used` against `takt_ports_capacity` warns before an apply fails
   with no free port. Usage carries a `protocol` label, because the range holds as
   many UDP ports as TCP ones.
+- `takt_image_pruned_total` and `takt_image_reclaimed_bytes_total` count the images
+  removed because nothing referenced them and the space they held. See
+  [Images](#images).
 
 Alongside takt's own instruments, the scrape carries the standard OpenTelemetry
 HTTP server metrics, with request counts and durations per route and status, and
