@@ -209,6 +209,38 @@ func (s *Suite) TestReadOnlyPathMountInAContainer() {
 	s.True(os.IsNotExist(err), "the workload wrote through a read-only mount")
 }
 
+// TestReadOnlyPrefixRefusesAWritableMount covers a prefix granted for reading only:
+// the whole host is opened for observation, a read-only mount of it is accepted and
+// a writable one is refused, naming the prefix that decided.
+func (s *Suite) TestReadOnlyPrefixRefusesAWritableMount() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	host := s.T().TempDir()
+	s.Require().NoError(os.WriteFile(filepath.Join(host, "greeting"), []byte("hello from the host\n"), 0o644))
+
+	s.restart(withAllowHostPaths("/:ro"))
+
+	spec := s.jobSpec(name, manifest.RestartNever, 0)
+	spec.Container.Command = []string{"sh", "-c", "cat /host/greeting"}
+	spec.Volumes = []manifest.VolumeMount{{Path: host, To: "/host"}}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "reading only")
+
+	_, err = s.client.Get(s.ctx(), name)
+	s.ErrorIs(err, client.ErrWorkloadNotFound)
+
+	// The same mount asking to be read-only is what the grant was for.
+	spec.Volumes[0].ReadOnly = true
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateCompleted)
+}
+
 // TestPathMountRefusedByDefault covers the gate: an unconfigured
 // server accepts no path mount at all, and nothing is stored when one is refused.
 func (s *Suite) TestPathMountRefusedByDefault() {
