@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"bytes"
+	"slices"
 	"strconv"
 	"time"
 
@@ -56,6 +57,72 @@ func (s *Suite) TestWorkloadReachesAnotherWorkload() {
 	s.Require().NoError(err)
 	s.Require().NotNil(workload.Spec.Env)
 	s.Contains(workload.Spec.Env["ADDR"], "${workload:"+backend+":http}")
+}
+
+// TestReaderWaitsForItsDependency covers a reader's first start being held until
+// the instance it references passes its health check, so a deployment applied beside
+// a slow dependency does not read as a broken one while it waits.
+func (s *Suite) TestReaderWaitsForItsDependency() {
+	backend, reader := s.workloadName()+"-backend", s.workloadName()+"-reader"
+	s.T().Cleanup(func() { s.cleanup(reader) })
+	s.T().Cleanup(func() { s.cleanup(backend) })
+
+	// A backend that takes a while to answer. The start period covers the sleep,
+	// so the failing checks in the meantime do not have it replaced.
+	served := s.containerSpec(backend, manifest.Port{Name: "http", To: 80})
+	served.Container.Command = []string{"sh", "-c", "sleep 10 && exec nginx -g 'daemon off;'"}
+	served.Health = &manifest.Health{
+		HTTP:        "/",
+		Interval:    time.Second,
+		Timeout:     time.Second,
+		Retries:     3,
+		StartPeriod: time.Minute,
+	}
+
+	_, _, err := s.client.Apply(s.ctx(), served)
+	s.Require().NoError(err)
+
+	// A reader that fails outright when the backend is not there, so a start
+	// before the backend answered would show as an exit and a paced restart.
+	spec := s.containerSpec(reader)
+	spec.Container.Command = []string{"sh", "-c", `wget -q -O- "http://$ADDR" >/dev/null && exec sleep 600`}
+	spec.Env = map[string]string{"ADDR": "${workload:" + backend + ":http}"}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	// Held rather than failing: desired, nothing running, nothing failed.
+	s.Require().Eventually(func() bool {
+		events, err := s.client.Events(s.ctx(), reader)
+		if err != nil {
+			return false
+		}
+
+		return slices.ContainsFunc(events, func(recorded client.Event) bool {
+			return recorded.Reason == client.EventDependencyNotReady
+		})
+	}, convergeTimeout, 500*time.Millisecond, "the reader was never held for its dependency")
+
+	held, err := s.client.Get(s.ctx(), reader)
+	s.Require().NoError(err)
+	s.Equal(client.WorkloadStatePending, held.State)
+
+	s.awaitHealth(backend, client.HealthHealthy)
+	s.awaitState(reader, client.WorkloadStateRunning)
+
+	events, err := s.client.Events(s.ctx(), reader)
+	s.Require().NoError(err)
+
+	reasons := make(map[client.EventReason]client.Event, len(events))
+	for _, recorded := range events {
+		reasons[recorded.Reason] = recorded
+	}
+
+	s.Contains(reasons, client.EventDependencyNotReady)
+	s.Contains(reasons[client.EventDependencyNotReady].Message, backend)
+	s.NotContains(reasons, client.EventRestartPaced, "the reader was started before its dependency answered")
+	s.NotContains(reasons, client.EventInstanceExited, "the reader was started before its dependency answered")
+	s.NotContains(reasons, client.EventDependencyWaitGivenUp)
 }
 
 // TestMovingAPortRedeploysItsConsumers covers the address reaching the specification
