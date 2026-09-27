@@ -47,6 +47,10 @@ jobs:
 
       - name: Run end-to-end tests
         run: make e2e
+        env:
+          # The runner's images are disposable, so the test that prunes them
+          # may run here. It skips itself anywhere this is unset.
+          TAKT_E2E_PRUNE: "1"
 
       - name: Upload debug bundles
         if: failure()
