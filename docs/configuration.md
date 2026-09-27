@@ -18,6 +18,8 @@ directory = "~/.local/share/takt"
 [docker]
 host = ""
 config-file = ""
+prune = true
+prune-delay = "1h"
 
 [reconcile]
 interval = "10s"
@@ -111,6 +113,8 @@ already exists keeps its mode — takt sets the mode only on what it creates.
 |---|---|---|
 | `host` | empty | The Docker daemon to talk to. |
 | `config-file` | empty | The docker credential file registry credentials come from. |
+| `prune` | `true` | Whether images no workload names and no container uses are removed. |
+| `prune-delay` | `"1h"` | How long an image is left alone after nothing references it. |
 
 Empty `host` uses the environment, then the local socket. Set it to reach a daemon
 elsewhere, such as `tcp://127.0.0.1:2375`.
@@ -134,6 +138,17 @@ Credential helpers named by the file — a `credsStore` or `credHelpers` entry �
 are run, so logins kept in the OS keychain work, provided the helper is on the
 server's `PATH`. An absent file means anonymous pulls, which is all a public
 image needs.
+
+`prune` removes images and nothing else. A container, a volume, a network and the
+build cache are never touched. An image stays while a workload's `container.image`
+names it, in any state, or while any container on the daemon uses it, whoever
+created that container. Everything else goes once it has been unreferenced for
+`prune-delay`: the dangling images a rebuilt tag leaves, and the tagged images a
+version bump or a deleted workload leaves behind. Set `prune = false` on a host
+where images are managed by hand. The delay covers a tag bumped and reverted, or
+an image pulled ahead of the manifest that will name it. It is measured from when
+takt first saw the image unreferenced, so a restart of the server starts it again.
+See [Images](operating.md#images).
 
 ## reconcile
 

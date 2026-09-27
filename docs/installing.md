@@ -32,7 +32,8 @@ who restarts the service, and what a new binary means for what is running.
 The service is installed but not started. The server cannot start until it can
 reach the Docker socket, and that grant is root-equivalent — anything in the
 `docker` group can run a privileged container — so it should happen because you
-typed it:
+typed it. It also hands takt the daemon's images to remove once nothing uses
+them, which [Images](operating.md#images) describes:
 
 ```sh
 sudo usermod -aG docker takt

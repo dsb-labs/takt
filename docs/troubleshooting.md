@@ -108,6 +108,14 @@ takes the runtime's grace period to die. A workload that stays `terminating` pas
 that is one whose runtime cannot be reached: check the server's log for the
 driver's error, and that the Docker daemon is running.
 
+## An image is gone that was expected to stay
+
+takt removes images that no workload names and no container uses, an hour after
+they became unreferenced. An image built or pulled ahead of the manifest that
+names it is such an image. The server's log names each removal at `info`. Apply
+the manifest within the hour, run a container from the image so it is held, or
+set `prune = false` under `[docker]`. See [Images](operating.md#images).
+
 ## The server will not start
 
 The log names what stopped it. The ones that come up:

@@ -308,6 +308,31 @@ configuration is what lets the whole filesystem be opened to a workload that obs
 the host without opening it to one that would write. The most specific prefix decides,
 so a read-only `/` does not shadow a writable tree listed beside it.
 
+## Images are takt's to reap
+
+The daemon's images are takt's the way host ports are its to allocate and a volume is a
+directory it owns. Nothing else on the host knows which images the workloads need, so
+nothing else can remove the rest safely: a scheduled `docker image prune -a` takes the
+image of every workload not running at that moment, and the next start of a suspended
+workload or a scheduled job fails on a pull. The kubelet and Nomad's docker driver own
+this for the same reason.
+
+What bounds a prune is Docker's own rule that an image a container holds cannot be
+removed without force. takt never forces, so a container started by anything — by hand,
+by a compose stack beside takt, or the attempt takt retains for a workload's output —
+holds its image. Pruning is therefore confined to images nothing references at all, and
+nothing another tool is running can be touched.
+
+The delay is a convenience for a rollback rather than a safety mechanism. An image
+removed too soon costs a pull. That is why the delay is kept in memory and starts again
+when the server restarts: erring towards keeping an image longer costs nothing, and a
+stored record would be bookkeeping for a case whose worst outcome is a download.
+
+A prune never removes a container, because the retained attempt is what `logs
+--previous` reads. Nor is there a disk-watermark policy. Reaping unreferenced images is
+a property of what takt knows. Reaping referenced ones because the disk is at ninety
+percent is a decision about what to break, and that is the operator's.
+
 ## Host ports are takt's to allocate
 
 A container port that names no host port gets one from takt rather than from the
