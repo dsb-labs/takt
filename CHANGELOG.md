@@ -15,7 +15,8 @@ describes how an entry is written.
   where the referenced workload declares one, so a reader applied beside a slow
   dependency is `pending` rather than restarting on the backoff. The wait is
   bounded by `reconcile.readiness-wait`, five minutes by default
-  ([#135](https://github.com/dsb-labs/takt/issues/135)).
+  ([#135](https://github.com/dsb-labs/takt/issues/135),
+  [#139](https://github.com/dsb-labs/takt/pull/139)).
 
 - An `allow-host-paths` entry ending in `:ro` grants the prefix for reading only,
   so a path mount beneath it is accepted only when it says `readOnly: true`. The
