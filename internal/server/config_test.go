@@ -34,6 +34,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "tcp://localhost:2375", config.Docker.Host)
 				assert.Equal(t, "/etc/takt/docker-config.json", config.Docker.ConfigFile)
 				assert.Equal(t, 30*time.Second, config.Reconcile.Interval)
+				assert.Equal(t, 2*time.Minute, config.Reconcile.ReadinessWait)
 				assert.Equal(t, []string{"takt.example.com"}, config.HTTP.Hosts)
 				assert.Equal(t, "/etc/takt/tls/cert.pem", config.HTTP.TLSCert)
 				assert.Equal(t, "/etc/takt/tls/key.pem", config.HTTP.TLSKey)
@@ -308,6 +309,15 @@ func TestConfig_Validate(t *testing.T) {
 			// credentials.
 			Name:         "a relative docker config file",
 			Mutate:       func(c *server.Config) { c.Docker.ConfigFile = "docker-config.json" },
+			ExpectsError: true,
+		},
+		{
+			Name:   "no readiness wait",
+			Mutate: func(c *server.Config) { c.Reconcile.ReadinessWait = 0 },
+		},
+		{
+			Name:         "a negative readiness wait",
+			Mutate:       func(c *server.Config) { c.Reconcile.ReadinessWait = -time.Minute },
 			ExpectsError: true,
 		},
 		{

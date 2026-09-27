@@ -13,6 +13,7 @@ config-file = "/etc/takt/docker-config.json"
 
 [reconcile]
 interval = "30s"
+readiness-wait = "2m"
 
 [workload]
 bind = "0.0.0.0"
