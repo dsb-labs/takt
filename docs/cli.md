@@ -1153,6 +1153,6 @@ opens nothing the node holds. See
 | `degraded` | At least one instance is up and at least one has failed. |
 | `terminating` | The workload is being torn down. |
 | `stopped` | An instance ended cleanly, and the restart policy will run it again. |
-| `completed` | The workload ended, and its restart policy asks for nothing more. |
+| `completed` | The workload ended cleanly, and nothing will restart it. A scheduled workload reads this way between occurrences. |
 | `failed` | An instance exited non-zero, or a health check is failing. |
 | `suspended` | The workload was stopped by an operator, and stays down until it is started again. |
