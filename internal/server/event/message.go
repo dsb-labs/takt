@@ -31,6 +31,9 @@ type Fields struct {
 	Version int `json:"version,omitempty"`
 	// The ordinal of the instance the event concerns, counting from zero.
 	Instance int `json:"instance,omitempty"`
+	// The ordinal of the instance of another workload the event concerns, where
+	// Name says which workload: the instance a reader waits on.
+	TargetInstance int `json:"targetInstance,omitempty"`
 	// The status an instance ended with. A pointer because zero is the code a
 	// clean exit reports, so it has to be told apart from the field being unset.
 	ExitCode *int `json:"exitCode,omitempty"`
@@ -97,6 +100,12 @@ func Message(reason Reason, data []byte) string {
 		return fmt.Sprintf("Gave up restarting after %d attempts", fields.Count)
 	case ReferenceUnresolved:
 		return fmt.Sprintf("Waiting for %s to resolve: %s", reference(fields), fields.Error)
+	case DependencyNotReady:
+		return fmt.Sprintf("Holding instance %d until %s instance %d passes its health check%s",
+			fields.Instance, fields.Name, fields.TargetInstance, because(fields))
+	case DependencyWaitGivenUp:
+		return fmt.Sprintf("Starting instance %d after waiting %s for %s instance %d to pass its health check",
+			fields.Instance, fields.Delay, fields.Name, fields.TargetInstance)
 
 	case SpecificationModified:
 		return fmt.Sprintf("Specification changed to version %d", fields.Version)

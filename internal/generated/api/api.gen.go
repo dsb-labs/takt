@@ -347,6 +347,8 @@ const (
 	WorkloadEventReasonApplied               WorkloadEventReason = "applied"
 	WorkloadEventReasonConvergeFailed        WorkloadEventReason = "convergeFailed"
 	WorkloadEventReasonDeleted               WorkloadEventReason = "deleted"
+	WorkloadEventReasonDependencyNotReady    WorkloadEventReason = "dependencyNotReady"
+	WorkloadEventReasonDependencyWaitGivenUp WorkloadEventReason = "dependencyWaitGivenUp"
 	WorkloadEventReasonHashMoved             WorkloadEventReason = "hashMoved"
 	WorkloadEventReasonHealthCheckFailing    WorkloadEventReason = "healthCheckFailing"
 	WorkloadEventReasonHealthCheckRecovered  WorkloadEventReason = "healthCheckRecovered"
@@ -386,6 +388,10 @@ func (e WorkloadEventReason) Valid() bool {
 	case WorkloadEventReasonConvergeFailed:
 		return true
 	case WorkloadEventReasonDeleted:
+		return true
+	case WorkloadEventReasonDependencyNotReady:
+		return true
+	case WorkloadEventReasonDependencyWaitGivenUp:
 		return true
 	case WorkloadEventReasonHashMoved:
 		return true

@@ -38,6 +38,24 @@ func TestMessage(t *testing.T) {
 			Expected: "Waiting for a reference to resolve: no address",
 		},
 		{
+			Name:     "names the instance a held reader waits on",
+			Reason:   event.DependencyNotReady,
+			Fields:   event.Fields{Instance: 1, Name: "db", TargetInstance: 2, Error: "connection refused"},
+			Expected: "Holding instance 1 until db instance 2 passes its health check: connection refused",
+		},
+		{
+			Name:     "leaves off a failure the held reader's target has not reported",
+			Reason:   event.DependencyNotReady,
+			Fields:   event.Fields{Name: "db"},
+			Expected: "Holding instance 0 until db instance 0 passes its health check",
+		},
+		{
+			Name:     "says how long a reader waited before starting anyway",
+			Reason:   event.DependencyWaitGivenUp,
+			Fields:   event.Fields{Instance: 1, Name: "db", Delay: 5 * time.Minute},
+			Expected: "Starting instance 1 after waiting 5m0s for db instance 0 to pass its health check",
+		},
+		{
 			Name:     "renders a backoff delay as a duration",
 			Reason:   event.RestartPaced,
 			Fields:   event.Fields{Delay: 90 * time.Second, Count: 4},

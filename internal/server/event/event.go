@@ -43,6 +43,12 @@ const (
 	// ReferenceUnresolved is recorded when a workload's expected hash cannot be
 	// resolved, which leaves it sitting still until whatever it names appears.
 	ReferenceUnresolved Reason = "referenceUnresolved"
+	// DependencyNotReady is recorded while a reader's first start is held because
+	// the instance of the workload it references has not passed its health check.
+	DependencyNotReady Reason = "dependencyNotReady"
+	// DependencyWaitGivenUp is recorded when a held reader is started anyway,
+	// because the instance it waited on never passed within the bounded wait.
+	DependencyWaitGivenUp Reason = "dependencyWaitGivenUp"
 )
 
 // The reasons a workload restarted.
