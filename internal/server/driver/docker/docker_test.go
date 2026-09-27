@@ -2056,6 +2056,194 @@ func multiplexed(payload string) string {
 	return string(header) + payload
 }
 
+func TestDriver_Prune(t *testing.T) {
+	t.Parallel()
+
+	tagged := func(id string, size int64, tags ...string) image.Summary {
+		return image.Summary{ID: id, Size: size, RepoTags: tags}
+	}
+
+	spec := func(ref string) manifest.Spec {
+		return manifest.Spec{Version: "v1", Name: "example", Container: &manifest.Container{Image: ref}}
+	}
+
+	tt := []struct {
+		Name       string
+		Keep       []manifest.Spec
+		Delay      time.Duration
+		SetupMocks func(*MockClient)
+	}{
+		{
+			Name: "removes an image nothing references",
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{tagged("sha256:old", 10, "example/example:1")}, nil).Once()
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+				c.EXPECT().ImageRemove(mock.Anything, "example/example:1", mock.Anything).
+					Return([]image.DeleteResponse{{Untagged: "example/example:1"}, {Deleted: "sha256:old"}}, nil).Once()
+			},
+		},
+		{
+			Name: "removes a dangling image by its identifier",
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:dangling"}}, nil).Once()
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+				c.EXPECT().ImageRemove(mock.Anything, "sha256:dangling", mock.Anything).
+					Return([]image.DeleteResponse{{Deleted: "sha256:dangling"}}, nil).Once()
+			},
+		},
+		{
+			Name: "removes every tag of an image tagged more than once",
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{tagged("sha256:old", 10, "example/example:1", "example/example:2")}, nil).Once()
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+				c.EXPECT().ImageRemove(mock.Anything, "example/example:1", mock.Anything).
+					Return([]image.DeleteResponse{{Untagged: "example/example:1"}}, nil).Once()
+				c.EXPECT().ImageRemove(mock.Anything, "example/example:2", mock.Anything).
+					Return([]image.DeleteResponse{{Untagged: "example/example:2"}, {Deleted: "sha256:old"}}, nil).Once()
+			},
+		},
+		{
+			Name: "keeps an image a workload names however it is written",
+			Keep: []manifest.Spec{spec("nginx"), spec("docker.io/library/redis:7"), spec("example/example@sha256:abc")},
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{
+						tagged("sha256:nginx", 10, "nginx:latest"),
+						tagged("sha256:redis", 10, "redis:7"),
+						{ID: "sha256:example", RepoDigests: []string{"example/example@sha256:abc"}},
+					}, nil).Once()
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+			},
+		},
+		{
+			Name: "keeps an image when any of its tags is named",
+			Keep: []manifest.Spec{spec("example/example:latest")},
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{tagged("sha256:one", 10, "example/example:1", "example/example:latest")}, nil).Once()
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+			},
+		},
+		{
+			Name: "keeps an image any container uses",
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{tagged("sha256:held", 10, "example/example:1")}, nil).Once()
+				c.EXPECT().ContainerList(mock.Anything, mock.MatchedBy(func(options dockerclient.ContainerListOptions) bool {
+					return options.All && len(options.Filters) == 0
+				})).Return([]dockercontainer.Summary{{ID: "stopped", ImageID: "sha256:held"}}, nil).Once()
+			},
+		},
+		{
+			Name: "ignores a workload on another runtime",
+			Keep: []manifest.Spec{{Version: "v1", Name: "worker", Exec: &manifest.Exec{Command: []string{"worker"}}}},
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{tagged("sha256:old", 10, "example/example:1")}, nil).Once()
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+				c.EXPECT().ImageRemove(mock.Anything, "example/example:1", mock.Anything).
+					Return([]image.DeleteResponse{{Deleted: "sha256:old"}}, nil).Once()
+			},
+		},
+		{
+			Name:  "waits out the delay before removing",
+			Delay: time.Hour,
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{tagged("sha256:old", 10, "example/example:1")}, nil).Once()
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+			},
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			client := NewMockClient(t)
+			tc.SetupMocks(client)
+
+			d := docker.New(docker.Config{
+				Logger:     newTestLogger(t),
+				Client:     client,
+				Prune:      true,
+				PruneDelay: tc.Delay,
+			})
+
+			require.NoError(t, d.Prune(t.Context(), tc.Keep))
+		})
+	}
+}
+
+func TestDriver_Prune_Delay(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	client := NewMockClient(t)
+
+	old := image.Summary{ID: "sha256:old", RepoTags: []string{"example/example:1"}}
+
+	// Seen unreferenced on the first pass, referenced again on the second, which
+	// starts the delay over: the third pass, an hour after the first, leaves it
+	// alone, and only the fourth, an hour after the second, removes it.
+	client.EXPECT().ImageList(mock.Anything, mock.Anything).Return([]image.Summary{old}, nil).Times(4)
+	client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Times(4)
+	client.EXPECT().ImageRemove(mock.Anything, "example/example:1", mock.Anything).
+		Return([]image.DeleteResponse{{Deleted: "sha256:old"}}, nil).Once()
+
+	d := docker.New(docker.Config{
+		Logger:     newTestLogger(t),
+		Client:     client,
+		Prune:      true,
+		PruneDelay: time.Hour,
+		Now:        func() time.Time { return now },
+	})
+
+	named := []manifest.Spec{{Version: "v1", Name: "example", Container: &manifest.Container{Image: "example/example:1"}}}
+
+	require.NoError(t, d.Prune(t.Context(), nil))
+
+	now = now.Add(30 * time.Minute)
+	require.NoError(t, d.Prune(t.Context(), named))
+
+	now = now.Add(30 * time.Minute)
+	require.NoError(t, d.Prune(t.Context(), nil))
+
+	now = now.Add(time.Hour)
+	require.NoError(t, d.Prune(t.Context(), nil))
+}
+
+func TestDriver_Prune_Off(t *testing.T) {
+	t.Parallel()
+
+	client := NewMockClient(t)
+	d := testDriver(t, client)
+
+	require.NoError(t, d.Prune(t.Context(), nil))
+}
+
+func TestDriver_Prune_ReportsRefusal(t *testing.T) {
+	t.Parallel()
+
+	client := NewMockClient(t)
+
+	client.EXPECT().ImageList(mock.Anything, mock.Anything).Return([]image.Summary{
+		{ID: "sha256:one", RepoTags: []string{"example/one:1"}},
+		{ID: "sha256:two", RepoTags: []string{"example/two:1"}},
+	}, nil).Once()
+	client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+	client.EXPECT().ImageRemove(mock.Anything, "example/one:1", mock.Anything).
+		Return(nil, errors.New("conflict: image is being used by stopped container")).Once()
+	client.EXPECT().ImageRemove(mock.Anything, "example/two:1", mock.Anything).
+		Return([]image.DeleteResponse{{Deleted: "sha256:two"}}, nil).Once()
+
+	d := docker.New(docker.Config{Logger: newTestLogger(t), Client: client, Prune: true})
+
+	// One refusal is reported without stopping the rest being removed.
+	assert.ErrorContains(t, d.Prune(t.Context(), nil), "example/one:1")
+}
+
 func newTestLogger(t *testing.T) *slog.Logger {
 	t.Helper()
 

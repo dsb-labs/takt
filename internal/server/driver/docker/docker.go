@@ -101,6 +101,19 @@ type (
 		// is asked once and the answer dropped when the container is removed.
 		endedMux sync.Mutex
 		ended    map[string]inspection
+
+		// Whether Prune removes anything, and how long an image is left alone
+		// after nothing references it.
+		prune      bool
+		pruneDelay time.Duration
+		now        func() time.Time
+
+		// When each image was first seen with nothing referencing it, keyed by
+		// image ID. In memory, so a server restart starts the delay again —
+		// which errs towards keeping an image for longer, never removing one
+		// sooner.
+		unreferencedMux sync.Mutex
+		unreferenced    map[string]time.Time
 	}
 
 	// The pull type records how a background image pull is going, and how it
@@ -131,6 +144,15 @@ type (
 		// reads docker's own default location, decided when a pull happens rather
 		// than here.
 		ConfigFile string
+		// Whether Prune removes the images no workload names and no container
+		// uses. Off leaves every image on the daemon.
+		Prune bool
+		// How long an image is left alone after nothing references it, so that a
+		// tag bumped and reverted within the delay does not pull the image again.
+		PruneDelay time.Duration
+		// Reports the current time, which the prune delay is measured against.
+		// May be nil, in which case the wall clock is used.
+		Now func() time.Time
 		// The meter the driver's instruments are created from. May be nil, in
 		// which case nothing is recorded.
 		MeterProvider metric.MeterProvider
@@ -175,15 +197,24 @@ func New(config Config) *Driver {
 		bind = defaultBind
 	}
 
+	now := config.Now
+	if now == nil {
+		now = time.Now
+	}
+
 	return &Driver{
-		logger:      config.Logger.With("component", "driver", "driver", "docker"),
-		client:      config.Client,
-		bind:        bind,
-		configFile:  config.ConfigFile,
-		tracer:      telemetry.Tracer(config.TracerProvider, scope),
-		instruments: newInstruments(telemetry.Meter(config.MeterProvider, scope)),
-		pulls:       make(map[string]*pull),
-		ended:       make(map[string]inspection),
+		logger:       config.Logger.With("component", "driver", "driver", "docker"),
+		client:       config.Client,
+		bind:         bind,
+		configFile:   config.ConfigFile,
+		prune:        config.Prune,
+		pruneDelay:   config.PruneDelay,
+		now:          now,
+		tracer:       telemetry.Tracer(config.TracerProvider, scope),
+		instruments:  newInstruments(telemetry.Meter(config.MeterProvider, scope)),
+		pulls:        make(map[string]*pull),
+		ended:        make(map[string]inspection),
+		unreferenced: make(map[string]time.Time),
 		// Buffered so a pull finishing when nothing watches does not block it.
 		// A dropped event costs a tick of latency, not correctness.
 		pullEvents: make(chan driver.Event, 16),

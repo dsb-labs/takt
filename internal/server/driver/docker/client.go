@@ -29,6 +29,9 @@ type (
 		// ImagePull should pull the named image, returning the progress stream the
 		// caller must drain and close for the pull to complete.
 		ImagePull(ctx context.Context, ref string, options client.ImagePullOptions) (io.ReadCloser, error)
+		// ImageRemove should remove the named image, or untag it when the name is
+		// one of several tags on it, returning what the daemon deleted and untagged.
+		ImageRemove(ctx context.Context, ref string, options client.ImageRemoveOptions) ([]image.DeleteResponse, error)
 		// DistributionInspect should ask the image's registry for its manifest,
 		// which carries the digest the reference currently resolves to.
 		DistributionInspect(ctx context.Context, ref, encodedAuth string) (registry.DistributionInspect, error)
@@ -105,6 +108,15 @@ func (c *engineClient) ImageList(ctx context.Context, options client.ImageListOp
 
 func (c *engineClient) ImagePull(ctx context.Context, ref string, options client.ImagePullOptions) (io.ReadCloser, error) {
 	return c.inner.ImagePull(ctx, ref, options)
+}
+
+func (c *engineClient) ImageRemove(ctx context.Context, ref string, options client.ImageRemoveOptions) ([]image.DeleteResponse, error) {
+	result, err := c.inner.ImageRemove(ctx, ref, options)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Items, nil
 }
 
 func (c *engineClient) DistributionInspect(ctx context.Context, ref, encodedAuth string) (registry.DistributionInspect, error) {
