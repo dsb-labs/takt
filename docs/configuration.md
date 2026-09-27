@@ -21,6 +21,7 @@ config-file = ""
 
 [reconcile]
 interval = "10s"
+readiness-wait = "5m"
 
 [workload]
 bind = "0.0.0.0"
@@ -139,10 +140,18 @@ image needs.
 | Key | Default | Description |
 |---|---|---|
 | `interval` | `10s` | How often a full reconciliation pass runs. |
+| `readiness-wait` | `"5m"` | How long a workload's first start waits for the instance it references to pass its health check. |
 
 The interval is a floor on convergence rather than the usual case. A driver reporting
 a change triggers a pass at once, and so does an apply. Shortening this mostly affects
 how quickly takt notices something it was never told about.
+
+`readiness-wait` bounds the hold on a workload reading another's address. When the
+referenced workload declares a health check and the instance the reader resolves to
+has not passed it, the reader's first start is held, and it starts on the pass after
+the check passes. A reader held this long starts anyway and records that the wait
+was given up. Zero disables the hold, so a reader starts as soon as its reference
+resolves. See [Reaching another workload](manifest.md#reaching-another-workload).
 
 ## workload
 

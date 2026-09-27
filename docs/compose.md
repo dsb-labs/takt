@@ -110,10 +110,13 @@ takt workload apply app.yaml
 
 **`depends_on`.** takt has no start order. A workload that reads another's
 address through `${workload:db:pg}` does not start until `db` has one, which
-covers the case `depends_on` is usually for. A workload that needs another to be
-*ready* rather than merely started should retry its connection, which it should do
-anyway: takt replaces instances one at a time, and the address it was given stays
-the same across a replacement.
+covers the case `depends_on` is usually for. Its first start also waits for the
+instance of `db` it resolves to to pass its health check, when `db` declares one,
+which covers `condition: service_healthy` without declaring anything. A workload
+that needs another to be ready should still retry its connection: takt replaces
+instances one at a time, and the address it was given stays the same across a
+replacement, but a restart is not held for the target the way a first start is.
+See [Reaching another workload](manifest.md#reaching-another-workload).
 
 **`networks`.** takt does not create Docker networks. A workload reaches another
 through the host port takt published for it, which `${workload:name:port}`

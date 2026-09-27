@@ -150,7 +150,9 @@ flowchart TD
     up -- no --> retired{"policy asks for nothing further?"}
     retired -- yes --> leaveslot["leave it, the outcome stays readable"]
     retired -- no --> empty{"anything there at all?"}
-    empty -- no --> attempt["start it, paced by the backoff"]
+    empty -- no --> ready{"first start, and a referenced instance not yet healthy?"}
+    ready -- yes --> hold["hold it, and say which instance it waits on"]
+    ready -- no --> attempt["start it, paced by the backoff"]
     empty -- yes --> restartslot["clear the corpse, start again, paced"]
 ```
 
@@ -167,6 +169,15 @@ period of ten seconds, and past its health check when the workload declares one.
 replacement that never settles holds the roll at one instance, which is what makes
 replacing a counted workload a degradation rather than an outage. Slots with
 nothing running are not held back by the roll.
+
+**A first start waits for what it references.** A slot that has never started
+under its version, reading the address of a workload that declares a health check,
+is held until the instance it resolves to has passed the check. The hold records no
+attempt and widens no backoff, and the reader reads as `pending`. A restart and a
+replacement are not held: the reader was talking to its target a moment ago, and a
+slow dependency must not stall a rollout that had nothing to do with it. The hold
+is bounded by `reconcile.readiness-wait`, after which the slot starts anyway and is
+paced like any other.
 
 **Health folds in before any of this.** An instance that is up but failing its
 check reads as failed, so the same paced replacement path a crashed instance

@@ -536,6 +536,20 @@ until something holds the name again. This is also what makes ordering unnecessa
 the other direction: a workload whose dependency has not started yet keeps retrying
 rather than failing for good.
 
+A reader's first start waits for its target to be ready, where the target says what
+ready means. When the referenced workload declares a [health check](#health) and the
+instance the reader resolves to has not yet passed one, the reader is held rather
+than started, and one event on the reader says which instance it is waiting on. It
+starts on the pass after the check passes. Nothing is declared: the dependency is
+the reference already written, and the signal is the check already running. A
+target with no health check is not waited for, because there is nothing to wait on.
+
+Only a first start is held. An instance restarted after a crash, or replaced after a
+change, was talking to its target a moment ago and starts at once. The wait is
+bounded by `reconcile.readiness-wait`, five minutes by default: a reader held that
+long starts anyway, says so, and fails on its own terms. See
+[Configuration](configuration.md#reconcile).
+
 Two workloads may reference each other. Ports are allocated without consulting a
 reference, so there is nothing circular to resolve.
 

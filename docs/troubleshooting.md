@@ -27,6 +27,12 @@ reasons:
 - **`Waiting for ... to resolve`.** The workload reads another's address, or a
   secret or variable, that does not exist yet. It starts once the thing it names
   exists. See [Reaching another workload](manifest.md#reaching-another-workload).
+- **`Holding instance ... until ... passes its health check`.** The workload
+  reads another's address, and the instance it resolves to has not passed its
+  health check yet. It starts on the pass after the check passes, or after
+  `reconcile.readiness-wait`, whichever comes first. Look at the named workload:
+  `takt workload get` reports its check. See
+  [Reaching another workload](manifest.md#reaching-another-workload).
 
 ## `no host port available`
 

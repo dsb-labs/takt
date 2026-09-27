@@ -355,6 +355,17 @@ schedule, so applying a consumer before its dependency is running costs a few re
 rather than an error — and it keeps working when the dependency restarts later, which
 a declared dependency would not.
 
+A reader's first start is held until the instance it resolves to has passed its health
+check, where the target declares one. That is a refinement of when a first start is
+worth attempting rather than a declaration: the dependency is the reference the
+manifest already writes, and the signal is the check the target already runs, so
+there is nothing to name and nothing to keep in step with the manifest. It is first
+start only, because a restart or a replacement was talking to its target a moment ago,
+and a hold on a replacement would let a slow dependency stall a rollout that had
+nothing to do with it. It is bounded, because a target that never passes must not
+hold its readers forever. A dependency mechanism that could stall a rollout or hold a
+reader indefinitely is the `depends_on` this design already rejected.
+
 Cycles need no detection. Port allocation does not consult a reference, so there is no
 fixpoint to solve: two workloads referencing each other both resolve and both hash.
 
