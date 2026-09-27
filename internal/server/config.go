@@ -17,6 +17,7 @@ import (
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
+	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/port"
 )
@@ -163,7 +164,11 @@ type (
 		// the process's business and takt has nothing to say about it.
 		Bind string `toml:"bind"`
 		// Host paths a workload may name in a path mount, as absolute prefixes.
-		// A path is accepted when it is one of these or sits beneath one.
+		// A path is accepted when it is one of these or sits beneath one. A
+		// prefix ending in ":ro" is granted for reading only, so a mount beneath
+		// it is accepted only when it says readOnly: true. The most specific
+		// prefix decides, so "/:ro" beside "/mnt/media" opens the whole host for
+		// observation without opening it for writing.
 		//
 		// Empty refuses every path mount, which is the default: a path mount
 		// reaches outside takt-managed state, so it is a sandbox escape by
@@ -508,12 +513,8 @@ func (c WorkloadConfig) validate() error {
 		return errors.New("workload maximum events must be at least 1")
 	}
 
-	for _, path := range c.AllowHostPaths {
-		// Absolute, because a path mount's own path must be and a relative prefix
-		// could never match one.
-		if !filepath.IsAbs(path) {
-			return fmt.Errorf("workload allowed host path must be absolute, got %q", path)
-		}
+	if _, err := driver.ParseHostPaths(c.AllowHostPaths); err != nil {
+		return fmt.Errorf("workload %w", err)
 	}
 
 	return nil

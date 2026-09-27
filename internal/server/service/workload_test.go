@@ -663,7 +663,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Workloads:      repo,
 			Ports:          ports,
 			Claimer:        newTestClaimer(ports, allocatorStub{}),
-			AllowHostPaths: []string{"/mnt"},
+			AllowHostPaths: []driver.HostPath{{Path: "/mnt"}},
 		})
 
 		_, _, err := svc.Apply(t.Context(), pathSpec, 0)
@@ -691,7 +691,7 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Workloads:      repo,
 			Ports:          ports,
 			Claimer:        newTestClaimer(ports, allocatorStub{}),
-			AllowHostPaths: []string{"/mnt/media"},
+			AllowHostPaths: []driver.HostPath{{Path: "/mnt/media"}},
 		})
 
 		_, _, err := svc.Apply(t.Context(), pathSpec, 0)
@@ -723,11 +723,41 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 			Workloads:      repo,
 			Ports:          ports,
 			Claimer:        newTestClaimer(ports, allocatorStub{}),
-			AllowHostPaths: []string{filepath.Join(root, "media")},
+			AllowHostPaths: []driver.HostPath{{Path: filepath.Join(root, "media")}},
 		})
 
 		_, _, err := svc.Apply(t.Context(), pathSpec, 0)
 		assert.ErrorIs(t, err, service.ErrInvalidSpec)
+	})
+
+	t.Run("refuses a writable mount under a read-only prefix", func(t *testing.T) {
+		t.Parallel()
+
+		// The prefix was granted for reading, and the mount did not say so. The
+		// message names the prefix, since what to change is the mount rather than
+		// the path.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		pathSpec := containerSpec("example", "example/example:latest")
+		pathSpec.Volumes = []manifest.VolumeMount{{Path: "/etc/hostname", To: "/host/etc/hostname"}}
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:         newTestLogger(t),
+			Drivers:        map[string]service.Driver{docker.Name: d},
+			Workloads:      repo,
+			Ports:          ports,
+			Claimer:        newTestClaimer(ports, allocatorStub{}),
+			AllowHostPaths: []driver.HostPath{{Path: "/", ReadOnly: true}},
+		})
+
+		_, _, err := svc.Apply(t.Context(), pathSpec, 0)
+		assert.ErrorIs(t, err, service.ErrInvalidSpec)
+		assert.ErrorContains(t, err, "readOnly: true")
 	})
 
 	t.Run("refuses every host path by default", func(t *testing.T) {

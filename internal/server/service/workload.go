@@ -262,7 +262,7 @@ type (
 		checker    Checker
 		reconciler Reconciler
 		events     WorkloadEventRepository
-		hostPaths  []string
+		hostPaths  []driver.HostPath
 		samples    *usageSamples
 	}
 )
@@ -312,7 +312,7 @@ type WorkloadServiceConfig struct {
 	// The absolute prefixes a path mount may sit beneath. Empty rejects every
 	// path mount, which is the safe default: a host path reaches outside
 	// takt-managed state, so which ones are reachable is the operator's call.
-	AllowHostPaths []string
+	AllowHostPaths []driver.HostPath
 }
 
 // NewWorkloadService returns a WorkloadService built from the given configuration.
