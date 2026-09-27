@@ -46,6 +46,18 @@ func (r *Reconciler) schedule(ctx context.Context, row database.Workload) cron.S
 	return parsed
 }
 
+// scheduled reports whether a stored workload names a schedule, without asking
+// whether the expression parses. A specification that cannot be decoded is treated
+// as no schedule, as schedule does.
+func scheduled(row database.Workload) bool {
+	spec, err := manifest.DecodeWorkload(row.Spec)
+	if err != nil {
+		return false
+	}
+
+	return spec.Schedule != nil
+}
+
 // overlap reads what a stored workload asks for when an occurrence comes due while the
 // previous run is still going.
 func overlap(row database.Workload) manifest.OverlapPolicy {
