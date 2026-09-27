@@ -80,6 +80,15 @@ func withAllowHostPaths(prefixes ...string) option {
 	return func(c *server.Config) { c.Workload.AllowHostPaths = prefixes }
 }
 
+// withPrune modifies the server to remove unreferenced images as soon as it sees
+// them, which the suite otherwise leaves off.
+func withPrune() option {
+	return func(c *server.Config) {
+		c.Docker.Prune = true
+		c.Docker.PruneDelay = 0
+	}
+}
+
 // withAuth modifies the server to require authentication, exactly as writing
 // an empty [auth] block into its configuration would.
 func withAuth() option {
@@ -183,6 +192,10 @@ func (s *Suite) start(options ...option) {
 	// Short enough that a test waiting for convergence isn't mostly waiting on the
 	// ticker. Driver events already cover the prompt cases.
 	config.Reconcile.Interval = time.Second
+	// Off, because every server in the suite shares the daemon it runs on, and
+	// a developer's daemon holds images no test knows about. The test of
+	// pruning turns it on for itself.
+	config.Docker.Prune = false
 
 	if testing.Verbose() {
 		config.Logging.Level = "debug"

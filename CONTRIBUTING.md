@@ -82,6 +82,15 @@ rather than reconstructed from assertion messages. A test that restarts its serv
 accumulates both runs' output in one bundle. The directory is not tracked, and the
 nightly workflow uploads it when a run fails.
 
+The test of image pruning removes every image on the daemon that no workload names and
+no container uses, which on a workstation is most of them. It skips itself unless
+`TAKT_E2E_PRUNE` is set, and the e2e workflow sets it because a runner's images are
+disposable:
+
+```sh
+TAKT_E2E_PRUNE=1 make e2e
+```
+
 ## Load testing
 
 ```sh
