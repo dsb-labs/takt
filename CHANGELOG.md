@@ -10,6 +10,13 @@ describes how an entry is written.
 
 ### Added
 
+- A workload reading another's address through `${workload:name:port}` has its
+  first start held until the instance it resolves to passes its health check,
+  where the referenced workload declares one, so a reader applied beside a slow
+  dependency is `pending` rather than restarting on the backoff. The wait is
+  bounded by `reconcile.readiness-wait`, five minutes by default
+  ([#135](https://github.com/dsb-labs/takt/issues/135)).
+
 - An `allow-host-paths` entry ending in `:ro` grants the prefix for reading only,
   so a path mount beneath it is accepted only when it says `readOnly: true`. The
   most specific prefix decides, which lets `/:ro` open the whole host to a workload
