@@ -8,6 +8,14 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Fixed
+
+- A scheduled workload read as `stopped` between occurrences, which describes
+  a workload its restart policy will restart, and under `on-failure` the same
+  workload read as `completed`. A run that ended cleanly now reads as
+  `completed` until its next occurrence whatever the restart policy says
+  ([#129](https://github.com/dsb-labs/takt/issues/129)).
+
 ## v0.10.0 - 2026-09-27
 
 ### Added
