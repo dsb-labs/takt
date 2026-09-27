@@ -8,6 +8,14 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Added
+
+- An `allow-host-paths` entry ending in `:ro` grants the prefix for reading only,
+  so a path mount beneath it is accepted only when it says `readOnly: true`. The
+  most specific prefix decides, which lets `/:ro` open the whole host to a workload
+  that observes it without opening it for writing
+  ([#134](https://github.com/dsb-labs/takt/issues/134)).
+
 ### Fixed
 
 - A scheduled workload read as `stopped` between occurrences, which describes

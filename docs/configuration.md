@@ -152,7 +152,7 @@ how quickly takt notices something it was never told about.
 | `min-port` | `20000` | The lowest host port takt will allocate. |
 | `max-port` | `32000` | The highest host port takt will allocate. |
 | `max-events` | `50` | The most events kept for one workload. |
-| `allow-host-paths` | empty | The prefixes a path mount may sit beneath. |
+| `allow-host-paths` | empty | The prefixes a path mount may sit beneath. A `:ro` suffix grants one for reading only. |
 
 `min-port` and `max-port` are the range takt allocates from for a container port that
 names no host port. A port a manifest pins is used as given, whether or not it falls in
@@ -210,6 +210,22 @@ does not cover `/mnt/media-cache`. Symbolic links are followed on both sides bef
 the comparison, so a link beneath an allowed directory cannot carry a mount outside
 it, and a prefix that is itself a link — `/var/run` on most hosts — covers what it
 points at.
+
+A prefix ending in `:ro` is granted for reading only. A path mount beneath it is
+accepted when the mount says `readOnly: true` and refused otherwise. `:rw` spells
+the bare form out and means the same as no suffix. The most specific prefix decides,
+so this opens the whole host to a workload that observes it — a node exporter, a log
+shipper reading the daemon's container logs — without opening it for writing, and
+still lets a workload write beneath `/mnt/media`:
+
+```toml
+[workload]
+allow-host-paths = ["/:ro", "/mnt/media"]
+```
+
+The exec runtime rejects `readOnly` on any mount, because a symbolic link cannot
+enforce it. A read-only prefix therefore refuses every exec path mount beneath it.
+The grant was for reading, and that runtime cannot promise it.
 
 There is no manifest equivalent, for the reason the exec `allow-paths` list has none.
 A host path reaches outside takt-managed state — the docker socket in particular is

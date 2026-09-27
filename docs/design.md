@@ -293,6 +293,21 @@ Nothing tells a workload where its volume is on the host. It does not need telli
 the path in its manifest is the path that works — and an exec workload that knew would
 know it sits inside takt's data directory.
 
+## A host path is the operator's grant
+
+A path mount reaches outside takt-managed state, so the server refuses every one
+until `allow-host-paths` names the tree it may sit beneath. The list is host
+configuration rather than a manifest field: a manifest arrives from anything holding
+a write grant, so a workload able to widen its own reach would undo the gate. Which
+trees open is the decision of the operator who administers the host.
+
+Whether a tree opens for writing is part of the same grant. A manifest saying
+`readOnly: true` is a request. The configuration saying `:ro` is a requirement, and a
+mount beneath such a prefix is refused unless it made the request. Naming it in the
+configuration is what lets the whole filesystem be opened to a workload that observes
+the host without opening it to one that would write. The most specific prefix decides,
+so a read-only `/` does not shadow a writable tree listed beside it.
+
 ## Host ports are takt's to allocate
 
 A container port that names no host port gets one from takt rather than from the
