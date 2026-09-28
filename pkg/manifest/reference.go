@@ -56,6 +56,22 @@ type (
 		// any other kind, which has no port to name.
 		Port PortRef
 	}
+
+	// The Contents type reads what a named variable holds, for finding the references
+	// inside a variable a workload mounts with expand. It reports false when nothing
+	// is held under the name.
+	//
+	// A function rather than a store, because the two things that can see inside a
+	// variable hold it differently: a score holds the files it is about to apply,
+	// and a server holds a database.
+	Contents func(name string) (string, bool)
+
+	// The reading type is one reference a workload reads, and whether it reads it
+	// through a mount naming a signal.
+	reading struct {
+		Reference
+		signalled bool
+	}
 )
 
 const (
@@ -214,37 +230,40 @@ func Expand(value string, resolve func(reference Reference) (string, bool)) (str
 // is what records that the workload reads it, so deleting one still reports the
 // workloads holding it. Whether a change replaces the instance or refreshes the file is a
 // separate question, which Refreshed answers.
+//
+// A reference inside the contents of a variable mounted with expand is not
+// included, because the specification alone cannot see one. ReferencesIn can.
 func References(spec Spec) ([]Reference, error) {
+	return ReferencesIn(spec, nil)
+}
+
+// ReferencesIn returns what References does, and also every reference inside the
+// contents of each variable the workload mounts with expand, read through
+// contents.
+//
+// A variable contents cannot see is skipped rather than reported. Whether the
+// variable exists is a separate question, which whoever holds the variables
+// answers by finding its name among the references. Contents may be nil, which
+// sees nothing.
+//
+// Returns ErrInvalidReference naming the variable, the mount and the text when
+// the contents hold something that begins like a reference but is not one, or
+// hold a token reference. A token is minted rather than read, so a file could
+// not be rendered again to see whether it moved without minting another.
+func ReferencesIn(spec Spec, contents Contents) ([]Reference, error) {
+	readings, err := scan(spec, contents)
+	if err != nil {
+		return nil, err
+	}
+
 	var references []Reference
-
-	// Sorted so that a manifest with two bad references always reports the same one.
-	for _, key := range slices.Sorted(maps.Keys(spec.Env)) {
-		found, err := ParseReferences(spec.Env[key])
-		if err != nil {
-			return nil, fmt.Errorf("invalid env %s: %w", key, err)
-		}
-
-		for _, reference := range found {
-			if !slices.Contains(references, reference) {
-				references = append(references, reference)
-			}
+	for _, reading := range readings {
+		if !slices.Contains(references, reading.Reference) {
+			references = append(references, reading.Reference)
 		}
 	}
 
-	for _, mount := range spec.Volumes {
-		reference, ok := mount.Reference()
-		if !ok {
-			continue
-		}
-
-		if !slices.Contains(references, reference) {
-			references = append(references, reference)
-		}
-	}
-
-	slices.SortFunc(references, func(a, b Reference) int {
-		return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Name, b.Name), cmp.Compare(a.Port, b.Port))
-	})
+	slices.SortFunc(references, compareReferences)
 
 	return references, nil
 }
@@ -261,70 +280,136 @@ func References(spec Spec) ([]Reference, error) {
 // variable is fixed once a process has started and another mount may ask to be
 // replaced, so a reference with any such reading has to move the hash. Refreshing the
 // file it also appears at costs nothing and happens anyway.
+//
+// As with References, a reference inside an expanded variable's contents is not
+// seen. RefreshedIn sees those too.
 func Refreshed(spec Spec) ([]Reference, error) {
+	return RefreshedIn(spec, nil)
+}
+
+// RefreshedIn returns what Refreshed does, also counting the references inside the
+// contents of each variable the workload mounts with expand, read through
+// contents.
+//
+// A reference inside such a variable is read the way the variable itself is: through
+// a mount naming a signal it is refreshed, and through one naming none it replaces
+// the instance. A file rendered from a variable is rewritten whenever anything it
+// reads changes, so a moved address is delivered as a reload where the mount asked
+// for one.
+func RefreshedIn(spec Spec, contents Contents) ([]Reference, error) {
 	// Nothing can be refreshed without a mount asking for it, so a workload with no
-	// mounts at all is answered without scanning its environment.
-	signalled := make(map[Reference]struct{}, len(spec.Volumes))
-	for _, mount := range spec.Volumes {
-		if mount.Signal == "" {
-			continue
-		}
-
-		if reference, ok := mount.Reference(); ok {
-			signalled[reference] = struct{}{}
-		}
-	}
-
-	if len(signalled) == 0 {
+	// such mount is answered without scanning its environment.
+	if len(signalledMounts(spec)) == 0 {
 		return nil, nil
 	}
 
-	read, err := References(spec)
+	readings, err := scan(spec, contents)
 	if err != nil {
 		return nil, err
 	}
 
-	// What is read in a way that a change cannot be delivered to in place. Built from
-	// the same scan References made, rather than by parsing every env value again.
-	replaced := make(map[Reference]struct{}, len(read))
-	for key, value := range spec.Env {
-		// References has already rejected a malformed value, so a failure here is
-		// impossible rather than merely unlikely. Reported anyway, since silently
-		// treating a value as holding no reference would put its value in the hash.
-		found, err := ParseReferences(value)
+	// What is read in a way that a change cannot be delivered to in place.
+	replaced := make(map[Reference]struct{}, len(readings))
+	for _, reading := range readings {
+		if !reading.signalled {
+			replaced[reading.Reference] = struct{}{}
+		}
+	}
+
+	var references []Reference
+	for _, reading := range readings {
+		if _, ok := replaced[reading.Reference]; ok {
+			continue
+		}
+
+		if !slices.Contains(references, reading.Reference) {
+			references = append(references, reading.Reference)
+		}
+	}
+
+	slices.SortFunc(references, compareReferences)
+
+	return references, nil
+}
+
+// scan returns every reading the workload makes, in the order the specification
+// makes them: its environment, then each mount, then the contents of each mount
+// asking to be expanded.
+//
+// One scan serves both References and Refreshed, so the two cannot disagree about
+// what a workload reads or through what.
+func scan(spec Spec, contents Contents) ([]reading, error) {
+	var readings []reading
+
+	// Sorted so that a manifest with two bad references always reports the same one.
+	for _, key := range slices.Sorted(maps.Keys(spec.Env)) {
+		found, err := ParseReferences(spec.Env[key])
 		if err != nil {
 			return nil, fmt.Errorf("invalid env %s: %w", key, err)
 		}
 
 		for _, reference := range found {
-			replaced[reference] = struct{}{}
+			readings = append(readings, reading{Reference: reference})
 		}
 	}
 
 	for _, mount := range spec.Volumes {
-		if mount.Signal != "" {
+		reference, ok := mount.Reference()
+		if !ok {
 			continue
 		}
 
-		if reference, ok := mount.Reference(); ok {
-			replaced[reference] = struct{}{}
+		readings = append(readings, reading{Reference: reference, signalled: mount.Signal != ""})
+
+		if !mount.Expand || contents == nil {
+			continue
+		}
+
+		value, ok := contents(mount.Var)
+		if !ok {
+			continue
+		}
+
+		found, err := ParseReferences(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid contents of variable %s mounted at %s: %w", mount.Var, mount.To, err)
+		}
+
+		for _, inner := range found {
+			if inner.Kind == KindToken {
+				return nil, fmt.Errorf("invalid contents of variable %s mounted at %s: %w: %q cannot be "+
+					"expanded inside a file, because a token is minted rather than read",
+					mount.Var, mount.To, ErrInvalidReference, inner.Kind.opening()+inner.String()+string(referenceSuffix))
+			}
+
+			readings = append(readings, reading{Reference: inner, signalled: mount.Signal != ""})
 		}
 	}
 
-	var references []Reference
-	for _, reference := range read {
-		if _, ok := signalled[reference]; !ok {
+	return readings, nil
+}
+
+// signalledMounts returns the mounts whose changes the workload asked to be
+// signalled about rather than replaced for.
+func signalledMounts(spec Spec) []VolumeMount {
+	var mounts []VolumeMount
+	for _, mount := range spec.Volumes {
+		if mount.Signal == "" {
 			continue
 		}
 
-		if _, ok := replaced[reference]; ok {
-			continue
+		if _, ok := mount.Reference(); ok {
+			mounts = append(mounts, mount)
 		}
-
-		references = append(references, reference)
 	}
 
-	return references, nil
+	return mounts
+}
+
+// compareReferences orders references by kind, then name, then port, which is the
+// order References reports them in.
+func compareReferences(a, b Reference) int {
+	return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Name, b.Name), cmp.Compare(a.Port, b.Port))
 }
 
 // Names returns the names of the references of the given kind, without repeats and

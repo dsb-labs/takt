@@ -525,6 +525,15 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
+			Name: "mounts a variable that asks to be expanded",
+			File: "mounts_expand.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, []manifest.VolumeMount{
+					{Var: "datasources", To: "/etc/grafana/provisioning/datasources/takt.yaml", Expand: true, Signal: manifest.SignalHUP},
+				}, spec.Volumes)
+			},
+		},
+		{
 			// A secret and a variable may share a name and hold different values, so
 			// mounting both is two mounts rather than a duplicate.
 			Name: "mounts a secret and a variable sharing a name",
@@ -663,6 +672,13 @@ func TestParse(t *testing.T) {
 			// asks for something that would never happen.
 			Name:         "rejects a signal on a mounted volume",
 			File:         "mounts_volume_signal.yaml",
+			ExpectsError: true,
+		},
+		{
+			// A secret's plaintext is decrypted as the instance starts and nowhere
+			// else, so there is nothing an apply could read references from.
+			Name:         "rejects expanding a mounted secret",
+			File:         "mounts_secret_expand.yaml",
 			ExpectsError: true,
 		},
 		{

@@ -1,0 +1,11 @@
+version: v1
+name: example
+
+volumes:
+  - var: datasources
+    to: /etc/grafana/provisioning/datasources/takt.yaml
+    expand: true
+    signal: SIGHUP
+
+container:
+  image: example/example:latest
