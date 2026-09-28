@@ -402,12 +402,20 @@ func (r *Reconciler) slotPorts(row database.Workload, index int) []database.Port
 // it, because each instance may land on a different instance of a target — so a
 // target's port moving replaces exactly the instances that were reading it, found
 // by comparison on the next pass rather than by anything remembering to tell them.
+//
+// A file rendered from a variable the workload asked to be replaced for is folded
+// in the same way. Its references resolve as the reader's first instance, since
+// every instance reads the one file, so a target instance's port moving replaces
+// every instance reading it — which is every instance, because all of them hold the
+// dead address. A file the workload asked to be signalled for is left out: the
+// refresh rewrites it, and a hash that moved with it would replace the instance.
 func (r *Reconciler) slotHash(ctx context.Context, row database.Workload, index int) (string, error) {
 	// This runs per slot per pass, so the common case of a workload referencing
 	// nothing must not cost a decode of its whole specification. A reference is
 	// stored verbatim in the canonical JSON, so the marker is present exactly when
-	// one exists — the same trick refresh uses for its signal key.
-	if r.env == nil || !bytes.Contains(row.Spec, []byte("${workload:")) {
+	// one exists — the same trick refresh uses for its signal key. A file may
+	// hold one too, and the key asking for that is present when one does.
+	if r.env == nil || (!bytes.Contains(row.Spec, []byte("${workload:")) && !bytes.Contains(row.Spec, []byte(`"expand":true`))) {
 		return row.SpecHash, nil
 	}
 
@@ -421,7 +429,12 @@ func (r *Reconciler) slotHash(ctx context.Context, row database.Workload, index 
 		return "", err
 	}
 
-	if len(addresses) == 0 {
+	mounted, err := r.mountedAddresses(ctx, row, spec)
+	if err != nil {
+		return "", err
+	}
+
+	if len(addresses) == 0 && len(mounted) == 0 {
 		return row.SpecHash, nil
 	}
 
@@ -432,7 +445,42 @@ func (r *Reconciler) slotHash(ctx context.Context, row database.Workload, index 
 		fmt.Fprintf(digest, "\n%s=%s", reference, addresses[reference])
 	}
 
+	// Under their own heading, since the same reference may resolve differently
+	// for this instance's environment and for the file every instance shares.
+	for _, reference := range slices.Sorted(maps.Keys(mounted)) {
+		fmt.Fprintf(digest, "\nmounted %s=%s", reference, mounted[reference])
+	}
+
 	return hex.EncodeToString(digest.Sum(nil)), nil
+}
+
+// mountedAddresses returns the resolved address of every workload reference inside
+// a variable the workload mounts with expand and no signal, keyed by the reference
+// as written and resolved as the reader's first instance.
+func (r *Reconciler) mountedAddresses(ctx context.Context, row database.Workload, spec manifest.Spec) (map[string]string, error) {
+	if r.mounts == nil {
+		return nil, nil
+	}
+
+	contents, err := r.mounts.Contents(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+
+	replaced := make(map[string]string, len(contents))
+	for _, mount := range spec.Volumes {
+		if mount.Expand && mount.Signal == "" {
+			if value, ok := contents[mount.Var]; ok {
+				replaced[mount.Var] = value
+			}
+		}
+	}
+
+	if len(replaced) == 0 {
+		return nil, nil
+	}
+
+	return r.env.Addresses(ctx, replaced, row.Name, 0)
 }
 
 // refresh rewrites the values a running workload mounts and signals it for each one

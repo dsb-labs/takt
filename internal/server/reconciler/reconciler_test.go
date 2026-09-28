@@ -3353,6 +3353,8 @@ func TestReconciler_Run_HoldsFirstStartForMountedDependency(t *testing.T) {
 	f.env.EXPECT().Targets(mock.Anything, contents, "api", 0).
 		Return([]resolve.Target{{Workload: "db", Instance: 0}}, nil).Maybe()
 	f.env.EXPECT().Addresses(mock.Anything, map[string]string(nil), "api", 0).Return(nil, nil).Maybe()
+	f.env.EXPECT().Addresses(mock.Anything, contents, "api", 0).
+		Return(map[string]string{"db:pg": "127.0.0.1:20432"}, nil).Maybe()
 	f.env.EXPECT().Resolve(mock.Anything, map[string]string(nil), mock.Anything, "api", 0).Return(nil, nil).Maybe()
 
 	r := reconciler.New(reconciler.Config{
@@ -3386,6 +3388,10 @@ func TestReconciler_Run_HoldsFirstStartForMountedDependency(t *testing.T) {
 	r.Notify()
 	awaitPasses(t, r, 2)
 	assert.Equal(t, int32(1), f.starts.Load(), "the reader did not start once its target passed")
+
+	// The address the file holds is part of what the instance is, so an instance
+	// carrying the stored hash alone reads as stale.
+	assert.NotEqual(t, "hash-api", *f.hash.Load(), "the file's address did not reach the instance's hash")
 }
 
 func TestReconciler_Run_HoldsFirstStartForDependency(t *testing.T) {
