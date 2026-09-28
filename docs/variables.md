@@ -121,6 +121,12 @@ is reported by the API. A variable's value is reported anyway, so there is nothi
 the indirection to protect. It also means deleting a variable and creating it again
 with the same value correctly leaves the workloads reading it alone.
 
+A variable a workload mounts with `expand` is rendered into a file, with the
+references inside its value replaced. Setting such a variable to a value the
+workload could not render is refused, and the message names the workload, the mount
+and the text. A `$` that is not `$$` or a reference is the usual cause. See
+[Expanding a mounted variable](manifest.md#expanding-a-mounted-variable).
+
 ## Deleting
 
 A variable a workload reads is refused, and the message names the workloads:

@@ -369,6 +369,21 @@ reader indefinitely is the `depends_on` this design already rejected.
 Cycles need no detection. Port allocation does not consult a reference, so there is no
 fixpoint to solve: two workloads referencing each other both resolve and both hash.
 
+A reference may also sit inside a mounted variable, where a program configured by a
+file rather than by its environment has nowhere else to write it. The mount asks for
+that with `expand`, and the same machinery answers: what the file reads is found at
+apply, reaches the hash through the maps an `env` reference already uses, and is
+resolved again as the file is written. The one property this adds is that a mount
+naming a signal renders the file again on every pass, so a moved address is
+delivered as a reload rather than a replacement.
+
+Only a variable may be expanded. A secret's plaintext exists as an instance starts and
+nowhere else, and finding the references inside one would need it decrypted at every
+apply and on every pass. A variable holding `${secret:name}` covers the file that
+needs a credential beside an address without a secret being parsed. A token is minted
+rather than read, so a rendered file could not be compared against a fresh one to see
+whether it moved, and a token reference is refused inside a file for that reason.
+
 ## A secret's revision is hashed, not its value
 
 A workload is replaced when its specification hash changes. A secret a workload reads

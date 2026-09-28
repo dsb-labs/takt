@@ -185,6 +185,13 @@ it reaches through `${workload:name:port}`, since the server refuses a reference
 to a workload that does not exist yet. Services depend on nothing: a target's
 workloads need not exist.
 
+A workload mounting a variable with `expand: true` also depends on what the
+variable's value names, since the file is rendered from it. The score looks inside
+the variables it sets, so a config file naming `${workload:prometheus:http}`
+orders its reader after `prometheus`, and a secret the file names must be declared
+like one the environment reads. A variable the score only requires has no contents
+the score can see, so what such a file names is checked by the server at apply.
+
 Resources are applied in that order, with ties broken by kind and then name, so
 an apply is volumes, then variables, then workloads with each after the ones it
 references, then services. A cycle among the workloads fails the render.
