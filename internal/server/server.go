@@ -263,6 +263,9 @@ func Run(ctx context.Context, config Config) error {
 		Variables: variables,
 		Events:    events,
 		Rehash:    rehash,
+		Check: func(ctx context.Context, workloads []string, name, value string) error {
+			return svc.CheckContents(ctx, workloads, name, value)
+		},
 	})
 
 	// Constructed before the mounter, which mints the tokens workloads mount
@@ -270,17 +273,6 @@ func Run(ctx context.Context, config Config) error {
 	tokenSvc := service.NewTokenService(service.TokenServiceConfig{
 		Logger: logger,
 		Tokens: tokens,
-	})
-
-	// The services rather than the repositories, because materialising a mounted value
-	// means reading the value itself — which for a secret is decryption, and lives
-	// behind the secret service.
-	mounter := mount.New(mount.Config{
-		Logger:    logger,
-		Secrets:   secretSvc,
-		Variables: variableSvc,
-		Tokens:    tokenSvc,
-		Directory: config.Data.Directory,
 	})
 
 	// The address a workload dials to reach another workload's published ports.
@@ -297,6 +289,19 @@ func Run(ctx context.Context, config Config) error {
 		Workloads: workloads,
 		Ports:     ports,
 		Address:   workloadAddress,
+	})
+
+	// The services rather than the repositories, because materialising a mounted value
+	// means reading the value itself — which for a secret is decryption, and lives
+	// behind the secret service. The address resolver is what a file naming another
+	// workload is rendered through.
+	mounter := mount.New(mount.Config{
+		Logger:    logger,
+		Secrets:   secretSvc,
+		Variables: variableSvc,
+		Tokens:    tokenSvc,
+		Workloads: addresses,
+		Directory: config.Data.Directory,
 	})
 
 	// The drivers are keyed by the name each one declares, which is what a workload's

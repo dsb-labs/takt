@@ -2751,6 +2751,178 @@ func TestWorkloadService_Apply_HashesSecretRevisions(t *testing.T) {
 	})
 }
 
+func TestWorkloadService_Apply_ExpandsMountedVariables(t *testing.T) {
+	t.Parallel()
+
+	prometheus := manifest.Reference{Kind: manifest.KindWorkload, Name: "prometheus", Port: "http"}
+
+	expanding := func(signal manifest.Signal) manifest.Spec {
+		spec := containerSpec("example", "example/example:latest")
+		spec.Volumes = []manifest.VolumeMount{
+			{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true, Signal: signal},
+		}
+
+		return spec
+	}
+
+	t.Run("records what the file reads", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets, variables, addresses := NewMockSecretRevisions(t), NewMockVariableValues(t), NewMockWorkloadAddresses(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		// Read once to see inside, and again with everything else the workload
+		// reads, since the file names a variable of its own.
+		variables.EXPECT().Values(mock.Anything, []string{"datasources"}).
+			Return(map[string]string{"datasources": "url: http://${workload:prometheus:http}\npassword: ${secret:grafana-db}\nregion: ${var:region}"}, nil).Once()
+		variables.EXPECT().Values(mock.Anything, []string{"datasources", "region"}).
+			Return(map[string]string{"datasources": "unchanged", "region": "eu-west-1"}, nil).Once()
+		secrets.EXPECT().Revisions(mock.Anything, []string{"grafana-db"}).
+			Return(map[string]string{"grafana-db": "rev-one"}, nil).Once()
+		addresses.EXPECT().Address(mock.Anything, prometheus, "example", 0).Return("10.0.0.5:20090", nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		var stored database.Workload
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
+				stored = w
+
+				return w, true, nil
+			}).Once()
+
+		_, _, err := newTestExpandingService(t, d, repo, ports, secrets, variables, addresses).Apply(t.Context(), expanding(""), 0)
+		require.NoError(t, err)
+
+		// What the file reads is recorded against the workload, so deleting any of
+		// it reports the reader and a moved address finds it.
+		assert.Equal(t, []string{"grafana-db"}, stored.Secrets)
+		assert.Equal(t, []string{"datasources", "region"}, stored.Variables)
+		assert.Equal(t, []string{"prometheus"}, stored.Workloads)
+	})
+
+	t.Run("refuses a file that does not parse", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets, variables, addresses := NewMockSecretRevisions(t), NewMockVariableValues(t), NewMockWorkloadAddresses(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		variables.EXPECT().Values(mock.Anything, []string{"datasources"}).
+			Return(map[string]string{"datasources": "cost: $5"}, nil).Once()
+
+		_, _, err := newTestExpandingService(t, d, repo, ports, secrets, variables, addresses).Apply(t.Context(), expanding(""), 0)
+		require.ErrorIs(t, err, service.ErrInvalidSpec)
+		assert.ErrorContains(t, err, "variable datasources mounted at /etc/grafana/datasources.yaml")
+		assert.ErrorContains(t, err, `"$5"`)
+	})
+
+	t.Run("refuses a file naming a workload that does not exist", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		secrets, variables, addresses := NewMockSecretRevisions(t), NewMockVariableValues(t), NewMockWorkloadAddresses(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		variables.EXPECT().Values(mock.Anything, []string{"datasources"}).
+			Return(map[string]string{"datasources": "url: ${workload:prometheus:http}"}, nil).Once()
+		variables.EXPECT().Values(mock.Anything, []string{"datasources"}).
+			Return(map[string]string{"datasources": "url: ${workload:prometheus:http}"}, nil).Once()
+		addresses.EXPECT().Address(mock.Anything, prometheus, "example", 0).Return("", database.ErrWorkloadNotFound).Once()
+
+		_, _, err := newTestExpandingService(t, d, repo, ports, secrets, variables, addresses).Apply(t.Context(), expanding(""), 0)
+		require.ErrorIs(t, err, service.ErrWorkloadNotFound)
+		assert.ErrorContains(t, err, "prometheus:http")
+	})
+
+	t.Run("keeps what a signalled file reads out of the hash", func(t *testing.T) {
+		// The property expansion exists for: a moved address rewrites the file and
+		// signals the workload rather than replacing it.
+		hashFor := func(address string) string {
+			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+			secrets, variables, addresses := NewMockSecretRevisions(t), NewMockVariableValues(t), NewMockWorkloadAddresses(t)
+
+			repo.EXPECT().Get(mock.Anything, "example").
+				Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+			variables.EXPECT().Values(mock.Anything, []string{"datasources"}).
+				Return(map[string]string{"datasources": "url: ${workload:prometheus:http}"}, nil).Times(2)
+			addresses.EXPECT().Address(mock.Anything, prometheus, "example", 0).Return(address, nil).Once()
+			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+			var hash string
+			repo.EXPECT().Upsert(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+				RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
+					hash = w.SpecHash
+
+					return w, true, nil
+				}).Once()
+
+			_, _, err := newTestExpandingService(t, d, repo, ports, secrets, variables, addresses).Apply(t.Context(), expanding(manifest.SignalHUP), 0)
+			require.NoError(t, err)
+
+			return hash
+		}
+
+		assert.Equal(t, hashFor("10.0.0.5:20090"), hashFor("10.0.0.5:20091"))
+	})
+}
+
+func TestWorkloadService_CheckContents(t *testing.T) {
+	t.Parallel()
+
+	reader := func(t *testing.T, mount manifest.VolumeMount) database.Workload {
+		t.Helper()
+
+		spec := containerSpec("grafana", "grafana/grafana:latest")
+		spec.Volumes = []manifest.VolumeMount{mount}
+
+		encoded, err := json.Marshal(spec)
+		require.NoError(t, err)
+
+		return database.Workload{Name: "grafana", Spec: encoded}
+	}
+
+	tt := []struct {
+		Name       string
+		Mount      manifest.VolumeMount
+		Value      string
+		ExpectsErr bool
+	}{
+		{
+			Name:  "accepts a value the reader can render",
+			Mount: manifest.VolumeMount{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true},
+			Value: "url: ${workload:prometheus:http}",
+		},
+		{
+			// A reader that does not expand the file gets whatever is written, as
+			// it always has.
+			Name:  "accepts any value for a reader that does not expand",
+			Mount: manifest.VolumeMount{Var: "datasources", To: "/etc/grafana/datasources.yaml"},
+			Value: "cost: $5",
+		},
+		{
+			Name:       "refuses a value the reader cannot render",
+			Mount:      manifest.VolumeMount{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true},
+			Value:      "cost: $5",
+			ExpectsErr: true,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+			repo.EXPECT().Get(mock.Anything, "grafana").Return(reader(t, tc.Mount), nil).Once()
+
+			err := newTestService(t, d, repo, ports, nil).CheckContents(t.Context(), []string{"grafana"}, "datasources", tc.Value)
+			if tc.ExpectsErr {
+				require.ErrorIs(t, err, manifest.ErrInvalidReference)
+				assert.ErrorContains(t, err, "workload grafana")
+
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestWorkloadService_Apply_HashesVariableValues(t *testing.T) {
 	t.Parallel()
 
@@ -3859,6 +4031,38 @@ func newTestAddressAwareService(
 		Drivers:   map[string]service.Driver{docker.Name: d},
 		Workloads: repo,
 		Ports:     ports,
+		Addresses: addresses,
+		Claimer:   newTestClaimer(ports, allocatorStub{}),
+	})
+}
+
+// newTestExpandingService builds a service holding every store a file rendered from
+// an expanded variable can read through, for the tests of what such a mount does to
+// what is recorded and hashed.
+func newTestExpandingService(
+	t *testing.T,
+	d *MockDriver,
+	repo *MockWorkloadRepository,
+	ports *MockPortRepository,
+	secrets *MockSecretRevisions,
+	variables *MockVariableValues,
+	addresses *MockWorkloadAddresses,
+) *service.WorkloadService {
+	t.Helper()
+
+	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
+	ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+	repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+	return service.NewWorkloadService(service.WorkloadServiceConfig{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]service.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Secrets:   secrets,
+		Variables: variables,
 		Addresses: addresses,
 		Claimer:   newTestClaimer(ports, allocatorStub{}),
 	})
