@@ -121,9 +121,9 @@ func Compute(spec manifest.Spec, inputs Inputs) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("failed to encode workload spec: %w", err)
 	}
 
-	revisions, values := inputs.hashed()
+	revisions, values, addresses := inputs.hashed()
 
-	if len(revisions) == 0 && len(values) == 0 && len(inputs.Addresses) == 0 && inputs.Digest == "" {
+	if len(revisions) == 0 && len(values) == 0 && len(addresses) == 0 && inputs.Digest == "" {
 		sum := sha256.Sum256(encoded)
 
 		return encoded, hex.EncodeToString(sum[:]), nil
@@ -133,7 +133,7 @@ func Compute(spec manifest.Spec, inputs Inputs) ([]byte, string, error) {
 		Spec:      encoded,
 		Secrets:   revisions,
 		Variables: values,
-		Workloads: inputs.Addresses,
+		Workloads: addresses,
 		Digest:    inputs.Digest,
 	})
 	if err != nil {
@@ -145,21 +145,26 @@ func Compute(spec manifest.Spec, inputs Inputs) ([]byte, string, error) {
 	return encoded, hex.EncodeToString(sum[:]), nil
 }
 
-// hashed returns what reaches the specification's hash: the revision of each secret
-// and the value of each variable, less anything read only through a mount naming a
-// signal.
+// hashed returns what reaches the specification's hash: the revision of each secret,
+// the value of each variable and the address of each referenced workload, less
+// anything read only through a mount naming a signal.
 //
-// Both maps come back nil when nothing is left, rather than empty. hashedSpec omits an
+// A workload reference is read through a mount only when the mount expands a
+// variable naming it, and a moved address is then delivered by rewriting the file,
+// which is the property expansion exists for.
+//
+// The maps come back nil when nothing is left, rather than empty. hashedSpec omits an
 // empty map, so a workload whose only reading is refreshed hashes exactly as one that
 // reads nothing at all — which is what keeps adding a signalling mount from being a
 // specification change in its own right.
-func (i Inputs) hashed() (map[string]string, map[string]string) {
+func (i Inputs) hashed() (map[string]string, map[string]string, map[string]string) {
 	if len(i.Refreshed) == 0 {
-		return i.Revisions, i.Values
+		return i.Revisions, i.Values, i.Addresses
 	}
 
 	revisions := maps.Clone(i.Revisions)
 	values := maps.Clone(i.Values)
+	addresses := maps.Clone(i.Addresses)
 
 	for _, reference := range i.Refreshed {
 		// By kind, so a refreshed token — which contributes nothing to the hash —
@@ -169,6 +174,8 @@ func (i Inputs) hashed() (map[string]string, map[string]string) {
 			delete(values, reference.Name)
 		case manifest.KindSecret:
 			delete(revisions, reference.Name)
+		case manifest.KindWorkload:
+			delete(addresses, reference.String())
 		}
 	}
 
@@ -178,6 +185,9 @@ func (i Inputs) hashed() (map[string]string, map[string]string) {
 	if len(values) == 0 {
 		values = nil
 	}
+	if len(addresses) == 0 {
+		addresses = nil
+	}
 
-	return revisions, values
+	return revisions, values, addresses
 }
