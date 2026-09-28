@@ -146,6 +146,10 @@ type (
 		Reclaim(id string, keep int) error
 		// Prune should remove the files written for workloads other than those named.
 		Prune(keep []string) error
+		// Contents should return what each variable the specification mounts with
+		// expand holds, keyed by name, for finding the workloads a rendered file
+		// names.
+		Contents(ctx context.Context, spec manifest.Spec) (map[string]string, error)
 	}
 
 	// The Tokens interface describes how the reconciler revokes the tokens minted

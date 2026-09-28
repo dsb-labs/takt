@@ -3,6 +3,7 @@ package reconciler
 import (
 	"bytes"
 	"context"
+	"slices"
 
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/event"
@@ -35,8 +36,10 @@ func (r *Reconciler) notReady(ctx context.Context, row database.Workload, index 
 	}
 
 	// The marker is present exactly when a reference exists, the trick slotHash
-	// uses, so a workload referencing nothing costs no decode.
-	if !bytes.Contains(row.Spec, []byte("${workload:")) {
+	// uses, so a workload referencing nothing costs no decode. A file rendered
+	// from a variable may name a workload too, and the stored bytes are canonical
+	// JSON, so the key that asks for that is present verbatim when one does.
+	if !bytes.Contains(row.Spec, []byte("${workload:")) && !bytes.Contains(row.Spec, []byte(`"expand":true`)) {
 		return false
 	}
 
@@ -113,6 +116,26 @@ func (r *Reconciler) blocker(ctx context.Context, row database.Workload, index i
 		// Reported by the start that follows, which resolves the same references
 		// and records what could not be resolved.
 		return resolve.Target{}, health.Result{}, false
+	}
+
+	// A file rendered from a variable is shared by every instance of the version,
+	// so what it names resolves as the first instance rather than as this one.
+	if r.mounts != nil {
+		contents, err := r.mounts.Contents(ctx, spec)
+		if err != nil {
+			return resolve.Target{}, health.Result{}, false
+		}
+
+		mounted, err := r.env.Targets(ctx, contents, row.Name, 0)
+		if err != nil {
+			return resolve.Target{}, health.Result{}, false
+		}
+
+		for _, target := range mounted {
+			if !slices.Contains(targets, target) {
+				targets = append(targets, target)
+			}
+		}
 	}
 
 	rows := r.rows.Load()
