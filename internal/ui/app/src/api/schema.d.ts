@@ -1670,6 +1670,26 @@ export interface components {
       propagation?: "rslave" | "rshared";
       signal?: components["schemas"]["MountSignal"];
       /**
+       * @description Whether the references inside the mounted variable's value are expanded
+       *     before the file is written, with the grammar an `env` value uses:
+       *     `${var:name}`, `${secret:name}`, `${workload:name:port}`, and `$$` for a
+       *     literal dollar sign. Without it the file holds the value and nothing
+       *     else.
+       *
+       *     This is how a workload configured by a file rather than by its
+       *     environment reaches another workload. Whatever the file reads through a
+       *     reference is read the way an `env` reference is: a moved port, a rotated
+       *     secret or an edited variable replaces the instance, or rewrites the file
+       *     and sends the mount's `signal` where one is named.
+       *
+       *     Only a mounted variable may ask for it, and a `${token:}` reference is
+       *     refused inside the value. One level only: a variable pulled in by
+       *     `${var:name}` is written as it is held. A `$` in the value that is not
+       *     `$$` or a reference is refused at apply, and a variable set to such a
+       *     value is refused while a workload expands it.
+       */
+      expand?: boolean;
+      /**
        * @description Where the workload finds what is mounted. Must be an absolute path, and
        *     not `/` itself.
        * @example /var/lib/example

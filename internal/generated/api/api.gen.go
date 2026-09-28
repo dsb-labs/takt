@@ -2119,6 +2119,25 @@ type Volume struct {
 // Either way nothing tells the workload where the mount sits on the host, which
 // for an exec workload would be takt's own layout.
 type VolumeMount struct {
+	// Expand Whether the references inside the mounted variable's value are expanded
+	// before the file is written, with the grammar an `env` value uses:
+	// `${var:name}`, `${secret:name}`, `${workload:name:port}`, and `$$` for a
+	// literal dollar sign. Without it the file holds the value and nothing
+	// else.
+	//
+	// This is how a workload configured by a file rather than by its
+	// environment reaches another workload. Whatever the file reads through a
+	// reference is read the way an `env` reference is: a moved port, a rotated
+	// secret or an edited variable replaces the instance, or rewrites the file
+	// and sends the mount's `signal` where one is named.
+	//
+	// Only a mounted variable may ask for it, and a `${token:}` reference is
+	// refused inside the value. One level only: a variable pulled in by
+	// `${var:name}` is written as it is held. A `$` in the value that is not
+	// `$$` or a reference is refused at apply, and a variable set to such a
+	// value is refused while a workload expands it.
+	Expand *bool `json:"expand,omitempty"`
+
 	// From Where the volume's data is on the host, resolved by the server from the
 	// named volume. Ignored when a specification is submitted, and absent for a
 	// mounted secret, variable or host path.
