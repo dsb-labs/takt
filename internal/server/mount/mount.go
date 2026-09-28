@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/resolve"
 	"github.com/dsb-labs/takt/pkg/manifest"
@@ -71,6 +72,15 @@ type (
 		RefreshWorkloadToken(ctx context.Context, principal, workloadID string, version int, expires bool) (string, bool, error)
 	}
 
+	// The Addresses interface describes how the mounter resolves a workload
+	// reference inside an expanded variable into the address it names.
+	Addresses interface {
+		// Address should return the address the reference resolves to as read by
+		// the given instance of the named reader, reporting
+		// database.ErrWorkloadNotFound when nothing holds the name.
+		Address(ctx context.Context, reference manifest.Reference, reader string, readerInstance int) (string, error)
+	}
+
 	// The Mounter type materialises the secrets and variables a workload mounts as
 	// files on the host, and owns the directories holding them.
 	//
@@ -87,6 +97,7 @@ type (
 		secrets   ValueStore
 		variables ValueStore
 		tokens    Tokens
+		workloads Addresses
 		files     string
 		state     string
 	}
@@ -104,6 +115,9 @@ type (
 		// What mints the token a token mount names. May be nil, in which case a
 		// workload mounting one fails to start.
 		Tokens Tokens
+		// Where a workload reference inside an expanded variable is resolved. May be
+		// nil, in which case a workload expanding one fails to start.
+		Workloads Addresses
 		// The directory takt keeps its state in. Mounted values live in a
 		// subdirectory of it.
 		Directory string
@@ -140,6 +154,7 @@ func New(config Config) *Mounter {
 		secrets:   config.Secrets,
 		variables: config.Variables,
 		tokens:    config.Tokens,
+		workloads: config.Workloads,
 		// Two trees rather than one, for the reason the exec driver has two: a
 		// workload reaches the files mounted into it, so what takt records about
 		// having written them is kept where the workload has no path to it.
@@ -199,7 +214,7 @@ func (m *Mounter) Deliver(ctx context.Context, id string, version int, spec mani
 				return nil, err
 			}
 		} else {
-			value, err := m.value(ctx, reference)
+			value, err := m.render(ctx, spec.Name, mount, reference)
 			if err != nil {
 				return nil, err
 			}
@@ -295,7 +310,10 @@ func (m *Mounter) Refresh(ctx context.Context, name, id string, version int, spe
 
 			value = credential
 		} else {
-			read, err := m.value(ctx, reference)
+			// Rendered again rather than compared as held, so a file that reads an
+			// address or a secret is rewritten when either moves and not only when
+			// the variable is edited.
+			read, err := m.render(ctx, name, mount, reference)
 			if err != nil {
 				return nil, err
 			}
@@ -532,6 +550,133 @@ func (m *Mounter) deliverToken(ctx context.Context, path, id string, version int
 	record.Digests[name] = digest(credential)
 
 	return nil
+}
+
+// Contents returns what each variable the specification mounts with expand holds,
+// keyed by name and as held rather than as rendered.
+//
+// This exists for the reconciler, which holds a reader's first start until the
+// instances its files name have passed their health checks, and finds those
+// instances by reading the references inside. A specification expanding nothing
+// reads nothing and returns nil.
+//
+// Returns database.ErrVariableNotFound naming a variable nothing holds, since a
+// file rendered from nothing is a file the workload cannot start against.
+func (m *Mounter) Contents(ctx context.Context, spec manifest.Spec) (map[string]string, error) {
+	var contents map[string]string
+
+	for _, mount := range spec.Volumes {
+		if !mount.Expand {
+			continue
+		}
+
+		value, err := m.value(ctx, manifest.Reference{Kind: manifest.KindVariable, Name: mount.Var})
+		if err != nil {
+			return nil, err
+		}
+
+		if contents == nil {
+			contents = make(map[string]string)
+		}
+
+		contents[mount.Var] = value
+	}
+
+	return contents, nil
+}
+
+// render returns what the mount's file holds: the value the reference names, with
+// the references inside it expanded where the mount asked for that.
+//
+// The reader is resolved as its first instance. The file is delivered once per
+// version and shared by every instance, so there is no instance of its own for a
+// reference to resolve as — which is why a file does not spread across a target's
+// instances the way an env reference does.
+//
+// Returns manifest.ErrUnknownSecret, manifest.ErrUnknownVariable or
+// manifest.ErrUnknownWorkload naming both the variable and what it could not read.
+// Handing the workload the reference text would have it use that as the value.
+func (m *Mounter) render(ctx context.Context, reader string, mount manifest.VolumeMount, reference manifest.Reference) (string, error) {
+	value, err := m.value(ctx, reference)
+	if err != nil {
+		return "", err
+	}
+
+	if !mount.Expand {
+		return value, nil
+	}
+
+	// Why a lookup came back empty, which the callback cannot report itself. A store
+	// that failed to answer is not the same as a name nobody holds, and an operator
+	// told the wrong one goes looking in the wrong place.
+	var failed error
+
+	expanded, err := manifest.Expand(value, func(inner manifest.Reference) (string, bool) {
+		resolved, found, err := m.resolve(ctx, inner, reader)
+		if err != nil {
+			failed = err
+		}
+
+		return resolved, found
+	})
+	switch {
+	case failed != nil:
+		return "", failed
+	case errors.Is(err, manifest.ErrUnknownSecret),
+		errors.Is(err, manifest.ErrUnknownVariable),
+		errors.Is(err, manifest.ErrUnknownWorkload),
+		errors.Is(err, manifest.ErrUnknownToken):
+		// Naming the variable as well as what it reads, so that an operator has
+		// both ends of the reference that could not be resolved.
+		return "", fmt.Errorf("variable %s reads %w", reference.Name, err)
+	case err != nil:
+		return "", fmt.Errorf("%w: variable %s: %v", ErrInvalidMount, reference.Name, err)
+	}
+
+	return expanded, nil
+}
+
+// resolve reads what one reference inside an expanded variable names, reporting
+// whether anything holds it.
+//
+// Nothing held under the name is a false rather than an error, so that expansion is
+// what reports it and the unresolved reference is described the one way, as the env
+// resolver does. A token is always a false: it is refused at apply, and is minted
+// rather than read, so nothing here could answer for one.
+func (m *Mounter) resolve(ctx context.Context, reference manifest.Reference, reader string) (string, bool, error) {
+	switch reference.Kind {
+	case manifest.KindToken:
+		return "", false, nil
+	case manifest.KindWorkload:
+		if m.workloads == nil {
+			return "", false, nil
+		}
+
+		address, err := m.workloads.Address(ctx, reference, reader, 0)
+		switch {
+		case errors.Is(err, database.ErrWorkloadNotFound):
+			return "", false, nil
+		case err != nil:
+			return "", false, err
+		}
+
+		return address, true, nil
+	}
+
+	store, missing := resolve.StoreFor(m.secrets, m.variables, reference.Kind)
+	if store == nil {
+		return "", false, nil
+	}
+
+	value, err := store.Value(ctx, reference.Name)
+	switch {
+	case errors.Is(err, missing):
+		return "", false, nil
+	case err != nil:
+		return "", false, err
+	}
+
+	return value, true, nil
 }
 
 // value reads what the reference names from whichever store holds that kind.

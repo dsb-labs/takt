@@ -439,6 +439,132 @@ func TestMounter_Refresh(t *testing.T) {
 	})
 }
 
+func TestMounter_Expand(t *testing.T) {
+	t.Parallel()
+
+	prometheus := manifest.Reference{Kind: manifest.KindWorkload, Name: "prometheus", Port: "http"}
+
+	expanded := func(signal manifest.Signal) manifest.Spec {
+		return mountSpec(manifest.VolumeMount{
+			Var:    "datasources",
+			To:     "/etc/grafana/datasources.yaml",
+			Expand: true,
+			Signal: signal,
+		})
+	}
+
+	t.Run("writes the rendered contents", func(t *testing.T) {
+		secrets, variables, workloads := NewMockValueStore(t), NewMockValueStore(t), NewMockAddresses(t)
+		variables.EXPECT().Value(mock.Anything, "datasources").
+			Return("url: http://${workload:prometheus:http}\npassword: ${secret:grafana-db}\nregion: ${var:region}\ncost: $$5", nil).Once()
+		variables.EXPECT().Value(mock.Anything, "region").Return("eu-west-1", nil).Once()
+		secrets.EXPECT().Value(mock.Anything, "grafana-db").Return("hunter2", nil).Once()
+		// As the reader's first instance: the file is shared by every instance of
+		// the version, so there is no instance of its own to resolve as.
+		workloads.EXPECT().Address(mock.Anything, prometheus, "example", 0).Return("10.0.0.1:20000", nil).Once()
+
+		svc, _ := newExpandingMounter(t, secrets, variables, workloads)
+
+		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, expanded(""))
+		require.NoError(t, err)
+		require.Len(t, mounts, 1)
+
+		contents, err := os.ReadFile(mounts[0].Host)
+		require.NoError(t, err)
+		assert.Equal(t, "url: http://10.0.0.1:20000\npassword: hunter2\nregion: eu-west-1\ncost: $5", string(contents))
+	})
+
+	t.Run("writes a variable that did not ask as held", func(t *testing.T) {
+		variables := NewMockValueStore(t)
+		variables.EXPECT().Value(mock.Anything, "datasources").Return("url: ${workload:prometheus:http}", nil).Once()
+
+		svc, _ := newExpandingMounter(t, nil, variables, NewMockAddresses(t))
+
+		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, mountSpec(manifest.VolumeMount{
+			Var: "datasources",
+			To:  "/etc/grafana/datasources.yaml",
+		}))
+		require.NoError(t, err)
+		require.Len(t, mounts, 1)
+
+		contents, err := os.ReadFile(mounts[0].Host)
+		require.NoError(t, err)
+		assert.Equal(t, "url: ${workload:prometheus:http}", string(contents))
+	})
+
+	t.Run("refuses a reference the file reads that nothing holds", func(t *testing.T) {
+		variables, workloads := NewMockValueStore(t), NewMockAddresses(t)
+		variables.EXPECT().Value(mock.Anything, "datasources").Return("url: ${workload:prometheus:http}", nil).Once()
+		workloads.EXPECT().Address(mock.Anything, prometheus, "example", 0).Return("", database.ErrWorkloadNotFound).Once()
+
+		svc, _ := newExpandingMounter(t, nil, variables, workloads)
+
+		_, err := svc.Deliver(t.Context(), testVolumeID, 1, expanded(""))
+		require.ErrorIs(t, err, manifest.ErrUnknownWorkload)
+		assert.ErrorContains(t, err, "variable datasources reads")
+	})
+
+	t.Run("refuses a workload reference on a server resolving no addresses", func(t *testing.T) {
+		variables := NewMockValueStore(t)
+		variables.EXPECT().Value(mock.Anything, "datasources").Return("url: ${workload:prometheus:http}", nil).Once()
+
+		svc, _ := newMounter(t, nil, variables)
+
+		_, err := svc.Deliver(t.Context(), testVolumeID, 1, expanded(""))
+		require.ErrorIs(t, err, manifest.ErrUnknownWorkload)
+	})
+
+	t.Run("rewrites the file when an address it reads moves", func(t *testing.T) {
+		// The property nothing else has: a moved address delivered as a reload
+		// rather than a replacement.
+		variables, workloads := NewMockValueStore(t), NewMockAddresses(t)
+		variables.EXPECT().Value(mock.Anything, "datasources").Return("url: ${workload:prometheus:http}", nil).Times(3)
+		workloads.EXPECT().Address(mock.Anything, prometheus, "example", 0).Return("10.0.0.1:20000", nil).Times(2)
+		workloads.EXPECT().Address(mock.Anything, prometheus, "example", 0).Return("10.0.0.1:20001", nil).Once()
+
+		svc, _ := newExpandingMounter(t, nil, variables, workloads)
+		spec := expanded(manifest.SignalHUP)
+
+		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
+		require.NoError(t, err)
+		require.Len(t, mounts, 1)
+
+		// The address is where it was, so the file is unchanged and nothing is
+		// reported.
+		refreshed, err := svc.Refresh(t.Context(), "example", testVolumeID, 1, spec)
+		require.NoError(t, err)
+		assert.Empty(t, refreshed)
+
+		refreshed, err = svc.Refresh(t.Context(), "example", testVolumeID, 1, spec)
+		require.NoError(t, err)
+		require.Len(t, refreshed, 1)
+		assert.Equal(t, manifest.SignalHUP, refreshed[0].Signal)
+		assert.Equal(t, "datasources", refreshed[0].Reference.Name)
+
+		contents, err := os.ReadFile(mounts[0].Host)
+		require.NoError(t, err)
+		assert.Equal(t, "url: 10.0.0.1:20001", string(contents))
+	})
+
+	t.Run("reports the contents of what it expands", func(t *testing.T) {
+		variables := NewMockValueStore(t)
+		variables.EXPECT().Value(mock.Anything, "datasources").Return("url: ${workload:prometheus:http}", nil).Once()
+
+		svc, _ := newExpandingMounter(t, nil, variables, NewMockAddresses(t))
+
+		contents, err := svc.Contents(t.Context(), mountSpec(
+			manifest.VolumeMount{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true},
+			manifest.VolumeMount{Var: "plain", To: "/etc/plain"},
+		))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"datasources": "url: ${workload:prometheus:http}"}, contents)
+
+		contents, err = svc.Contents(t.Context(), mountSpec())
+		require.NoError(t, err)
+		assert.Nil(t, contents)
+	})
+}
+
 func TestMounter_Reclaim(t *testing.T) {
 	t.Parallel()
 
@@ -637,6 +763,29 @@ func newMounter(t *testing.T, secrets, variables mount.ValueStore) (*mount.Mount
 
 	// Assigned only when given, so that a nil mock is a server with no store rather
 	// than a typed nil that answers calls.
+	if secrets != nil {
+		config.Secrets = secrets
+	}
+	if variables != nil {
+		config.Variables = variables
+	}
+
+	return mount.New(config), root
+}
+
+// newExpandingMounter returns a mounter that resolves workload references inside an
+// expanded variable through the given mock, alongside its data directory.
+func newExpandingMounter(t *testing.T, secrets, variables mount.ValueStore, workloads mount.Addresses) (*mount.Mounter, string) {
+	t.Helper()
+
+	root := t.TempDir()
+
+	config := mount.Config{
+		Logger:    newTestLogger(t),
+		Workloads: workloads,
+		Directory: root,
+	}
+
 	if secrets != nil {
 		config.Secrets = secrets
 	}
