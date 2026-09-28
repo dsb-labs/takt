@@ -47,6 +47,9 @@ type (
 		workloads []manifest.Spec
 		services  []string
 		variables []string
+		// What each variable in the set holds, for seeing inside one a workload
+		// mounts with expand. Nil when the set carries no values.
+		contents manifest.Contents
 	}
 )
 
@@ -83,11 +86,18 @@ var kindOrder = map[Kind]int{KindVolume: 0, KindVariable: 1, KindSecret: 2, Kind
 // server refuses a reference to a workload that does not exist yet. Services
 // depend on nothing: a target's workloads need not exist.
 //
+// A workload mounting a variable with expand reads what the variable's value
+// names too. The score can see inside a variable it sets, so those are
+// dependencies like any other. It cannot see inside one it only requires, so
+// what such a file reads is the server's to check at apply.
+//
 // A variable or secret a workload reads that the score neither sets nor declares
 // is refused with ErrUndeclared, so the score stays an honest inventory of what
 // its workloads need.
 func NewPlan(rendered Rendered) (Plan, error) {
-	if err := checkDeclared(rendered); err != nil {
+	contents := rendered.contents()
+
+	if err := checkDeclared(rendered, contents); err != nil {
 		return Plan{}, err
 	}
 
@@ -96,6 +106,7 @@ func NewPlan(rendered Rendered) (Plan, error) {
 		workloads: rendered.Workloads,
 		services:  make([]string, 0, len(rendered.Services)),
 		variables: make([]string, 0, len(rendered.Variables)),
+		contents:  contents,
 	}
 
 	for _, volume := range rendered.Volumes {
@@ -137,16 +148,30 @@ func (p *Plan) require(node Node) {
 	}
 }
 
+// contents returns a lookup over the values of the variables the score sets.
+func (r Rendered) contents() manifest.Contents {
+	values := make(map[string]string, len(r.Variables))
+	for _, variable := range r.Variables {
+		values[variable.Name] = variable.Value
+	}
+
+	return func(name string) (string, bool) {
+		value, ok := values[name]
+
+		return value, ok
+	}
+}
+
 // checkDeclared reports a workload reading a variable or secret the score does
-// not list.
-func checkDeclared(rendered Rendered) error {
+// not list, looking inside the variables it sets for a workload expanding one.
+func checkDeclared(rendered Rendered, contents manifest.Contents) error {
 	variables := slices.Clone(rendered.Required)
 	for _, variable := range rendered.Variables {
 		variables = append(variables, variable.Name)
 	}
 
 	for _, workload := range rendered.Workloads {
-		references, err := manifest.References(workload)
+		references, err := manifest.ReferencesIn(workload, contents)
 		if err != nil {
 			return fmt.Errorf("failed to read references of workload %s: %w", workload.Name, err)
 		}
@@ -203,7 +228,7 @@ func (inv inventory) plan() (Plan, error) {
 	var requirements []Node
 	for _, workload := range inv.workloads {
 		reader := Node{Kind: KindWorkload, Name: workload.Name}
-		for _, dependency := range dependenciesOf(workload) {
+		for _, dependency := range dependenciesOf(workload, inv.contents) {
 			if _, ok := held[dependency]; !ok {
 				if !slices.Contains(requirements, dependency) {
 					requirements = append(requirements, dependency)
@@ -253,15 +278,17 @@ func (inv inventory) plan() (Plan, error) {
 }
 
 // dependenciesOf returns what a workload depends on: the volumes it mounts by
-// name, the variables and secrets it reads, and the workloads it reaches.
+// name, the variables and secrets it reads, and the workloads it reaches,
+// looking inside the variables contents can see for a workload expanding one.
 //
 // A token reference is not a dependency. Nothing has to exist before a
 // workload asserts a principal, and a host path is the host's to provide.
-func dependenciesOf(workload manifest.Spec) []Node {
+func dependenciesOf(workload manifest.Spec, contents manifest.Contents) []Node {
 	var nodes []Node
 
-	// References already validated by Render, so the error cannot occur here.
-	references, _ := manifest.References(workload)
+	// References already validated by checkDeclared, so the error cannot occur
+	// here.
+	references, _ := manifest.ReferencesIn(workload, contents)
 	for _, reference := range references {
 		var node Node
 		switch reference.Kind {
