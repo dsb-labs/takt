@@ -301,12 +301,17 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec manifest.Spec
 // workloads reading it, which is how they come to report that something they need has
 // gone. Refusing the reference is the business of the caller that can act on it.
 func (s *WorkloadService) resolveReferences(ctx context.Context, spec manifest.Spec) (references, error) {
-	found, err := manifest.References(spec)
+	contents, err := s.contents(ctx, spec)
+	if err != nil {
+		return references{}, err
+	}
+
+	found, err := manifest.ReferencesIn(spec, contents)
 	if err != nil {
 		return references{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
 
-	refreshed, err := manifest.Refreshed(spec)
+	refreshed, err := manifest.RefreshedIn(spec, contents)
 	if err != nil {
 		return references{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
@@ -370,6 +375,78 @@ func (s *WorkloadService) resolveReferences(ctx context.Context, spec manifest.S
 	}
 
 	return resolved, nil
+}
+
+// contents returns what each variable the specification mounts with expand holds,
+// for the scan of what the specification reads to see inside. Nil for a
+// specification expanding nothing, which is most of them, so those cost no read.
+//
+// A variable nothing holds is absent rather than an error. The mount's own
+// reference still names it, so the caller reports it missing the way it reports
+// any other variable the specification reads.
+func (s *WorkloadService) contents(ctx context.Context, spec manifest.Spec) (manifest.Contents, error) {
+	var names []string
+	for _, mount := range spec.Volumes {
+		if mount.Expand && mount.Var != "" {
+			names = append(names, mount.Var)
+		}
+	}
+
+	if len(names) == 0 {
+		return nil, nil
+	}
+
+	if s.variables == nil {
+		return nil, fmt.Errorf("%w: this server holds no variables", ErrVariableNotFound)
+	}
+
+	values, err := s.variables.Values(ctx, names)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read variable values: %w", err)
+	}
+
+	return func(name string) (string, bool) {
+		value, ok := values[name]
+
+		return value, ok
+	}, nil
+}
+
+// CheckContents reports whether each of the named workloads that mounts the
+// variable with expand could render the given value, so that a variable is refused
+// the value before any of them is left with a file it cannot be started against.
+//
+// This exists for the variable service to call before it stores a value. Only the
+// grammar is checked: a reference to something that does not exist yet is stored,
+// as one in a specification is at apply, and moves the hash of the reader the way
+// a deleted secret does. The error names the workload, the mount and the text.
+func (s *WorkloadService) CheckContents(ctx context.Context, workloads []string, name, value string) error {
+	contents := func(variable string) (string, bool) {
+		return value, variable == name
+	}
+
+	for _, workload := range workloads {
+		row, err := s.workloads.Get(ctx, workload)
+		switch {
+		case errors.Is(err, database.ErrWorkloadNotFound):
+			// Deleted between being named and being read, so there is nothing
+			// left that could read the value.
+			continue
+		case err != nil:
+			return fmt.Errorf("failed to load workload: %w", err)
+		}
+
+		spec, err := manifest.DecodeWorkload(row.Spec)
+		if err != nil {
+			return err
+		}
+
+		if _, err = manifest.ReferencesIn(spec, contents); err != nil {
+			return fmt.Errorf("workload %s: %w", workload, err)
+		}
+	}
+
+	return nil
 }
 
 // resolveDigest returns the digest a pull-always workload's image currently

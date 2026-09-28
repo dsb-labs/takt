@@ -177,6 +177,63 @@ func TestVariableService_Set(t *testing.T) {
 		assert.Equal(t, []string{"one", "two"}, rehashed)
 	})
 
+	t.Run("refuses a value a reader could not render", func(t *testing.T) {
+		variables := NewMockVariableRepository(t)
+
+		variables.EXPECT().Get(mock.Anything, "datasources").
+			Return(database.Variable{Name: "datasources", Value: "url: ${workload:prometheus:http}"}, nil).Once()
+		variables.EXPECT().UsedBy(mock.Anything, "datasources").Return([]string{"grafana"}, nil).Once()
+
+		var checked []string
+		svc := service.NewVariableService(service.VariableServiceConfig{
+			Logger:    newTestLogger(t),
+			Variables: variables,
+			Check: func(_ context.Context, workloads []string, name, value string) error {
+				checked = workloads
+				assert.Equal(t, "datasources", name)
+				assert.Equal(t, "cost: $5", value)
+
+				return errors.New("workload grafana: invalid reference")
+			},
+			Rehash: func(_ context.Context, _ string) error {
+				t.Fatal("a value that was refused must not redeploy anything")
+
+				return nil
+			},
+		})
+
+		// Refused before the write, so nothing reading the variable is left with a
+		// file it cannot be started against.
+		_, _, err := svc.Set(t.Context(), manifest.Variable{Name: "datasources", Value: "cost: $5"}, 0)
+		require.ErrorIs(t, err, service.ErrInvalidVariable)
+		assert.ErrorContains(t, err, "workload grafana")
+		assert.Equal(t, []string{"grafana"}, checked)
+	})
+
+	t.Run("does not ask the readers of a variable that does not exist", func(t *testing.T) {
+		variables := NewMockVariableRepository(t)
+
+		variables.EXPECT().Get(mock.Anything, "datasources").
+			Return(database.Variable{}, database.ErrVariableNotFound).Once()
+		variables.EXPECT().Upsert(mock.Anything, variableHolding("datasources", "cost: $5"), 0).
+			Return(database.Variable{Name: "datasources", Value: "cost: $5"}, nil).Once()
+		variables.EXPECT().UsedBy(mock.Anything, "datasources").Return(nil, nil).Once()
+
+		svc := service.NewVariableService(service.VariableServiceConfig{
+			Logger:    newTestLogger(t),
+			Variables: variables,
+			Check: func(_ context.Context, _ []string, _, _ string) error {
+				t.Fatal("nothing can read a variable that does not exist yet")
+
+				return nil
+			},
+		})
+
+		_, created, err := svc.Set(t.Context(), manifest.Variable{Name: "datasources", Value: "cost: $5"}, 0)
+		require.NoError(t, err)
+		assert.True(t, created)
+	})
+
 	t.Run("records which variable moved each workload's hash", func(t *testing.T) {
 		variables, events := NewMockVariableRepository(t), NewMockWorkloadEventRepository(t)
 

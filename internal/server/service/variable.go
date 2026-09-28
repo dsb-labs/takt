@@ -76,6 +76,7 @@ type (
 		variables VariableRepository
 		events    WorkloadEventRepository
 		rehash    func(ctx context.Context, workload string) error
+		check     func(ctx context.Context, workloads []string, name, value string) error
 	}
 
 	// The VariableServiceConfig type contains fields used to construct a
@@ -92,6 +93,10 @@ type (
 		// its specification hash moves and the reconciler replaces its instances. May
 		// be nil, in which case a change does not redeploy anything.
 		Rehash func(ctx context.Context, workload string) error
+		// Called with the workloads referencing a variable before its value is
+		// stored, to refuse a value one of them mounts with expand and could not
+		// render. May be nil, in which case any value is stored.
+		Check func(ctx context.Context, workloads []string, name, value string) error
 	}
 )
 
@@ -102,6 +107,7 @@ func NewVariableService(config VariableServiceConfig) *VariableService {
 		variables: config.Variables,
 		events:    config.Events,
 		rehash:    config.Rehash,
+		check:     config.Check,
 	}
 }
 
@@ -163,6 +169,16 @@ func (s *VariableService) Set(ctx context.Context, spec manifest.Variable, ifMat
 	}
 
 	created := errors.Is(err, database.ErrVariableNotFound)
+
+	// Refused before the value lands rather than reported by the readers afterwards.
+	// A reader expanding the variable renders it into a file, and a value it cannot
+	// render is a file the reader cannot start against — which the operator setting
+	// the value is the one who can fix.
+	if !created {
+		if err = s.checkReaders(ctx, name, value); err != nil {
+			return Variable{}, false, err
+		}
+	}
 
 	stored, err := s.variables.Upsert(ctx, database.Variable{Name: name, Value: value, Labels: labels}, ifMatch)
 	if err != nil {
@@ -282,6 +298,29 @@ func (s *VariableService) Value(ctx context.Context, name string) (string, error
 	}
 
 	return stored.Value, nil
+}
+
+// checkReaders asks the workloads reading the variable whether they could render
+// the value, returning ErrInvalidVariable naming the one that could not.
+func (s *VariableService) checkReaders(ctx context.Context, name, value string) error {
+	if s.check == nil {
+		return nil
+	}
+
+	usedBy, err := s.variables.UsedBy(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	if len(usedBy) == 0 {
+		return nil
+	}
+
+	if err = s.check(ctx, usedBy, name, value); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidVariable, err)
+	}
+
+	return nil
 }
 
 // changedVariable maps a conditional write the repository refused onto the
