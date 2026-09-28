@@ -66,6 +66,59 @@ func TestNewPlan(t *testing.T) {
 		assert.Empty(t, plan.Requirements)
 	})
 
+	t.Run("a workload follows what its expanded file names", func(t *testing.T) {
+		// The score can see inside a variable it sets, so a config file naming
+		// another workload orders the reader after it, and a secret the file
+		// names must be declared like one the environment reads.
+		rendered := score.Rendered{
+			Variables: []manifest.Variable{
+				{Name: "datasources", Value: "url: ${workload:prometheus:http}\npassword: ${secret:grafana-db}"},
+			},
+			Secrets: []string{"grafana-db"},
+			Workloads: []manifest.Spec{
+				workload("grafana", nil, manifest.VolumeMount{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true}),
+				workload("prometheus", nil),
+			},
+		}
+
+		plan, err := score.NewPlan(rendered)
+		require.NoError(t, err)
+
+		assert.Equal(t, []score.Node{
+			{Kind: score.KindVariable, Name: "datasources"},
+			{Kind: score.KindWorkload, Name: "prometheus"},
+			{Kind: score.KindWorkload, Name: "grafana"},
+		}, plan.Steps)
+		assert.Equal(t, []score.Node{{Kind: score.KindSecret, Name: "grafana-db"}}, plan.Requirements)
+	})
+
+	t.Run("refuses an undeclared secret an expanded file names", func(t *testing.T) {
+		rendered := score.Rendered{
+			Variables: []manifest.Variable{{Name: "datasources", Value: "password: ${secret:grafana-db}"}},
+			Workloads: []manifest.Spec{
+				workload("grafana", nil, manifest.VolumeMount{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true}),
+			},
+		}
+
+		_, err := score.NewPlan(rendered)
+		assert.ErrorIs(t, err, score.ErrUndeclared)
+	})
+
+	t.Run("cannot see inside a variable the score only requires", func(t *testing.T) {
+		// What such a file names is the server's to check at apply.
+		rendered := score.Rendered{
+			Required: []string{"datasources"},
+			Workloads: []manifest.Spec{
+				workload("grafana", nil, manifest.VolumeMount{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true}),
+			},
+		}
+
+		plan, err := score.NewPlan(rendered)
+		require.NoError(t, err)
+		assert.Equal(t, []score.Node{{Kind: score.KindWorkload, Name: "grafana"}}, plan.Steps)
+		assert.Equal(t, []score.Node{{Kind: score.KindVariable, Name: "datasources"}}, plan.Requirements)
+	})
+
 	t.Run("a volume or workload the score does not hold is a requirement", func(t *testing.T) {
 		rendered := score.Rendered{
 			Workloads: []manifest.Spec{
