@@ -128,6 +128,7 @@ func TestVariableService_Set(t *testing.T) {
 
 		variables.EXPECT().Get(mock.Anything, "log-level").
 			Return(database.Variable{Name: "log-level", Value: "debug", Version: 3}, nil).Once()
+		variables.EXPECT().UsedBy(mock.Anything, "log-level").Return(nil, nil).Once()
 		variables.EXPECT().Upsert(mock.Anything, variableHolding("log-level", "info"), 3).
 			Return(database.Variable{}, database.ErrVariableChanged).Once()
 
@@ -159,7 +160,7 @@ func TestVariableService_Set(t *testing.T) {
 		variables.EXPECT().Upsert(mock.Anything, variableHolding("log-level", "debug"), 0).
 			Return(database.Variable{Name: "log-level", Value: "debug"}, nil).Once()
 		variables.EXPECT().UsedBy(mock.Anything, "log-level").
-			Return([]string{"one", "two"}, nil).Twice()
+			Return([]string{"one", "two"}, nil).Once()
 
 		var rehashed []string
 		svc := service.NewVariableService(service.VariableServiceConfig{
@@ -210,28 +211,27 @@ func TestVariableService_Set(t *testing.T) {
 		assert.Equal(t, []string{"grafana"}, checked)
 	})
 
-	t.Run("does not ask the readers of a variable that does not exist", func(t *testing.T) {
+	t.Run("asks the readers of a variable created again", func(t *testing.T) {
+		// A workload keeps reading a name through a forced delete, so a variable
+		// created again is read by whatever read the one before it.
 		variables := NewMockVariableRepository(t)
 
 		variables.EXPECT().Get(mock.Anything, "datasources").
 			Return(database.Variable{}, database.ErrVariableNotFound).Once()
-		variables.EXPECT().Upsert(mock.Anything, variableHolding("datasources", "cost: $5"), 0).
-			Return(database.Variable{Name: "datasources", Value: "cost: $5"}, nil).Once()
-		variables.EXPECT().UsedBy(mock.Anything, "datasources").Return(nil, nil).Once()
+		variables.EXPECT().UsedBy(mock.Anything, "datasources").Return([]string{"grafana"}, nil).Once()
 
 		svc := service.NewVariableService(service.VariableServiceConfig{
 			Logger:    newTestLogger(t),
 			Variables: variables,
-			Check: func(_ context.Context, _ []string, _, _ string) error {
-				t.Fatal("nothing can read a variable that does not exist yet")
+			Check: func(_ context.Context, workloads []string, _, _ string) error {
+				assert.Equal(t, []string{"grafana"}, workloads)
 
-				return nil
+				return errors.New("workload grafana: invalid reference")
 			},
 		})
 
-		_, created, err := svc.Set(t.Context(), manifest.Variable{Name: "datasources", Value: "cost: $5"}, 0)
-		require.NoError(t, err)
-		assert.True(t, created)
+		_, _, err := svc.Set(t.Context(), manifest.Variable{Name: "datasources", Value: "cost: $5"}, 0)
+		require.ErrorIs(t, err, service.ErrInvalidVariable)
 	})
 
 	t.Run("records which variable moved each workload's hash", func(t *testing.T) {
@@ -242,7 +242,7 @@ func TestVariableService_Set(t *testing.T) {
 		variables.EXPECT().Upsert(mock.Anything, variableHolding("log-level", "debug"), 0).
 			Return(database.Variable{Name: "log-level", Value: "debug"}, nil).Once()
 		variables.EXPECT().UsedBy(mock.Anything, "log-level").
-			Return([]string{"one", "two"}, nil).Twice()
+			Return([]string{"one", "two"}, nil).Once()
 
 		// Recorded here rather than by the rehash, which recomputes against every
 		// value a workload reads and so cannot say which of them moved.

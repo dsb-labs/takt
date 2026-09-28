@@ -170,14 +170,20 @@ func (s *VariableService) Set(ctx context.Context, spec manifest.Variable, ifMat
 
 	created := errors.Is(err, database.ErrVariableNotFound)
 
+	// Read whether or not the variable exists. A workload keeps reading a name
+	// through a forced delete, so a variable created again is read by whatever read
+	// the one before it.
+	usedBy, err := s.variables.UsedBy(ctx, name)
+	if err != nil {
+		return Variable{}, false, err
+	}
+
 	// Refused before the value lands rather than reported by the readers afterwards.
 	// A reader expanding the variable renders it into a file, and a value it cannot
 	// render is a file the reader cannot start against — which the operator setting
 	// the value is the one who can fix.
-	if !created {
-		if err = s.checkReaders(ctx, name, value); err != nil {
-			return Variable{}, false, err
-		}
+	if err = s.checkReaders(ctx, usedBy, name, value); err != nil {
+		return Variable{}, false, err
 	}
 
 	stored, err := s.variables.Upsert(ctx, database.Variable{Name: name, Value: value, Labels: labels}, ifMatch)
@@ -187,15 +193,13 @@ func (s *VariableService) Set(ctx context.Context, spec manifest.Variable, ifMat
 
 	// The workloads reading it are rehashed after the value has landed, so nothing is
 	// redeployed to pick up a value that failed to store.
-	if err = s.redeploy(ctx, name); err != nil {
+	if err = s.redeployAll(ctx, name, usedBy); err != nil {
 		return Variable{}, false, err
 	}
 
 	s.logger.With("variable", name, "created", created).Info("variable set")
 
-	variable, err := s.hydrate(ctx, stored)
-
-	return variable, created, err
+	return reportVariable(stored, usedBy), created, nil
 }
 
 // Get returns the variable with the given name, along with the workloads
@@ -300,23 +304,14 @@ func (s *VariableService) Value(ctx context.Context, name string) (string, error
 	return stored.Value, nil
 }
 
-// checkReaders asks the workloads reading the variable whether they could render
-// the value, returning ErrInvalidVariable naming the one that could not.
-func (s *VariableService) checkReaders(ctx context.Context, name, value string) error {
-	if s.check == nil {
+// checkReaders asks the given workloads, which read the variable, whether they could
+// render the value, returning ErrInvalidVariable naming the one that could not.
+func (s *VariableService) checkReaders(ctx context.Context, usedBy []string, name, value string) error {
+	if s.check == nil || len(usedBy) == 0 {
 		return nil
 	}
 
-	usedBy, err := s.variables.UsedBy(ctx, name)
-	if err != nil {
-		return err
-	}
-
-	if len(usedBy) == 0 {
-		return nil
-	}
-
-	if err = s.check(ctx, usedBy, name, value); err != nil {
+	if err := s.check(ctx, usedBy, name, value); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidVariable, err)
 	}
 
@@ -349,6 +344,16 @@ func (s *VariableService) redeploy(ctx context.Context, name string) error {
 		return err
 	}
 
+	return s.redeployAll(ctx, name, usedBy)
+}
+
+// redeployAll rehashes each of the given workloads, which reference the named
+// variable, for a caller that has already read them.
+func (s *VariableService) redeployAll(ctx context.Context, name string, usedBy []string) error {
+	if s.rehash == nil {
+		return nil
+	}
+
 	// One failed rehash does not stop the rest. The value has already landed, so
 	// every reader that can be moved onto it should be — stopping at the first
 	// failure would leave readers on the old value for no reason of their own.
@@ -360,7 +365,7 @@ func (s *VariableService) redeploy(ctx context.Context, name string) error {
 		// value a workload reads and so cannot say which of them moved.
 		record(ctx, s.logger, s.events, workload, event.VariableChanged, event.Fields{Name: name})
 
-		if err = s.rehash(ctx, workload); err != nil {
+		if err := s.rehash(ctx, workload); err != nil {
 			failed = append(failed, fmt.Errorf("failed to redeploy workload %s: %w", workload, err))
 		}
 	}
@@ -374,6 +379,12 @@ func (s *VariableService) hydrate(ctx context.Context, row database.Variable) (V
 		return Variable{}, err
 	}
 
+	return reportVariable(row, usedBy), nil
+}
+
+// reportVariable returns the variable as it is reported, beside the workloads
+// reading it, for a caller that has already read them.
+func reportVariable(row database.Variable, usedBy []string) Variable {
 	return Variable{
 		Name:      row.Name,
 		Value:     row.Value,
@@ -382,5 +393,5 @@ func (s *VariableService) hydrate(ctx context.Context, row database.Variable) (V
 		Version:   row.Version,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
-	}, nil
+	}
 }
