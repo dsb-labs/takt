@@ -1161,6 +1161,74 @@ func (_m *MockMounts) EXPECT() *MockMounts_Expecter {
 	return &MockMounts_Expecter{mock: &_m.Mock}
 }
 
+// Contents provides a mock function for the type MockMounts
+func (_mock *MockMounts) Contents(ctx context.Context, spec manifest.Spec) (map[string]string, error) {
+	ret := _mock.Called(ctx, spec)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Contents")
+	}
+
+	var r0 map[string]string
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Spec) (map[string]string, error)); ok {
+		return returnFunc(ctx, spec)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Spec) map[string]string); ok {
+		r0 = returnFunc(ctx, spec)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]string)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Spec) error); ok {
+		r1 = returnFunc(ctx, spec)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockMounts_Contents_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Contents'
+type MockMounts_Contents_Call struct {
+	*mock.Call
+}
+
+// Contents is a helper method to define mock.On call
+//   - ctx context.Context
+//   - spec manifest.Spec
+func (_e *MockMounts_Expecter) Contents(ctx any, spec any) *MockMounts_Contents_Call {
+	return &MockMounts_Contents_Call{Call: _e.mock.On("Contents", ctx, spec)}
+}
+
+func (_c *MockMounts_Contents_Call) Run(run func(ctx context.Context, spec manifest.Spec)) *MockMounts_Contents_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 manifest.Spec
+		if args[1] != nil {
+			arg1 = args[1].(manifest.Spec)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockMounts_Contents_Call) Return(stringToString map[string]string, err error) *MockMounts_Contents_Call {
+	_c.Call.Return(stringToString, err)
+	return _c
+}
+
+func (_c *MockMounts_Contents_Call) RunAndReturn(run func(ctx context.Context, spec manifest.Spec) (map[string]string, error)) *MockMounts_Contents_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Deliver provides a mock function for the type MockMounts
 func (_mock *MockMounts) Deliver(ctx context.Context, id string, version int, spec manifest.Spec) ([]driver.Volume, error) {
 	ret := _mock.Called(ctx, id, version, spec)

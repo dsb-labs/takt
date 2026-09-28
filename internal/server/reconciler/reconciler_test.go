@@ -3318,6 +3318,76 @@ func (f *readinessFixture) observe(instances ...driver.Instance) {
 	f.observed = instances
 }
 
+// TestReconciler_Run_HoldsFirstStartForMountedDependency covers the reader whose
+// only reference to its target is inside a file rendered from a variable, which
+// the environment cannot see and the mounter can.
+func TestReconciler_Run_HoldsFirstStartForMountedDependency(t *testing.T) {
+	t.Parallel()
+
+	f := newReadinessFixture(t, false)
+
+	reader := storedWorkload("api", "hash-api")
+	reader.Spec = specWithExpandedMount("api", "db-config")
+
+	target := storedWorkload("db", "hash-db")
+	target.Spec = specWithCheckedPort("db", "")
+
+	// Replaces the fixture's list, which holds a reader reading through its
+	// environment.
+	f.repo.ExpectedCalls = nil
+	f.repo.EXPECT().List(mock.Anything).Return([]database.Workload{target, reader}, nil)
+
+	contents := map[string]string{"db-config": "host: ${workload:db:pg}"}
+
+	mounts := NewMockMounts(t)
+	mounts.EXPECT().Contents(mock.Anything, mock.MatchedBy(func(spec manifest.Spec) bool {
+		return spec.Name == "api"
+	})).Return(contents, nil).Maybe()
+	mounts.EXPECT().Deliver(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+	mounts.EXPECT().Reclaim(mock.Anything, mock.Anything).Return(nil).Maybe()
+	mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
+
+	// Nothing in the environment, so the environment names no target. The file is
+	// shared by every instance, so what it names resolves as the first.
+	f.env.EXPECT().Targets(mock.Anything, map[string]string(nil), "api", 0).Return(nil, nil).Maybe()
+	f.env.EXPECT().Targets(mock.Anything, contents, "api", 0).
+		Return([]resolve.Target{{Workload: "db", Instance: 0}}, nil).Maybe()
+	f.env.EXPECT().Addresses(mock.Anything, map[string]string(nil), "api", 0).Return(nil, nil).Maybe()
+	f.env.EXPECT().Resolve(mock.Anything, map[string]string(nil), mock.Anything, "api", 0).Return(nil, nil).Maybe()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:        newTestLogger(t),
+		Drivers:       map[string]reconciler.Driver{docker.Name: f.driver},
+		Workloads:     f.repo,
+		Env:           f.env,
+		Mounts:        mounts,
+		Checker:       f.checker,
+		Events:        f.recorder,
+		Interval:      time.Hour,
+		ReadinessWait: 5 * time.Minute,
+		Now:           func() time.Time { return *f.now.Load() },
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+	defer func() {
+		cancel()
+		require.NoError(t, <-done)
+	}()
+
+	awaitPasses(t, r, 1)
+	assert.Zero(t, f.starts.Load(), "the reader started before its target was ready")
+	assert.Equal(t, 1, f.recorder.count(event.DependencyNotReady))
+	assert.Contains(t, string(f.recorder.data(event.DependencyNotReady)), `"name":"db"`)
+
+	f.healthy.Store(true)
+	r.Notify()
+	awaitPasses(t, r, 2)
+	assert.Equal(t, int32(1), f.starts.Load(), "the reader did not start once its target passed")
+}
+
 func TestReconciler_Run_HoldsFirstStartForDependency(t *testing.T) {
 	t.Parallel()
 
@@ -4289,6 +4359,24 @@ func specWithEnv(name string, env map[string]string) []byte {
 		Version:   "v1",
 		Name:      name,
 		Env:       env,
+		Container: &manifest.Container{Image: "example/example:latest"},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return spec
+}
+
+// specWithExpandedMount returns the stored bytes of a workload mounting the named
+// variable with expand and reading nothing through its environment.
+func specWithExpandedMount(name, variable string) []byte {
+	spec, err := json.Marshal(manifest.Spec{
+		Version: "v1",
+		Name:    name,
+		Volumes: []manifest.VolumeMount{
+			{Var: variable, To: "/etc/app/config", Expand: true},
+		},
 		Container: &manifest.Container{Image: "example/example:latest"},
 	})
 	if err != nil {
