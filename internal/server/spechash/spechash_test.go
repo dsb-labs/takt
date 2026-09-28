@@ -72,6 +72,34 @@ func TestCompute(t *testing.T) {
 			Inputs: spechash.Inputs{Addresses: map[string]string{"workload:api:http": "10.0.0.1:20000"}},
 		},
 		{
+			// The references inside the file reach the hash through the same maps
+			// an env reference does, so a moved port or a rotated secret the file
+			// names replaces the instance.
+			Name: "expands a mounted variable",
+			File: "expanded_mount.json",
+			Inputs: spechash.Inputs{
+				Revisions: map[string]string{"grafana-db": "rev-one"},
+				Values:    map[string]string{"datasources": "url: http://${workload:prometheus:http}"},
+				Addresses: map[string]string{"prometheus:http": "10.0.0.1:20000"},
+			},
+		},
+		{
+			// Everything the file reads is refreshed with it, so this hashes as a
+			// workload reading nothing at all.
+			Name: "expands a mounted variable it asked to be signalled for",
+			File: "expanded_signalled_mount.json",
+			Inputs: spechash.Inputs{
+				Revisions: map[string]string{"grafana-db": "rev-one"},
+				Values:    map[string]string{"datasources": "url: http://${workload:prometheus:http}"},
+				Addresses: map[string]string{"prometheus:http": "10.0.0.1:20000"},
+				Refreshed: []manifest.Reference{
+					{Kind: manifest.KindSecret, Name: "grafana-db"},
+					{Kind: manifest.KindVariable, Name: "datasources"},
+					{Kind: manifest.KindWorkload, Name: "prometheus", Port: "http"},
+				},
+			},
+		},
+		{
 			Name:   "pulls the image on every start",
 			File:   "pull_always.json",
 			Inputs: spechash.Inputs{Digest: "sha256:abc"},
@@ -157,6 +185,41 @@ func TestCompute_SignallingMountIsNotASpecificationChange(t *testing.T) {
 	// And it hashes as a workload reading nothing, because an empty map is left out
 	// rather than written as null.
 	assert.Equal(t, unread, signalled)
+}
+
+// TestCompute_RefreshedAddressIsNotASpecificationChange holds the rule for a
+// workload reference read only through a signalled expanded mount: the address
+// moving rewrites the file rather than replacing the instance.
+func TestCompute_RefreshedAddressIsNotASpecificationChange(t *testing.T) {
+	t.Parallel()
+
+	spec := readSpec(t, "expanded_signalled_mount.json")
+	refreshed := []manifest.Reference{{Kind: manifest.KindWorkload, Name: "prometheus", Port: "http"}}
+
+	_, before, err := spechash.Compute(spec, spechash.Inputs{
+		Addresses: map[string]string{"prometheus:http": "10.0.0.1:20000"},
+		Refreshed: refreshed,
+	})
+	require.NoError(t, err)
+
+	_, moved, err := spechash.Compute(spec, spechash.Inputs{
+		Addresses: map[string]string{"prometheus:http": "10.0.0.1:20001"},
+		Refreshed: refreshed,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, before, moved)
+
+	_, unread, err := spechash.Compute(spec, spechash.Inputs{})
+	require.NoError(t, err)
+	assert.Equal(t, unread, before)
+
+	// An address the environment also reads stays in the hash, since the
+	// environment cannot be rewritten.
+	_, kept, err := spechash.Compute(spec, spechash.Inputs{
+		Addresses: map[string]string{"prometheus:http": "10.0.0.1:20001"},
+	})
+	require.NoError(t, err)
+	assert.NotEqual(t, unread, kept)
 }
 
 // TestCompute_RefreshedTokenLeavesTheOtherKindsAlone pins the rule that a token

@@ -1,0 +1,1 @@
+{"version":"v1","name":"example","count":1,"restart":{"policy":"always","delay":5000000000},"volumes":[{"var":"datasources","to":"/etc/grafana/datasources.yaml","expand":true}],"container":{"image":"example/example:latest"}}
