@@ -752,6 +752,180 @@ func TestRefreshed(t *testing.T) {
 	})
 }
 
+func TestReferencesIn(t *testing.T) {
+	t.Parallel()
+
+	contents := func(values map[string]string) manifest.Contents {
+		return func(name string) (string, bool) {
+			value, ok := values[name]
+
+			return value, ok
+		}
+	}
+
+	t.Run("sees inside an expanded variable", func(t *testing.T) {
+		references, err := manifest.ReferencesIn(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true},
+			},
+		}, contents(map[string]string{
+			"datasources": "url: http://${workload:prometheus:http}\npassword: ${secret:grafana-db}\nregion: ${var:region}",
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{
+			{Kind: manifest.KindSecret, Name: "grafana-db"},
+			{Kind: manifest.KindVariable, Name: "datasources"},
+			{Kind: manifest.KindVariable, Name: "region"},
+			{Kind: manifest.KindWorkload, Name: "prometheus", Port: "http"},
+		}, references)
+	})
+
+	t.Run("reads one level only", func(t *testing.T) {
+		// A variable the file pulls in is written as it is held, so what it holds is
+		// not a reading of this workload's.
+		references, err := manifest.ReferencesIn(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Var: "config", To: "/etc/app/config", Expand: true},
+			},
+		}, contents(map[string]string{
+			"config": "${var:inner}",
+			"inner":  "${secret:hidden}",
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{
+			{Kind: manifest.KindVariable, Name: "config"},
+			{Kind: manifest.KindVariable, Name: "inner"},
+		}, references)
+	})
+
+	t.Run("does not look inside a mount that did not ask", func(t *testing.T) {
+		references, err := manifest.ReferencesIn(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Var: "config", To: "/etc/app/config"},
+			},
+		}, contents(map[string]string{"config": "$ not a reference"}))
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{{Kind: manifest.KindVariable, Name: "config"}}, references)
+	})
+
+	t.Run("skips a variable the contents cannot see", func(t *testing.T) {
+		// Whether the variable exists is answered by whoever holds them, from the
+		// mount's own reference being among the result.
+		references, err := manifest.ReferencesIn(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Var: "config", To: "/etc/app/config", Expand: true},
+			},
+		}, contents(nil))
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{{Kind: manifest.KindVariable, Name: "config"}}, references)
+	})
+
+	t.Run("matches References without contents", func(t *testing.T) {
+		spec := manifest.Spec{
+			Env: map[string]string{"ADDR": "${workload:api:http}"},
+			Volumes: []manifest.VolumeMount{
+				{Var: "config", To: "/etc/app/config", Expand: true},
+			},
+		}
+
+		expected, err := manifest.References(spec)
+		require.NoError(t, err)
+
+		references, err := manifest.ReferencesIn(spec, nil)
+		require.NoError(t, err)
+		assert.Equal(t, expected, references)
+	})
+
+	t.Run("rejects a malformed reference naming the variable and the mount", func(t *testing.T) {
+		_, err := manifest.ReferencesIn(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Var: "config", To: "/etc/app/config", Expand: true},
+			},
+		}, contents(map[string]string{"config": "cost: $5"}))
+		require.ErrorIs(t, err, manifest.ErrInvalidReference)
+		assert.ErrorContains(t, err, "variable config mounted at /etc/app/config")
+		assert.ErrorContains(t, err, `"$5"`)
+	})
+
+	t.Run("rejects a token inside the contents", func(t *testing.T) {
+		_, err := manifest.ReferencesIn(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Var: "config", To: "/etc/app/config", Expand: true},
+			},
+		}, contents(map[string]string{"config": "token: ${token:prometheus}"}))
+		require.ErrorIs(t, err, manifest.ErrInvalidReference)
+		assert.ErrorContains(t, err, "variable config mounted at /etc/app/config")
+		assert.ErrorContains(t, err, "${token:prometheus}")
+	})
+}
+
+func TestRefreshedIn(t *testing.T) {
+	t.Parallel()
+
+	contents := func(name string) (string, bool) {
+		return map[string]string{
+			"datasources": "url: http://${workload:prometheus:http}\npassword: ${secret:grafana-db}",
+		}[name], name == "datasources"
+	}
+
+	prometheus := manifest.Reference{Kind: manifest.KindWorkload, Name: "prometheus", Port: "http"}
+
+	t.Run("refreshes what a signalled expanded mount reads", func(t *testing.T) {
+		// This is the property nothing else has: a moved address delivered as a
+		// reload rather than a replacement.
+		refreshed, err := manifest.RefreshedIn(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true, Signal: manifest.SignalHUP},
+			},
+		}, contents)
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{
+			{Kind: manifest.KindSecret, Name: "grafana-db"},
+			{Kind: manifest.KindVariable, Name: "datasources"},
+			prometheus,
+		}, refreshed)
+	})
+
+	t.Run("replaces for what an unsignalled expanded mount reads", func(t *testing.T) {
+		refreshed, err := manifest.RefreshedIn(manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true},
+			},
+		}, contents)
+		require.NoError(t, err)
+		assert.Empty(t, refreshed)
+	})
+
+	t.Run("ignores an address the environment also reads", func(t *testing.T) {
+		refreshed, err := manifest.RefreshedIn(manifest.Spec{
+			Env: map[string]string{"PROMETHEUS": "${workload:prometheus:http}"},
+			Volumes: []manifest.VolumeMount{
+				{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true, Signal: manifest.SignalHUP},
+			},
+		}, contents)
+		require.NoError(t, err)
+		assert.Equal(t, []manifest.Reference{
+			{Kind: manifest.KindSecret, Name: "grafana-db"},
+			{Kind: manifest.KindVariable, Name: "datasources"},
+		}, refreshed)
+	})
+
+	t.Run("matches Refreshed without contents", func(t *testing.T) {
+		spec := manifest.Spec{
+			Volumes: []manifest.VolumeMount{
+				{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true, Signal: manifest.SignalHUP},
+			},
+		}
+
+		expected, err := manifest.Refreshed(spec)
+		require.NoError(t, err)
+
+		refreshed, err := manifest.RefreshedIn(spec, nil)
+		require.NoError(t, err)
+		assert.Equal(t, expected, refreshed)
+	})
+}
+
 func TestKindOf(t *testing.T) {
 	t.Parallel()
 

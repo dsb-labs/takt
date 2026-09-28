@@ -353,6 +353,28 @@ type (
 		// Only a mounted secret, variable or token may name one. A volume holds
 		// whatever the workload puts there, so there is no change takt could report.
 		Signal Signal `json:"signal,omitempty"`
+		// Whether the references inside the mounted variable's value are expanded
+		// before the file is written, with the grammar an env value uses. Without
+		// it the file holds the value and nothing else.
+		//
+		// This is how a workload configured by a file rather than by its
+		// environment reaches another workload: the file names
+		// "${workload:name:port}" and takt writes the address. Whatever the file
+		// reads through a reference is read the way an env reference is, so a
+		// moved port, a rotated secret or an edited variable is delivered the way
+		// the mount's signal, or its absence, asks for.
+		//
+		// Only a mounted variable may ask for it. A secret's plaintext is decrypted
+		// immediately before the instance starts and nowhere else, and finding the
+		// references inside one would need it decrypted at every apply. A token is
+		// written by the server, a volume has no contents takt knows, and a host
+		// path is not takt's to rewrite.
+		//
+		// One level only: a variable pulled in by "${var:name}" is written as it is
+		// held. And a token reference is refused inside the file, since a token is
+		// minted rather than read and the file could not be re-rendered to see
+		// whether it moved without minting another.
+		Expand bool `json:"expand,omitempty"`
 		// Whether the workload may only read what is mounted. Applies to any
 		// source, so a shared volume can be handed to a workload that should not
 		// change it.
@@ -1079,6 +1101,11 @@ func validateVolumes(mounts []VolumeMount, runtime Runtime) error {
 
 		if err = validateMountSignal(mount, kind); err != nil {
 			return err
+		}
+
+		if mount.Expand && kind != MountVariable {
+			return fmt.Errorf("invalid volumes: %s %q cannot be expanded, because only a "+
+				"mounted %s holds contents takt reads references from", kind, source, MountVariable)
 		}
 
 		if mount.ReadOnly && runtime == RuntimeExec {
