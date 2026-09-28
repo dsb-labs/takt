@@ -120,8 +120,9 @@ See [Reaching another workload](manifest.md#reaching-another-workload).
 
 **`networks`.** takt does not create Docker networks. A workload reaches another
 through the host port takt published for it, which `${workload:name:port}`
-resolves to. Two workloads that must share a network namespace can both name
-`networkMode: host`.
+resolves to. A workload configured by a file writes the reference inside a
+mounted variable with `expand: true`. Two workloads that must share a network
+namespace can both name `networkMode: host`.
 
 **`build`.** takt runs images and does not build them. Build and push the image,
 then name it. A tag that is rebuilt in place wants `pull: always`, which folds the
@@ -129,7 +130,8 @@ image's digest into the specification so a rebuild is applied like any other
 change.
 
 **`links` and container DNS.** Nothing resolves `db` inside `app`. Use the address
-reference instead, which also survives the port moving.
+reference instead, which also survives the port moving. A config file that names
+`db` becomes a variable naming `${workload:db:pg}`, mounted with `expand: true`.
 
 **`profiles`, `extends`, `x-` anchors.** A manifest is one workload and has no
 composition of its own. Generate manifests from whatever templating you already

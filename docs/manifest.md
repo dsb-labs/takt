@@ -553,6 +553,10 @@ long starts anyway, says so, and fails on its own terms. See
 Two workloads may reference each other. Ports are allocated without consulting a
 reference, so there is nothing circular to resolve.
 
+A workload configured by a file rather than by its environment writes the reference
+inside a mounted variable instead. See
+[Expanding a mounted variable](#expanding-a-mounted-variable).
+
 A container reaching another workload depends on `workload.bind` naming an address a
 container can dial. The default publishes on every interface, which one can. Loopback
 is the exception, and only `exec` workloads reach each other there. See
@@ -726,7 +730,9 @@ document, a configuration fragment. An `env` reference covers a value that fits 
 environment variable. Use whichever the program wants.
 
 The file holds the value and nothing else. No trailing newline is added, so what a
-workload reads is what `takt secret set` was given.
+workload reads is what `takt secret set` was given. A mounted variable may ask for
+the references inside its value to be expanded first, which
+[Expanding a mounted variable](#expanding-a-mounted-variable) covers.
 
 The value has to exist before a workload can mount it, exactly as a volume does.
 Applying a manifest naming one that does not is rejected, and the message names it.
@@ -778,6 +784,67 @@ replacement would leave the workload reading the old contents.
 A value read from `env` as well as from a signalling mount still replaces the workload.
 An environment variable is fixed once a process has started, so there is no way to
 change one without a restart.
+
+### Expanding a mounted variable
+
+A program configured by a file has no environment to write a reference into. A
+metrics server's scrape config, a dashboard's datasource list and a log shipper's
+push target all name an address inside a file. `expand` asks for the references
+inside a mounted variable's value to be expanded before the file is written:
+
+```yaml
+volumes:
+  - var: datasources
+    to: /etc/grafana/provisioning/datasources/takt.yaml
+    expand: true
+    signal: SIGHUP
+```
+
+```yaml
+# The variable named datasources.
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    url: http://${workload:prometheus:http}
+```
+
+The grammar is the one an `env` value uses, and nothing more: `${var:name}`,
+`${secret:name}`, `${workload:name}`, `${workload:name:port}`, and `$$` for a
+literal dollar sign. It is not a template language. One level only: a variable the
+file pulls in with `${var:name}` is written as it is held. A `${token:name}`
+reference is refused inside a file, because a token is minted rather than read.
+
+The strict grammar applies. A `$` in the value that is not `$$` or a reference is
+rejected when the workload is applied, and the message names the variable, the mount
+and the text. A file that speaks another `$` dialect has to escape it, which is why
+expansion is asked for per mount rather than assumed. Setting the variable to such a
+value later is refused too, while a workload expands it.
+
+Whatever the file reads through a reference is read the way an `env` reference is.
+The secret's revision, the variable's value and the workload's address reach the
+hash, so a rotated secret, an edited variable or a moved port replaces the instances
+reading the file. With a `signal`, they stay out of the hash instead: takt renders the
+file again on every pass, and when the result differs it rewrites the file in place
+and sends the signal. A moved port is then delivered as a reload rather than a
+replacement, which nothing else offers. A reference the workload also reads from
+`env`, or through a mount naming no signal, still replaces it.
+
+A reader's first start waits for the workloads its file names, the way it waits for
+one its environment names. The dependency is recorded too: a workload named inside
+the file cannot be deleted without `--force`, and deleting the secret or variable it
+reads reports the reader.
+
+The file is delivered once per version of the workload and shared by its instances,
+so a `${workload:name:port}` reference inside it resolves as the reader's first
+instance. Every instance reads the same address. A file does not spread a reader's
+instances across a target's the way `env` does.
+
+Only a mounted variable may ask for `expand`. A secret is decrypted immediately
+before the instance starts and nowhere else, so there is nothing an apply could read
+references from. A variable holding `${secret:name}` covers a file that needs both
+an address and a credential. A token is written by takt, a volume has no contents
+takt knows, and a host path is not takt's to rewrite.
 
 ## Mounting a token
 

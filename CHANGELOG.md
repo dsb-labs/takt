@@ -17,6 +17,13 @@ describes how an entry is written.
   bounded by `reconcile.readiness-wait`, five minutes by default
   ([#135](https://github.com/dsb-labs/takt/issues/135),
   [#139](https://github.com/dsb-labs/takt/pull/139)).
+- A mount naming a variable may say `expand: true`, which replaces the
+  `${var:}`, `${secret:}` and `${workload:}` references inside the variable's
+  value before the file is written, so a workload configured by a file follows
+  a moved port, a rotated secret or an edited variable the way one reading
+  `env` does. With a `signal`, the file is rewritten and the workload signalled
+  rather than replaced
+  ([#131](https://github.com/dsb-labs/takt/issues/131)).
 
 - An `allow-host-paths` entry ending in `:ro` grants the prefix for reading only,
   so a path mount beneath it is accepted only when it says `readOnly: true`. The
