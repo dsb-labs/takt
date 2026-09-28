@@ -4172,6 +4172,42 @@ func metricByName(t *testing.T, reader *sdkmetric.ManualReader, name string) met
 	return metricdata.Metrics{}
 }
 
+// awaitRecordedPasses waits until the loop has recorded the given number of passes
+// on its counter, which it does as a pass returns: after the pass has decided what
+// to converge, and before the converges it spawned have finished. It is the wait
+// for a test that needs a pass to have looked at a workload it should leave alone,
+// where Passes would wait for the converge holding it as well.
+func awaitRecordedPasses(t *testing.T, reader *sdkmetric.ManualReader, passes int64) {
+	t.Helper()
+
+	require.Eventuallyf(t, func() bool {
+		var collected metricdata.ResourceMetrics
+		if err := reader.Collect(t.Context(), &collected); err != nil {
+			return false
+		}
+
+		var recorded int64
+		for _, scope := range collected.ScopeMetrics {
+			for _, m := range scope.Metrics {
+				if m.Name != "takt.reconcile.passes" {
+					continue
+				}
+
+				sum, ok := m.Data.(metricdata.Sum[int64])
+				if !ok {
+					return false
+				}
+
+				for _, point := range sum.DataPoints {
+					recorded += point.Value
+				}
+			}
+		}
+
+		return recorded >= passes
+	}, 5*time.Second, time.Millisecond, "the loop recorded fewer than %d passes", passes)
+}
+
 // The counter type counts reconciliation passes as the loop drives them, so that
 // tests can wait on the pass itself rather than polling the mock's call log —
 // which the loop is concurrently writing to.
@@ -4816,16 +4852,9 @@ func TestReconciler_Run_DoesNotWaitOnAConverge(t *testing.T) {
 
 	events := make(chan driver.Event)
 	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
-
-	passes := newCounter()
-	d.EXPECT().Observe(mock.Anything).
-		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
-			passes.inc()
-
-			return []driver.Instance{
-				{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning},
-			}, nil
-		})
+	d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+		{ID: "container-one", Workload: "example", SpecHash: "hash-one", State: driver.StateRunning},
+	}, nil)
 
 	// The stop sits out a grace period, which is what a pass used to wait on.
 	// Exactly once: the passes that run while it is held must leave the workload
@@ -4842,11 +4871,19 @@ func TestReconciler_Run_DoesNotWaitOnAConverge(t *testing.T) {
 		}).Once()
 	d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-two", nil).Once()
 
+	// The passes are waited on through the counter the loop records as a pass
+	// returns, not through the observations. A pass observes before it decides
+	// what to converge, so releasing the stop once the second pass had observed
+	// would race it: the first pass's converge finishes and frees the workload,
+	// and the second pass finds it free and stops it again.
+	reader := sdkmetric.NewManualReader()
+
 	r := reconciler.New(reconciler.Config{
-		Logger:    newTestLogger(t),
-		Drivers:   map[string]reconciler.Driver{docker.Name: d},
-		Workloads: repo,
-		Interval:  time.Hour,
+		Logger:        newTestLogger(t),
+		Drivers:       map[string]reconciler.Driver{docker.Name: d},
+		Workloads:     repo,
+		Interval:      time.Hour,
+		MeterProvider: sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)),
 	})
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -4862,7 +4899,7 @@ func TestReconciler_Run_DoesNotWaitOnAConverge(t *testing.T) {
 
 	// Passes keep running while the stop is held, and skip the workload it holds.
 	r.Notify()
-	passes.wait(t, 2)
+	awaitRecordedPasses(t, reader, 2)
 
 	// A pass is only counted once its converges have finished, so none has.
 	assert.Zero(t, r.Passes(), "a pass was counted complete while its converge was still stopping an instance")
