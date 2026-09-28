@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dsb-labs/takt/pkg/client"
@@ -156,6 +157,84 @@ func (s *Suite) TestMovingAPortRedeploysItsConsumers() {
 	s.Require().NoError(err)
 	s.Greater(after.Version, before.Version)
 	s.Equal(before.Spec.Env, after.Spec.Env)
+}
+
+// TestConfigFileFollowsAMovedPort covers a reference written inside a mounted
+// variable rather than the environment, which is how a workload configured by a
+// file reaches another. The port moves twice: once for a reader that asked to be
+// replaced, and once for one that asked to be signalled.
+func (s *Suite) TestConfigFileFollowsAMovedPort() {
+	backend, variable := s.workloadName()+"-backend", s.variableName()
+	replaced, signalled := s.workloadName()+"-replaced", s.workloadName()+"-signalled"
+	s.T().Cleanup(func() { s.cleanup(signalled) })
+	s.T().Cleanup(func() { s.cleanup(replaced) })
+	s.T().Cleanup(func() { s.cleanup(backend) })
+	s.T().Cleanup(func() { s.cleanupVariable(variable) })
+
+	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(backend, manifest.Port{Name: "http", To: 80, From: 8282}))
+	s.Require().NoError(err)
+	s.awaitState(backend, client.WorkloadStateRunning)
+
+	_, _, err = s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "url: http://${workload:" + backend + ":http}\ncost: $$5"})
+	s.Require().NoError(err)
+
+	reader := func(name string, signal manifest.Signal) manifest.Spec {
+		spec := s.containerSpec(name)
+		spec.Volumes = []manifest.VolumeMount{
+			{Var: variable, To: "/etc/app/config.yaml", Expand: true, Signal: signal},
+		}
+
+		return spec
+	}
+
+	_, _, err = s.client.Apply(s.ctx(), reader(replaced, ""))
+	s.Require().NoError(err)
+
+	applied, _, err := s.client.Apply(s.ctx(), reader(signalled, manifest.SignalHUP))
+	s.Require().NoError(err)
+
+	before := s.awaitState(replaced, client.WorkloadStateRunning)
+	replacedInstance := s.awaitInstance(replaced)
+	s.awaitState(signalled, client.WorkloadStateRunning)
+	signalledInstance := s.instanceID(signalled)
+
+	// The file holds the address rather than the reference, with the escaped dollar
+	// sign unescaped.
+	s.Require().True(strings.HasSuffix(s.mountedFile(replaced, "/etc/app/config.yaml"), ":8282\ncost: $5"))
+	s.Require().True(strings.HasSuffix(s.mountedFile(signalled, "/etc/app/config.yaml"), ":8282\ncost: $5"))
+
+	// The backend moves to another host port, which changes both files without a
+	// word of either reader's manifest or the variable changing.
+	_, _, err = s.client.Apply(s.ctx(), s.containerSpec(backend, manifest.Port{Name: "http", To: 80, From: 8283}))
+	s.Require().NoError(err)
+
+	// The reader that asked to be replaced was, and its replacement reads the new
+	// address.
+	s.awaitInstanceOtherThan(replaced, replacedInstance)
+	s.awaitState(replaced, client.WorkloadStateRunning)
+
+	after, err := s.client.Get(s.ctx(), replaced)
+	s.Require().NoError(err)
+	s.Greater(after.Version, before.Version)
+	s.True(strings.HasSuffix(s.mountedFile(replaced, "/etc/app/config.yaml"), ":8283\ncost: $5"))
+
+	// The reader that asked to be signalled had its file rewritten underneath it,
+	// which is the property nothing else offers: a moved address delivered as a
+	// reload rather than a replacement.
+	s.Require().Eventuallyf(func() bool {
+		return strings.HasSuffix(s.mountedFile(signalled, "/etc/app/config.yaml"), ":8283\ncost: $5")
+	}, convergeTimeout, 500*time.Millisecond, "the signalled reader's file was never rewritten")
+
+	workload, err := s.client.Get(s.ctx(), signalled)
+	s.Require().NoError(err)
+	s.Equal(applied.Version, workload.Version, "a moved address bumped the signalled reader's version")
+	s.Require().Len(workload.Instances, 1)
+	s.Equal(signalledInstance, workload.Instances[0].ID, "a moved address replaced the signalled reader's instance")
+
+	// A value the readers could not render is refused before it lands.
+	_, _, err = s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "cost: $5"})
+	s.Require().Error(err)
+	s.Contains(err.Error(), replaced)
 }
 
 // TestDeletingAReferencedWorkload covers the guard on the other end of a reference,
