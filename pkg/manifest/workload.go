@@ -436,12 +436,23 @@ const (
 	// PullAlways pulls the image on every start, and its registry digest reaches the
 	// specification hash so a rebuilt tag replaces the instance.
 	PullAlways PullPolicy = "always"
+	// PullFollow is PullAlways, and in addition lets the server act when it finds
+	// the tag has moved between starts: the hash is moved so the instance is
+	// replaced, rather than the drift being reported and left for the operator.
+	PullFollow PullPolicy = "follow"
 	// PullMissing pulls the image only when it is not present on the host. It is the
 	// default.
 	PullMissing PullPolicy = "missing"
 	// PullNever never pulls, and starting fails when the image is absent.
 	PullNever PullPolicy = "never"
 )
+
+// Always reports whether the policy pulls the image on every start and hashes the
+// digest the tag resolves to, which PullFollow does exactly as PullAlways does. The
+// two differ only in what the server may do once it finds the digest has moved.
+func (p PullPolicy) Always() bool {
+	return p == PullAlways || p == PullFollow
+}
 
 const (
 	// OverlapReplace stops the running instance and starts the occurrence, so the
@@ -1372,10 +1383,10 @@ func validateContainer(spec Container) error {
 	// Empty is accepted and means PullMissing. It is not resolved to it here, so that
 	// a manifest which says nothing encodes nothing on the wire.
 	switch spec.Pull {
-	case "", PullAlways, PullMissing, PullNever:
+	case "", PullAlways, PullFollow, PullMissing, PullNever:
 	default:
-		return fmt.Errorf("invalid container: pull must be %q, %q or %q",
-			PullAlways, PullMissing, PullNever)
+		return fmt.Errorf("invalid container: pull must be %q, %q, %q or %q",
+			PullAlways, PullFollow, PullMissing, PullNever)
 	}
 
 	// The user and the capability names are not held to a pattern. Docker accepts
