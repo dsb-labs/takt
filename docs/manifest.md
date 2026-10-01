@@ -547,7 +547,8 @@ target with no health check is not waited for, because there is nothing to wait 
 Only a first start is held. An instance restarted after a crash, or replaced after a
 change, was talking to its target a moment ago and starts at once. The wait is
 bounded by `reconcile.readiness-wait`, five minutes by default: a reader held that
-long starts anyway, says so, and fails on its own terms. See
+long starts anyway, says so, and fails on its own terms. A start that fails after
+the wait is given up is paced by the restart backoff, not held again. See
 [Configuration](configuration.md#reconcile).
 
 Two workloads may reference each other. Ports are allocated without consulting a
