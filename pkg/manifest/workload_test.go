@@ -342,6 +342,13 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			Name: "accepts a followed tag",
+			File: "pull_follow.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				assert.Equal(t, manifest.PullFollow, spec.Container.Pull)
+			},
+		},
+		{
 			Name:         "rejects a restart delay that is not a duration",
 			File:         "bad_delay.yaml",
 			ExpectsError: true,
@@ -1018,6 +1025,46 @@ func TestRestartPolicy_Restarts(t *testing.T) {
 	for _, tc := range tt {
 		t.Run(tc.Name, func(t *testing.T) {
 			assert.Equal(t, tc.ExpectRestarts, tc.Policy.Restarts(tc.ExitCode))
+		})
+	}
+}
+
+func TestPullPolicy_Always(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name         string
+		Policy       manifest.PullPolicy
+		ExpectAlways bool
+	}{
+		{
+			Name:         "always pulls on every start",
+			Policy:       manifest.PullAlways,
+			ExpectAlways: true,
+		},
+		{
+			// What follow adds happens between starts. At a start it is always.
+			Name:         "follow pulls on every start",
+			Policy:       manifest.PullFollow,
+			ExpectAlways: true,
+		},
+		{
+			Name:   "missing does not",
+			Policy: manifest.PullMissing,
+		},
+		{
+			Name:   "never does not",
+			Policy: manifest.PullNever,
+		},
+		{
+			Name:   "the empty policy is missing",
+			Policy: "",
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			assert.Equal(t, tc.ExpectAlways, tc.Policy.Always())
 		})
 	}
 }
