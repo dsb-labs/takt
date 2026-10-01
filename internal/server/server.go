@@ -25,6 +25,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/driver/docker"
 	"github.com/dsb-labs/takt/internal/server/driver/exec"
 	"github.com/dsb-labs/takt/internal/server/health"
+	"github.com/dsb-labs/takt/internal/server/job"
 	"github.com/dsb-labs/takt/internal/server/middleware"
 	"github.com/dsb-labs/takt/internal/server/mount"
 	"github.com/dsb-labs/takt/internal/server/port"
@@ -353,6 +354,22 @@ func Run(ctx context.Context, config Config) error {
 		TracerProvider: tel.TracerProvider(),
 	})
 
+	// The work the server does on its own clock rather than in answer to anything.
+	jobs := job.New(job.Config{
+		Logger: logger,
+		Jobs: []job.Job{
+			{
+				// An expired token already refuses to authenticate, so the sweep is
+				// hygiene for the token list rather than security — hourly is plenty.
+				Name:     "token-sweep",
+				Interval: time.Hour,
+				Run:      tokenSvc.Sweep,
+			},
+		},
+		MeterProvider:  tel.MeterProvider(),
+		TracerProvider: tel.TracerProvider(),
+	})
+
 	volumeSvc := service.NewVolumeService(service.VolumeServiceConfig{
 		Logger:  logger,
 		Volumes: volumes,
@@ -604,29 +621,7 @@ func Run(ctx context.Context, config Config) error {
 
 	g.Go(func() error { return reconcile.Run(ctx) })
 	g.Go(func() error { return checker.Run(ctx) })
-	g.Go(func() error {
-		// An expired token already refuses to authenticate, so the sweep is
-		// hygiene for the token list rather than security — hourly is plenty.
-		ticker := time.NewTicker(time.Hour)
-		defer ticker.Stop()
-
-		// Once at startup as well, so a server that was down for longer than an
-		// hour does not carry what expired in the meantime until its first tick.
-		if err := tokenSvc.Sweep(ctx); err != nil {
-			logger.With("error", err).Warn("failed to sweep expired tokens")
-		}
-
-		for {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-ticker.C:
-				if err := tokenSvc.Sweep(ctx); err != nil {
-					logger.With("error", err).Warn("failed to sweep expired tokens")
-				}
-			}
-		}
-	})
+	g.Go(func() error { return jobs.Run(ctx) })
 	g.Go(func() error {
 		<-ctx.Done()
 
