@@ -16,8 +16,8 @@ describes how an entry is written.
   sets the `takt_workload_image_drifted` gauge. Nothing is replaced until an apply
   or a restart. A new `pull: follow` policy is `always` with the server moving the
   hash itself when the tag moves, so the instances are replaced
-  ([#132](https://github.com/dsb-labs/takt/issues/132)).
-
+  ([#132](https://github.com/dsb-labs/takt/issues/132),
+  [#145](https://github.com/dsb-labs/takt/pull/145)).
 - A workload reading another's address through `${workload:name:port}` has its
   first start held until the instance it resolves to passes its health check,
   where the referenced workload declares one, so a reader applied beside a slow
