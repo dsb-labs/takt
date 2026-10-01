@@ -1277,19 +1277,23 @@ export interface components {
      *     that is already there is pinned until something removes it. `always` pulls
      *     on every start, and the image's digest is resolved from the registry and
      *     folded into the specification hash — so a rebuilt tag reads as an ordinary
-     *     specification change and replaces the instance. `never` refuses to pull at
-     *     all, and starting fails when the image is absent.
+     *     specification change and replaces the instance. `follow` is `always`, and
+     *     in addition lets the server move the hash itself when its periodic check
+     *     finds the tag has moved, so the instance is replaced without an apply.
+     *     `never` refuses to pull at all, and starting fails when the image is absent.
      *
      *     The digest behind `always` is resolved when the server computes the hash: an
-     *     apply, a changed secret or variable, or a port reallocation. It is not
-     *     watched continuously, so a rebuilt tag is picked up when one of those
-     *     happens rather than on a timer. Resolution carries the credentials the
+     *     apply, a changed secret or variable, or a port reallocation. A server with
+     *     a digest interval configured also asks on that interval, reporting an
+     *     `always` workload behind its tag as an `imageDrifted` event and replacing a
+     *     `follow` one. Without an interval nothing follows anything, which an apply
+     *     of a `follow` workload reports. Resolution carries the credentials the
      *     host's docker credential file holds for the registry, so a private image
      *     resolves wherever a docker pull on the host would.
      * @default missing
      * @enum {string}
      */
-    PullPolicy: "always" | "missing" | "never";
+    PullPolicy: "always" | "follow" | "missing" | "never";
     /**
      * @description The resource limits the workload runs under. A limit that is not named is
      *     not applied, so an empty section means what leaving it out means: unlimited.
@@ -2049,6 +2053,15 @@ export interface components {
        */
       suspended?: boolean;
       /**
+       * @description Whether the server's last check of the workload's tag found it
+       *     resolving to a digest other than the one its instances were hashed
+       *     with, so what is running is behind what the registry holds. Only ever
+       *     set for a `pull: always` workload on a server with a digest interval
+       *     configured, since a `follow` workload is moved on instead of reported.
+       *     An apply or a restart picks the new content up.
+       */
+      imageDrifted?: boolean;
+      /**
        * @description The port mappings the server settled on for this workload, including the
        *     host ports it allocated. These are how a caller reaches the workload, and
        *     are reported whether or not anything is currently running.
@@ -2170,6 +2183,10 @@ export interface components {
       | "occurrenceSkipped"
       | "occurrenceReplaced"
       | "scheduleInvalid"
+      | "imageDrifted"
+      | "imageFollowed"
+      | "digestUnresolved"
+      | "followUnscheduled"
       | "convergeFailed";
     /**
      * @description The values an event's message was rendered from, such as the image reference a
@@ -2213,6 +2230,8 @@ export interface components {
        * @description How long the server is waiting before it tries again, in nanoseconds.
        */
       delay?: number;
+      /** @description The digest an image reference resolves to, where the event concerns one. */
+      digest?: string;
       /** @description The schedule expression the event concerns. */
       schedule?: string;
       /** @description The signal sent to the workload, where the event reports one. */
