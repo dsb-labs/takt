@@ -23,6 +23,7 @@ archives:
     files:
       - LICENSE.md
       - README.md
+      - licenses/*
     formats:
       - zip
 
@@ -53,6 +54,8 @@ nfpms:
         type: config|noreplace
       - src: LICENSE.md
         dst: /usr/share/doc/takt/LICENSE.md
+      - src: licenses/**/*
+        dst: /usr/share/doc/takt/licenses
     scripts:
       postinstall: packaging/postinstall.sh
 
