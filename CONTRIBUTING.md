@@ -22,6 +22,18 @@ That regenerates the API and the test mocks. CI checks that running it produces 
 diff, so a change to the specification and a change to the generated code land
 together.
 
+## Dependency licences
+
+`licenses/` holds the licence of every Go module the binary is built from, and the
+release bundles it beside the binary. A change to the dependencies refreshes it:
+
+```sh
+./scripts/refresh_licenses.sh
+```
+
+The script runs `go-licenses`, which is a tool dependency in `go.mod`, so it needs
+nothing beyond a Go toolchain.
+
 ## Testing
 
 ```sh
@@ -266,6 +278,7 @@ internal/server/          the server and everything it wires together
   database/               SQLite, and desired state
 internal/e2e/             the end-to-end suite
 internal/loadtest/        the load test scenarios are run from here
+licenses/                 the licences of the modules the binary is built from
 pkg/manifest/             the canonical specification, and parsing one
 pkg/client/               the Go client
 pkg/cli/                  the connection settings a client resolves
