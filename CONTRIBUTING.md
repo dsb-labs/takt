@@ -18,21 +18,17 @@ there:
 go generate ./...
 ```
 
-That regenerates the API and the test mocks. CI checks that running it produces no
-diff, so a change to the specification and a change to the generated code land
-together.
+That regenerates the API, the test mocks and the dependency licences. CI checks that
+running it produces no diff, so a change to the specification and a change to the
+generated code land together.
 
 ## Dependency licences
 
 `licenses/` holds the licence of every Go module the binary is built from, and the
-release bundles it beside the binary. A change to the dependencies refreshes it:
-
-```sh
-./scripts/refresh_licenses.sh
-```
-
-The script runs `go-licenses`, which is a tool dependency in `go.mod`, so it needs
-nothing beyond a Go toolchain.
+release bundles it beside the binary. `go generate ./...` refreshes it along with
+everything else, through `scripts/refresh_licenses.sh`, so a dependency change and
+the licences it brings land together. The script runs `go-licenses`, which is a tool
+dependency in `go.mod`, so it needs nothing beyond a Go toolchain.
 
 ## Testing
 
