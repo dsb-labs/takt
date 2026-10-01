@@ -34,6 +34,14 @@ func (d *driftState) replace(found map[string]bool) {
 	d.workload = found
 }
 
+// behind reports whether the last check found the named workload behind its tag.
+func (d *driftState) behind(workload string) bool {
+	d.mux.Lock()
+	defer d.mux.Unlock()
+
+	return d.workload[workload]
+}
+
 // observe reports each checked workload to the gauge.
 func (d *driftState) observe(observer metric.Observer, gauge metric.Int64ObservableGauge) {
 	d.mux.Lock()

@@ -38,6 +38,10 @@ type (
 		Deleting bool
 		// Whether the workload has been stopped and is intentionally not running.
 		Suspended bool
+		// Whether the last check of a pulled workload's tag found it resolving to a
+		// digest other than the one its instances were hashed with. Only ever set
+		// on a server that checks, and cleared by whatever moves the hash.
+		ImageDrifted bool
 		// The time the workload was first applied.
 		CreatedAt time.Time
 		// The time the workload's specification last changed, or a suspended
@@ -108,7 +112,7 @@ func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (W
 
 	instances := s.observeWorkload(ctx, row)
 
-	return newWorkload(row, instances, ports, s.healths(row.Name, instances))
+	return newWorkload(row, instances, ports, s.healths(row.Name, instances), s.drifted.behind(row.Name))
 }
 
 // observeWorkload asks each driver what it is running for one workload.
@@ -223,7 +227,7 @@ func healthState(state driver.State, reported Health) driver.State {
 	}
 }
 
-func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, healths map[int]Health) (Workload, error) {
+func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, healths map[int]Health, drifted bool) (Workload, error) {
 	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return Workload{}, err
@@ -282,11 +286,12 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 		Instances: reported,
 		Ports:     newResolvedPorts(ports),
 		State:     state.Of(instances, deleting, suspended),
-		Deleting:  deleting,
-		Suspended: suspended,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		NextRun:   next,
+		Deleting:     deleting,
+		Suspended:    suspended,
+		ImageDrifted: drifted,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		NextRun:      next,
 	}, nil
 }
 
