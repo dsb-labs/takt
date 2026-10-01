@@ -354,22 +354,6 @@ func Run(ctx context.Context, config Config) error {
 		TracerProvider: tel.TracerProvider(),
 	})
 
-	// The work the server does on its own clock rather than in answer to anything.
-	jobs := job.New(job.Config{
-		Logger: logger,
-		Jobs: []job.Job{
-			{
-				// An expired token already refuses to authenticate, so the sweep is
-				// hygiene for the token list rather than security — hourly is plenty.
-				Name:     "token-sweep",
-				Interval: time.Hour,
-				Run:      tokenSvc.Sweep,
-			},
-		},
-		MeterProvider:  tel.MeterProvider(),
-		TracerProvider: tel.TracerProvider(),
-	})
-
 	volumeSvc := service.NewVolumeService(service.VolumeServiceConfig{
 		Logger:  logger,
 		Volumes: volumes,
@@ -483,6 +467,31 @@ func Run(ctx context.Context, config Config) error {
 		Reconciler:     reconcile,
 		Events:         events,
 		AllowHostPaths: hostPaths,
+		DigestInterval: config.Docker.DigestInterval,
+		MeterProvider:  tel.MeterProvider(),
+	})
+
+	// The work the server does on its own clock rather than in answer to anything.
+	jobs := job.New(job.Config{
+		Logger: logger,
+		Jobs: []job.Job{
+			{
+				// An expired token already refuses to authenticate, so the sweep is
+				// hygiene for the token list rather than security — hourly is plenty.
+				Name:     "token-sweep",
+				Interval: time.Hour,
+				Run:      tokenSvc.Sweep,
+			},
+			{
+				// Off unless the operator chose an interval: each check is a
+				// registry request, counted against a pull rate limit.
+				Name:     "image-drift",
+				Interval: config.Docker.DigestInterval,
+				Run:      svc.Drift,
+			},
+		},
+		MeterProvider:  tel.MeterProvider(),
+		TracerProvider: tel.TracerProvider(),
 	})
 
 	serviceSvc := service.NewServiceService(service.ServiceServiceConfig{

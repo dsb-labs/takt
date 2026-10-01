@@ -124,6 +124,12 @@ type (
 		// How long an image is left alone after nothing references it, so that a
 		// tag bumped and reverted within the delay does not pull the image again.
 		PruneDelay time.Duration `toml:"prune-delay"`
+		// How often the server asks what each pull-always or followed workload's
+		// tag resolves to, reporting the ones behind their tag and moving the
+		// followed ones on. Zero, the default, never asks: a check is a manifest
+		// request to the registry, and Docker Hub counts those against its pull
+		// rate limit, so turning it on is the operator's decision.
+		DigestInterval time.Duration `toml:"digest-interval"`
 	}
 
 	// The ExecConfig type contains configuration for the exec runtime.
@@ -558,6 +564,10 @@ func (c DockerConfig) validate() error {
 
 	if c.PruneDelay < 0 {
 		return errors.New("docker prune delay must not be negative")
+	}
+
+	if c.DigestInterval < 0 {
+		return errors.New("docker digest interval must not be negative")
 	}
 
 	return nil
