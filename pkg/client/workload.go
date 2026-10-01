@@ -54,6 +54,10 @@ type (
 		Deleting bool
 		// Whether the workload has been stopped and is intentionally not running.
 		Suspended bool
+		// Whether the server's last check of the workload's tag found it resolving
+		// to a digest other than the one its instances were hashed with. Only ever
+		// set for a pull-always workload on a server that checks digests.
+		ImageDrifted bool
 		// The specification that was submitted.
 		Spec manifest.Spec
 		// The port mappings the server settled on, including any it allocated. These
@@ -125,6 +129,8 @@ type (
 		Count int
 		// How long the server is waiting before it tries again.
 		Delay time.Duration
+		// The digest an image reference resolves to, where the event concerns one.
+		Digest string
 		// The schedule expression the event concerns.
 		Schedule string
 		// The signal sent to the workload, where the event reports one.
@@ -391,6 +397,22 @@ const (
 	EventOccurrenceReplaced EventReason = "occurrenceReplaced"
 	// EventScheduleInvalid indicates the workload's schedule could not be read.
 	EventScheduleInvalid EventReason = "scheduleInvalid"
+)
+
+// The reasons concerning a workload's image between starts.
+const (
+	// EventImageDrifted indicates a pull-always workload's tag resolves to a digest
+	// other than the one its instances were hashed with, and nothing was replaced.
+	EventImageDrifted EventReason = "imageDrifted"
+	// EventImageFollowed indicates a followed workload's hash was moved to a
+	// rebuilt tag, replacing its instances.
+	EventImageFollowed EventReason = "imageFollowed"
+	// EventDigestUnresolved indicates the registry could not say what a tag
+	// resolves to, so nothing was compared.
+	EventDigestUnresolved EventReason = "digestUnresolved"
+	// EventFollowUnscheduled indicates a workload asked to follow its tag on a
+	// server that checks no digests.
+	EventFollowUnscheduled EventReason = "followUnscheduled"
 )
 
 const (
@@ -1166,6 +1188,7 @@ func newEvent(e api.WorkloadEvent) Event {
 		ExitCode:  e.Data.ExitCode,
 		Count:     value(e.Data.Count),
 		Delay:     time.Duration(value(e.Data.Delay)),
+		Digest:    value(e.Data.Digest),
 		Schedule:  value(e.Data.Schedule),
 		Signal:    value(e.Data.Signal),
 		Ports:     value(e.Data.Ports),
@@ -1205,6 +1228,9 @@ func newWorkload(w api.Workload) (Workload, error) {
 	}
 	if w.Suspended != nil {
 		workload.Suspended = *w.Suspended
+	}
+	if w.ImageDrifted != nil {
+		workload.ImageDrifted = *w.ImageDrifted
 	}
 
 	if w.Ports != nil {
