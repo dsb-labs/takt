@@ -409,7 +409,7 @@ func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Worklo
 
 	workloads := make([]Workload, 0, len(rows))
 	for _, row := range rows {
-		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.healths(row.Name, observed[row.Name]))
+		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.healths(row.Name, observed[row.Name]), s.drifted.behind(row.Name))
 		if err != nil {
 			return nil, err
 		}

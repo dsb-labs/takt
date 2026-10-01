@@ -3313,6 +3313,48 @@ func TestWorkloadService_Drift(t *testing.T) {
 	})
 }
 
+func TestWorkloadService_Drift_ReportedOnTheWorkload(t *testing.T) {
+	t.Parallel()
+
+	d, repo, images, events := newMockDriver(t), NewMockWorkloadRepository(t), NewMockImageResolver(t), NewMockWorkloadEventRepository(t)
+
+	row := pulledWorkload("example", manifest.PullAlways, "sha256:one")
+
+	repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "always"}}).Return([]database.Workload{row}, nil).Once()
+	repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "follow"}}).Return(nil, nil).Once()
+	images.EXPECT().Digest(mock.Anything, "example/example:latest").Return("sha256:two", nil).Once()
+	events.EXPECT().Record(mock.Anything, "example", event.ImageDrifted, mock.Anything).Return(nil).Once()
+	repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+	ports := NewMockPortRepository(t)
+	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+	svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]service.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Images:    images,
+		Events:    events,
+	})
+
+	// Not drifted until something has checked: a server that never asks has
+	// nothing to say.
+	before, err := svc.Get(t.Context(), "example")
+	require.NoError(t, err)
+	assert.False(t, before.ImageDrifted)
+
+	require.NoError(t, svc.Drift(t.Context()))
+
+	repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+	after, err := svc.Get(t.Context(), "example")
+	require.NoError(t, err)
+	assert.True(t, after.ImageDrifted)
+}
+
 func TestWorkloadService_Drift_Metrics(t *testing.T) {
 	t.Parallel()
 
