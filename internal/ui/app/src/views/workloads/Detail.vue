@@ -253,6 +253,18 @@ await workload.suspense().catch(() => {});
             <OverviewRow v-if="spec?.container" label="Image" mono>{{
               spec.container.image
             }}</OverviewRow>
+            <!-- Only ever set on a server that checks digests, so the row says
+                 what the registry holds is ahead of what is running, in the
+                 colour the state badge gives a degraded workload. -->
+            <OverviewRow v-if="spec?.container?.pull" label="Pull">
+              {{ spec.container.pull }}
+              <span
+                v-if="workload.data.value.imageDrifted"
+                class="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                title="The tag now resolves to a digest other than the one this workload is running. Apply or restart it to pick the new content up."
+                >behind its tag</span
+              >
+            </OverviewRow>
             <OverviewRow
               v-if="command"
               label="Command"
