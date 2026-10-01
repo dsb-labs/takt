@@ -3108,6 +3108,16 @@ func TestWorkloadService_Apply_HashesImageDigest(t *testing.T) {
 		assert.NotEqual(t, first, second)
 	})
 
+	t.Run("hashes a followed workload's digest the way an always one is", func(t *testing.T) {
+		spec := pullAlwaysSpec("example", "example/example:latest")
+		spec.Container.Pull = manifest.PullFollow
+
+		first := applyForDigestHash(t, spec, map[string]string{"example/example:latest": "sha256:one"})
+		second := applyForDigestHash(t, spec, map[string]string{"example/example:latest": "sha256:two"})
+
+		assert.NotEqual(t, first, second)
+	})
+
 	t.Run("keeps the hash when the digest is unchanged", func(t *testing.T) {
 		spec := pullAlwaysSpec("example", "example/example:latest")
 

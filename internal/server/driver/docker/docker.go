@@ -963,7 +963,7 @@ func (d *Driver) forget(containers []container.Summary) {
 // The empty policy means manifest.PullMissing, so a specification written before
 // the policy existed behaves as it always did. An always policy pulls without
 // looking at what is held locally, since the point of asking for it is to fetch the
-// tag's current content. A never policy must fail when the image is absent rather
+// tag's current content, and a follow policy is always at a start. A never policy must fail when the image is absent rather
 // than falling through to a pull, or it is indistinguishable from missing.
 //
 // A pull runs in the background rather than here. A registry round-trip can take
@@ -973,7 +973,7 @@ func (d *Driver) forget(containers []container.Summary) {
 // while it runs, and the call that finds it finished consumes the outcome — a
 // failure is returned exactly once, and a success falls through to the start.
 func (d *Driver) ensureImage(ctx context.Context, workload, ref string, policy manifest.PullPolicy) error {
-	if policy != manifest.PullAlways {
+	if !policy.Always() {
 		images, err := d.client.ImageList(ctx, client.ImageListOptions{
 			Filters: client.Filters{}.Add("reference", ref),
 		})

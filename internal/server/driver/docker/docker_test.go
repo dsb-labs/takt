@@ -679,6 +679,34 @@ func TestDriver_Start_AlwaysPolicyPullsInBackground(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 }
 
+func TestDriver_Start_FollowPolicyPullsLikeAlways(t *testing.T) {
+	t.Parallel()
+
+	// What follow adds happens between starts. At a start it is always, so the
+	// local images are not consulted: the strict mocks fail this test if
+	// ImageList is called.
+	client := NewMockClient(t)
+
+	client.EXPECT().ImagePull(mock.Anything, "example/example:latest", mock.Anything).
+		Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
+	client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+	client.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+	client.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+
+	d := testDriver(t, client)
+	w := workload("example", 0, "", pulledSpec("example/example:latest", manifest.PullFollow), nil, nil)
+
+	_, err := d.Start(t.Context(), w)
+	require.ErrorIs(t, err, driver.ErrImagePulling)
+
+	require.Eventually(t, func() bool {
+		_, err := d.Start(t.Context(), w)
+
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
 func TestDriver_Start_ReportsPullFailure(t *testing.T) {
 	t.Parallel()
 

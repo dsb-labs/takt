@@ -449,8 +449,8 @@ func (s *WorkloadService) CheckContents(ctx context.Context, workloads []string,
 	return nil
 }
 
-// resolveDigest returns the digest a pull-always workload's image currently
-// resolves to, and the empty string for every other workload.
+// resolveDigest returns the digest a pull-always or followed workload's image
+// currently resolves to, and the empty string for every other workload.
 //
 // The digest is read whenever a hash is computed — an apply, a rehash, a port
 // reallocation — rather than stored, so each of those picks up a rebuilt tag and
@@ -459,7 +459,7 @@ func (s *WorkloadService) CheckContents(ctx context.Context, workloads []string,
 // That is the honest outcome: a hash computed without the digest would claim the
 // image is unchanged when nothing checked.
 func (s *WorkloadService) resolveDigest(ctx context.Context, spec manifest.Spec) (string, error) {
-	if spec.Container == nil || spec.Container.Pull != manifest.PullAlways {
+	if spec.Container == nil || !spec.Container.Pull.Always() {
 		return "", nil
 	}
 
