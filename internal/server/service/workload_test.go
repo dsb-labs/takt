@@ -21,6 +21,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/driver"
@@ -3187,6 +3189,269 @@ func TestWorkloadService_Apply_HashesImageDigest(t *testing.T) {
 	})
 }
 
+func TestWorkloadService_Drift(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports a pull-always workload behind its tag and replaces nothing", func(t *testing.T) {
+		repo, images, events := NewMockWorkloadRepository(t), NewMockImageResolver(t), NewMockWorkloadEventRepository(t)
+
+		row := pulledWorkload("example", manifest.PullAlways, "sha256:one")
+
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "always"}}).Return([]database.Workload{row}, nil).Once()
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "follow"}}).Return(nil, nil).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").Return("sha256:two", nil).Once()
+		events.EXPECT().Record(mock.Anything, "example", event.ImageDrifted, mock.MatchedBy(func(data []byte) bool {
+			return strings.Contains(string(data), `"reference":"example/example:latest"`) &&
+				strings.Contains(string(data), `"digest":"sha256:two"`)
+		})).Return(nil).Once()
+
+		svc := newTestDriftService(t, repo, images, events, nil)
+		require.NoError(t, svc.Drift(t.Context()))
+	})
+
+	t.Run("says nothing about a workload whose tag has not moved", func(t *testing.T) {
+		repo, images, events := NewMockWorkloadRepository(t), NewMockImageResolver(t), NewMockWorkloadEventRepository(t)
+
+		row := pulledWorkload("example", manifest.PullAlways, "sha256:one")
+
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "always"}}).Return([]database.Workload{row}, nil).Once()
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "follow"}}).Return(nil, nil).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").Return("sha256:one", nil).Once()
+
+		svc := newTestDriftService(t, repo, images, events, nil)
+		require.NoError(t, svc.Drift(t.Context()))
+	})
+
+	t.Run("moves a followed workload's hash to the new digest", func(t *testing.T) {
+		repo, images, events := NewMockWorkloadRepository(t), NewMockImageResolver(t), NewMockWorkloadEventRepository(t)
+
+		row := pulledWorkload("example", manifest.PullFollow, "sha256:one")
+
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "always"}}).Return(nil, nil).Once()
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "follow"}}).Return([]database.Workload{row}, nil).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").Return("sha256:two", nil).Once()
+
+		var stored database.Workload
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
+				stored = w
+
+				return w, false, nil
+			}).Once()
+		events.EXPECT().Record(mock.Anything, "example", event.ImageFollowed, mock.MatchedBy(func(data []byte) bool {
+			return strings.Contains(string(data), `"digest":"sha256:two"`)
+		})).Return(nil).Once()
+
+		woken := make(chan struct{}, 1)
+		svc := newTestDriftService(t, repo, images, events, func() { woken <- struct{}{} })
+		require.NoError(t, svc.Drift(t.Context()))
+
+		// Only the hash moves, to what the new digest computes to, and the
+		// reconciler is woken to replace the instances running the old content.
+		assert.Equal(t, row.Spec, stored.Spec)
+		assert.Equal(t, pulledHash(t, row, "sha256:two"), stored.SpecHash)
+		assert.NotEqual(t, row.SpecHash, stored.SpecHash)
+
+		select {
+		case <-woken:
+		default:
+			t.Fatal("the reconciler was not woken")
+		}
+	})
+
+	t.Run("records a digest the registry cannot resolve and compares nothing", func(t *testing.T) {
+		repo, images, events := NewMockWorkloadRepository(t), NewMockImageResolver(t), NewMockWorkloadEventRepository(t)
+
+		row := pulledWorkload("example", manifest.PullFollow, "sha256:one")
+
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "always"}}).Return(nil, nil).Once()
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "follow"}}).Return([]database.Workload{row}, nil).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").Return("", errors.New("registry unreachable")).Once()
+		events.EXPECT().Record(mock.Anything, "example", event.DigestUnresolved, mock.MatchedBy(func(data []byte) bool {
+			return strings.Contains(string(data), `"error":"failed to resolve image digest: registry unreachable"`)
+		})).Return(nil).Once()
+
+		// The strict repository mock fails this test if anything is written.
+		svc := newTestDriftService(t, repo, images, events, nil)
+		assert.ErrorContains(t, svc.Drift(t.Context()), "registry unreachable")
+	})
+
+	t.Run("leaves suspended and deleted workloads alone", func(t *testing.T) {
+		repo, images, events := NewMockWorkloadRepository(t), NewMockImageResolver(t), NewMockWorkloadEventRepository(t)
+
+		suspended := pulledWorkload("suspended", manifest.PullAlways, "sha256:one")
+		suspended.SuspendedAt = time.Now()
+
+		deleted := pulledWorkload("deleted", manifest.PullFollow, "sha256:one")
+		deleted.DeletedAt = time.Now()
+
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "always"}}).Return([]database.Workload{suspended}, nil).Once()
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "follow"}}).Return([]database.Workload{deleted}, nil).Once()
+
+		// The strict resolver mock fails this test if either is asked about.
+		svc := newTestDriftService(t, repo, images, events, nil)
+		require.NoError(t, svc.Drift(t.Context()))
+	})
+
+	t.Run("checks the rest when one registry fails", func(t *testing.T) {
+		repo, images, events := NewMockWorkloadRepository(t), NewMockImageResolver(t), NewMockWorkloadEventRepository(t)
+
+		broken := pulledWorkload("broken", manifest.PullAlways, "sha256:one")
+		broken.Spec = encodedSpec(pullAlwaysSpec("broken", "broken.example/app:latest"))
+
+		fine := pulledWorkload("fine", manifest.PullAlways, "sha256:one")
+
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "always"}}).Return([]database.Workload{broken, fine}, nil).Once()
+		repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "follow"}}).Return(nil, nil).Once()
+		images.EXPECT().Digest(mock.Anything, "broken.example/app:latest").Return("", errors.New("registry unreachable")).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").Return("sha256:two", nil).Once()
+		events.EXPECT().Record(mock.Anything, "broken", event.DigestUnresolved, mock.Anything).Return(nil).Once()
+		events.EXPECT().Record(mock.Anything, "fine", event.ImageDrifted, mock.Anything).Return(nil).Once()
+
+		svc := newTestDriftService(t, repo, images, events, nil)
+		assert.Error(t, svc.Drift(t.Context()))
+	})
+}
+
+func TestWorkloadService_Drift_Metrics(t *testing.T) {
+	t.Parallel()
+
+	reader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+
+	repo, images, events := NewMockWorkloadRepository(t), NewMockImageResolver(t), NewMockWorkloadEventRepository(t)
+
+	behind := pulledWorkload("behind", manifest.PullAlways, "sha256:one")
+	behind.Spec = encodedSpec(pullAlwaysSpec("behind", "example/behind:latest"))
+	behind.SpecHash = pulledHash(t, behind, "sha256:one")
+
+	current := pulledWorkload("current", manifest.PullAlways, "sha256:one")
+
+	repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "always"}}).Return([]database.Workload{behind, current}, nil).Once()
+	repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "follow"}}).Return(nil, nil).Once()
+	images.EXPECT().Digest(mock.Anything, "example/behind:latest").Return("sha256:two", nil).Once()
+	images.EXPECT().Digest(mock.Anything, "example/example:latest").Return("sha256:one", nil).Once()
+	events.EXPECT().Record(mock.Anything, "behind", event.ImageDrifted, mock.Anything).Return(nil).Once()
+
+	svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+		Logger:        newTestLogger(t),
+		Workloads:     repo,
+		Ports:         NewMockPortRepository(t),
+		Images:        images,
+		Events:        events,
+		MeterProvider: provider,
+	})
+	require.NoError(t, svc.Drift(t.Context()))
+
+	assert.Equal(t, map[string]int64{"behind": 1, "current": 0}, driftGauge(t, reader))
+
+	// A workload no longer pulled stops being reported rather than freezing at
+	// its last value.
+	repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "always"}}).Return([]database.Workload{current}, nil).Once()
+	repo.EXPECT().List(mock.Anything, []database.Query{{Path: "$.container.pull", Value: "follow"}}).Return(nil, nil).Once()
+	images.EXPECT().Digest(mock.Anything, "example/example:latest").Return("sha256:one", nil).Once()
+	require.NoError(t, svc.Drift(t.Context()))
+
+	assert.Equal(t, map[string]int64{"current": 0}, driftGauge(t, reader))
+}
+
+// driftGauge collects the image drift gauge, keyed by workload.
+func driftGauge(t *testing.T, reader *sdkmetric.ManualReader) map[string]int64 {
+	t.Helper()
+
+	var collected metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(t.Context(), &collected))
+
+	values := make(map[string]int64)
+	for _, scope := range collected.ScopeMetrics {
+		for _, recorded := range scope.Metrics {
+			if recorded.Name != "takt.workload.image.drifted" {
+				continue
+			}
+
+			gauge, ok := recorded.Data.(metricdata.Gauge[int64])
+			require.True(t, ok)
+
+			for _, point := range gauge.DataPoints {
+				workload, _ := point.Attributes.Value("workload")
+				values[workload.AsString()] = point.Value
+			}
+		}
+	}
+
+	return values
+}
+
+// pulledWorkload builds a stored container workload under the given pull policy,
+// hashed against the given digest the way an apply would have hashed it.
+func pulledWorkload(name string, policy manifest.PullPolicy, digest string) database.Workload {
+	spec := pullAlwaysSpec(name, "example/example:latest")
+	spec.Container.Pull = policy
+	spec.Defaults()
+
+	row := database.Workload{
+		ID:      name + "-id",
+		Name:    name,
+		Version: 1,
+		Runtime: string(manifest.RuntimeContainer),
+		Spec:    encodedSpec(spec),
+	}
+
+	_, hash, err := spechash.Compute(spec, spechash.Inputs{Digest: digest})
+	if err != nil {
+		panic(err)
+	}
+
+	row.SpecHash = hash
+
+	return row
+}
+
+// pulledHash returns the hash a stored workload computes to against a digest.
+func pulledHash(t *testing.T, row database.Workload, digest string) string {
+	t.Helper()
+
+	spec, err := manifest.DecodeWorkload(row.Spec)
+	require.NoError(t, err)
+
+	_, hash, err := spechash.Compute(spec, spechash.Inputs{Digest: digest})
+	require.NoError(t, err)
+
+	return hash
+}
+
+// newTestDriftService builds a service that resolves digests and records events,
+// for the tests about the drift check. It is woken through notify when given.
+func newTestDriftService(
+	t *testing.T,
+	repo *MockWorkloadRepository,
+	images *MockImageResolver,
+	events *MockWorkloadEventRepository,
+	notify func(),
+) *service.WorkloadService {
+	t.Helper()
+
+	ports := NewMockPortRepository(t)
+	ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+	config := service.WorkloadServiceConfig{
+		Logger:    newTestLogger(t),
+		Workloads: repo,
+		Ports:     ports,
+		Images:    images,
+		Events:    events,
+	}
+
+	if notify != nil {
+		rec := NewMockReconciler(t)
+		rec.EXPECT().Notify().Run(notify).Return().Maybe()
+
+		config.Reconciler = rec
+	}
+
+	return service.NewWorkloadService(config)
+}
+
 func TestWorkloadService_Rehash(t *testing.T) {
 	t.Parallel()
 
@@ -4359,6 +4624,94 @@ func TestWorkloadService_RecordsRequests(t *testing.T) {
 		svc := newTestRecordingService(t, d, repo, ports, events)
 
 		_, _, err := svc.Apply(t.Context(), containerSpec("example", "example/example:latest"), 0)
+		require.NoError(t, err)
+	})
+
+	t.Run("reports a follow on a server that checks no digests", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events, images := NewMockWorkloadEventRepository(t), NewMockImageResolver(t)
+
+		spec := pullAlwaysSpec("example", "example/example:latest")
+		spec.Container.Pull = manifest.PullFollow
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
+				w.Version = 1
+
+				return w, true, nil
+			}).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").Return("sha256:one", nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		events.EXPECT().Record(mock.Anything, "example", event.Applied, mock.Anything).Return(nil).Once()
+		events.EXPECT().Record(mock.Anything, "example", event.FollowUnscheduled,
+			mock.MatchedBy(func(data []byte) bool {
+				return strings.Contains(string(data), `"reference":"example/example:latest"`)
+			})).Return(nil).Once()
+
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		// No digest interval: this server checks nothing, so the manifest's ask is
+		// accepted and the workload says it will go unanswered.
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Address:   "10.0.0.5",
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]service.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Events:    events,
+			Images:    images,
+			Claimer:   newTestClaimer(ports, allocatorStub{}),
+		})
+
+		_, _, err := svc.Apply(t.Context(), spec, 0)
+		require.NoError(t, err)
+	})
+
+	t.Run("says nothing about a follow on a server that checks digests", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events, images := NewMockWorkloadEventRepository(t), NewMockImageResolver(t)
+
+		spec := pullAlwaysSpec("example", "example/example:latest")
+		spec.Container.Pull = manifest.PullFollow
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+		repo.EXPECT().Upsert(mock.Anything, mock.Anything, 0).
+			RunAndReturn(func(_ context.Context, w database.Workload, _ int, _ ...database.Port) (database.Workload, bool, error) {
+				w.Version = 1
+
+				return w, true, nil
+			}).Once()
+		images.EXPECT().Digest(mock.Anything, "example/example:latest").Return("sha256:one", nil).Once()
+		d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+		// The strict events mock fails this test if anything but the apply is recorded.
+		events.EXPECT().Record(mock.Anything, "example", event.Applied, mock.Anything).Return(nil).Once()
+
+		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().ListAll(mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().Allocated(mock.Anything).Return(nil, nil).Maybe()
+		ports.EXPECT().HolderOf(mock.Anything, mock.Anything, mock.Anything).Return("", false, nil).Maybe()
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Address:        "10.0.0.5",
+			Logger:         newTestLogger(t),
+			Drivers:        map[string]service.Driver{docker.Name: d},
+			Workloads:      repo,
+			Ports:          ports,
+			Events:         events,
+			Images:         images,
+			Claimer:        newTestClaimer(ports, allocatorStub{}),
+			DigestInterval: 30 * time.Minute,
+		})
+
+		_, _, err := svc.Apply(t.Context(), spec, 0)
 		require.NoError(t, err)
 	})
 
