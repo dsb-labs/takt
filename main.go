@@ -2,6 +2,7 @@
 //
 //go:generate go tool oapi-codegen -config api/oapi-codegen.yaml api/openapi.yaml
 //go:generate go tool mockery
+//go:generate ./scripts/refresh_licenses.sh
 package main
 
 import (
