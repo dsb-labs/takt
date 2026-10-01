@@ -730,6 +730,10 @@ func newWorkload(w service.Workload) api.Workload {
 		workload.Suspended = new(true)
 	}
 
+	if w.ImageDrifted {
+		workload.ImageDrifted = new(true)
+	}
+
 	if len(w.Ports) > 0 {
 		workload.Ports = new(newResolvedPorts(w.Ports))
 	}

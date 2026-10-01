@@ -181,6 +181,7 @@ func (e Protocol) Valid() bool {
 // Defines values for PullPolicy.
 const (
 	PullPolicyAlways  PullPolicy = "always"
+	PullPolicyFollow  PullPolicy = "follow"
 	PullPolicyMissing PullPolicy = "missing"
 	PullPolicyNever   PullPolicy = "never"
 )
@@ -189,6 +190,8 @@ const (
 func (e PullPolicy) Valid() bool {
 	switch e {
 	case PullPolicyAlways:
+		return true
+	case PullPolicyFollow:
 		return true
 	case PullPolicyMissing:
 		return true
@@ -349,9 +352,13 @@ const (
 	WorkloadEventReasonDeleted               WorkloadEventReason = "deleted"
 	WorkloadEventReasonDependencyNotReady    WorkloadEventReason = "dependencyNotReady"
 	WorkloadEventReasonDependencyWaitGivenUp WorkloadEventReason = "dependencyWaitGivenUp"
+	WorkloadEventReasonDigestUnresolved      WorkloadEventReason = "digestUnresolved"
+	WorkloadEventReasonFollowUnscheduled     WorkloadEventReason = "followUnscheduled"
 	WorkloadEventReasonHashMoved             WorkloadEventReason = "hashMoved"
 	WorkloadEventReasonHealthCheckFailing    WorkloadEventReason = "healthCheckFailing"
 	WorkloadEventReasonHealthCheckRecovered  WorkloadEventReason = "healthCheckRecovered"
+	WorkloadEventReasonImageDrifted          WorkloadEventReason = "imageDrifted"
+	WorkloadEventReasonImageFollowed         WorkloadEventReason = "imageFollowed"
 	WorkloadEventReasonImagePulling          WorkloadEventReason = "imagePulling"
 	WorkloadEventReasonInstanceExited        WorkloadEventReason = "instanceExited"
 	WorkloadEventReasonInstanceRemoved       WorkloadEventReason = "instanceRemoved"
@@ -393,11 +400,19 @@ func (e WorkloadEventReason) Valid() bool {
 		return true
 	case WorkloadEventReasonDependencyWaitGivenUp:
 		return true
+	case WorkloadEventReasonDigestUnresolved:
+		return true
+	case WorkloadEventReasonFollowUnscheduled:
+		return true
 	case WorkloadEventReasonHashMoved:
 		return true
 	case WorkloadEventReasonHealthCheckFailing:
 		return true
 	case WorkloadEventReasonHealthCheckRecovered:
+		return true
+	case WorkloadEventReasonImageDrifted:
+		return true
+	case WorkloadEventReasonImageFollowed:
 		return true
 	case WorkloadEventReasonImagePulling:
 		return true
@@ -577,13 +592,17 @@ type ContainerSpec struct {
 	// that is already there is pinned until something removes it. `always` pulls
 	// on every start, and the image's digest is resolved from the registry and
 	// folded into the specification hash — so a rebuilt tag reads as an ordinary
-	// specification change and replaces the instance. `never` refuses to pull at
-	// all, and starting fails when the image is absent.
+	// specification change and replaces the instance. `follow` is `always`, and
+	// in addition lets the server move the hash itself when its periodic check
+	// finds the tag has moved, so the instance is replaced without an apply.
+	// `never` refuses to pull at all, and starting fails when the image is absent.
 	//
 	// The digest behind `always` is resolved when the server computes the hash: an
-	// apply, a changed secret or variable, or a port reallocation. It is not
-	// watched continuously, so a rebuilt tag is picked up when one of those
-	// happens rather than on a timer. Resolution carries the credentials the
+	// apply, a changed secret or variable, or a port reallocation. A server with
+	// a digest interval configured also asks on that interval, reporting an
+	// `always` workload behind its tag as an `imageDrifted` event and replacing a
+	// `follow` one. Without an interval nothing follows anything, which an apply
+	// of a `follow` workload reports. Resolution carries the credentials the
 	// host's docker credential file holds for the registry, so a private image
 	// resolves wherever a docker pull on the host would.
 	Pull *PullPolicy `json:"pull,omitempty"`
@@ -1487,13 +1506,17 @@ type Protocol string
 // that is already there is pinned until something removes it. `always` pulls
 // on every start, and the image's digest is resolved from the registry and
 // folded into the specification hash — so a rebuilt tag reads as an ordinary
-// specification change and replaces the instance. `never` refuses to pull at
-// all, and starting fails when the image is absent.
+// specification change and replaces the instance. `follow` is `always`, and
+// in addition lets the server move the hash itself when its periodic check
+// finds the tag has moved, so the instance is replaced without an apply.
+// `never` refuses to pull at all, and starting fails when the image is absent.
 //
 // The digest behind `always` is resolved when the server computes the hash: an
-// apply, a changed secret or variable, or a port reallocation. It is not
-// watched continuously, so a rebuilt tag is picked up when one of those
-// happens rather than on a timer. Resolution carries the credentials the
+// apply, a changed secret or variable, or a port reallocation. A server with
+// a digest interval configured also asks on that interval, reporting an
+// `always` workload behind its tag as an `imageDrifted` event and replacing a
+// `follow` one. Without an interval nothing follows anything, which an apply
+// of a `follow` workload reports. Resolution carries the credentials the
 // host's docker credential file holds for the registry, so a private image
 // resolves wherever a docker pull on the host would.
 type PullPolicy string
@@ -2326,6 +2349,14 @@ type Workload struct {
 	// once nothing is left running for it.
 	Deleting *bool `json:"deleting,omitempty"`
 
+	// ImageDrifted Whether the server's last check of the workload's tag found it
+	// resolving to a digest other than the one its instances were hashed
+	// with, so what is running is behind what the registry holds. Only ever
+	// set for a `pull: always` workload on a server with a digest interval
+	// configured, since a `follow` workload is moved on instead of reported.
+	// An apply or a restart picks the new content up.
+	ImageDrifted *bool `json:"imageDrifted,omitempty"`
+
 	// Instances The instances the driver is currently running for this workload. Empty
 	// when nothing is running yet.
 	Instances *[]Instance `json:"instances,omitempty"`
@@ -2454,6 +2485,9 @@ type WorkloadEventData struct {
 
 	// Delay How long the server is waiting before it tries again, in nanoseconds.
 	Delay *int64 `json:"delay,omitempty"`
+
+	// Digest The digest an image reference resolves to, where the event concerns one.
+	Digest *string `json:"digest,omitempty"`
 
 	// Error What went wrong, where the event reports a failure.
 	Error *string `json:"error,omitempty"`
