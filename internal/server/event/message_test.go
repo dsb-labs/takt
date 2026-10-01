@@ -126,6 +126,30 @@ func TestMessage(t *testing.T) {
 			Fields:   event.Fields{Ports: []int{20001}},
 			Expected: "Gave up host port 20001",
 		},
+		{
+			Name:     "shortens the digest a tag drifted to",
+			Reason:   event.ImageDrifted,
+			Fields:   event.Fields{Reference: "ghcr.io/dsb-labs/api:latest", Digest: "sha256:0123456789abcdef0123456789abcdef"},
+			Expected: "Image ghcr.io/dsb-labs/api:latest now resolves to 0123456789ab, which is not what is running",
+		},
+		{
+			Name:     "says a followed tag replaces what is running",
+			Reason:   event.ImageFollowed,
+			Fields:   event.Fields{Reference: "ghcr.io/dsb-labs/api:latest", Digest: "sha256:0123456789abcdef0123456789abcdef"},
+			Expected: "Image ghcr.io/dsb-labs/api:latest now resolves to 0123456789ab, replacing what is running",
+		},
+		{
+			Name:     "names the image whose digest could not be resolved",
+			Reason:   event.DigestUnresolved,
+			Fields:   event.Fields{Reference: "ghcr.io/dsb-labs/api:latest", Error: "registry unreachable"},
+			Expected: "Could not resolve the digest of image ghcr.io/dsb-labs/api:latest: registry unreachable",
+		},
+		{
+			Name:     "says a follow on a server checking nothing follows nothing",
+			Reason:   event.FollowUnscheduled,
+			Fields:   event.Fields{Reference: "ghcr.io/dsb-labs/api:latest"},
+			Expected: "Image ghcr.io/dsb-labs/api:latest will not be followed, this server does not check digests",
+		},
 	}
 
 	for _, tc := range tt {
