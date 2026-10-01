@@ -3201,6 +3201,8 @@ type readinessFixture struct {
 
 	// Whether the target's instance has passed its check, read on every pass.
 	healthy atomic.Bool
+	// Whether the reader's starts fail, for the start that follows a given-up wait.
+	failing atomic.Bool
 	// The instances the driver reports for the reader, replaced by the test.
 	mux      sync.Mutex
 	observed []driver.Instance
@@ -3277,6 +3279,10 @@ func newReadinessFixture(t *testing.T, unchecked bool) *readinessFixture {
 	})).RunAndReturn(func(_ context.Context, w driver.Workload) (string, error) {
 		f.starts.Add(1)
 		f.hash.Store(new(w.SpecHash))
+
+		if f.failing.Load() {
+			return "", errors.New("exec format error")
+		}
 
 		return "api-one", nil
 	}).Maybe()
@@ -3484,6 +3490,38 @@ func TestReconciler_Run_HoldsFirstStartForDependency(t *testing.T) {
 		assert.Equal(t, int32(1), f.starts.Load(), "the reader was held past the wait")
 		assert.Equal(t, 1, f.recorder.count(event.DependencyWaitGivenUp))
 		assert.Contains(t, string(f.recorder.data(event.DependencyWaitGivenUp)), `"delay":60000000000`)
+	})
+
+	t.Run("paces a failed start after the wait is up rather than holding again", func(t *testing.T) {
+		f := newReadinessFixture(t, false)
+		f.failing.Store(true)
+
+		r, stop := f.run(t, time.Minute)
+		defer stop()
+
+		awaitPasses(t, r, 1)
+		require.Zero(t, f.starts.Load())
+
+		f.now.Store(new(f.now.Load().Add(time.Minute)))
+		r.Notify()
+		awaitPasses(t, r, 2)
+		require.Equal(t, int32(1), f.starts.Load(), "the reader was held past the wait")
+		require.Equal(t, 1, f.recorder.count(event.RestartPaced), "the failed start was not paced")
+
+		// The failed start is a restart from here on. The pass inside the backoff
+		// does nothing, and the one after it tries again, where before it would have
+		// been held for another full wait.
+		r.Notify()
+		awaitPasses(t, r, 3)
+		assert.Equal(t, int32(1), f.starts.Load(), "the backoff was not respected")
+		assert.Equal(t, 1, f.recorder.count(event.DependencyNotReady), "the reader was held again after its wait was given up")
+
+		f.now.Store(new(f.now.Load().Add(2 * time.Second)))
+		r.Notify()
+		awaitPasses(t, r, 4)
+		assert.Equal(t, int32(2), f.starts.Load(), "the failed start was not retried on the backoff")
+		assert.Equal(t, 1, f.recorder.count(event.DependencyNotReady))
+		assert.Equal(t, 1, f.recorder.count(event.DependencyWaitGivenUp))
 	})
 
 	t.Run("does not wait on a target with no check", func(t *testing.T) {

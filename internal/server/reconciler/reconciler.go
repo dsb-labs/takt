@@ -286,13 +286,14 @@ type (
 		// the ending be recorded as the check's doing rather than as an exit the
 		// process never made.
 		unhealthy map[slot]string
-		// The version each slot most recently started, so that the readiness
-		// gate holds a slot's first start under a version and nothing after it.
-		// A restart after a crash and a replacement after a change are not held:
+		// The version under which the readiness gate is finished with each slot,
+		// because the slot started or because the gate stopped waiting, so that it
+		// holds a slot's first start under a version and nothing after it. A
+		// restart after a crash and a replacement after a change are not held:
 		// the reader was talking to its target a moment ago.
 		started map[slot]int
 		// When each held slot was first held, for the bounded wait. Cleared when
-		// the slot starts.
+		// the gate is finished with the slot.
 		held map[slot]time.Time
 		// The workloads whose instances an operator asked to have replaced,
 		// consumed by the next pass over each. In memory rather than stored,

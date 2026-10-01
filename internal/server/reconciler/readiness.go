@@ -29,7 +29,11 @@ import (
 //
 // The wait is bounded. A target that never passes must not hold its readers
 // forever, so once a slot has been held for the configured wait it starts anyway
-// and fails on its own terms, which is what it did before the gate existed.
+// and fails on its own terms, which is what it did before the gate existed. Giving
+// up is remembered under the version the way a start is, since the start that
+// follows may fail: without that, the next pass would find nothing started and
+// hold the slot for the full wait again, so a reader whose target never passes
+// and whose start fails would cycle through the wait rather than the backoff.
 func (r *Reconciler) notReady(ctx context.Context, row database.Workload, index int) bool {
 	if r.readiness == 0 || r.checker == nil || r.env == nil {
 		return false
@@ -82,7 +86,7 @@ func (r *Reconciler) notReady(ctx context.Context, row database.Workload, index 
 
 		fields.Delay = r.readiness
 		r.record(ctx, row.Name, event.DependencyWaitGivenUp, fields)
-		r.release(key)
+		r.markStarted(row.Name, index, row.Version)
 
 		return false
 	}
@@ -178,8 +182,9 @@ func (r *Reconciler) release(key slot) {
 	delete(r.held, key)
 }
 
-// markStarted records that a slot started under a version, so that its next empty
-// pass is a restart rather than a first start and is not held.
+// markStarted records that the gate is finished with a slot under a version, because
+// it started or because the wait was given up, so that its next empty pass is a
+// restart rather than a first start and is not held.
 func (r *Reconciler) markStarted(workload string, index, version int) {
 	r.mux.Lock()
 	defer r.mux.Unlock()
