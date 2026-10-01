@@ -20,6 +20,7 @@ host = ""
 config-file = ""
 prune = true
 prune-delay = "1h"
+digest-interval = "0s"
 
 [reconcile]
 interval = "10s"
@@ -115,6 +116,7 @@ already exists keeps its mode — takt sets the mode only on what it creates.
 | `config-file` | empty | The docker credential file registry credentials come from. |
 | `prune` | `true` | Whether images no workload names and no container uses are removed. |
 | `prune-delay` | `"1h"` | How long an image is left alone after nothing references it. |
+| `digest-interval` | `"0s"` | How often the server asks what each pulled tag resolves to. Zero never asks. |
 
 Empty `host` uses the environment, then the local socket. Set it to reach a daemon
 elsewhere, such as `tcp://127.0.0.1:2375`.
@@ -149,6 +151,22 @@ where images are managed by hand. The delay covers a tag bumped and reverted, or
 an image pulled ahead of the manifest that will name it. It is measured from when
 takt first saw the image unreferenced, so a restart of the server starts it again.
 See [Images](operating.md#images).
+
+`digest-interval` turns on the check behind `pull: always` and `pull: follow`. On
+each interval the server asks the registry what every pulled tag resolves to and
+compares it with what each workload was hashed with. An `always` workload behind its
+tag is reported and left alone. A `follow` workload is moved on. Zero, the default,
+never asks, and `follow` on such a server follows nothing, which the apply reports.
+See [Manifest](manifest.md#container).
+
+Each check is one manifest request per pulled tag, and a registry may count that
+against its pull rate limit. Docker Hub applies a limit per IP address to anonymous
+requests and a higher one per account to authenticated ones. The figures change, so
+take them from [Docker's usage
+documentation](https://docs.docker.com/docker-hub/usage/) rather than from here. An
+interval measured in tens of minutes keeps a host with a handful of pulled tags well
+inside either. A registry that refuses a check is recorded against the workload as a
+`digestUnresolved` event and asked again next interval.
 
 ## reconcile
 

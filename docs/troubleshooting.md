@@ -116,6 +116,23 @@ names it is such an image. The server's log names each removal at `info`. Apply
 the manifest within the hour, run a container from the image so it is held, or
 set `prune = false` under `[docker]`. See [Images](operating.md#images).
 
+## A workload says it is behind its tag
+
+The server's digest check found that the tag a `pull: always` workload names now
+resolves to a digest other than the one its instances were hashed with. Nothing
+was replaced, because `always` leaves the moment to the operator. Apply the
+manifest or run `takt workload restart <name>` to pick the new content up, or set
+`pull: follow` to have the server do so on the next interval. See
+[Manifest](manifest.md#container).
+
+## `Could not resolve the digest of image ...`
+
+The registry could not say what a pulled tag resolves to, so the digest check
+compared nothing for that workload and will ask again on the next interval. The
+event names the registry's answer. A rate limit is the usual cause on Docker Hub,
+and a longer `digest-interval` or a `docker login` on the host is the fix. See
+[Configuration](configuration.md#docker).
+
 ## The server will not start
 
 The log names what stopped it. The ones that come up:
