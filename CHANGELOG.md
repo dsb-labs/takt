@@ -23,7 +23,8 @@ describes how an entry is written.
   a moved port, a rotated secret or an edited variable the way one reading
   `env` does. With a `signal`, the file is rewritten and the workload signalled
   rather than replaced
-  ([#131](https://github.com/dsb-labs/takt/issues/131)).
+  ([#131](https://github.com/dsb-labs/takt/issues/131),
+  [#140](https://github.com/dsb-labs/takt/pull/140)).
 
 - An `allow-host-paths` entry ending in `:ro` grants the prefix for reading only,
   so a path mount beneath it is accepted only when it says `readOnly: true`. The
