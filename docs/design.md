@@ -485,6 +485,32 @@ Every other pull policy contributes nothing, so a workload that never asked for 
 of this is hashed exactly as it was before the policy existed — the same property the
 secret and variable contributions hold to, and for the same reason.
 
+A server told to can also ask the registry on an interval. That runs in a loop of
+its own rather than inside the reconciler pass, for the reason image pulls were moved
+off the pass: a registry round-trip must not sit inside the thing that converges the
+node.
+What the loop does with a tag that has moved depends on the policy, and the default is
+to report rather than act. The trust decision `always` records is "run what the
+publisher pushes when this workload next starts". Acting on a timer would remove the
+one thing standing between a push and the host — an operator action, or a failure the
+operator hears about — which is a weak control but a control. So an `always`
+workload behind its tag is reported, by an event, a gauge and the workload itself, and
+nothing is replaced. Pinning a tag or a digest under `pull: missing` remains the
+deterministic path, and the report is what tells an operator their pins are stale.
+
+`follow` is the same trust decision made explicitly: the loop moves the hash, and
+the instances are replaced through the ordinary stale path. It is a pull policy and
+not a server setting. A server-wide switch would let one config edit change what
+every `always` workload on the host trusts, and trust in a publisher is a property
+of one image. The decision is reviewed where the manifest is reviewed.
+
+The comparison is of hashes rather than of digests, because the digest a workload
+was hashed with is not held anywhere, which is the point of the paragraphs above. The
+loop resolves the digest, recomputes the hash and compares it with the stored one. It
+follows from resolving rather than remembering that the tag may move again between
+the check and the pull at start. An instance can then run a digest newer than the one
+hashed, and the next interval rolls it once more.
+
 ## Registry credentials are docker's, not takt's
 
 A pull or a digest lookup against a private registry carries credentials resolved

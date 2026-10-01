@@ -156,7 +156,7 @@ container:
 | Field | Required | Description |
 |---|---|---|
 | `image` | yes | The image reference to run, in the form `docker pull` accepts. |
-| `pull` | no | When the image is pulled: `always`, `missing` or `never`. Defaults to `missing`. |
+| `pull` | no | When the image is pulled: `always`, `follow`, `missing` or `never`. Defaults to `missing`. |
 | `command` | no | Replaces the command the image declares. |
 | `user` | no | The user to run as, replacing the one the image declares. |
 | `readOnly` | no | Make the root filesystem read-only. |
@@ -173,11 +173,28 @@ digest in `image`, which is the deterministic way to run a container.
 and the tag's digest is resolved from the registry and folded into the specification
 hash — so a rebuilt tag reads as an ordinary specification change and the instance is
 replaced. The digest is resolved when the server computes the hash: an apply, a
-changed secret or variable, or a port reallocation. It is not watched continuously,
-so re-applying the manifest is how a rebuilt tag is picked up on demand. One cost
-follows from this. Each of those operations is a registry round-trip, and fails when
-the registry is unreachable — including changing a secret that a `pull: always`
-workload reads.
+changed secret or variable, or a port reallocation. Re-applying the manifest is how a
+rebuilt tag is picked up on demand. One cost follows from this. Each of those
+operations is a registry round-trip, and fails when the registry is unreachable —
+including changing a secret that a `pull: always` workload reads.
+
+A server with `docker.digest-interval` set also asks the registry on that interval
+what each pulled tag resolves to. A `pull: always` workload whose tag has moved on is
+reported and left alone. The workload records an `imageDrifted` event, and `workload
+get` and the UI say it is behind its tag. The `takt_workload_image_drifted` gauge
+holds one for it until an apply or a `workload restart` picks the new content up.
+Nothing is replaced on a timer under `always`. Without the interval the server never asks, and
+the policy means exactly what it did before the check existed.
+
+`pull: follow` is `pull: always` with the moment handed to the server. The check that
+would report drift moves the hash instead, and the reconciler replaces the instances
+through the ordinary stale path: one at a time for a counted workload, gated on the
+health check. The pull at start fetches the new content. The workload records an `imageFollowed` event. The
+decision is made here and nowhere else: a server-wide switch would change what every
+`always` workload on the host trusts, where trust in a publisher is a property of one
+image. `follow` on a server with no `digest-interval` is accepted, and the apply
+records a `followUnscheduled` event so the operator learns that nothing will follow
+anything. See [Configuration](configuration.md#docker).
 
 Pulls and digest lookups carry the credentials the host's docker credential file
 holds for the image's registry, so a private image works wherever a `docker pull` on

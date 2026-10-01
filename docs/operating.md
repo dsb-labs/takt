@@ -831,6 +831,10 @@ The metrics to alert on first:
 - `takt_image_pruned_total` and `takt_image_reclaimed_bytes_total` count the images
   removed because nothing referenced them and the space they held. See
   [Images](#images).
+- `takt_workload_image_drifted{workload}` holds one while a `pull: always`
+  workload's tag resolves to a digest other than the one it is running, on a server
+  with `docker.digest-interval` set. A scraper alerting on it is how an operator is
+  told their pins are stale. See [Configuration](configuration.md#docker).
 
 Alongside takt's own instruments, the scrape carries the standard OpenTelemetry
 HTTP server metrics, with request counts and durations per route and status, and
