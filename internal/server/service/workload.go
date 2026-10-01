@@ -10,11 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/health"
 	"github.com/dsb-labs/takt/internal/server/port"
+	"github.com/dsb-labs/takt/internal/server/telemetry"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
@@ -264,6 +267,8 @@ type (
 		events     WorkloadEventRepository
 		hostPaths  []driver.HostPath
 		samples    *usageSamples
+		digests    time.Duration
+		drifted    driftState
 	}
 )
 
@@ -313,11 +318,18 @@ type WorkloadServiceConfig struct {
 	// path mount, which is the safe default: a host path reaches outside
 	// takt-managed state, so which ones are reachable is the operator's call.
 	AllowHostPaths []driver.HostPath
+	// How often the server asks what each pulled tag resolves to. Zero means it
+	// never does, which an apply of a workload asking to follow its tag reports,
+	// since nothing will follow anything.
+	DigestInterval time.Duration
+	// The provider the service's instruments are created from. May be nil, in
+	// which case nothing is recorded.
+	MeterProvider metric.MeterProvider
 }
 
 // NewWorkloadService returns a WorkloadService built from the given configuration.
 func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
-	return &WorkloadService{
+	svc := &WorkloadService{
 		address:    config.Address,
 		logger:     config.Logger.With("component", "service"),
 		drivers:    config.Drivers,
@@ -334,7 +346,12 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		events:     config.Events,
 		hostPaths:  config.AllowHostPaths,
 		samples:    newUsageSamples(),
+		digests:    config.DigestInterval,
 	}
+
+	svc.registerMetrics(telemetry.Meter(config.MeterProvider, scope))
+
+	return svc
 }
 
 // Get returns the workload with the given name, with the state observed from the

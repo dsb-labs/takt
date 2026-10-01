@@ -92,6 +92,13 @@ func (s *WorkloadService) Apply(ctx context.Context, spec manifest.Spec, ifMatch
 		})
 	}
 
+	// Accepted rather than refused: the manifest is the right place for the
+	// decision, and the server's interval is the operator's. Reported on the same
+	// terms as the apply itself, so a manifest re-applied on a loop says it once.
+	if (created || stored.Version != resolved.existing.Version) && follows(resolved.spec) && s.digests == 0 {
+		s.record(ctx, stored.Name, event.FollowUnscheduled, event.Fields{Reference: resolved.spec.Container.Image})
+	}
+
 	s.wake()
 
 	workload, err := s.hydrate(ctx, stored)
@@ -292,4 +299,9 @@ func allocations(claims []port.Claim, workloadID string) []database.Port {
 	}
 
 	return ports
+}
+
+// follows reports whether the specification asks the server to follow its tag.
+func follows(spec manifest.Spec) bool {
+	return spec.Container != nil && spec.Container.Pull == manifest.PullFollow
 }

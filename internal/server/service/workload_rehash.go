@@ -45,17 +45,12 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 		return false, err
 	}
 
-	read, err := s.resolveReferences(ctx, spec)
-	if err != nil {
-		return false, err
-	}
-
 	digest, err := s.resolveDigest(ctx, spec)
 	if err != nil {
 		return false, err
 	}
 
-	_, hash, err := spechash.Compute(spec, read.hashInputs(digest))
+	read, hash, err := s.recompute(ctx, spec, digest)
 	if err != nil {
 		return false, err
 	}
@@ -73,25 +68,146 @@ func (s *WorkloadService) Rehash(ctx context.Context, name string) (bool, error)
 		return false, nil
 	}
 
+	return true, s.rehash(ctx, row, read, hash)
+}
+
+// recompute returns what the specification reads and the hash it computes to
+// against those values and the given image digest, which is what every path that
+// moves a hash without changing the specification asks.
+func (s *WorkloadService) recompute(ctx context.Context, spec manifest.Spec, digest string) (references, string, error) {
+	read, err := s.resolveReferences(ctx, spec)
+	if err != nil {
+		return references{}, "", err
+	}
+
+	_, hash, err := spechash.Compute(spec, read.hashInputs(digest))
+	if err != nil {
+		return references{}, "", err
+	}
+
+	return read, hash, nil
+}
+
+// rehash stores the row under a hash recompute arrived at, with the references it
+// read, leaving the specification's bytes exactly as they were.
+func (s *WorkloadService) rehash(ctx context.Context, row database.Workload, read references, hash string) error {
 	// The workload keeps the ports it holds. The specification already names them, so
 	// resolving them again would be asking for the allocation takt has, and the write
 	// has to carry them or it would clear them.
 	held, err := s.ports.List(ctx, row.ID)
 	if err != nil {
-		return false, fmt.Errorf("failed to read workload ports: %w", err)
+		return fmt.Errorf("failed to read workload ports: %w", err)
 	}
 
 	row.SpecHash = hash
 	row.Secrets, row.Variables, row.Workloads = read.secrets, read.variables, read.workloads
 
 	if _, _, err = s.workloads.Upsert(ctx, row, 0, held...); err != nil {
-		return false, fmt.Errorf("failed to store workload: %w", err)
+		return fmt.Errorf("failed to store workload: %w", err)
 	}
 
-	s.logger.With("workload", name).Debug("workload rehashed")
+	s.logger.With("workload", row.Name).Debug("workload rehashed")
 	s.wake()
 
-	return true, nil
+	return nil
+}
+
+// Drift asks the registry what the tag of every pulled workload resolves to now,
+// and says what it finds. For a pull-always workload a moved digest is reported: an
+// event on the workload and a gauge, and nothing is replaced until the operator
+// applies or restarts it. For a followed workload the hash is moved, so the
+// reconciler replaces the instances through the ordinary stale path and the pull at
+// start fetches the new content.
+//
+// This exists for the job runner to call on the configured interval. It is a loop
+// of its own rather than part of the reconciler pass because each tag is a registry
+// round-trip, and a round-trip must not sit inside the thing that converges the
+// node. A registry that cannot be asked is recorded against the workload and asked
+// again next time: nothing is compared without the digest, since a hash computed
+// without it would claim the image is unchanged when nothing checked.
+//
+// Drift is told by recomputing the hash with the digest the tag resolves to now and
+// comparing it with the stored one. The digest a workload was hashed with is not
+// held anywhere — it reaches the hash without being stored, the way a secret's
+// revision does — so there is nothing else to compare against. Every other input to
+// the hash is rehashed as it changes, so a hash that moves here moved because of the
+// digest in all but the case where one of those rehashes failed and was not retried.
+//
+// Suspended workloads and those marked for deletion are left alone: nothing of
+// theirs is running to be behind its tag.
+func (s *WorkloadService) Drift(ctx context.Context) error {
+	var rows []database.Workload
+	for _, policy := range []manifest.PullPolicy{manifest.PullAlways, manifest.PullFollow} {
+		listed, err := s.workloads.List(ctx, database.Query{Path: "$.container.pull", Value: string(policy)})
+		if err != nil {
+			return fmt.Errorf("failed to list workloads pulling %s: %w", policy, err)
+		}
+
+		rows = append(rows, listed...)
+	}
+
+	drifted := make(map[string]bool, len(rows))
+
+	var errs []error
+
+	for _, row := range rows {
+		if !row.DeletedAt.IsZero() || !row.SuspendedAt.IsZero() {
+			continue
+		}
+
+		spec, err := manifest.DecodeWorkload(row.Spec)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("workload %s: %w", row.Name, err))
+
+			continue
+		}
+
+		image := spec.Container.Image
+
+		digest, err := s.resolveDigest(ctx, spec)
+		if err != nil {
+			// Recorded every interval it stays unresolved and coalesced into one
+			// row, so the count says how long the registry has been unreachable.
+			s.record(ctx, row.Name, event.DigestUnresolved, event.Fields{Reference: image, Error: err.Error()})
+			errs = append(errs, fmt.Errorf("workload %s: %w", row.Name, err))
+
+			continue
+		}
+
+		read, hash, err := s.recompute(ctx, spec, digest)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("workload %s: %w", row.Name, err))
+
+			continue
+		}
+
+		drifted[row.Name] = false
+
+		if hash == row.SpecHash {
+			continue
+		}
+
+		if spec.Container.Pull == manifest.PullFollow {
+			if err = s.rehash(ctx, row, read, hash); err != nil {
+				errs = append(errs, fmt.Errorf("workload %s: %w", row.Name, err))
+
+				continue
+			}
+
+			s.record(ctx, row.Name, event.ImageFollowed, event.Fields{Reference: image, Digest: digest})
+
+			continue
+		}
+
+		// Recorded every interval the workload stays behind its tag, for the same
+		// reason an unresolved digest is.
+		s.record(ctx, row.Name, event.ImageDrifted, event.Fields{Reference: image, Digest: digest})
+		drifted[row.Name] = true
+	}
+
+	s.drifted.replace(drifted)
+
+	return errors.Join(errs...)
 }
 
 // rehashAll rehashes each of the named workloads, which reference the workload whose
