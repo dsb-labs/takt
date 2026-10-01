@@ -10,6 +10,14 @@ describes how an entry is written.
 
 ### Added
 
+- `digest-interval` under `[docker]` has the server ask the registry, on that
+  interval, what each `pull: always` workload's tag resolves to. One behind its
+  tag records an `imageDrifted` event, says so in `workload get` and the UI, and
+  sets the `takt_workload_image_drifted` gauge. Nothing is replaced until an apply
+  or a restart. A new `pull: follow` policy is `always` with the server moving the
+  hash itself when the tag moves, so the instances are replaced
+  ([#132](https://github.com/dsb-labs/takt/issues/132)).
+
 - A workload reading another's address through `${workload:name:port}` has its
   first start held until the instance it resolves to passes its health check,
   where the referenced workload declares one, so a reader applied beside a slow
