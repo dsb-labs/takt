@@ -129,6 +129,26 @@ const (
 	ScheduleInvalid Reason = "scheduleInvalid"
 )
 
+// The reasons concerning a workload's image between starts. The server asks the
+// registry what a pulled tag resolves to on an interval, and these are what it
+// says about the answer.
+const (
+	// ImageDrifted is recorded while the tag a pull-always workload names resolves
+	// to a digest other than the one its instances were hashed with. Nothing is
+	// replaced: the operator picks it up with an apply or a restart.
+	ImageDrifted Reason = "imageDrifted"
+	// ImageFollowed is recorded when a followed workload's hash is moved to a
+	// rebuilt tag, which is what replaces its instances.
+	ImageFollowed Reason = "imageFollowed"
+	// DigestUnresolved is recorded when the registry could not say what the tag
+	// resolves to, so nothing was compared. Tried again next interval.
+	DigestUnresolved Reason = "digestUnresolved"
+	// FollowUnscheduled is recorded at apply when a workload asks to follow its
+	// tag on a server that checks no digests, so the operator learns that
+	// nothing will follow anything.
+	FollowUnscheduled Reason = "followUnscheduled"
+)
+
 // ConvergeFailed is recorded when a pass over a workload fails without a more
 // specific reason having been recorded for it.
 const ConvergeFailed Reason = "convergeFailed"

@@ -43,6 +43,8 @@ type Fields struct {
 	Count int `json:"count,omitempty"`
 	// How long the server is waiting before it tries again.
 	Delay time.Duration `json:"delay,omitempty"`
+	// The digest an image reference resolves to, where the event concerns one.
+	Digest string `json:"digest,omitempty"`
 	// The schedule expression the event concerns.
 	Schedule string `json:"schedule,omitempty"`
 	// The signal sent to the workload, where the event reports one.
@@ -162,6 +164,15 @@ func Message(reason Reason, data []byte) string {
 	case ScheduleInvalid:
 		return fmt.Sprintf("Could not read schedule %q: %s", fields.Schedule, fields.Error)
 
+	case ImageDrifted:
+		return fmt.Sprintf("Image %s now resolves to %s, which is not what is running", fields.Reference, digest(fields))
+	case ImageFollowed:
+		return fmt.Sprintf("Image %s now resolves to %s, replacing what is running", fields.Reference, digest(fields))
+	case DigestUnresolved:
+		return fmt.Sprintf("Could not resolve the digest of image %s: %s", fields.Reference, fields.Error)
+	case FollowUnscheduled:
+		return fmt.Sprintf("Image %s will not be followed, this server does not check digests", fields.Reference)
+
 	case ConvergeFailed:
 		return fmt.Sprintf("Could not converge: %s", fields.Error)
 	}
@@ -181,6 +192,18 @@ func short(hash string) string {
 	}
 
 	return hash[:12]
+}
+
+// digest renders the digest an event names the way a hash is, less the algorithm a
+// registry prefixes it with: the prefix is the same on every digest and would
+// leave too little of the part that differs.
+func digest(fields Fields) string {
+	_, hex, found := strings.Cut(fields.Digest, ":")
+	if !found {
+		return short(fields.Digest)
+	}
+
+	return short(hex)
 }
 
 // reference renders what an event names, describing it instead where the event knows
