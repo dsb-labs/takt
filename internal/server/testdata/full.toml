@@ -12,6 +12,7 @@ host = "tcp://localhost:2375"
 config-file = "/etc/takt/docker-config.json"
 prune = false
 prune-delay = "2h"
+digest-interval = "30m"
 
 [reconcile]
 interval = "30s"

@@ -35,6 +35,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "/etc/takt/docker-config.json", config.Docker.ConfigFile)
 				assert.False(t, config.Docker.Prune)
 				assert.Equal(t, 2*time.Hour, config.Docker.PruneDelay)
+				assert.Equal(t, 30*time.Minute, config.Docker.DigestInterval)
 				assert.Equal(t, 30*time.Second, config.Reconcile.Interval)
 				assert.Equal(t, 2*time.Minute, config.Reconcile.ReadinessWait)
 				assert.Equal(t, []string{"takt.example.com"}, config.HTTP.Hosts)
@@ -329,6 +330,17 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			Name:         "a negative prune delay",
 			Mutate:       func(c *server.Config) { c.Docker.PruneDelay = -time.Hour },
+			ExpectsError: true,
+		},
+		{
+			// Zero is the switch: the check costs a registry request per tag, so a
+			// server asked for nothing asks nothing.
+			Name:   "a digest interval of zero",
+			Mutate: func(c *server.Config) { c.Docker.DigestInterval = 0 },
+		},
+		{
+			Name:         "a negative digest interval",
+			Mutate:       func(c *server.Config) { c.Docker.DigestInterval = -time.Minute },
 			ExpectsError: true,
 		},
 		{
