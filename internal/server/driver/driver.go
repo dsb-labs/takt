@@ -10,6 +10,7 @@
 package driver
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -170,6 +171,24 @@ type (
 		// The specification the workload was stored with, which carries the runtime
 		// block the driver reads.
 		Spec manifest.Spec
+	}
+
+	// The Probe type describes a command health check a driver performs where the
+	// workload runs.
+	//
+	// It is separate from Workload because a probe is asked of an instance that is
+	// already running: the driver finds the instance from the workload's identity,
+	// and what the probe carries is only what the instance does not already hold.
+	Probe struct {
+		// The command to run, and its arguments. Exit status zero passes.
+		Command []string
+		// Env should resolve the environment the workload was started with, for a
+		// runtime that does not keep it once the process is running. A runtime
+		// whose instance carries its own environment never calls it.
+		//
+		// A function rather than a map so that a secret is read, and a token
+		// minted, only when a runtime has to.
+		Env func(ctx context.Context) (map[string]string, error)
 	}
 
 	// The Instance type describes one unit of work a driver is running on behalf of

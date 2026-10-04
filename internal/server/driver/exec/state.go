@@ -12,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/dsb-labs/takt/internal/server/driver"
 )
 
 // The state type is what the driver records about one instance, and is the whole of
@@ -57,6 +59,15 @@ type state struct {
 	// How many files of output are kept, the one being written included. Zero
 	// means one.
 	LogMaxFiles int `json:"logMaxFiles,omitempty"`
+	// The volumes the process was started with, which with its directory are
+	// everything its ruleset grants beyond the host's own files.
+	//
+	// Recorded so that a health probe can be confined exactly as the process is.
+	// They are paths rather than contents, so the record discloses nothing a
+	// mounted value holds. The working directory holds links to the same places
+	// but is the workload's to write, so a ruleset built from it would grant
+	// whatever a workload chose to link.
+	Volumes []driver.Volume `json:"volumes,omitempty"`
 	// Whether the process has ended, and how.
 	Ended bool `json:"ended"`
 	// The exit code, meaningful only when Ended.
