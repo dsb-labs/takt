@@ -33,6 +33,7 @@ func TestWrapDriver(t *testing.T) {
 		d.EXPECT().StopInstance(mock.Anything, "id", "web", 1).Return(nil)
 		d.EXPECT().DiscardInstance(mock.Anything, "id", "web", 1).Return(nil)
 		d.EXPECT().Signal(mock.Anything, "id", "web", "HUP").Return(nil)
+		d.EXPECT().Probe(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
 		d.EXPECT().Prune(mock.Anything, mock.Anything).Return(nil)
 
@@ -45,6 +46,7 @@ func TestWrapDriver(t *testing.T) {
 		require.NoError(t, wrapped.StopInstance(ctx, "id", "web", 1))
 		require.NoError(t, wrapped.DiscardInstance(ctx, "id", "web", 1))
 		require.NoError(t, wrapped.Signal(ctx, "id", "web", "HUP"))
+		require.NoError(t, wrapped.Probe(ctx, driver.Workload{Name: "web", Instance: 1}, driver.Probe{}))
 
 		_, err = wrapped.Observe(ctx)
 		require.NoError(t, err)
@@ -58,7 +60,7 @@ func TestWrapDriver(t *testing.T) {
 
 		assert.Equal(t, []string{
 			"driver.start", "driver.stop", "driver.discard",
-			"driver.stop", "driver.discard", "driver.signal", "driver.observe", "driver.prune",
+			"driver.stop", "driver.discard", "driver.signal", "driver.probe", "driver.observe", "driver.prune",
 		}, names)
 	})
 
