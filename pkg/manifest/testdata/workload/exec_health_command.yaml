@@ -1,0 +1,10 @@
+version: v1
+name: example
+health:
+  command: ["/usr/local/bin/worker", "check"]
+  interval: 30s
+  timeout: 5s
+env:
+  QUEUE: ${var:queue}
+exec:
+  command: ["/usr/local/bin/worker", "run"]

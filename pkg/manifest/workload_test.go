@@ -92,6 +92,53 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
+			// A worker publishing nothing can still be checked by asking it. The
+			// port requirement is about having an address to probe, and a command
+			// check needs none.
+			Name: "an exec manifest with a command check and no ports",
+			File: "exec_health_command.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Health)
+				assert.Equal(t, []string{"/usr/local/bin/worker", "check"}, spec.Health.Command)
+				assert.Empty(t, spec.Ports)
+			},
+		},
+		{
+			// The probe resolves the environment again on every run, and a token is
+			// minted per resolution.
+			Name:         "rejects a command check on an exec workload reading a token",
+			File:         "exec_health_command_token.yaml",
+			ExpectsError: true,
+		},
+		{
+			// A container's probe inherits the environment the container already
+			// has, so the token rule for exec does not reach it.
+			Name: "a container manifest with a command check reading a token",
+			File: "container_health_command.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Health)
+				assert.Equal(t, []string{"/usr/local/bin/worker", "check"}, spec.Health.Command)
+			},
+		},
+		{
+			Name: "a command check on a workload that also publishes ports",
+			File: "health_command_ports.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Health)
+				assert.Len(t, spec.Ports, 1)
+			},
+		},
+		{
+			Name:         "rejects a command check naming a port",
+			File:         "health_command_port.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a health check naming command and http",
+			File:         "health_command_http.yaml",
+			ExpectsError: true,
+		},
+		{
 			Name:         "rejects an exec manifest naming no command",
 			File:         "exec_no_command.yaml",
 			ExpectsError: true,
