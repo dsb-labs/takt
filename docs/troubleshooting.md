@@ -90,9 +90,15 @@ what stops a page elsewhere driving the API. See
 
 `takt workload events` says which of two things is happening:
 
-- **`Replacing instance ..., which failed its health check`.** Check the path
-  and port the manifest names, and whether the workload answers on the address
-  the server probes, which is the host port on `workload.bind`.
+- **`Replacing instance ..., which failed its health check`.** For an `http` or
+  `tcp` check, check the path and port the manifest names, and whether the
+  workload answers on the address the server probes, which is the host port on
+  `workload.bind`. For a `command` check, the error carries the exit status and
+  the end of what the command wrote. An error reading `context deadline exceeded`
+  is a probe that outlived `timeout`. On the `exec` runtime the probe is confined
+  as the workload is, so a command reading a path the workload was never granted
+  fails with `Permission denied`. On the `container` runtime the binary has to be
+  in the image.
 - **`Instance ... exited`** with a status. The process is ending on its own. Read
   its output with `takt workload logs <name> --previous`, which is the attempt
   before the one running now.

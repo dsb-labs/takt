@@ -189,6 +189,17 @@ A failing check makes the instance failed, which routes it into the same paced r
 crashed one takes. The reaction to "not working" is the same whether the process died or
 merely stopped answering.
 
+A workload publishing no port cannot be connected to, so a `command` check asks it
+instead. The command runs where the workload runs, and that is the one check that
+reaches a driver. The checker still schedules it, bounds it and records its answer. The
+driver only runs the command.
+
+The probe runs confined and accounted as the workload is. A manifest may name a
+command, and the promise the exec runtime makes is that nothing a manifest names runs
+unconfined. The outside-in check was a constraint of the container, not a principle,
+and `docker exec` runs inside the container's own cgroup, namespaces and capability
+set. What it costs is that the binary has to be in the image.
+
 ## Only the reconciler touches the runtime
 
 Deleting a workload records the intent and returns. The reconciler performs the

@@ -954,7 +954,8 @@ health:
 |---|---|---|---|
 | `http` | one of | | The path to request, starting with `/`. A query is allowed. Any 2xx response passes. |
 | `tcp` | one of | | Check that the port accepts a connection. |
-| `port` | no | | Which published port to check, by name or by number. Needed when more than one TCP port is published — UDP ports do not count, since a check cannot use one. |
+| `command` | one of | | A command to run where the workload runs, and its arguments. Exit status zero passes. |
+| `port` | no | | Which published port to check, by name or by number. Needed when more than one TCP port is published — UDP ports do not count, since a check cannot use one. Does not apply to `command`. |
 | `interval` | no | `10s` | How often to check. |
 | `timeout` | no | `2s` | How long one check may take. |
 | `retries` | no | `3` | Consecutive failures that mark the workload failed. |
@@ -980,11 +981,48 @@ failures.
 is worth preferring: the number is restated in two places otherwise, and a manifest
 that changes one and not the other still applies.
 
-A health check needs a published TCP port, whatever the runtime. Both probes connect,
-and a connection to a UDP port succeeds whatever is behind it, so a check against one
-would report the workload as healthy however broken it is. A workload publishing only
-UDP is rejected when you apply the manifest. One publishing both is checked on its TCP
-side.
+An `http` or `tcp` check needs a published TCP port, whatever the runtime. Both probes
+connect, and a connection to a UDP port succeeds whatever is behind it, so a check
+against one would report the workload as healthy however broken it is. A workload
+publishing only UDP is rejected when you apply the manifest. One publishing both is
+checked on its TCP side.
+
+### Checking by command
+
+A worker, a consumer or a shipper publishes no port, so nothing can connect to it. The
+only failure takt could see is the process ending, and one that is up and doing
+nothing reads as `running` indefinitely. A `command` check asks the workload instead:
+
+```yaml
+health:
+  command: ["/usr/local/bin/worker", "check"]
+  interval: 30s
+  timeout: 5s
+exec:
+  command: ["/usr/local/bin/worker", "run"]
+```
+
+The command runs where the workload runs. Exit status zero passes. Anything else
+fails, and the error the check reports carries the exit status and the end of what the
+command wrote. The output never reaches the workload's logs. A command that outlives
+`timeout` fails the check. No shell is involved unless the command names one.
+
+On the `exec` runtime the command runs as the process does: in the same working
+directory, confined to the same paths, under the same resource limits, and with the
+workload's `env` as the process received it. Secrets and variables in the environment
+are resolved again for every probe, so a `${token:}` reference in the `env` of an
+`exec` workload with a `command` check is refused — each probe would mint a credential.
+A mounted token is a file the workload already has, and is fine.
+
+On the `container` runtime the command runs inside the container, in its namespaces,
+its cgroup and its user, with the environment the container already has. The binary
+has to be in the image, which is the same constraint Docker's own `HEALTHCHECK`
+carries. Docker offers no way to end a running exec, so a probe that outlives
+`timeout` is left running inside the container until it ends or the container is
+replaced.
+
+`command` is one of `http`, `tcp` and `command`, and takes no `port`. A workload
+publishing ports may still use it.
 
 ## Resources
 
