@@ -1,6 +1,7 @@
 [http]
 address = "localhost:9999"
 hosts = ["takt.example.com"]
+max-header-values = 250
 tls-cert = "/etc/takt/tls/cert.pem"
 tls-key = "/etc/takt/tls/key.pem"
 

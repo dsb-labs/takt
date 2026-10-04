@@ -11,6 +11,7 @@ address = "127.0.0.1:7373"
 hosts = []
 tls-cert = ""
 tls-key = ""
+max-header-values = 100
 
 [data]
 directory = "~/.local/share/takt"
@@ -64,6 +65,7 @@ level = "info"
 | `hosts` | empty | The host names a request may name. |
 | `tls-cert` | empty | The PEM certificate the server presents when it serves TLS. |
 | `tls-key` | empty | The PEM private key for `tls-cert`. |
+| `max-header-values` | `100` | The most header values a request may carry, across every header. |
 
 The default is loopback. Reaching the API is enough to run code on the host, so read
 [Operating takt](operating.md) before binding it to a network.
