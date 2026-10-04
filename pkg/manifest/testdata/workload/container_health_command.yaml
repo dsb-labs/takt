@@ -1,0 +1,8 @@
+version: v1
+name: example
+health:
+  command: ["/usr/local/bin/worker", "check"]
+env:
+  TOKEN: ${token:worker}
+container:
+  image: nginx:latest

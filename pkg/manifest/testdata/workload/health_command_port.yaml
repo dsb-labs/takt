@@ -1,0 +1,10 @@
+version: v1
+name: example
+health:
+  command: ["/usr/local/bin/worker", "check"]
+  port: http
+ports:
+  - name: http
+    to: 8080
+container:
+  image: nginx:latest

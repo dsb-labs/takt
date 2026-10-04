@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"path"
 	"slices"
@@ -155,6 +156,14 @@ type (
 		HTTP string `json:"http,omitempty"`
 		// Whether to check that the port merely accepts a connection.
 		TCP bool `json:"tcp,omitempty"`
+		// The command to run where the workload runs, when the workload should be
+		// checked by asking it rather than by connecting to it. Exit status zero
+		// passes. No shell is involved unless the command names one.
+		//
+		// It runs as the workload does: for an exec workload confined and accounted
+		// exactly as the process is, with the same environment; for a container
+		// inside the container, so the binary has to be in the image.
+		Command []string `json:"command,omitempty"`
 		// Which of the workload's ports to check, written as the port's name or as
 		// the port inside the workload. Only needed when it publishes more than one.
 		Port PortRef `json:"port,omitempty"`
@@ -1254,11 +1263,14 @@ func validateLogs(logs *Logs) error {
 // actually perform.
 //
 // The timing fields apply to any runtime, so they are checked for every workload. The
-// probe fields do not: a check is performed against an address, and a runtime with
-// nothing to address cannot be probed. Rejecting that combination matters more than
-// ignoring it would — a workload whose check can never run would sit reported as
-// starting forever, which looks like takt failing rather than the manifest being
-// wrong.
+// probe fields do not: an http or tcp check is performed against an address, and a
+// runtime with nothing to address cannot be probed. Rejecting that combination matters
+// more than ignoring it would — a workload whose check can never run would sit
+// reported as starting forever, which looks like takt failing rather than the manifest
+// being wrong.
+//
+// A command check is performed where the workload runs rather than against an
+// address, so the port rules do not apply to it and it has rules of its own.
 func validateHealth(spec Spec, runtime Runtime) error {
 	health := spec.Health
 	if health == nil {
@@ -1280,11 +1292,20 @@ func validateHealth(spec Spec, runtime Runtime) error {
 		return errors.New("invalid health: start period must not be negative")
 	}
 
+	probes := 0
+	for _, named := range []bool{health.HTTP != "", health.TCP, len(health.Command) > 0} {
+		if named {
+			probes++
+		}
+	}
+
 	switch {
-	case health.HTTP != "" && health.TCP:
-		return errors.New("invalid health: only one of http or tcp may be specified")
-	case health.HTTP == "" && !health.TCP:
-		return errors.New("invalid health: one of http or tcp is required")
+	case probes > 1:
+		return errors.New("invalid health: only one of http, tcp or command may be specified")
+	case probes == 0:
+		return errors.New("invalid health: one of http, tcp or command is required")
+	case len(health.Command) > 0:
+		return validateHealthCommand(spec)
 	case health.HTTP != "" && !rootedPath(health.HTTP):
 		// The path is appended to the instance's address to make the probe URL, so
 		// one that parses as anything but a path would redirect the probe elsewhere.
@@ -1300,6 +1321,41 @@ func validateHealth(spec Spec, runtime Runtime) error {
 	}
 
 	return validateHealthPort(*health, spec.Ports)
+}
+
+// validateHealthCommand reports whether the workload's command check is one that can
+// be run.
+//
+// The check has nothing to do with ports, so naming one is a mistake rather than a
+// hint, and the requirement that the workload publish a port does not apply: a
+// workload publishing nothing is exactly what a command check is for.
+//
+// An exec workload's probe is handed the workload's environment resolved again, since
+// nothing keeps the resolved values once the process has started. A token in the
+// environment is minted per resolution, so a probe would mint one every interval and
+// the token list would fill with credentials nothing holds. The pair is refused. A
+// container's probe inherits the environment the container already has, so the rule
+// does not reach it.
+func validateHealthCommand(spec Spec) error {
+	if spec.Health.Port != "" {
+		return errors.New("invalid health: port does not apply to a command check")
+	}
+
+	if spec.Exec == nil {
+		return nil
+	}
+
+	// Sorted so a manifest with two tokens always reports the same one.
+	for _, key := range slices.Sorted(maps.Keys(spec.Env)) {
+		// validateEnv has already refused a value that does not parse.
+		references, _ := ParseReferences(spec.Env[key])
+		if slices.ContainsFunc(references, func(reference Reference) bool { return reference.Kind == KindToken }) {
+			return fmt.Errorf("invalid health: env %s reads a token, and a command check on an %s "+
+				"workload would mint one on every probe", key, RuntimeExec)
+		}
+	}
+
+	return nil
 }
 
 // validateHealthPort reports whether the check names a port the workload actually
