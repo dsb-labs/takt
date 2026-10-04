@@ -8,6 +8,8 @@ describes how an entry is written.
 
 ## Unreleased
 
+## v0.11.1 - 2026-10-04
+
 ### Fixed
 
 - The UI's reference graph and a workload's reference cards left out what a
