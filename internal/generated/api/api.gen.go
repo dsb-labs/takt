@@ -891,15 +891,31 @@ type GetWorkloadResult struct {
 // reports it started, which says nothing about whether the process inside is
 // able to serve.
 //
-// The check is performed by the server against the workload's published
-// address, not by the runtime inside the workload, so it needs nothing
-// installed alongside the process and works for an image carrying no shell.
+// An `http` or `tcp` check is performed by the server against the workload's
+// published address, not by the runtime inside the workload, so it needs
+// nothing installed alongside the process and works for an image carrying no
+// shell. A `command` check runs where the workload runs, for a workload that
+// publishes nothing to connect to.
 //
 // It sits alongside the runtime blocks rather than inside one because whether a
 // workload is working is a question about the workload. Which fields apply
 // does depend on the runtime, and a probe a runtime cannot perform is rejected
 // rather than ignored.
 type HealthSpec struct {
+	// Command The command to run where the workload runs, and its arguments. The
+	// workload is healthy when the command exits zero. No shell is involved
+	// unless the command names one.
+	//
+	// On the `exec` runtime the command runs confined as the process is, in
+	// its working directory, with the workload's environment resolved for the
+	// run. On the `container` runtime it runs inside the container, so the
+	// binary has to be in the image. One of `http`, `tcp` or `command` is
+	// required, and `command` takes no `port`.
+	//
+	//
+	// Examples: ["/usr/local/bin/worker","check"]
+	Command *[]string `json:"command,omitempty"`
+
 	// HTTP The path to request. The workload is healthy when the request answers
 	// with a 2xx status. Requires the workload to publish exactly one port, or
 	// for `port` to name which of several to use.
@@ -915,7 +931,8 @@ type HealthSpec struct {
 
 	// Port Which of the workload's ports to check, written either as the name the
 	// specification gave it or as the port inside the workload. Only needed
-	// when the workload publishes more than one.
+	// when the workload publishes more than one, and does not apply to a
+	// `command` check.
 	//
 	// A string rather than a number so that both forms are one field. A port
 	// name may not read as a number, so the two can never describe the same
@@ -2578,9 +2595,11 @@ type WorkloadSpec struct {
 	// reports it started, which says nothing about whether the process inside is
 	// able to serve.
 	//
-	// The check is performed by the server against the workload's published
-	// address, not by the runtime inside the workload, so it needs nothing
-	// installed alongside the process and works for an image carrying no shell.
+	// An `http` or `tcp` check is performed by the server against the workload's
+	// published address, not by the runtime inside the workload, so it needs
+	// nothing installed alongside the process and works for an image carrying no
+	// shell. A `command` check runs where the workload runs, for a workload that
+	// publishes nothing to connect to.
 	//
 	// It sits alongside the runtime blocks rather than inside one because whether a
 	// workload is working is a question about the workload. Which fields apply

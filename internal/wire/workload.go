@@ -191,6 +191,9 @@ func toHealth(spec *api.HealthSpec) (*manifest.Health, error) {
 	if spec.TCP != nil {
 		health.TCP = *spec.TCP
 	}
+	if spec.Command != nil {
+		health.Command = *spec.Command
+	}
 	if spec.Port != nil {
 		health.Port = manifest.PortRef(*spec.Port)
 	}
@@ -563,6 +566,9 @@ func fromHealth(health *manifest.Health) *api.HealthSpec {
 	}
 	if health.TCP {
 		spec.TCP = new(health.TCP)
+	}
+	if len(health.Command) > 0 {
+		spec.Command = new(health.Command)
 	}
 	if health.Port != "" {
 		spec.Port = new(string(health.Port))
