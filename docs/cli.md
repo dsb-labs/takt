@@ -1148,7 +1148,7 @@ opens nothing the node holds. See
 
 | State | Meaning |
 |---|---|
-| `pending` | Nothing is running yet. |
+| `pending` | Nothing is running yet, or the instance that will run is waiting on an image pull. |
 | `running` | The workload's instances are up. |
 | `degraded` | At least one instance is up and at least one has failed. |
 | `terminating` | The workload is being torn down. |
