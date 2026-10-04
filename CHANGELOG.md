@@ -15,11 +15,12 @@ describes how an entry is written.
   runtime confined and limited as the process is, with its environment, and on the
   `container` runtime inside the container. Exit status zero passes, and the error a
   failing check reports carries the exit status and the end of the command's output
-  ([#136](https://github.com/dsb-labs/takt/issues/136)).
-
+  ([#136](https://github.com/dsb-labs/takt/issues/136),
+  [#148](https://github.com/dsb-labs/takt/pull/148)).
 - `max-header-values` under `[http]` bounds how many header values a request may
   carry, one hundred by default. A request carrying more is refused before a
-  handler sees it ([#147](https://github.com/dsb-labs/takt/issues/147)).
+  handler sees it ([#147](https://github.com/dsb-labs/takt/issues/147),
+  [#148](https://github.com/dsb-labs/takt/pull/148)).
 
 - `digest-interval` under `[docker]` has the server ask the registry, on that
   interval, what each `pull: always` workload's tag resolves to. One behind its
