@@ -51,7 +51,7 @@ func (s *Suite) TestExecCommandCheck() {
 	spec.Health = &manifest.Health{
 		// The environment is the worker's own, resolved for the probe.
 		Command:     []string{"sh", "-c", `test -f "$MARKER"`},
-		Interval:    time.Second,
+		Interval:    5 * time.Second,
 		Timeout:     5 * time.Second,
 		Retries:     3,
 		StartPeriod: 30 * time.Second,
