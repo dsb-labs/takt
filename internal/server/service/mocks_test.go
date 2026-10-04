@@ -4528,6 +4528,63 @@ func (_c *MockReconciler_Notify_Call) RunAndReturn(run func()) *MockReconciler_N
 	return _c
 }
 
+// Pulling provides a mock function for the type MockReconciler
+func (_mock *MockReconciler) Pulling(workload string, instance int) bool {
+	ret := _mock.Called(workload, instance)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Pulling")
+	}
+
+	var r0 bool
+	if returnFunc, ok := ret.Get(0).(func(string, int) bool); ok {
+		r0 = returnFunc(workload, instance)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	return r0
+}
+
+// MockReconciler_Pulling_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Pulling'
+type MockReconciler_Pulling_Call struct {
+	*mock.Call
+}
+
+// Pulling is a helper method to define mock.On call
+//   - workload string
+//   - instance int
+func (_e *MockReconciler_Expecter) Pulling(workload any, instance any) *MockReconciler_Pulling_Call {
+	return &MockReconciler_Pulling_Call{Call: _e.mock.On("Pulling", workload, instance)}
+}
+
+func (_c *MockReconciler_Pulling_Call) Run(run func(workload string, instance int)) *MockReconciler_Pulling_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *MockReconciler_Pulling_Call) Return(b bool) *MockReconciler_Pulling_Call {
+	_c.Call.Return(b)
+	return _c
+}
+
+func (_c *MockReconciler_Pulling_Call) RunAndReturn(run func(workload string, instance int) bool) *MockReconciler_Pulling_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Restart provides a mock function for the type MockReconciler
 func (_mock *MockReconciler) Restart(workload string) {
 	_mock.Called(workload)

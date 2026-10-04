@@ -1420,6 +1420,86 @@ func TestWorkloadService_Get_Completion(t *testing.T) {
 	}
 }
 
+func TestWorkloadService_Get_Pulling(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name      string
+		Instances []driver.Instance
+		Pulling   map[int]bool
+		Expected  state.Workload
+	}{
+		{
+			// The reconciler stopped the instance to replace it and its successor is
+			// waiting on the pull, so the exit is a consequence of the replacement
+			// rather than an instance that ended on its own.
+			Name: "a replaced instance awaiting its successor's image is pending",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateExited},
+			},
+			Pulling:  map[int]bool{0: true},
+			Expected: state.Pending,
+		},
+		{
+			// A stop that ended the process non-zero is still takt's own doing.
+			Name: "a replaced instance that exited non-zero on the stop is pending",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateFailed, ExitCode: 143},
+			},
+			Pulling:  map[int]bool{0: true},
+			Expected: state.Pending,
+		},
+		{
+			// Only the slot waiting on the pull is rewritten: a sibling that ended
+			// on its own is still news.
+			Name: "a sibling's own failure is not masked",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", Index: 0, State: driver.StateExited},
+				{ID: "container-two", Workload: "example", Index: 1, State: driver.StateFailed, ExitCode: 1},
+			},
+			Pulling:  map[int]bool{0: true, 1: false},
+			Expected: state.Failed,
+		},
+		{
+			Name: "a slot the reconciler is not pulling for reads as it ended",
+			Instances: []driver.Instance{
+				{ID: "container-one", Workload: "example", State: driver.StateExited},
+			},
+			Pulling:  map[int]bool{0: false},
+			Expected: state.Stopped,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+			rec := NewMockReconciler(t)
+
+			repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+			repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(tc.Instances, nil).Once()
+			ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+			for index, pulling := range tc.Pulling {
+				rec.EXPECT().Pulling("example", index).Return(pulling).Maybe()
+			}
+
+			svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+				Logger:     newTestLogger(t),
+				Drivers:    map[string]service.Driver{docker.Name: d},
+				Workloads:  repo,
+				Ports:      ports,
+				Claimer:    newTestClaimer(ports, allocatorStub{}),
+				Reconciler: rec,
+			})
+
+			got, err := svc.Get(t.Context(), "example")
+			require.NoError(t, err)
+			assert.Equal(t, tc.Expected, got.State)
+		})
+	}
+}
+
 func TestWorkloadService_Get_NextRun(t *testing.T) {
 	t.Parallel()
 
@@ -2488,6 +2568,7 @@ func TestWorkloadService_Restart(t *testing.T) {
 		// instances, so the runtime is never touched from here.
 		rec.EXPECT().Restart("example").Return().Once()
 		rec.EXPECT().Notify().Return().Once()
+		rec.EXPECT().Pulling("example", 0).Return(false).Maybe()
 
 		ports.EXPECT().List(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
@@ -3487,6 +3568,7 @@ func newTestDriftService(
 	if notify != nil {
 		rec := NewMockReconciler(t)
 		rec.EXPECT().Notify().Run(notify).Return().Maybe()
+		rec.EXPECT().Pulling(mock.Anything, mock.Anything).Return(false).Maybe()
 
 		config.Reconciler = rec
 	}
@@ -4224,6 +4306,7 @@ func newTestService(t *testing.T, d *MockDriver, repo *MockWorkloadRepository, p
 	if notify != nil {
 		rec := NewMockReconciler(t)
 		rec.EXPECT().Notify().Run(notify).Return().Maybe()
+		rec.EXPECT().Pulling(mock.Anything, mock.Anything).Return(false).Maybe()
 
 		config.Reconciler = rec
 	}

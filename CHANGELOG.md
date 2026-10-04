@@ -17,6 +17,10 @@ describes how an entry is written.
   one level deep as the server records it, marked with the variable it came from
   ([#150](https://github.com/dsb-labs/takt/issues/150),
   [#151](https://github.com/dsb-labs/takt/pull/151)).
+- A workload replaced onto an image still being pulled read as `stopped`, or as
+  `failed` when the stop ended its process non-zero, for as long as the pull took
+  ([#149](https://github.com/dsb-labs/takt/issues/149),
+  [#152](https://github.com/dsb-labs/takt/pull/152)).
 
 ## v0.11.0 - 2026-10-04
 
