@@ -35,8 +35,9 @@ export const nodeHeight = 48;
 
 // buildGraph assembles the reference graph from the five lists. Workload
 // edges come from each specification, the same derivation the references card
-// uses. Service edges come from label selection: a service points at every
-// workload carrying its target labels.
+// uses, with the variables supplying the values a mount with expand set reads
+// references out of. Service edges come from label selection: a service
+// points at every workload carrying its target labels.
 //
 // With resourcesConnectedOnly set, resources nothing references are left out,
 // which is what a filtered graph wants: the neighbourhood of the workloads
@@ -77,7 +78,7 @@ export function buildGraph(
 
   for (const workload of workloads) {
     const source = `workload:${workload.name}`;
-    for (const ref of references(workload.spec)) {
+    for (const ref of references(workload.spec, variables)) {
       // A host path is not a resource, so the graph has nothing to draw for
       // one. references() never yields the kind today, but the type allows it
       // and the guard keeps the exclusion deliberate rather than accidental.

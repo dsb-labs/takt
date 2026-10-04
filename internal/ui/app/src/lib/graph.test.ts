@@ -110,6 +110,34 @@ describe("buildGraph", () => {
     expect(nodes.map((node) => node.id)).toContain("secret:db");
   });
 
+  it("draws what an expanded variable's value names", () => {
+    const { edges } = buildGraph(
+      [
+        workload("grafana", {
+          volumes: [{ var: "datasources", to: "/etc/ds.yaml", expand: true }],
+        }),
+        workload("prometheus", {}),
+      ],
+      [],
+      [
+        {
+          ...variable("datasources"),
+          value: "url: http://${workload:prometheus:http}",
+        },
+      ],
+      [],
+      [],
+      everything,
+    );
+
+    expect(edge(edges, "workload:grafana", "variable:datasources")?.via).toBe(
+      "mounted at /etc/ds.yaml",
+    );
+    expect(edge(edges, "workload:grafana", "workload:prometheus")?.via).toBe(
+      "variable datasources",
+    );
+  });
+
   it("leaves a token out, since it names no resource", () => {
     const { nodes, edges } = buildGraph(
       [workload("api", { env: { T: "${token:ci}" } })],
