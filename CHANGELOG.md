@@ -8,6 +8,8 @@ describes how an entry is written.
 
 ## Unreleased
 
+## v0.11.0 - 2026-10-04
+
 ### Added
 
 - A health check may name a `command` instead of `http` or `tcp`, for a workload
@@ -21,7 +23,6 @@ describes how an entry is written.
   carry, one hundred by default. A request carrying more is refused before a
   handler sees it ([#147](https://github.com/dsb-labs/takt/issues/147),
   [#148](https://github.com/dsb-labs/takt/pull/148)).
-
 - `digest-interval` under `[docker]` has the server ask the registry, on that
   interval, what each `pull: always` workload's tag resolves to. One behind its
   tag records an `imageDrifted` event, says so in `workload get` and the UI, and
@@ -45,14 +46,12 @@ describes how an entry is written.
   rather than replaced
   ([#131](https://github.com/dsb-labs/takt/issues/131),
   [#140](https://github.com/dsb-labs/takt/pull/140)).
-
 - An `allow-host-paths` entry ending in `:ro` grants the prefix for reading only,
   so a path mount beneath it is accepted only when it says `readOnly: true`. The
   most specific prefix decides, which lets `/:ro` open the whole host to a workload
   that observes it without opening it for writing
   ([#134](https://github.com/dsb-labs/takt/issues/134),
   [#137](https://github.com/dsb-labs/takt/pull/137)).
-
 - The server removes the images no workload names and no container uses, an
   hour after they became unreferenced. `prune` and `prune-delay` under
   `[docker]` turn it off or change the delay
