@@ -15,7 +15,8 @@ describes how an entry is written.
   expanded `${workload:prometheus:http}` out of a mounted variable showed an edge
   to the variable alone. Both now list each reference inside the value as well,
   one level deep as the server records it, marked with the variable it came from
-  ([#150](https://github.com/dsb-labs/takt/issues/150)).
+  ([#150](https://github.com/dsb-labs/takt/issues/150),
+  [#151](https://github.com/dsb-labs/takt/pull/151)).
 
 ## v0.11.0 - 2026-10-04
 
