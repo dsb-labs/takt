@@ -179,6 +179,14 @@ slow dependency must not stall a rollout that had nothing to do with it. The hol
 is bounded by `reconcile.readiness-wait`, after which the slot starts anyway and is
 paced like any other.
 
+**A replacement waiting on an image pull reads as `pending`.** A stale instance is
+stopped before its successor starts, and the successor cannot start until its image
+is on the host. For as long as the pull takes, the stopped instance is the only one
+the slot has. It reads as `pending` rather than as `stopped` or `failed`, whatever
+its exit code says: takt stopped it, so the exit is a consequence of the
+replacement rather than news of its own. The `Pulling image` event says why the
+slot is pending. The same holds for a restart whose image has gone from the host.
+
 **Health folds in before any of this.** An instance that is up but failing its
 check reads as failed, so the same paced replacement path a crashed instance
 takes also serves an unhealthy one. The restart policy reads it as a failure
