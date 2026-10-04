@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { useDeleteWorkload, useWorkloadAction } from "@/api/mutations";
-import { useWorkload, useWorkloadEvents } from "@/api/queries";
+import { useVariables, useWorkload, useWorkloadEvents } from "@/api/queries";
 import DeleteControl from "@/components/DeleteControl.vue";
 import DetailCard from "@/components/DetailCard.vue";
 import DetailPage from "@/components/DetailPage.vue";
@@ -67,9 +67,22 @@ async function act(action: { mutateAsync: () => Promise<unknown> }) {
 
 const spec = computed(() => workload.data.value?.spec);
 
+// A mount with expand set reads references out of the variable's value, so
+// the cards need the variables to list them. Most specifications expand
+// nothing, and those fetch nothing.
+const expands = computed(
+  () => spec.value?.volumes?.some((mount) => mount.expand) ?? false,
+);
+const variables = useVariables(
+  () => [],
+  () => expands.value,
+);
+
 // The references, split by kind so each gets a card of its own. A kind the
 // workload reads nothing of renders no card.
-const refs = computed(() => (spec.value ? references(spec.value) : []));
+const refs = computed(() =>
+  spec.value ? references(spec.value, variables.data.value ?? []) : [],
+);
 const refsOf = (kind: string) =>
   computed(() => refs.value.filter((ref) => ref.kind === kind));
 const volumeRefs = refsOf("volume");

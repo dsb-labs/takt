@@ -65,9 +65,13 @@ export function useSecrets(query: () => string[]) {
   });
 }
 
-export function useVariables(query: () => string[]) {
+// useVariables lists the variables, with their values. The enabled getter
+// lets a view that only sometimes needs them, such as a workload page whose
+// mounts may or may not expand one, skip the request when it does not.
+export function useVariables(query: () => string[], enabled = () => true) {
   return useQuery({
     queryKey: ["variables", computed(query)],
+    enabled: computed(enabled),
     refetchInterval: pollInterval,
     queryFn: async () => {
       const { data, error } = await client.GET("/api/v1/variables", {
