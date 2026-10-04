@@ -112,15 +112,15 @@ func testFleet() []service.Workload {
 			Name: "limited",
 			Spec: manifest.Spec{Resources: &manifest.Resources{Memory: "512m", CPU: 0.5}},
 			Instances: []service.Instance{
-				{Instance: driver.Instance{ID: "a", State: driver.StateRunning}},
-				{Instance: driver.Instance{ID: "b", State: driver.StateRunning}},
-				{Instance: driver.Instance{ID: "c", State: driver.StateExited}},
+				{ID: "a", State: driver.StateRunning},
+				{ID: "b", State: driver.StateRunning},
+				{ID: "c", State: driver.StateExited},
 			},
 		},
 		{
 			Name: "unlimited",
 			Instances: []service.Instance{
-				{Instance: driver.Instance{ID: "d", State: driver.StateRunning}},
+				{ID: "d", State: driver.StateRunning},
 			},
 		},
 	}
