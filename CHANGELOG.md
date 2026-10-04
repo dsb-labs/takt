@@ -8,6 +8,15 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Fixed
+
+- The UI's reference graph and a workload's reference cards left out what a
+  variable mounted with `expand: true` names in its value. A workload that
+  expanded `${workload:prometheus:http}` out of a mounted variable showed an edge
+  to the variable alone. Both now list each reference inside the value as well,
+  one level deep as the server records it, marked with the variable it came from
+  ([#150](https://github.com/dsb-labs/takt/issues/150)).
+
 ## v0.11.0 - 2026-10-04
 
 ### Added
