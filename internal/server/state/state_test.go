@@ -85,3 +85,30 @@ func TestCompletion(t *testing.T) {
 		})
 	}
 }
+
+func TestReplacing(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name     string
+		Instance driver.Instance
+		Waiting  bool
+		Expected driver.State
+	}{
+		// The reconciler stopped it to replace it, so the exit is not news.
+		{Name: "a clean exit awaiting its successor is pending", Instance: driver.Instance{State: driver.StateExited}, Waiting: true, Expected: driver.StatePending},
+		// A stop that ended the process non-zero is still takt's own doing.
+		{Name: "a failure awaiting its successor is pending", Instance: driver.Instance{State: driver.StateFailed, ExitCode: 143}, Waiting: true, Expected: driver.StatePending},
+		{Name: "a completion awaiting its successor is pending", Instance: driver.Instance{State: driver.StateCompleted}, Waiting: true, Expected: driver.StatePending},
+		// The fact describes the slot after its instance ended, and this has not.
+		{Name: "a running instance is untouched", Instance: driver.Instance{State: driver.StateRunning}, Waiting: true, Expected: driver.StateRunning},
+		{Name: "a terminating instance is untouched", Instance: driver.Instance{State: driver.StateTerminating}, Waiting: true, Expected: driver.StateTerminating},
+		{Name: "nothing waiting leaves the ending alone", Instance: driver.Instance{State: driver.StateFailed, ExitCode: 1}, Expected: driver.StateFailed},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			assert.Equal(t, tc.Expected, state.Replacing(tc.Instance, tc.Waiting))
+		})
+	}
+}

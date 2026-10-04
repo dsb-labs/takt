@@ -90,6 +90,33 @@ func Completion(instance driver.Instance, restart *manifest.Restart, scheduled b
 	return driver.StateCompleted
 }
 
+// Replacing reports the state an ended instance reads as while the slot's next
+// instance waits to start, which it does when the reconciler is waiting on an image
+// pull.
+//
+// The ending reads as pending whatever the exit code says. The reconciler stopped the
+// instance to replace it, so the exit is a consequence of the replacement rather
+// than news in its own right — the reasoning Of applies to a terminating instance
+// beside a running one. Stopped would claim the instance ended on its own and a
+// restart is due, and failed would raise an alarm over a stop takt itself performed.
+// Pending is what the slot would read had the predecessor been removed before the
+// pull began, and the pull event stays as the explanation.
+//
+// An instance still running or on its way out is untouched: the fact describes the
+// slot after its instance has ended, and this one has not.
+func Replacing(instance driver.Instance, waiting bool) driver.State {
+	if !waiting {
+		return instance.State
+	}
+
+	switch instance.State {
+	case driver.StateExited, driver.StateFailed, driver.StateCompleted:
+		return driver.StatePending
+	default:
+		return instance.State
+	}
+}
+
 // Of derives a workload's overall state from its instances and whether it is
 // being deleted or suspended.
 //
