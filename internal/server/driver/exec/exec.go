@@ -411,6 +411,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		SpecHash:   w.SpecHash,
 		Version:    w.Version,
 		StartedAt:  time.Now(),
+		Volumes:    w.Volumes,
 	}
 
 	if limits != nil {
