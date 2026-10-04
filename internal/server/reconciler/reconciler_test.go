@@ -4781,6 +4781,53 @@ func TestReconciler_Run_RecordsWhatItObserved(t *testing.T) {
 		assert.JSONEq(t, `{"reference":"example/example:latest"}`, string(recorder.data(event.ImagePulling)))
 	})
 
+	t.Run("marks a slot waiting on an image pull until the start lands", func(t *testing.T) {
+		d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
+
+		repo.EXPECT().List(mock.Anything).Return([]database.Workload{
+			storedWorkload("example", "hash-one"),
+		}, nil)
+
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).Run(func(context.Context) { passes.inc() }).Return(nil, nil)
+		d.EXPECT().Start(mock.Anything, mock.Anything).Return("", driver.ErrImagePulling).Once()
+		d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-one", nil).Once()
+
+		events := make(chan driver.Event)
+		d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+		r := reconciler.New(reconciler.Config{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]reconciler.Driver{docker.Name: d},
+			Workloads: repo,
+			Events:    recorder,
+			Interval:  time.Hour,
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+
+		go func() { done <- r.Run(ctx) }()
+
+		passes.wait(t, 1)
+		awaitPasses(t, r, 1)
+
+		// The slot's instance is on its way, so whatever its predecessor says
+		// about how it ended, the slot reads as pending.
+		assert.True(t, r.Pulling("example", 0))
+
+		// The pull landed and the successor started, so the slot is no longer
+		// waiting on anything.
+		r.Notify()
+		passes.wait(t, 2)
+		awaitPasses(t, r, 2)
+
+		assert.False(t, r.Pulling("example", 0))
+
+		cancel()
+		require.NoError(t, <-done)
+	})
+
 	t.Run("records an ending once rather than once a pass", func(t *testing.T) {
 		d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
 
