@@ -60,6 +60,49 @@ describe("references", () => {
     ]);
   });
 
+  it("reads what an expanded variable's value names, one level deep", () => {
+    const refs = references(
+      spec({
+        volumes: [
+          { var: "datasources", to: "/etc/datasources.yaml", expand: true },
+          { var: "plain", to: "/etc/plain" },
+        ],
+      }),
+      [
+        {
+          name: "datasources",
+          value:
+            "url: http://${workload:prometheus:http}\npass: ${secret:grafana}\nmode: ${var:mode}\ntoken: ${token:ci}",
+        },
+        { name: "plain", value: "${workload:ignored:http}" },
+        { name: "mode", value: "${workload:also-ignored:http}" },
+      ],
+    );
+
+    expect(refs).toEqual([
+      {
+        kind: "variable",
+        name: "datasources",
+        via: "mounted at /etc/datasources.yaml",
+      },
+      { kind: "workload", name: "prometheus", via: "variable datasources" },
+      { kind: "secret", name: "grafana", via: "variable datasources" },
+      { kind: "variable", name: "mode", via: "variable datasources" },
+      { kind: "variable", name: "plain", via: "mounted at /etc/plain" },
+    ]);
+  });
+
+  it("names only the mount when the expanded variable is not held", () => {
+    const refs = references(
+      spec({ volumes: [{ var: "missing", to: "/etc/missing", expand: true }] }),
+      [],
+    );
+
+    expect(refs).toEqual([
+      { kind: "variable", name: "missing", via: "mounted at /etc/missing" },
+    ]);
+  });
+
   it("lists expansions before mounts", () => {
     const refs = references(
       spec({
