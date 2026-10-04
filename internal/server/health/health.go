@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -47,11 +48,20 @@ const (
 type (
 	// The Check type describes what to probe and how often.
 	Check struct {
-		// The address to probe, in host:port form.
+		// The address to probe, in host:port form. Unused when Probe is set.
 		Address string
 		// The path to request when checking over HTTP. Empty means the check is a
 		// connection attempt rather than a request.
 		HTTP string
+		// The command to run instead of connecting, when the check is one the
+		// workload's runtime performs. Empty means the check connects. The checker
+		// never runs it itself: it is what identifies the check, so that a check
+		// registered again with the same command keeps its history.
+		Command []string
+		// What runs Command, supplied by whoever registers a command check. The
+		// checker schedules it, bounds it by Timeout and records its answer exactly
+		// as it does a connection, and knows nothing about what it does.
+		Probe func(ctx context.Context) error
 		// How often to perform the check.
 		Interval time.Duration
 		// How long a single check may take before it counts as failed.
@@ -180,7 +190,12 @@ func (c *Checker) Set(workload string, instance int, spec Check) {
 
 	key := subject{workload: workload, instance: instance}
 
-	if existing, ok := c.checks[key]; ok && existing.spec == spec {
+	if existing, ok := c.checks[key]; ok && existing.spec.equal(spec) {
+		// The probe is taken afresh even so. It is a closure whoever registered the
+		// check built for this pass, and two closures over the same command are the
+		// same check rather than a change to it.
+		existing.spec.Probe = spec.Probe
+
 		return
 	}
 
@@ -202,6 +217,19 @@ func (c *Checker) Set(workload string, instance int, spec Check) {
 	// wait computed before it existed — for as long as a second when nothing else is
 	// waiting, or a whole interval otherwise.
 	c.notify()
+}
+
+// equal reports whether two checks describe the same probe on the same terms. The
+// probe function is left out, since a function has no equality and the command it
+// runs already identifies it.
+func (c Check) equal(other Check) bool {
+	return c.Address == other.Address &&
+		c.HTTP == other.HTTP &&
+		slices.Equal(c.Command, other.Command) &&
+		c.Interval == other.Interval &&
+		c.Timeout == other.Timeout &&
+		c.Retries == other.Retries &&
+		c.StartPeriod == other.StartPeriod
 }
 
 // notify tells the loop that the set of checks has changed. It never blocks.
@@ -504,11 +532,14 @@ func (c *Checker) probe(ctx context.Context, spec Check) error {
 	ctx, cancel := context.WithTimeout(ctx, spec.Timeout)
 	defer cancel()
 
-	if spec.HTTP == "" {
+	switch {
+	case spec.Probe != nil:
+		return spec.Probe(ctx)
+	case spec.HTTP == "":
 		return c.probeTCP(ctx, spec.Address)
+	default:
+		return c.probeHTTP(ctx, spec.Address, spec.HTTP)
 	}
-
-	return c.probeHTTP(ctx, spec.Address, spec.HTTP)
 }
 
 func (c *Checker) probeTCP(ctx context.Context, address string) error {
