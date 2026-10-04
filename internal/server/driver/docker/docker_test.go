@@ -1090,6 +1090,115 @@ func TestDriver_Signal(t *testing.T) {
 	})
 }
 
+func TestDriver_Probe(t *testing.T) {
+	t.Parallel()
+
+	// A workload whose first instance has been replaced once, so the test can tell a
+	// probe of the current container from one of the retained container or of the
+	// other instance.
+	containers := []dockercontainer.Summary{
+		{ID: "zero-old", State: dockercontainer.StateExited, Labels: map[string]string{docker.LabelInstance: "0", docker.LabelAttempt: "1"}},
+		{ID: "zero-new", State: dockercontainer.StateRunning, Labels: map[string]string{docker.LabelInstance: "0", docker.LabelAttempt: "2"}},
+		{ID: "one-only", State: dockercontainer.StateRunning, Labels: map[string]string{docker.LabelInstance: "1", docker.LabelAttempt: "1"}},
+	}
+
+	w := driver.Workload{Name: "example", Instance: 0}
+
+	// The probe's Env must never be asked for: the exec inherits the container's.
+	probe := driver.Probe{
+		Command: []string{"worker", "check"},
+		Env: func(context.Context) (map[string]string, error) {
+			return nil, errors.New("resolved the environment for a container probe")
+		},
+	}
+
+	t.Run("passes when the command exits zero", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
+		client.EXPECT().ExecCreate(mock.Anything, "zero-new", mock.MatchedBy(func(options dockerclient.ExecCreateOptions) bool {
+			return options.AttachStdout && options.AttachStderr && slices.Equal(options.Cmd, []string{"worker", "check"}) && !options.Privileged
+		})).Return("exec-one", nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(io.NopCloser(strings.NewReader(multiplexed("ok\n"))), nil).Once()
+		client.EXPECT().ExecInspect(mock.Anything, "exec-one").Return(dockerclient.ExecInspectResult{ExitCode: 0}, nil).Once()
+
+		d := testDriver(t, client)
+
+		assert.NoError(t, d.Probe(t.Context(), w, probe))
+	})
+
+	t.Run("fails with the status and the output when the command exits non-zero", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
+		client.EXPECT().ExecCreate(mock.Anything, "zero-new", mock.Anything).Return("exec-one", nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(io.NopCloser(strings.NewReader(multiplexed("not ready\n"))), nil).Once()
+		client.EXPECT().ExecInspect(mock.Anything, "exec-one").Return(dockerclient.ExecInspectResult{ExitCode: 3}, nil).Once()
+
+		d := testDriver(t, client)
+
+		err := d.Probe(t.Context(), w, probe)
+		require.ErrorIs(t, err, docker.ErrProbeFailed)
+		assert.Contains(t, err.Error(), "exit status 3")
+		assert.Contains(t, err.Error(), "not ready")
+	})
+
+	t.Run("probes the other instance's container when asked for it", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
+		client.EXPECT().ExecCreate(mock.Anything, "one-only", mock.Anything).Return("exec-one", nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(io.NopCloser(strings.NewReader("")), nil).Once()
+		client.EXPECT().ExecInspect(mock.Anything, "exec-one").Return(dockerclient.ExecInspectResult{}, nil).Once()
+
+		d := testDriver(t, client)
+
+		other := w
+		other.Instance = 1
+
+		assert.NoError(t, d.Probe(t.Context(), other, probe))
+	})
+
+	t.Run("reports a timeout when the command outlives the deadline", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		// A stream that never ends, which is what a hung command looks like from
+		// the daemon. Closing it is what frees the read.
+		reader, writer := io.Pipe()
+		t.Cleanup(func() { _ = writer.Close() })
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
+		client.EXPECT().ExecCreate(mock.Anything, "zero-new", mock.Anything).Return("exec-one", nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(reader, nil).Once()
+
+		d := testDriver(t, client)
+
+		ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+		defer cancel()
+
+		assert.ErrorIs(t, d.Probe(ctx, w, probe), context.DeadlineExceeded)
+	})
+
+	t.Run("refuses an instance with no running container", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
+
+		d := testDriver(t, client)
+
+		missing := w
+		missing.Instance = 2
+
+		assert.ErrorIs(t, d.Probe(t.Context(), missing, probe), docker.ErrNoRunningInstance)
+	})
+
+	t.Run("refuses a probe naming no command", func(t *testing.T) {
+		d := testDriver(t, NewMockClient(t))
+
+		assert.ErrorIs(t, d.Probe(t.Context(), w, driver.Probe{}), docker.ErrNotContainerWorkload)
+	})
+}
+
 // TestDriver_ObserveWorkload covers reading one workload rather than the whole host.
 // The daemon does the filtering, which is what makes a single-workload read cost the
 // same whether the host runs one container or two hundred.
