@@ -30,6 +30,7 @@ func TestLoadConfig(t *testing.T) {
 			File: "full.toml",
 			Assert: func(t *testing.T, config server.Config) {
 				assert.Equal(t, "localhost:9999", config.HTTP.Address)
+				assert.Equal(t, 250, config.HTTP.MaxHeaderValues)
 				assert.Equal(t, "/var/lib/takt", config.Data.Directory)
 				assert.Equal(t, "tcp://localhost:2375", config.Docker.Host)
 				assert.Equal(t, "/etc/takt/docker-config.json", config.Docker.ConfigFile)

@@ -585,6 +585,10 @@ func Run(ctx context.Context, config Config) error {
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      5 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
+		// The timeouts bound how long a request may take, and this bounds how
+		// much of one the server will hold: a request carrying more header values
+		// than the configuration allows is refused before a handler sees it.
+		MaxHeaderValueCount: config.HTTP.MaxHeaderValues,
 		// Every request's context descends from this one, and it is cancelled as
 		// the server begins shutting down. Shutdown waits for every response to
 		// end, and a followed read or a service stream ends only when its context

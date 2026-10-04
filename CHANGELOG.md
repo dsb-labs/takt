@@ -17,6 +17,10 @@ describes how an entry is written.
   failing check reports carries the exit status and the end of the command's output
   ([#136](https://github.com/dsb-labs/takt/issues/136)).
 
+- `max-header-values` under `[http]` bounds how many header values a request may
+  carry, one hundred by default. A request carrying more is refused before a
+  handler sees it ([#147](https://github.com/dsb-labs/takt/issues/147)).
+
 - `digest-interval` under `[docker]` has the server ask the registry, on that
   interval, what each `pull: always` workload's tag resolves to. One behind its
   tag records an `imageDrifted` event, says so in `workload get` and the UI, and

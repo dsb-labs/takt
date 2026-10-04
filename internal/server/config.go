@@ -73,6 +73,13 @@ type (
 		// The PEM private key for tls-cert. The file must be readable only by
 		// the user running the server.
 		TLSKey string `toml:"tls-key"`
+		// The most header values a request may carry, counted across every
+		// header. A request carrying more is refused before a handler sees it.
+		//
+		// Nothing the API accepts needs many: a client sends a handful, and a
+		// browser a few dozen. The bound is what stops a request from spending
+		// the server's memory on headers nothing reads.
+		MaxHeaderValues int `toml:"max-header-values"`
 	}
 
 	// The DataConfig type contains configuration for the server's on-disk state.
@@ -296,7 +303,8 @@ func DefaultConfig() Config {
 			// containers — so reaching the port can be enough to run code on the
 			// host. Binding it to the network is a decision an operator
 			// should have to make, not one a default makes for them.
-			Address: "127.0.0.1:7373",
+			Address:         "127.0.0.1:7373",
+			MaxHeaderValues: 100,
 		},
 		Data: DataConfig{
 			Directory: defaultDataDir(),
@@ -464,6 +472,8 @@ func (c HTTPConfig) validate() error {
 		return fmt.Errorf("http tls-cert must be absolute, got %q", c.TLSCert)
 	case c.TLSKey != "" && !filepath.IsAbs(c.TLSKey):
 		return fmt.Errorf("http tls-key must be absolute, got %q", c.TLSKey)
+	case c.MaxHeaderValues < 1:
+		return errors.New("http max-header-values must be at least one")
 	}
 
 	return nil
