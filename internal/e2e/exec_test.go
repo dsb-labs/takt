@@ -36,6 +36,53 @@ func (s *Suite) TestExecJobRunsAndCompletes() {
 	s.Contains(out.String(), "did-the-work")
 }
 
+// TestExecCommandCheck covers a command check on an exec workload: a worker
+// publishing nothing, checked by a command run confined as the worker is, in the
+// worker's own directory.
+func (s *Suite) TestExecCommandCheck() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// The worker takes a moment to become ready, and says so by writing a file in
+	// its working directory. The check reads the file, which it can only do from
+	// the same directory.
+	spec := s.execSpec(name, "sh", "-c", "sleep 3; touch ready; sleep 60")
+	spec.Env = map[string]string{"MARKER": "ready"}
+	spec.Health = &manifest.Health{
+		// The environment is the worker's own, resolved for the probe.
+		Command:     []string{"sh", "-c", `test -f "$MARKER"`},
+		Interval:    time.Second,
+		Timeout:     5 * time.Second,
+		Retries:     3,
+		StartPeriod: 30 * time.Second,
+	}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	original := s.awaitInstance(name)
+
+	workload := s.awaitHealth(name, client.HealthHealthy)
+	s.Require().Len(workload.Instances, 1)
+	s.Equal(original, workload.Instances[0].ID, "a worker becoming ready was replaced")
+
+	// A probe that overruns its timeout is killed and the check fails with the
+	// deadline, and the worker is replaced as one that stopped answering would be.
+	spec.Health = &manifest.Health{
+		Command:  []string{"sleep", "30"},
+		Interval: time.Second,
+		Timeout:  time.Second,
+		Retries:  2,
+	}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	workload = s.awaitHealth(name, client.HealthUnhealthy)
+	s.Require().Len(workload.Instances, 1)
+	s.Contains(workload.Instances[0].Health.Error, "deadline exceeded")
+}
+
 // TestExecWorkloadRunsUnderItsResourceLimits covers the exec runtime's resource
 // limits end to end: the section is accepted through the API, the workload runs, and
 // the kernel refuses it what the limit denies.

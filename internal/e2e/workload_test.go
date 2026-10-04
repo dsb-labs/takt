@@ -528,6 +528,46 @@ func (s *Suite) TestWarmingWorkloadIsNotReplaced() {
 	s.NotZero(*reported.Failures)
 }
 
+// TestContainerCommandCheck covers a command check on a container, which runs inside
+// it. The container publishes nothing, so no other check could reach it.
+func (s *Suite) TestContainerCommandCheck() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	spec := s.containerSpec(name)
+	// A file the image ships, read with a binary the image ships.
+	spec.Health = &manifest.Health{
+		Command:  []string{"test", "-f", "/etc/nginx/nginx.conf"},
+		Interval: 5 * time.Second,
+		Timeout:  5 * time.Second,
+		Retries:  10,
+	}
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	workload := s.awaitHealth(name, client.HealthHealthy)
+	s.Require().Len(workload.Instances, 1)
+	s.Empty(workload.Instances[0].Health.Error)
+
+	// A failing command fails the check, and the error carries what it wrote
+	// rather than only its status.
+	spec.Health = &manifest.Health{
+		Command:  []string{"sh", "-c", "echo not ready >&2; exit 2"},
+		Interval: time.Second,
+		Timeout:  time.Second,
+		Retries:  2,
+	}
+
+	_, _, err = s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	workload = s.awaitHealth(name, client.HealthUnhealthy)
+	s.Require().Len(workload.Instances, 1)
+	s.Contains(workload.Instances[0].Health.Error, "exit status 2")
+	s.Contains(workload.Instances[0].Health.Error, "not ready")
+}
+
 // TestDefaultPolicyStillRestarts covers the compatibility claim. A manifest that says
 // nothing about restarting behaves as it did before the policy existed.
 func (s *Suite) TestDefaultPolicyStillRestarts() {
