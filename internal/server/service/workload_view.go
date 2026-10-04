@@ -112,7 +112,7 @@ func (s *WorkloadService) hydrate(ctx context.Context, row database.Workload) (W
 
 	instances := s.observeWorkload(ctx, row)
 
-	return newWorkload(row, instances, ports, s.healths(row.Name, instances), s.drifted.behind(row.Name))
+	return newWorkload(row, instances, ports, s.healths(row.Name, instances), s.pulling(row.Name, instances), s.drifted.behind(row.Name))
 }
 
 // observeWorkload asks each driver what it is running for one workload.
@@ -204,6 +204,28 @@ func (s *WorkloadService) healths(workload string, instances []driver.Instance) 
 	return healths
 }
 
+// pulling reports which instance slots are waiting on an image pull, keyed by the
+// instance's index. Only the observed instances are asked after, since the question
+// is what an instance the reconciler stopped should read as while its successor
+// waits.
+func (s *WorkloadService) pulling(workload string, instances []driver.Instance) map[int]bool {
+	if s.reconciler == nil {
+		return nil
+	}
+
+	pulling := make(map[int]bool, len(instances))
+
+	for _, instance := range instances {
+		if _, ok := pulling[instance.Index]; ok {
+			continue
+		}
+
+		pulling[instance.Index] = s.reconciler.Pulling(workload, instance.Index)
+	}
+
+	return pulling
+}
+
 // healthState reports the instance state a workload's health implies, so that a
 // workload which is running but not working converges rather than being left alone.
 //
@@ -227,7 +249,7 @@ func healthState(state driver.State, reported Health) driver.State {
 	}
 }
 
-func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, healths map[int]Health, drifted bool) (Workload, error) {
+func newWorkload(row database.Workload, instances []driver.Instance, ports []database.Port, healths map[int]Health, pulling map[int]bool, drifted bool) (Workload, error) {
 	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return Workload{}, err
@@ -255,10 +277,15 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 	// The restart policy is applied after it, on the instances that have ended. An
 	// instance the policy retires is finished with, so a stale health result must not
 	// reopen the question of whether it is working.
+	//
+	// Last, an instance the reconciler stopped to replace reads as pending while its
+	// successor waits on an image pull, so a workload mid-replacement does not spend
+	// the pull reading as stopped or failed over an exit takt itself asked for.
 	scheduled := spec.Schedule != nil
 	for i := range instances {
 		instances[i].State = healthState(instances[i].State, healths[instances[i].Index])
 		instances[i].State = state.Completion(instances[i], policy, scheduled)
+		instances[i].State = state.Replacing(instances[i], pulling[instances[i].Index])
 	}
 
 	// A suspended workload's occurrences will not happen, so none is reported: a

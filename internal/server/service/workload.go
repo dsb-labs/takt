@@ -123,8 +123,8 @@ type (
 	// The service records what is wanted and never touches running work, so
 	// everything here crosses that one boundary: waking the loop when desired
 	// state changes, recording a restart request for it to act on, and reading
-	// why its last pass over a workload failed — which is only observable during
-	// the pass that hits it, so the reconciler is the one component that has it.
+	// whether a slot is waiting on an image pull — which only the pass that stopped
+	// the slot's instance knows, so the reconciler is the one component that has it.
 	Reconciler interface {
 		// Notify should ask for a reconciliation pass to run as soon as possible,
 		// and never block.
@@ -132,6 +132,10 @@ type (
 		// Restart should record that the workload's instances are to be replaced
 		// on the next pass over it.
 		Restart(workload string)
+		// Pulling should report whether the slot's next instance is waiting on an
+		// image pull, so an instance stopped to make way for it reads as pending
+		// rather than as ended.
+		Pulling(workload string, instance int) bool
 	}
 
 	// The WorkloadEventRepository interface describes the event operations the
@@ -409,7 +413,7 @@ func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Worklo
 
 	workloads := make([]Workload, 0, len(rows))
 	for _, row := range rows {
-		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.healths(row.Name, observed[row.Name]), s.drifted.behind(row.Name))
+		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.healths(row.Name, observed[row.Name]), s.pulling(row.Name, observed[row.Name]), s.drifted.behind(row.Name))
 		if err != nil {
 			return nil, err
 		}
