@@ -304,6 +304,15 @@ type (
 		// When each held slot was first held, for the bounded wait. Cleared when
 		// the gate is finished with the slot.
 		held map[slot]time.Time
+		// The slots whose next instance is waiting on an image pull. A slot is
+		// marked when a start returns with the image still being fetched and
+		// cleared by the next start attempt, whatever its outcome, so the mark
+		// says what the last attempt to start the slot found.
+		//
+		// This is what lets a replaced instance read as pending rather than as
+		// having ended: the pass that stopped it is the only thing that knows its
+		// successor is on the way, and the stopped container says nothing of it.
+		pulling map[slot]struct{}
 		// The workloads whose instances an operator asked to have replaced,
 		// consumed by the next pass over each. In memory rather than stored,
 		// because a request the server loses can simply be made again.
@@ -469,6 +478,7 @@ func New(config Config) *Reconciler {
 		restarts:     make(map[string]struct{}),
 		started:      make(map[slot]int),
 		held:         make(map[slot]time.Time),
+		pulling:      make(map[slot]struct{}),
 		converging:   make(map[string]struct{}),
 		observations: observations,
 		subscribers:  make(map[chan struct{}]struct{}),
@@ -539,6 +549,32 @@ func (r *Reconciler) record(ctx context.Context, workload string, reason event.R
 
 	if err := r.events.Record(ctx, workload, reason, event.Encode(fields)); err != nil {
 		r.logger.With("error", err, "workload", workload, "reason", reason).Error("failed to record workload event")
+	}
+}
+
+// Pulling reports whether a slot's next instance is waiting on an image pull, which
+// is what a caller deriving the workload's state needs to read an instance the
+// reconciler stopped for replacement as pending rather than as ended.
+func (r *Reconciler) Pulling(workload string, instance int) bool {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	_, ok := r.pulling[slot{workload: workload, instance: instance}]
+
+	return ok
+}
+
+// markPulling records whether a slot's last start attempt found its image still
+// being fetched.
+func (r *Reconciler) markPulling(workload string, instance int, waiting bool) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	key := slot{workload: workload, instance: instance}
+	if waiting {
+		r.pulling[key] = struct{}{}
+	} else {
+		delete(r.pulling, key)
 	}
 }
 
@@ -978,6 +1014,7 @@ func (r *Reconciler) measure(ctx context.Context, rows []database.Workload, obse
 		instances := slices.Clone(observed[row.Name])
 		for i := range instances {
 			instances[i].State = state.Completion(instances[i], policy, onSchedule)
+			instances[i].State = state.Replacing(instances[i], r.Pulling(row.Name, instances[i].Index))
 		}
 
 		counts[state.Of(instances, !row.DeletedAt.IsZero(), !row.SuspendedAt.IsZero())]++

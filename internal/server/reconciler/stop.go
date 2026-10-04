@@ -257,6 +257,7 @@ func (r *Reconciler) discardInstance(ctx context.Context, row database.Workload,
 	delete(r.unhealthy, key)
 	delete(r.started, key)
 	delete(r.held, key)
+	delete(r.pulling, key)
 	r.mux.Unlock()
 
 	if r.checker != nil {

@@ -208,4 +208,10 @@ func (r *Reconciler) forgetStarted(workload string) {
 			delete(r.held, key)
 		}
 	}
+
+	for key := range r.pulling {
+		if key.workload == workload {
+			delete(r.pulling, key)
+		}
+	}
 }

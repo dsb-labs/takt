@@ -77,6 +77,12 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 	}
 
 	id, err := d.Start(startCtx, w)
+
+	// The mark follows the outcome of every attempt: set while the image is still
+	// being fetched, and cleared by a start that went any other way, so a slot
+	// never reads as waiting on a pull that is over.
+	r.markPulling(row.Name, index, errors.Is(err, driver.ErrImagePulling))
+
 	if err != nil {
 		// An image still being fetched is a waiting state rather than a failure.
 		// The instance stays pending with its ports and pacing untouched, and a
