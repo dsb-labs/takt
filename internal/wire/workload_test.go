@@ -151,6 +151,27 @@ func TestFromSpec(t *testing.T) {
 		assert.Equal(t, spec, actual)
 	})
 
+	t.Run("round-trips a command health check", func(t *testing.T) {
+		spec := manifest.Spec{
+			Version: "v1",
+			Name:    "example",
+			Count:   1,
+			Restart: &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay},
+			Health: &manifest.Health{
+				Command:     []string{"/usr/local/bin/worker", "check"},
+				Interval:    manifest.DefaultHealthInterval,
+				Timeout:     manifest.DefaultHealthTimeout,
+				Retries:     manifest.DefaultHealthRetries,
+				StartPeriod: manifest.DefaultHealthStartPeriod,
+			},
+			Exec: &manifest.Exec{Command: []string{"/usr/local/bin/worker", "run"}},
+		}
+
+		actual, err := wire.ToSpec(wire.FromSpec(spec))
+		require.NoError(t, err)
+		assert.Equal(t, spec, actual)
+	})
+
 	t.Run("round-trips a host-networked specification", func(t *testing.T) {
 		spec := manifest.Spec{
 			Version: "v1",

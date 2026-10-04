@@ -94,6 +94,7 @@ const check = computed(() => {
 
   const rows: [string, string][] = [];
   if (health.http) rows.push(["Path", health.http]);
+  if (health.command) rows.push(["Command", health.command.join(" ")]);
   if (health.port) rows.push(["Port", health.port]);
   rows.push(
     ["Interval", health.interval ?? "10s"],
