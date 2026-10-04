@@ -36,7 +36,7 @@ func (r *Reconciler) register(rows []database.Workload, observed map[string][]dr
 		// One check per instance, against that instance's own host port, so one
 		// instance failing to answer marks that instance alone.
 		for index := range count {
-			check, ok, err := healthCheck(r.bind, row, r.slotPorts(row, index))
+			check, ok, err := r.healthCheck(row, index)
 			switch {
 			case err != nil:
 				// The specification was validated before it was stored, so a check
@@ -78,32 +78,78 @@ func (r *Reconciler) checkable(row database.Workload, index int, instances []dri
 	})
 }
 
-// healthCheck resolves a stored workload's health check into something probeable,
+// healthCheck resolves one instance's health check into something probeable,
 // reporting false when the workload declares none.
-func healthCheck(bind string, row database.Workload, ports []database.Port) (health.Check, bool, error) {
+//
+// An http or tcp check resolves to the instance's own host port. A command check
+// resolves to a probe the instance's driver performs, which is the one place the
+// checker's work reaches a runtime.
+func (r *Reconciler) healthCheck(row database.Workload, index int) (health.Check, bool, error) {
 	spec, err := manifest.DecodeWorkload(row.Spec)
 	if err != nil {
 		return health.Check{}, false, err
 	}
 
-	resolved := spec
-	if resolved.Health == nil {
+	if spec.Health == nil {
 		return health.Check{}, false, nil
 	}
 
-	host, err := healthPort(*resolved.Health, ports)
+	check := health.Check{
+		Interval:    spec.Health.Interval,
+		Timeout:     spec.Health.Timeout,
+		Retries:     spec.Health.Retries,
+		StartPeriod: spec.Health.StartPeriod,
+	}
+
+	if len(spec.Health.Command) > 0 {
+		d, ok := r.driverFor(row)
+		if !ok {
+			return health.Check{}, false, fmt.Errorf("no driver for the %s runtime", row.Runtime)
+		}
+
+		check.Command = spec.Health.Command
+		check.Probe = r.probe(d, row, index, spec.Health.Command)
+
+		return check, true, nil
+	}
+
+	host, err := healthPort(*spec.Health, r.slotPorts(row, index))
 	if err != nil {
 		return health.Check{}, false, err
 	}
 
-	return health.Check{
-		Address:     net.JoinHostPort(probeHost(bind), strconv.Itoa(host)),
-		HTTP:        resolved.Health.HTTP,
-		Interval:    resolved.Health.Interval,
-		Timeout:     resolved.Health.Timeout,
-		Retries:     resolved.Health.Retries,
-		StartPeriod: resolved.Health.StartPeriod,
-	}, true, nil
+	check.Address = net.JoinHostPort(probeHost(r.bind), strconv.Itoa(host))
+	check.HTTP = spec.Health.HTTP
+
+	return check, true, nil
+}
+
+// probe returns the function the checker runs for one instance's command check.
+//
+// The environment is resolved as a start resolves it, and as late: a secret's
+// plaintext exists only while the probe that needs it runs. It is resolved through a
+// function rather than ahead of the call so that a runtime whose instance already
+// carries its environment never has it resolved at all.
+func (r *Reconciler) probe(d Driver, row database.Workload, index int, command []string) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		w, err := driver.NewWorkload(row, r.hostPaths)
+		if err != nil {
+			return err
+		}
+
+		w.Instance = index
+
+		return d.Probe(ctx, w, driver.Probe{
+			Command: command,
+			Env: func(ctx context.Context) (map[string]string, error) {
+				if r.env == nil {
+					return w.Env, nil
+				}
+
+				return r.env.Resolve(ctx, w.Env, row.ID, w.Name, w.Instance)
+			},
+		})
+	}
 }
 
 // probeHost returns the host a check is performed against, given the address a

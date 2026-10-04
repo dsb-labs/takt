@@ -906,6 +906,96 @@ func TestReconciler_Run_RegistersChecks(t *testing.T) {
 	assert.Equal(t, "/healthz", got.HTTP)
 }
 
+func TestReconciler_Run_RegistersCommandChecks(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+	ports, checker := NewMockPortRepository(t), newMockChecker(t)
+	secrets := NewMockResolver(t)
+
+	checked := storedWorkload("example", "hash-one")
+	checked.ID = "workload-one"
+	checked.Spec = specWithCommandCheck("example")
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{checked}, nil)
+
+	// A command check needs no port, so a workload publishing none is checked.
+	ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{}, nil)
+
+	registered := make(chan health.Check, 1)
+	checker.EXPECT().Set("example", 0, mock.Anything).
+		Run(func(_ string, _ int, check health.Check) {
+			select {
+			case registered <- check:
+			default:
+			}
+		}).Return()
+
+	checker.EXPECT().Result("example", 0).Return(health.Result{Status: health.StatusHealthy}, true)
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return []driver.Instance{{
+				ID:       "container-one",
+				Workload: "example",
+				SpecHash: "hash-one",
+				State:    driver.StateRunning,
+			}}, nil
+		})
+
+	// The probe reaches the driver with the workload's identity and the command,
+	// and resolves the environment the way a start does only when the driver asks.
+	secrets.EXPECT().Resolve(mock.Anything, map[string]string{"TOKEN": "${secret:token}"}, "workload-one", "example", 0).
+		Return(map[string]string{"TOKEN": "plaintext"}, nil).Once()
+
+	d.EXPECT().Probe(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, w driver.Workload, probe driver.Probe) error {
+			assert.Equal(t, "workload-one", w.ID)
+			assert.Equal(t, "example", w.Name)
+			assert.Equal(t, 0, w.Instance)
+			assert.Equal(t, []string{"worker", "check"}, probe.Command)
+
+			env, err := probe.Env(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, map[string]string{"TOKEN": "plaintext"}, env)
+
+			return errors.New("not ready")
+		}).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Checker:   checker,
+		Env:       secrets,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
+
+	cancel()
+	require.NoError(t, <-done)
+
+	got := <-registered
+	assert.Empty(t, got.Address)
+	assert.Equal(t, []string{"worker", "check"}, got.Command)
+	require.NotNil(t, got.Probe)
+	assert.EqualError(t, got.Probe(t.Context()), "not ready")
+}
+
 func TestReconciler_Run_ProbesThePublishedAddress(t *testing.T) {
 	t.Parallel()
 
@@ -4402,6 +4492,23 @@ func specWithHealth(name string) []byte {
 		Name:      name,
 		Container: &manifest.Container{Image: "example/example:latest"},
 		Health:    &manifest.Health{HTTP: "/healthz"},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	return spec
+}
+
+// specWithCommandCheck returns a stored specification declaring a command check
+// and an environment reading a secret, publishing no ports.
+func specWithCommandCheck(name string) []byte {
+	spec, err := json.Marshal(manifest.Spec{
+		Version:   "v1",
+		Name:      name,
+		Env:       map[string]string{"TOKEN": "${secret:token}"},
+		Container: &manifest.Container{Image: "example/example:latest"},
+		Health:    &manifest.Health{Command: []string{"worker", "check"}},
 	})
 	if err != nil {
 		panic(err)

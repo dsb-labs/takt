@@ -71,6 +71,15 @@ type (
 		// than fail. There is nothing to reload, and the reconciler asks only the
 		// driver that runs the workload anyway.
 		Signal(ctx context.Context, id, workload, signal string) error
+		// Probe should run a command health check for one instance of a workload
+		// where the instance runs, returning nil when the command exits zero. The
+		// error carries why it did not, which is what the check's result reports.
+		//
+		// This is the one check that reaches a runtime. An http or tcp check is
+		// performed against the address the workload publishes, and a driver
+		// inherits it by publishing one; a command runs where the workload does,
+		// which only its driver can arrange.
+		Probe(ctx context.Context, w driver.Workload, probe driver.Probe) error
 		// Observe should report every instance the driver is currently running.
 		Observe(ctx context.Context) ([]driver.Instance, error)
 		// Watch should report changes to the driver's instances so that the

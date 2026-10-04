@@ -38,6 +38,9 @@ type (
 		// Signal should send the named signal to everything the driver runs for
 		// a workload.
 		Signal(ctx context.Context, id, workload, signal string) error
+		// Probe should run a command health check for one instance of a workload,
+		// where the instance runs.
+		Probe(ctx context.Context, w driver.Workload, probe driver.Probe) error
 		// Observe should report every instance the driver is currently running.
 		Observe(ctx context.Context) ([]driver.Instance, error)
 		// Watch should report changes to the driver's instances.
@@ -162,6 +165,19 @@ func (t *tracedDriver) Signal(ctx context.Context, id, workload, signal string) 
 		attribute.String("takt.signal", signal))
 
 	err := t.next.Signal(ctx, id, workload, signal)
+	end(span, err)
+
+	return err
+}
+
+// Probe runs a command health check for one instance of a workload through the
+// wrapped driver.
+func (t *tracedDriver) Probe(ctx context.Context, w driver.Workload, probe driver.Probe) error {
+	ctx, span := t.span(ctx, "driver.probe",
+		attribute.String("takt.workload", w.Name),
+		attribute.Int("takt.instance", w.Instance))
+
+	err := t.next.Probe(ctx, w, probe)
 	end(span, err)
 
 	return err
