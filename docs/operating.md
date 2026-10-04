@@ -510,6 +510,13 @@ the same user, so granting it would let one workload read what another wrote the
 workload needing scratch space has its own working directory, and `TMPDIR` will point
 a command at it.
 
+A `command` health check is confined too. The probe starts in the workload's working
+directory, through the same trampoline, with the same ruleset: the directory, the
+volumes the workload was started with, and the host's system directories. A probe
+running unconfined would let a manifest run a command with the server's reach, which
+is the gap confinement exists to close. Where the workload has a cgroup, the probe
+runs in one beside it under the same limits, which is removed when the probe ends.
+
 ## Delegation
 
 An `exec` workload runs in a cgroup of its own. The cgroup enforces the limits a

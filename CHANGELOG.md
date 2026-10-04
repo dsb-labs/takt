@@ -10,6 +10,13 @@ describes how an entry is written.
 
 ### Added
 
+- A health check may name a `command` instead of `http` or `tcp`, for a workload
+  that publishes no port. The command runs where the workload runs: on the `exec`
+  runtime confined and limited as the process is, with its environment, and on the
+  `container` runtime inside the container. Exit status zero passes, and the error a
+  failing check reports carries the exit status and the end of the command's output
+  ([#136](https://github.com/dsb-labs/takt/issues/136)).
+
 - `digest-interval` under `[docker]` has the server ask the registry, on that
   interval, what each `pull: always` workload's tag resolves to. One behind its
   tag records an `imageDrifted` event, says so in `workload get` and the UI, and
