@@ -165,6 +165,10 @@ type (
 		// Where the record for this process lives, which is in the driver's own tree
 		// rather than the workload's.
 		state string
+		// Closed once the supervisor has recorded how the process ended, so that
+		// whoever removes the record's directory can wait for the last write to
+		// it rather than race one.
+		done chan struct{}
 	}
 
 	// The supKey type identifies one supervised instance of a workload.
@@ -441,7 +445,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", err
 	}
 
-	d.supervise(ctx, w.Name, w.Instance, &supervised{cmd: cmd, state: recordPath})
+	d.supervise(ctx, w.Name, w.Instance, &supervised{cmd: cmd, state: recordPath, done: make(chan struct{})})
 
 	d.logger.With("workload", w.Name, "pid", recorded.PID, "version", w.Version, "instance", w.Instance).Debug("process started")
 
@@ -462,6 +466,8 @@ func (d *Driver) supervise(ctx context.Context, workload string, instance int, p
 	d.mux.Unlock()
 
 	d.waits.Go(func() {
+		defer close(process.done)
+
 		err := process.cmd.Wait()
 
 		d.mux.Lock()
@@ -698,10 +704,27 @@ func (d *Driver) halt(ctx context.Context, workload string, records []record) er
 	}
 
 	d.mux.Lock()
+	ending := make([]*supervised, 0, len(records))
 	for _, r := range records {
-		delete(d.supervised, supKey{workload: workload, instance: r.instance})
+		key := supKey{workload: workload, instance: r.instance}
+		if process, ok := d.supervised[key]; ok {
+			ending = append(ending, process)
+		}
+
+		delete(d.supervised, key)
 	}
 	d.mux.Unlock()
+
+	// The supervisor records the exit once the process is gone, and the caller is
+	// about to remove the directory it writes into. Waiting here is what keeps the
+	// removal from finding a file the supervisor created under it.
+	for _, process := range ending {
+		select {
+		case <-process.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 
 	return nil
 }
