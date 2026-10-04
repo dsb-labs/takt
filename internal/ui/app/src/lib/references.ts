@@ -1,4 +1,4 @@
-import type { VolumeMount, WorkloadSpec } from "@/api/types";
+import type { Variable, VolumeMount, WorkloadSpec } from "@/api/types";
 
 // A Reference is something a workload's specification names: a secret,
 // variable, token or another workload expanded into its environment, or a
@@ -31,8 +31,19 @@ const kinds = {
 } as const;
 
 // references lists everything the given specification refers to, in the order
-// the specification declares it: environment expansions first, mounts second.
-export function references(spec: WorkloadSpec): Reference[] {
+// the specification declares it: environment expansions first, mounts second,
+// and after each mount with expand set, what the mounted variable's value
+// names. That last list needs the variables, so a caller without them gets
+// the mounts alone.
+//
+// One level only, the same as the server: a ${var:} inside the value is a
+// reference to that variable, not to what it names. A ${token:} inside is
+// left out, because the server refuses one there and nothing can be read
+// through it.
+export function references(
+  spec: WorkloadSpec,
+  variables: Pick<Variable, "name" | "value">[] = [],
+): Reference[] {
   const refs: Reference[] = [];
 
   for (const [key, value] of Object.entries(spec.env ?? {})) {
@@ -45,12 +56,28 @@ export function references(spec: WorkloadSpec): Reference[] {
     }
   }
 
+  const values = new Map(variables.map((v) => [v.name, v.value]));
+
   for (const mount of spec.volumes ?? []) {
     const via = mountedAt(mount);
     if (mount.name) refs.push({ kind: "volume", name: mount.name, via });
     if (mount.secret) refs.push({ kind: "secret", name: mount.secret, via });
     if (mount.var) refs.push({ kind: "variable", name: mount.var, via });
     if (mount.token) refs.push({ kind: "token", name: mount.token, via });
+
+    if (!mount.expand || !mount.var) continue;
+
+    // A variable nothing holds yet is only the mount's own reference above,
+    // which is how the server reports it missing too.
+    const value = values.get(mount.var);
+    if (value === undefined) continue;
+
+    for (const match of value.matchAll(pattern)) {
+      const kind = kinds[match[1] as keyof typeof kinds];
+      if (kind === "token") continue;
+
+      refs.push({ kind, name: match[2]!, via: `variable ${mount.var}` });
+    }
   }
 
   return refs;
