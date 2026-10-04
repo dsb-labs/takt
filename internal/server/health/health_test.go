@@ -2,6 +2,7 @@ package health_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -100,6 +101,55 @@ func TestChecker_Run(t *testing.T) {
 		checker.Set("example", 0, check(listener.Addr().String(), ""))
 
 		awaitStatus(t, checker, "example", health.StatusHealthy)
+	})
+
+	t.Run("runs the probe instead of connecting when one is given", func(t *testing.T) {
+		var healthy atomic.Bool
+
+		checker := run(t)
+
+		// The address names nothing listening, so a check that connected would
+		// fail. The probe is what answers.
+		spec := check(freeAddress(t), "")
+		spec.Command = []string{"worker", "check"}
+		spec.Probe = func(context.Context) error {
+			if !healthy.Load() {
+				return errors.New("not ready")
+			}
+
+			return nil
+		}
+
+		checker.Set("example", 0, spec)
+
+		awaitStatus(t, checker, "example", health.StatusUnhealthy)
+
+		result, ok := checker.Result("example", 0)
+		require.True(t, ok)
+		assert.Equal(t, "not ready", result.Error)
+
+		healthy.Store(true)
+		awaitStatus(t, checker, "example", health.StatusHealthy)
+	})
+
+	t.Run("bounds the probe by the check's timeout", func(t *testing.T) {
+		checker := run(t)
+
+		spec := check(freeAddress(t), "")
+		spec.Command = []string{"worker", "check"}
+		spec.Probe = func(ctx context.Context) error {
+			<-ctx.Done()
+
+			return ctx.Err()
+		}
+
+		checker.Set("example", 0, spec)
+
+		awaitStatus(t, checker, "example", health.StatusUnhealthy)
+
+		result, ok := checker.Result("example", 0)
+		require.True(t, ok)
+		assert.Equal(t, context.DeadlineExceeded.Error(), result.Error)
 	})
 
 	t.Run("recovers when a workload starts answering again", func(t *testing.T) {
@@ -327,6 +377,39 @@ func TestChecker_Set(t *testing.T) {
 		result, ok := checker.Result("example", 0)
 		require.True(t, ok)
 		assert.Equal(t, health.StatusUnhealthy, result.Status)
+	})
+
+	t.Run("keeps history when a command check is registered with a new probe", func(t *testing.T) {
+		checker := run(t)
+
+		failing := func(context.Context) error { return errors.New("not ready") }
+
+		spec := check("", "")
+		spec.Command = []string{"worker", "check"}
+		spec.Probe = failing
+
+		checker.Set("example", 0, spec)
+		awaitStatus(t, checker, "example", health.StatusUnhealthy)
+
+		// The reconciler builds the probe closure afresh every pass. Two closures
+		// over the same command are the same check, and the latest one is what
+		// runs from now on.
+		var ran atomic.Bool
+
+		spec.Probe = func(context.Context) error {
+			ran.Store(true)
+
+			return nil
+		}
+
+		checker.Set("example", 0, spec)
+
+		result, ok := checker.Result("example", 0)
+		require.True(t, ok)
+		assert.Equal(t, health.StatusUnhealthy, result.Status)
+
+		awaitStatus(t, checker, "example", health.StatusHealthy)
+		assert.True(t, ran.Load())
 	})
 
 	t.Run("starts afresh when the check changes", func(t *testing.T) {
