@@ -9,10 +9,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
-	"slices"
 	"strconv"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -30,14 +27,8 @@ var (
 	ErrProbeFailed = errors.New("probe failed")
 )
 
-const (
-	// How much of what a probe writes is kept for the error it reports. A check
-	// that fails says why in a line or two, and the output is never written to the
-	// workload's log, so this is the whole of what an operator sees of it.
-	probeOutputLimit = 1024
-	// The suffix on the cgroup a probe runs in, beside the workload's own.
-	probeCgroupSuffix = "-probe"
-)
+// The suffix on the cgroup a probe runs in, beside the workload's own.
+const probeCgroupSuffix = "-probe"
 
 // Probe runs a command health check for one instance of a workload, returning nil
 // when the command exits zero.
@@ -105,7 +96,7 @@ func (d *Driver) Probe(ctx context.Context, w driver.Workload, probe driver.Prob
 		return err
 	}
 
-	output := &tail{limit: probeOutputLimit}
+	output := new(driver.Tail)
 
 	cmd := osexec.Command(self, confineArg)
 	cmd.Dir = cwd
@@ -176,7 +167,7 @@ func (d *Driver) Probe(ctx context.Context, w driver.Workload, probe driver.Prob
 // that forked and then hung has everything it started ended with it. The context's
 // error is what a timed-out probe reports, since the exit status of a killed process
 // says nothing an operator can act on.
-func (d *Driver) await(ctx context.Context, cmd *osexec.Cmd, output *tail) error {
+func (d *Driver) await(ctx context.Context, cmd *osexec.Cmd, output *driver.Tail) error {
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
 
@@ -194,7 +185,7 @@ func (d *Driver) await(ctx context.Context, cmd *osexec.Cmd, output *tail) error
 	exit, ok := errors.AsType[*osexec.ExitError](err)
 	switch {
 	case ok:
-		return fmt.Errorf("%w: exit status %d%s", ErrProbeFailed, exit.ExitCode(), tailOf(output))
+		return fmt.Errorf("%w: exit status %d%s", ErrProbeFailed, exit.ExitCode(), output.Suffix())
 	case err != nil:
 		return fmt.Errorf("failed to wait for probe: %w", err)
 	default:
@@ -265,40 +256,4 @@ func probeCgroup(recorded state, resources *manifest.Resources) (*cgroup, error)
 	}
 
 	return group, nil
-}
-
-// The tail type is a writer that keeps the end of what is written to it, up to its
-// limit, so that a probe writing without end costs the server no more than the
-// limit.
-type tail struct {
-	mux   sync.Mutex
-	limit int
-	kept  []byte
-}
-
-// Write keeps the last limit bytes of everything written so far.
-func (t *tail) Write(p []byte) (int, error) {
-	t.mux.Lock()
-	defer t.mux.Unlock()
-
-	t.kept = append(t.kept, p...)
-	if len(t.kept) > t.limit {
-		t.kept = slices.Clone(t.kept[len(t.kept)-t.limit:])
-	}
-
-	return len(p), nil
-}
-
-// tailOf returns what a probe wrote, formatted to follow its exit status in an error,
-// or nothing when it wrote nothing.
-func tailOf(output *tail) string {
-	output.mux.Lock()
-	defer output.mux.Unlock()
-
-	text := strings.TrimSpace(string(output.kept))
-	if text == "" {
-		return ""
-	}
-
-	return ": " + text
 }

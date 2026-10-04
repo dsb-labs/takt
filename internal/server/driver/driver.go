@@ -15,7 +15,9 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dsb-labs/takt/internal/server/database"
@@ -191,6 +193,17 @@ type (
 		Env func(ctx context.Context) (map[string]string, error)
 	}
 
+	// The Tail type is a writer that keeps the end of what is written to it, so
+	// that a probe writing without end costs the server no more than the limit.
+	//
+	// A check that fails says why in a line or two, and a probe's output is never
+	// written to the workload's log, so what this keeps is the whole of what an
+	// operator sees of it.
+	Tail struct {
+		mux  sync.Mutex
+		kept []byte
+	}
+
 	// The Instance type describes one unit of work a driver is running on behalf of
 	// a workload. It is observed state: every field reflects what the driver found
 	// when asked, never what the server wishes were true.
@@ -347,6 +360,36 @@ type (
 		Workload string
 	}
 )
+
+// How much of what a probe writes a Tail keeps.
+const tailLimit = 1024
+
+// Write keeps the last of everything written so far, up to the limit.
+func (t *Tail) Write(p []byte) (int, error) {
+	t.mux.Lock()
+	defer t.mux.Unlock()
+
+	t.kept = append(t.kept, p...)
+	if len(t.kept) > tailLimit {
+		t.kept = slices.Clone(t.kept[len(t.kept)-tailLimit:])
+	}
+
+	return len(p), nil
+}
+
+// Suffix returns what was kept, trimmed and formatted to follow an exit status in
+// an error, or nothing when nothing was written.
+func (t *Tail) Suffix() string {
+	t.mux.Lock()
+	defer t.mux.Unlock()
+
+	text := strings.TrimSpace(string(t.kept))
+	if text == "" {
+		return ""
+	}
+
+	return ": " + text
+}
 
 // NewWorkload maps a stored workload onto the shape a driver runs, decoding the
 // specification the server persisted.

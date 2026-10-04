@@ -75,6 +75,13 @@ var (
 	// ErrNotContainerWorkload is returned when NewWorkload is given a stored
 	// workload whose specification carries no container block.
 	ErrNotContainerWorkload = errors.New("workload does not describe a container")
+	// ErrNoRunningInstance is returned when a probe is asked of an instance the
+	// driver has no running container for.
+	ErrNoRunningInstance = errors.New("no running instance to probe")
+	// ErrProbeFailed is returned when a probe ran and exited with a status other
+	// than zero. The error carries the status and the tail of what the command
+	// wrote.
+	ErrProbeFailed = errors.New("probe failed")
 )
 
 type (
@@ -507,6 +514,108 @@ func (d *Driver) Signal(ctx context.Context, _, workload, signal string) error {
 	}
 
 	return nil
+}
+
+// Probe runs a command health check inside the running container of one instance,
+// returning nil when the command exits zero.
+//
+// The command runs as the container does: in its namespaces and its cgroup, under
+// its capability set, its seccomp profile and its user, with the environment the
+// container already has. The probe's Env is never called, since nothing has to be
+// resolved again for a runtime that keeps it.
+//
+// The engine offers no way to end an exec, so a probe that outlives the caller's
+// deadline fails here and is left running inside the container until it ends on its
+// own or the container is replaced. The daemon's own health check lives with the
+// same constraint. Output is captured to a bounded buffer for the error and never
+// reaches the container's log.
+func (d *Driver) Probe(ctx context.Context, w driver.Workload, probe driver.Probe) error {
+	if len(probe.Command) == 0 {
+		return fmt.Errorf("%w: no command", ErrNotContainerWorkload)
+	}
+
+	id, err := d.running(ctx, w.Name, w.Instance)
+	if err != nil {
+		return err
+	}
+
+	execID, err := d.client.ExecCreate(ctx, id, client.ExecCreateOptions{
+		AttachStdout: true,
+		AttachStderr: true,
+		Cmd:          probe.Command,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create probe: %w", err)
+	}
+
+	stream, err := d.client.ExecAttach(ctx, execID)
+	if err != nil {
+		return fmt.Errorf("failed to start probe: %w", err)
+	}
+	defer stream.Close()
+
+	// The stream ends when the command does, so this is the wait. The copy is on a
+	// goroutine of its own because the stream is a hijacked connection the context
+	// does not reach: closing it is what ends a read the deadline cut short.
+	output := new(driver.Tail)
+	copied := make(chan error, 1)
+
+	go func() {
+		_, err := stdcopy.StdCopy(output, output, stream)
+		copied <- err
+	}()
+
+	select {
+	case err = <-copied:
+		if err != nil {
+			return fmt.Errorf("failed to read probe output: %w", err)
+		}
+	case <-ctx.Done():
+		_ = stream.Close()
+		<-copied
+
+		return ctx.Err()
+	}
+
+	// Inspected with a context of its own: the stream has ended so the command
+	// has, and a deadline passing between the two would turn an answer the command
+	// gave into a timeout.
+	inspectCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
+	inspected, err := d.client.ExecInspect(inspectCtx, execID)
+	switch {
+	case err != nil:
+		return fmt.Errorf("failed to inspect probe: %w", err)
+	case inspected.Running:
+		return fmt.Errorf("%w: still running after its output ended", ErrProbeFailed)
+	case inspected.ExitCode != 0:
+		return fmt.Errorf("%w: exit status %d%s", ErrProbeFailed, inspected.ExitCode, output.Suffix())
+	default:
+		return nil
+	}
+}
+
+// running finds the container currently running one instance of a workload,
+// reporting ErrNoRunningInstance when there is none.
+//
+// A retained container is left out: it has been replaced, and probing it would
+// answer a question about an attempt that is over.
+func (d *Driver) running(ctx context.Context, workload string, instance int) (string, error) {
+	containers, err := d.containers(ctx, workload)
+	if err != nil {
+		return "", err
+	}
+
+	superseded := supersededBy(containers)
+
+	for _, c := range containers {
+		if instanceOf(c) == instance && state(c.State) == driver.StateRunning && !superseded[c.ID] {
+			return c.ID, nil
+		}
+	}
+
+	return "", fmt.Errorf("%w: instance %d", ErrNoRunningInstance, instance)
 }
 
 // Observe returns an instance for every container the driver owns, whatever state

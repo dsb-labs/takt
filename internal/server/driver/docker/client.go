@@ -58,6 +58,16 @@ type (
 		// of the container with the given identifier, without waiting for a second
 		// sample. The caller must close the body.
 		ContainerStatsOneShot(ctx context.Context, id string) (io.ReadCloser, error)
+		// ExecCreate should prepare a command to run inside the container with the
+		// given identifier, returning the identifier of the exec.
+		ExecCreate(ctx context.Context, id string, options client.ExecCreateOptions) (string, error)
+		// ExecAttach should start the exec with the given identifier and return its
+		// output, multiplexed as the engine multiplexes a container's logs. The
+		// caller must close the stream.
+		ExecAttach(ctx context.Context, id string) (io.ReadCloser, error)
+		// ExecInspect should report whether the exec with the given identifier is
+		// still running, and how it exited once it is not.
+		ExecInspect(ctx context.Context, id string) (client.ExecInspectResult, error)
 		// Events should return a stream of engine events matching the given options,
 		// alongside a channel carrying any error that ends the stream.
 		Events(ctx context.Context, options client.EventsListOptions) (<-chan events.Message, <-chan error)
@@ -68,7 +78,22 @@ type (
 	engineClient struct {
 		inner *client.Client
 	}
+
+	// The hijacked type is the output of an attached exec as a stream the driver
+	// can read and close, which the SDK's hijacked connection is not quite: its
+	// Close returns nothing.
+	hijacked struct {
+		io.Reader
+		close func()
+	}
 )
+
+// Close releases the connection the stream reads from.
+func (h *hijacked) Close() error {
+	h.close()
+
+	return nil
+}
 
 // NewClient returns a Client talking to the Docker daemon described by the
 // environment, negotiating the API version so that takt works against older
@@ -192,6 +217,28 @@ func (c *engineClient) ContainerStatsOneShot(ctx context.Context, id string) (io
 	}
 
 	return result.Body, nil
+}
+
+func (c *engineClient) ExecCreate(ctx context.Context, id string, options client.ExecCreateOptions) (string, error) {
+	result, err := c.inner.ExecCreate(ctx, id, options)
+	if err != nil {
+		return "", err
+	}
+
+	return result.ID, nil
+}
+
+func (c *engineClient) ExecAttach(ctx context.Context, id string) (io.ReadCloser, error) {
+	result, err := c.inner.ExecAttach(ctx, id, client.ExecAttachOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return &hijacked{Reader: result.Reader, close: result.Close}, nil
+}
+
+func (c *engineClient) ExecInspect(ctx context.Context, id string) (client.ExecInspectResult, error) {
+	return c.inner.ExecInspect(ctx, id, client.ExecInspectOptions{})
 }
 
 func (c *engineClient) Events(ctx context.Context, options client.EventsListOptions) (<-chan events.Message, <-chan error) {
