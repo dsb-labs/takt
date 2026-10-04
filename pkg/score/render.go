@@ -199,7 +199,7 @@ type renderer struct {
 }
 
 func (r renderer) volumes(rendered *Rendered) error {
-	return each(r, rendered, r.score.Volumes, manifest.ParseVolume, func(volume *manifest.Volume) (string, *map[string]string) {
+	return r.each(rendered, r.score.Volumes, manifest.ParseVolume, func(volume *manifest.Volume) (string, *map[string]string) {
 		return volume.Name, &volume.Labels
 	}, func(volume manifest.Volume) {
 		rendered.Volumes = append(rendered.Volumes, volume)
@@ -207,7 +207,7 @@ func (r renderer) volumes(rendered *Rendered) error {
 }
 
 func (r renderer) workloads(rendered *Rendered) error {
-	return each(r, rendered, r.score.Workloads, manifest.ParseWorkload, func(spec *manifest.Spec) (string, *map[string]string) {
+	return r.each(rendered, r.score.Workloads, manifest.ParseWorkload, func(spec *manifest.Spec) (string, *map[string]string) {
 		return spec.Name, &spec.Labels
 	}, func(spec manifest.Spec) {
 		rendered.Workloads = append(rendered.Workloads, spec)
@@ -215,7 +215,7 @@ func (r renderer) workloads(rendered *Rendered) error {
 }
 
 func (r renderer) services(rendered *Rendered) error {
-	return each(r, rendered, r.score.Services, manifest.ParseService, func(service *manifest.Service) (string, *map[string]string) {
+	return r.each(rendered, r.score.Services, manifest.ParseService, func(service *manifest.Service) (string, *map[string]string) {
 		return service.Name, &service.Labels
 	}, func(service manifest.Service) {
 		rendered.Services = append(rendered.Services, service)
@@ -229,7 +229,7 @@ func (r renderer) services(rendered *Rendered) error {
 // which is how one loop stamps three manifest kinds without each having to
 // implement an interface for the purpose. It takes a pointer so that stamping a
 // manifest with no labels of its own reaches the value collect receives.
-func each[T any](r renderer, rendered *Rendered, paths []string, parse func(io.Reader) (T, error), identity func(*T) (string, *map[string]string), collect func(T)) error {
+func (r renderer) each[T any](rendered *Rendered, paths []string, parse func(io.Reader) (T, error), identity func(*T) (string, *map[string]string), collect func(T)) error {
 	names := make(map[string]string, len(paths))
 
 	for _, path := range paths {
