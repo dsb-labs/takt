@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -500,9 +501,7 @@ func (s *Suite) fakeIssuer() (string, func(claims map[string]any) string, func(c
 			"iat": now.Unix(),
 			"exp": now.Add(time.Hour).Unix(),
 		}
-		for name, value := range claims {
-			token[name] = value
-		}
+		maps.Copy(token, claims)
 
 		payload, err := json.Marshal(token)
 		s.Require().NoError(err)

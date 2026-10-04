@@ -593,7 +593,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 
 		stopped := workload("example", state.Failed)
 		stopped.Instances = []service.Instance{
-			{Instance: driver.Instance{ID: "container-one", State: driver.StateFailed, ExitCode: 137, SpecHash: "hash-one"}},
+			{ID: "container-one", State: driver.StateFailed, ExitCode: 137, SpecHash: "hash-one"},
 		}
 
 		svc.EXPECT().Get(mock.Anything, "example").Return(stopped, nil).Once()
@@ -656,7 +656,7 @@ func TestWorkloadAPI_GetWorkload(t *testing.T) {
 		// not the manifest declares one, and surfacing that beats discarding it.
 		declared := workload("example", state.Running)
 		declared.Instances = []service.Instance{
-			{Instance: driver.Instance{ID: "container-one", State: driver.StateRunning, SpecHash: "hash-one", RuntimeHealth: "healthy"}},
+			{ID: "container-one", State: driver.StateRunning, SpecHash: "hash-one", RuntimeHealth: "healthy"},
 		}
 
 		svc.EXPECT().Get(mock.Anything, "example").Return(declared, nil).Once()
@@ -1315,7 +1315,7 @@ func workload(name string, state state.Workload) service.Workload {
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 		Instances: []service.Instance{
-			{Instance: driver.Instance{ID: "container-one", State: driver.StateRunning, SpecHash: "hash-one"}},
+			{ID: "container-one", State: driver.StateRunning, SpecHash: "hash-one"},
 		},
 	}
 }

@@ -230,7 +230,7 @@ func TestServiceService_Get(t *testing.T) {
 			Selected: []service.Workload{
 				{
 					Name:      "worker",
-					Instances: []service.Instance{{Instance: driver.Instance{Index: 0, State: driver.StateRunning}}},
+					Instances: []service.Instance{{Index: 0, State: driver.StateRunning}},
 				},
 			},
 			Expected: nil,
@@ -242,7 +242,7 @@ func TestServiceService_Get(t *testing.T) {
 			Selected: []service.Workload{
 				{
 					Name:      "dns",
-					Instances: []service.Instance{{Instance: driver.Instance{Index: 0, State: driver.StateRunning}}},
+					Instances: []service.Instance{{Index: 0, State: driver.StateRunning}},
 					Ports: []service.ResolvedPort{
 						{Instance: 0, To: 8080, From: 20000, Protocol: manifest.ProtocolUDP},
 					},
