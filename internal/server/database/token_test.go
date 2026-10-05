@@ -47,6 +47,22 @@ func TestTokenRepository(t *testing.T) {
 		assert.ErrorIs(t, err, database.ErrTokenNotFound)
 	})
 
+	t.Run("loads a token by its identifier", func(t *testing.T) {
+		tokens := database.NewTokenRepository(newTestDatabase(t))
+		ctx := t.Context()
+
+		created, err := tokens.Create(ctx, database.Token{Hash: "recovery-1", Type: "recovery", Source: "init"})
+		require.NoError(t, err)
+
+		loaded, err := tokens.Get(ctx, created.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "recovery-1", loaded.Hash)
+		assert.Equal(t, "recovery", loaded.Type)
+
+		_, err = tokens.Get(ctx, "missing")
+		assert.ErrorIs(t, err, database.ErrTokenNotFound)
+	})
+
 	// `takt acl init` works exactly once because the schema refuses a second
 	// recovery row, not because any code counts them.
 	t.Run("refuses a second recovery token", func(t *testing.T) {

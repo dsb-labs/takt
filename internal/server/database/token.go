@@ -109,6 +109,19 @@ func (r *TokenRepository) Create(ctx context.Context, token Token) (Token, error
 	return token, nil
 }
 
+// Get returns the token with the given identifier, reporting ErrTokenNotFound
+// when the database holds no such token.
+func (r *TokenRepository) Get(ctx context.Context, id string) (Token, error) {
+	const q = `
+		SELECT id, hash, type, source, principal, asserted_groups, expires_at, created_at, last_used_at,
+			COALESCE(workload_id, ''), workload_instance, workload_version
+		FROM token
+		WHERE id = ?
+	`
+
+	return r.get(ctx, q, id)
+}
+
 // GetByHash returns the token a presented credential hashes to, reporting
 // ErrTokenNotFound when the database holds no such token.
 func (r *TokenRepository) GetByHash(ctx context.Context, hash string) (Token, error) {
@@ -119,7 +132,13 @@ func (r *TokenRepository) GetByHash(ctx context.Context, hash string) (Token, er
 		WHERE hash = ?
 	`
 
-	token, err := scanToken(r.db.QueryRowContext(ctx, q, hash))
+	return r.get(ctx, q, hash)
+}
+
+// get runs a query that selects one token and maps an empty result to
+// ErrTokenNotFound.
+func (r *TokenRepository) get(ctx context.Context, q string, arg any) (Token, error) {
+	token, err := scanToken(r.db.QueryRowContext(ctx, q, arg))
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return Token{}, ErrTokenNotFound
