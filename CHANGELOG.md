@@ -10,6 +10,14 @@ describes how an entry is written.
 
 ### Fixed
 
+- A container on the daemon carrying a `takt.workload` label with an empty value,
+  from a `docker run --label takt.workload` or a compose file with a null value, was
+  reported as a workload named `""`, swept as an orphan, and the discard of that name
+  removed every takt container on the host. The container driver now ignores such a
+  container and refuses to stop, discard, signal or read the logs of an empty name
+  ([#156](https://github.com/dsb-labs/takt/issues/156),
+  [#188](https://github.com/dsb-labs/takt/pull/188)).
+
 - `takt token delete` and `DELETE /api/v1/tokens/{id}` removed the recovery
   token, which re-armed the anonymous `acl init` and let an `admin` replace the
   operator's recovery token with one only it held. Both now refuse it with a
