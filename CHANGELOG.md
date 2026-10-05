@@ -17,6 +17,13 @@ describes how an entry is written.
   by U+FFFD, and nothing said so. The CLI and the UI send the new encoding. A
   caller of the API by hand has to base64 the value
   ([#166](https://github.com/dsb-labs/takt/issues/166)).
+- A container the server created but did not start, because the server stopped or
+  the daemon dropped the start between the two calls, read as `pending` on every
+  pass and was never started or replaced. The container driver now reports one
+  still created after 30 seconds as `failed`, so the reconciler removes it and
+  starts another. The remove that cleans up after a failed start no longer shares
+  the start's cancelled context
+  ([#162](https://github.com/dsb-labs/takt/issues/162)).
 
 ## v0.11.1 - 2026-10-04
 
