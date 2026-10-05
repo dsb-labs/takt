@@ -267,6 +267,18 @@ still lets a workload write beneath `/mnt/media`:
 allow-host-paths = ["/:ro", "/mnt/media"]
 ```
 
+A read-only grant covers regular files and directories only. A read-only mount
+stops writes through the filesystem. It does not stop a connect on a unix socket, a
+write to a FIFO or an ioctl on a device, so a path mount that reaches one of those
+beneath a `:ro` prefix is refused however the manifest asked for it. The docker
+socket under a read-only `/` is the usual case. Name the socket in its own prefix
+when a workload is meant to reach it, and the more specific prefix opens it:
+
+```toml
+[workload]
+allow-host-paths = ["/:ro", "/var/run/docker.sock"]
+```
+
 The exec runtime rejects `readOnly` on any mount, because a symbolic link cannot
 enforce it. A read-only prefix therefore refuses every exec path mount beneath it.
 The grant was for reading, and that runtime cannot promise it.

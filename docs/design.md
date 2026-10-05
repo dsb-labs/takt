@@ -319,6 +319,13 @@ configuration is what lets the whole filesystem be opened to a workload that obs
 the host without opening it to one that would write. The most specific prefix decides,
 so a read-only `/` does not shadow a writable tree listed beside it.
 
+The grant is only as wide as the kernel can hold it. A read-only mount stops writes
+through the filesystem and nothing else: a connect on a unix socket, a write to a
+FIFO and an ioctl on a device all pass. So a read-only prefix covers regular files and
+directories only, and a socket or a device beneath it is refused until a prefix of
+its own names it. Otherwise `/:ro` would hand the docker socket, and with it the
+daemon, to any workload that asked for it read-only.
+
 ## Images are takt's to reap
 
 The daemon's images are takt's the way host ports are its to allocate and a volume is a
