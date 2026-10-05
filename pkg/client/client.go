@@ -87,6 +87,9 @@ var (
 	// ErrRecoveryLogout is returned when the recovery token asks to revoke
 	// itself, which only the reset file does.
 	ErrRecoveryLogout = errors.New("the recovery token is revoked by the reset file")
+	// ErrRecoveryDelete is returned when a delete names the recovery token,
+	// which only the reset file revokes.
+	ErrRecoveryDelete = errors.New("the recovery token is revoked by the reset file")
 	// ErrOIDCNotConfigured is returned when a login is asked for and the
 	// server carries no OIDC configuration.
 	ErrOIDCNotConfigured = errors.New("oidc is not configured")

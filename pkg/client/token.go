@@ -89,7 +89,9 @@ func (c *Client) ListTokens(ctx context.Context) ([]Token, error) {
 
 // DeleteToken revokes the token with the given identifier, returning
 // ErrTokenNotFound when no such token exists. Revocation is immediate: the
-// next request presenting the credential is refused.
+// next request presenting the credential is refused. The one refusal is the
+// recovery token, reported as ErrRecoveryDelete: its revocation path is the
+// reset file, not this call.
 func (c *Client) DeleteToken(ctx context.Context, id string) error {
 	if err := checkTokenID(id); err != nil {
 		return err
@@ -105,6 +107,8 @@ func (c *Client) DeleteToken(ctx context.Context, id string) error {
 		return nil
 	case resp.JSON404 != nil:
 		return fmt.Errorf("%s: %w", resp.JSON404.Error, ErrTokenNotFound)
+	case resp.JSON409 != nil:
+		return fmt.Errorf("%s: %w", resp.JSON409.Error, ErrRecoveryDelete)
 	case resp.JSON500 != nil:
 		return newError(http.StatusInternalServerError, resp.JSON500)
 	default:
