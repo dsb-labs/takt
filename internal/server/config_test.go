@@ -43,6 +43,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "/etc/takt/tls/cert.pem", config.HTTP.TLSCert)
 				assert.Equal(t, "/etc/takt/tls/key.pem", config.HTTP.TLSKey)
 				assert.True(t, config.HTTP.TLSEnabled())
+				assert.True(t, config.HTTP.BehindTLS)
 				assert.Equal(t, "0.0.0.0", config.Workload.Bind)
 				assert.Equal(t, 25000, config.Workload.MinPort)
 				assert.Equal(t, 26000, config.Workload.MaxPort)
@@ -549,6 +550,18 @@ func TestConfig_ServedOverTLS(t *testing.T) {
 			Config: func() server.Config {
 				c := server.DefaultConfig()
 				c.Auth = &server.AuthConfig{OIDC: server.OIDCConfig{RedirectURL: "https://takt.example.com/api/v1/auth/oidc/callback"}}
+
+				return c
+			}(),
+			Expected: true,
+		},
+		{
+			// A proxy terminates TLS and there is no OIDC redirect to infer it
+			// from, so the operator says so directly.
+			Name: "a proxy terminates tls in front without oidc",
+			Config: func() server.Config {
+				c := server.DefaultConfig()
+				c.HTTP.BehindTLS = true
 
 				return c
 			}(),

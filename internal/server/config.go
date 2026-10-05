@@ -73,6 +73,16 @@ type (
 		// The PEM private key for tls-cert. The file must be readable only by
 		// the user running the server.
 		TLSKey string `toml:"tls-key"`
+		// Whether a reverse proxy in front of this server terminates TLS. The
+		// server itself speaks plain HTTP on a loopback listener, but the
+		// browser reaches it over TLS, so a session cookie is marked Secure
+		// and every response carries Strict-Transport-Security.
+		//
+		// A setting rather than something read from a forwarded header,
+		// because a header is what any client on the loopback network can
+		// send, and whether the browser's connection is encrypted is a fact
+		// about the deployment rather than the request.
+		BehindTLS bool `toml:"behind-tls"`
 		// The most header values a request may carry, counted across every
 		// header. A request carrying more is refused before a handler sees it.
 		//
@@ -606,12 +616,12 @@ func (c *AuthConfig) validate() error {
 	return c.OIDC.validate()
 }
 
-// ServedOverTLS reports whether the browser reaches this server over TLS: either
-// the server terminates it, or a reverse proxy in front does and the OIDC
-// redirect names the https address the proxy serves. That decides whether a
-// cookie may be marked Secure.
+// ServedOverTLS reports whether the browser reaches this server over TLS: the
+// server terminates it, or a reverse proxy in front does, which the operator
+// says with behind-tls or by giving an https OIDC redirect URL. That decides
+// whether a cookie may be marked Secure.
 func (c *Config) ServedOverTLS() bool {
-	if c.HTTP.TLSEnabled() {
+	if c.HTTP.TLSEnabled() || c.HTTP.BehindTLS {
 		return true
 	}
 
