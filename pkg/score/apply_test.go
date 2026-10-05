@@ -191,7 +191,7 @@ func TestApply(t *testing.T) {
 			Options: []score.ApplyOption{score.WithAdopt()},
 			SetupMocks: func(c *MockClient) {
 				expectRequirementsExist(c)
-				c.EXPECT().GetVolume(mock.Anything, "blog-pgdata").Return(client.Volume{Name: "blog-pgdata"}, nil)
+				c.EXPECT().GetVolume(mock.Anything, "blog-pgdata").Return(client.Volume{Name: "blog-pgdata", ETag: `"3"`}, nil)
 				c.EXPECT().GetVariable(mock.Anything, "motd").Return(client.Variable{}, client.ErrVariableNotFound)
 				c.EXPECT().GetVariable(mock.Anything, "web-config").Return(client.Variable{}, client.ErrVariableNotFound)
 				c.EXPECT().Get(mock.Anything, "blog-cron").Return(client.Workload{}, client.ErrWorkloadNotFound)
@@ -199,7 +199,12 @@ func TestApply(t *testing.T) {
 				c.EXPECT().Get(mock.Anything, "blog-web").Return(client.Workload{}, client.ErrWorkloadNotFound)
 				c.EXPECT().GetService(mock.Anything, "blog").Return(client.Service{}, client.ErrServiceNotFound)
 
-				c.EXPECT().ApplyVolume(mock.Anything, mock.Anything).Return(client.Volume{}, nil)
+				// The volume existed at the check, so the write over it carries
+				// the tag the check read. The rest did not, and are created
+				// unconditionally.
+				c.EXPECT().ApplyVolume(mock.Anything, mock.Anything, mock.MatchedBy(func(options []client.ApplyOption) bool {
+					return len(options) == 1
+				})).Return(client.Volume{}, nil)
 				c.EXPECT().SetVariable(mock.Anything, mock.Anything).Return(client.Variable{}, true, nil)
 				c.EXPECT().Apply(mock.Anything, mock.Anything).Return(client.Workload{}, true, nil)
 				c.EXPECT().ApplyService(mock.Anything, mock.Anything).Return(client.Service{}, nil)
@@ -215,6 +220,25 @@ func TestApply(t *testing.T) {
 					{Kind: score.KindService, Name: "blog"},
 				},
 			},
+		},
+		{
+			// A hand edit landed between the check and the apply. The server
+			// refused the tag, and the score reports the change rather than
+			// writing over it.
+			Name: "refuses a resource that changed since the check",
+			SetupMocks: func(c *MockClient) {
+				expectRequirementsExist(c)
+				c.EXPECT().GetVolume(mock.Anything, "blog-pgdata").Return(client.Volume{Name: "blog-pgdata", Labels: owned, ETag: `"3"`}, nil)
+				c.EXPECT().GetVariable(mock.Anything, "motd").Return(client.Variable{}, client.ErrVariableNotFound)
+				c.EXPECT().GetVariable(mock.Anything, "web-config").Return(client.Variable{}, client.ErrVariableNotFound)
+				c.EXPECT().Get(mock.Anything, "blog-cron").Return(client.Workload{}, client.ErrWorkloadNotFound)
+				c.EXPECT().Get(mock.Anything, "blog-db").Return(client.Workload{}, client.ErrWorkloadNotFound)
+				c.EXPECT().Get(mock.Anything, "blog-web").Return(client.Workload{}, client.ErrWorkloadNotFound)
+				c.EXPECT().GetService(mock.Anything, "blog").Return(client.Service{}, client.ErrServiceNotFound)
+
+				c.EXPECT().ApplyVolume(mock.Anything, mock.Anything, mock.Anything).Return(client.Volume{}, client.ErrVolumeChanged)
+			},
+			ExpectErr: score.ErrChanged,
 		},
 		{
 			Name: "stops at the first failure and reports what landed",
