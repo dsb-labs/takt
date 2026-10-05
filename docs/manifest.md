@@ -970,7 +970,9 @@ same paced schedule a crashed one takes.
 
 `startPeriod` is the grace a workload gets first. Failures inside it do not count. A
 workload slow to become ready is therefore not replaced for failing checks it was never
-going to pass yet, and passing one check ends the grace early.
+going to pass yet, and passing one check ends the grace early. The grace starts when
+the reconciler first sees the instance running, not when the workload is applied, so
+an image pull or a readiness hold that outlasts it does not use it up.
 
 `timeout` must not exceed `interval`. A check that could outlast the gap between
 checks would overlap itself, and the failure count would stop meaning consecutive
