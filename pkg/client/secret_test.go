@@ -33,7 +33,7 @@ func TestClient_SetSecret(t *testing.T) {
 
 				var body api.SecretSpec
 				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-				assert.Equal(t, "hunter2", body.Value)
+				assert.Equal(t, []byte("hunter2"), body.Value)
 
 				writeJSON(t, w, http.StatusCreated, api.SetSecretResult{Secret: apiSecret("db-password")})
 			},
@@ -123,6 +123,38 @@ func TestClient_SetSecret_Conditional(t *testing.T) {
 		_, _, err := c.SetSecret(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, client.WithIfMatch(`"3"`))
 		assert.ErrorIs(t, err, client.ErrSecretChanged)
 	})
+}
+
+// TestClient_SetSecret_Encoding covers what reaches the wire: base64, so a value
+// that is not text arrives as it was, and an empty string for a nil value.
+func TestClient_SetSecret_Encoding(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name   string
+		Value  []byte
+		Expect string
+	}{
+		{Name: "text", Value: []byte("hunter2"), Expect: "aHVudGVyMg=="},
+		{Name: "bytes that are not UTF-8", Value: []byte{0x30, 0x82, 0xff, 0xfe, 0x00}, Expect: "MIL//gA="},
+		{Name: "an empty value", Value: []byte{}, Expect: ""},
+		{Name: "a nil value", Value: nil, Expect: ""},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				assert.Equal(t, tc.Expect, body["value"])
+
+				writeJSON(t, w, http.StatusCreated, api.SetSecretResult{Secret: apiSecret("client-cert")})
+			})
+
+			_, _, err := c.SetSecret(t.Context(), manifest.Secret{Name: "client-cert", Value: tc.Value})
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestClient_GetSecret(t *testing.T) {

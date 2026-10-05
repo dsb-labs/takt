@@ -82,8 +82,16 @@ func (c *Client) SetSecret(ctx context.Context, secret manifest.Secret, options 
 		return Secret{}, false, err
 	}
 
+	// Base64 on the wire, so a value that is not text arrives as it was. A nil value
+	// would encode as null rather than as an empty string, and an empty secret is a
+	// value in its own right.
+	value := secret.Value
+	if value == nil {
+		value = []byte{}
+	}
+
 	resp, err := c.api.SetSecretWithResponse(ctx, secret.Name, &api.SetSecretParams{IfMatch: ifMatch(options)},
-		api.SecretSpec{Value: string(secret.Value), Labels: wireLabels(secret.Labels)})
+		api.SecretSpec{Value: value, Labels: wireLabels(secret.Labels)})
 	if err != nil {
 		return Secret{}, false, fmt.Errorf("failed to send the request: %w", err)
 	}
