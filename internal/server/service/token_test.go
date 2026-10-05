@@ -97,6 +97,7 @@ func TestTokenService_Delete(t *testing.T) {
 
 	t.Run("deletes a token", func(t *testing.T) {
 		tokens := NewMockTokenRepository(t)
+		tokens.EXPECT().Get(mock.Anything, "id").Return(database.Token{ID: "id", Type: "client", Source: "static"}, nil).Once()
 		tokens.EXPECT().Delete(mock.Anything, "id").Return(nil).Once()
 
 		assert.NoError(t, newTestTokenService(t, tokens).Delete(t.Context(), "id"))
@@ -104,9 +105,16 @@ func TestTokenService_Delete(t *testing.T) {
 
 	t.Run("reports a token that does not exist", func(t *testing.T) {
 		tokens := NewMockTokenRepository(t)
-		tokens.EXPECT().Delete(mock.Anything, "id").Return(database.ErrTokenNotFound).Once()
+		tokens.EXPECT().Get(mock.Anything, "id").Return(database.Token{}, database.ErrTokenNotFound).Once()
 
 		assert.ErrorIs(t, newTestTokenService(t, tokens).Delete(t.Context(), "id"), service.ErrTokenNotFound)
+	})
+
+	t.Run("refuses the recovery token", func(t *testing.T) {
+		tokens := NewMockTokenRepository(t)
+		tokens.EXPECT().Get(mock.Anything, "id").Return(database.Token{ID: "id", Type: "recovery", Source: "init"}, nil).Once()
+
+		assert.ErrorIs(t, newTestTokenService(t, tokens).Delete(t.Context(), "id"), service.ErrRecoveryDelete)
 	})
 }
 
