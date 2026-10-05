@@ -16,3 +16,7 @@ machine is says nothing about whether the code is right.
 Everything the run creates is named after --prefix and removed at the
 end, so two runs on one server neither collide nor tear down each
 other's work.
+
+The server is named with --address every time. The command does not
+read TAKT_ADDRESS or the config file, so a shell set up for another
+server cannot be loaded by accident.

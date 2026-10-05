@@ -4,6 +4,7 @@ package loadtest
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -30,6 +31,15 @@ func Command() *cobra.Command {
 		Long:  usage,
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// The run fills whatever server the client reaches with a fleet, so
+			// the server is named on the command line every time. A shell whose
+			// TAKT_ADDRESS or config file points at a production server does
+			// not get loaded by a command that forgot to say which.
+			if flag := cmd.Flag("address"); flag == nil || !flag.Changed {
+				return errors.New("dev loadtest runs against the server --address names only, " +
+					"and does not read TAKT_ADDRESS or the config file")
+			}
+
 			f, err := os.Open(args[0])
 			if err != nil {
 				return fmt.Errorf("failed to open scenario: %w", err)
