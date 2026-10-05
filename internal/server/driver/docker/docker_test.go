@@ -981,6 +981,21 @@ func TestDriver_Discard(t *testing.T) {
 		require.NoError(t, d.Discard(t.Context(), "", "example"))
 	})
 
+	t.Run("refuses an empty workload name", func(t *testing.T) {
+		// No ContainerList expectation: the daemon's label filter matches on
+		// presence when no value is given, so listing under an empty name would
+		// return every container the driver owns, and the discard that follows
+		// would remove all of them.
+		client := NewMockClient(t)
+
+		d := testDriver(t, client)
+
+		assert.ErrorIs(t, d.Discard(t.Context(), "", ""), docker.ErrNoWorkloadName)
+		assert.ErrorIs(t, d.Stop(t.Context(), "", ""), docker.ErrNoWorkloadName)
+		assert.ErrorIs(t, d.Signal(t.Context(), "", "", "SIGHUP"), docker.ErrNoWorkloadName)
+		assert.ErrorIs(t, d.Logs(t.Context(), io.Discard, "", driver.LogOptions{}), docker.ErrNoWorkloadName)
+	})
+
 	t.Run("keeps discarding past a container that fails", func(t *testing.T) {
 		client := NewMockClient(t)
 
@@ -1512,6 +1527,35 @@ func TestDriver_Observe(t *testing.T) {
 		assert.Equal(t, "hash-one", instances[0].SpecHash)
 		assert.Equal(t, 3, instances[0].Version)
 		assert.Equal(t, driver.StateRunning, instances[0].State)
+	})
+
+	t.Run("ignores a container whose workload label is empty", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		// Something other than the driver labelled the second container: a docker
+		// run with a bare --label, or a compose file with a null value. Reported
+		// under the name "", it would be swept as an orphan, and the discard of that
+		// name would reach every container the driver owns.
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:     "container-one",
+				State:  dockercontainer.StateRunning,
+				Labels: map[string]string{docker.LabelWorkload: "example"},
+			},
+			{
+				ID:     "foreign",
+				State:  dockercontainer.StateRunning,
+				Labels: map[string]string{docker.LabelWorkload: ""},
+			},
+		}, nil).Once()
+
+		d := testDriver(t, client)
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 1)
+
+		assert.Equal(t, "container-one", instances[0].ID)
 	})
 
 	t.Run("leaves a running health-checked container uninspected", func(t *testing.T) {
