@@ -69,8 +69,13 @@ systemd:
 ```ini
 [Service]
 User=takt
-AmbientCapabilities=CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+AmbientCapabilities=CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER CAP_SETGID
 ```
+
+`CAP_SETGID` is not for volumes. It lets an `exec` workload drop the server's
+supplementary groups before its command runs, and a server whose user is in the
+`docker` group refuses `exec` workloads without it. See
+[Confinement](operating.md#confinement).
 
 The grant does not reach the workloads. takt drops its ambient capabilities
 before an exec workload's command runs, and a container's capabilities come

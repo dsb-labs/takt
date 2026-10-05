@@ -194,9 +194,9 @@ instead. The command runs where the workload runs, and that is the one check tha
 reaches a driver. The checker still schedules it, bounds it and records its answer. The
 driver only runs the command.
 
-The probe runs confined and accounted as the workload is. A manifest may name a
-command, and the promise the exec runtime makes is that nothing a manifest names runs
-unconfined. The outside-in check was a constraint of the container, not a principle,
+The probe runs confined as the workload is, in a cgroup of its own beside the
+workload's that carries the same limits. A manifest may name a command, and the
+promise the exec runtime makes is that nothing a manifest names runs unconfined. The outside-in check was a constraint of the container, not a principle,
 and `docker exec` runs inside the container's own cgroup, namespaces and capability
 set. What it costs is that the binary has to be in the image.
 

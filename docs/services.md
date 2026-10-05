@@ -63,6 +63,10 @@ The port is always a number: the port inside the workload, as a manifest's `port
 entry writes its `to`. A port's name cannot be used here, because the selected
 workloads need not agree on their names. The protocol defaults to `tcp`.
 
+A service's name follows the [same rules](manifest.md#shape) as a workload's, with
+one more: `stream` is refused, because the service API serves its own routes under
+the path a service of that name would occupy.
+
 The workloads the target selects do not have to exist. A service is a question asked
 of whatever is running, so one applied ahead of its workloads reports no backends
 until they arrive.
