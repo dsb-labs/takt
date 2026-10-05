@@ -75,6 +75,13 @@ type (
 	applyConfig struct {
 		adopt bool
 	}
+
+	// The resource type is what lookup reads of a resource: its labels, and the
+	// tag an apply conditions a write on.
+	resource struct {
+		labels map[string]string
+		etag   string
+	}
 )
 
 var (
@@ -83,6 +90,10 @@ var (
 	// ErrUnowned is returned when a resource the score would apply exists
 	// without this score's label.
 	ErrUnowned = errors.New("resource belongs to something else")
+	// ErrChanged is returned when a resource changed on the server between the
+	// check and the apply, so what the check judged is not what the apply
+	// would have written over.
+	ErrChanged = errors.New("resource changed since it was checked")
 )
 
 // WithAdopt modifies an apply to take over resources that exist without this
@@ -98,16 +109,23 @@ func WithAdopt() ApplyOption {
 // every requirement that does not exist, and every resource that exists without
 // this score's label. It contacts the server and changes nothing.
 func Check(ctx context.Context, c Client, rendered Rendered) (Preconditions, error) {
+	preconditions, _, err := check(ctx, c, rendered)
+	return preconditions, err
+}
+
+// check is Check, also returning the tag of every step's resource that exists,
+// for an apply to condition each write on.
+func check(ctx context.Context, c Client, rendered Rendered) (Preconditions, map[Node]string, error) {
 	plan, err := NewPlan(rendered)
 	if err != nil {
-		return Preconditions{}, err
+		return Preconditions{}, nil, err
 	}
 
 	var preconditions Preconditions
 	for _, node := range plan.Requirements {
 		_, found, err := lookup(ctx, c, node)
 		if err != nil {
-			return Preconditions{}, err
+			return Preconditions{}, nil, err
 		}
 
 		if !found {
@@ -115,18 +133,24 @@ func Check(ctx context.Context, c Client, rendered Rendered) (Preconditions, err
 		}
 	}
 
+	tags := make(map[Node]string)
 	for _, node := range plan.Steps {
-		labels, found, err := lookup(ctx, c, node)
+		existing, found, err := lookup(ctx, c, node)
 		if err != nil {
-			return Preconditions{}, err
+			return Preconditions{}, nil, err
 		}
 
-		if found && labels[LabelName] != rendered.Name {
+		if !found {
+			continue
+		}
+
+		tags[node] = existing.etag
+		if existing.labels[LabelName] != rendered.Name {
 			preconditions.Unowned = append(preconditions.Unowned, node)
 		}
 	}
 
-	return preconditions, nil
+	return preconditions, tags, nil
 }
 
 // Apply applies the rendered score in dependency order, checking its
@@ -136,6 +160,12 @@ func Check(ctx context.Context, c Client, rendered Rendered) (Preconditions, err
 // the error names every one. A failure partway stops at once with no rollback,
 // and the report says what landed. The manifests were validated as they were
 // rendered, so almost nothing reaches that state.
+//
+// Each write over a resource that existed at the check is conditioned on the tag
+// the check read, so a change that lands in between is refused as ErrChanged
+// rather than overwritten, and an adoption takes what it was shown. A resource
+// absent at the check is created unconditionally, since the server has no way to
+// condition a create on absence.
 func Apply(ctx context.Context, c Client, rendered Rendered, options ...ApplyOption) (Report, error) {
 	config := new(applyConfig)
 	for _, option := range options {
@@ -147,7 +177,7 @@ func Apply(ctx context.Context, c Client, rendered Rendered, options ...ApplyOpt
 		return Report{}, err
 	}
 
-	preconditions, err := Check(ctx, c, rendered)
+	preconditions, tags, err := check(ctx, c, rendered)
 	if err != nil {
 		return Report{}, err
 	}
@@ -162,7 +192,7 @@ func Apply(ctx context.Context, c Client, rendered Rendered, options ...ApplyOpt
 
 	var report Report
 	for _, node := range plan.Steps {
-		if err = apply(ctx, c, rendered, node); err != nil {
+		if err = apply(ctx, c, rendered, node, tags[node]); err != nil {
 			return report, fmt.Errorf("failed to apply %s: %w", node, err)
 		}
 
@@ -172,34 +202,51 @@ func Apply(ctx context.Context, c Client, rendered Rendered, options ...ApplyOpt
 	return report, nil
 }
 
-// apply applies one resource of the rendered score.
-func apply(ctx context.Context, c Client, rendered Rendered, node Node) error {
+// apply applies one resource of the rendered score, conditioned on the tag when
+// one was read.
+func apply(ctx context.Context, c Client, rendered Rendered, node Node, etag string) error {
+	var options []client.ApplyOption
+	if etag != "" {
+		options = append(options, client.WithIfMatch(etag))
+	}
+
+	var (
+		err     error
+		changed error
+	)
+
 	switch node.Kind {
 	case KindVolume:
 		index := slices.IndexFunc(rendered.Volumes, func(volume manifest.Volume) bool { return volume.Name == node.Name })
-		_, err := c.ApplyVolume(ctx, rendered.Volumes[index])
-		return err
+		_, err = c.ApplyVolume(ctx, rendered.Volumes[index], options...)
+		changed = client.ErrVolumeChanged
 	case KindVariable:
 		index := slices.IndexFunc(rendered.Variables, func(variable manifest.Variable) bool { return variable.Name == node.Name })
-		_, _, err := c.SetVariable(ctx, rendered.Variables[index])
-		return err
+		_, _, err = c.SetVariable(ctx, rendered.Variables[index], options...)
+		changed = client.ErrVariableChanged
 	case KindWorkload:
 		index := slices.IndexFunc(rendered.Workloads, func(spec manifest.Spec) bool { return spec.Name == node.Name })
-		_, _, err := c.Apply(ctx, rendered.Workloads[index])
-		return err
+		_, _, err = c.Apply(ctx, rendered.Workloads[index], options...)
+		changed = client.ErrWorkloadChanged
 	case KindService:
 		index := slices.IndexFunc(rendered.Services, func(service manifest.Service) bool { return service.Name == node.Name })
-		_, err := c.ApplyService(ctx, rendered.Services[index])
-		return err
+		_, err = c.ApplyService(ctx, rendered.Services[index], options...)
+		changed = client.ErrServiceChanged
 	default:
 		return fmt.Errorf("unknown kind %q", node.Kind)
 	}
+
+	if errors.Is(err, changed) {
+		return fmt.Errorf("%w: %v", ErrChanged, err)
+	}
+
+	return err
 }
 
-// lookup reads a resource, returning its labels and whether it exists.
-func lookup(ctx context.Context, c Client, node Node) (map[string]string, bool, error) {
+// lookup reads a resource, returning it and whether it exists.
+func lookup(ctx context.Context, c Client, node Node) (resource, bool, error) {
 	var (
-		labels   map[string]string
+		existing resource
 		err      error
 		notFound error
 	)
@@ -208,33 +255,33 @@ func lookup(ctx context.Context, c Client, node Node) (map[string]string, bool, 
 	case KindVolume:
 		var volume client.Volume
 		volume, err = c.GetVolume(ctx, node.Name)
-		labels, notFound = volume.Labels, client.ErrVolumeNotFound
+		existing, notFound = resource{volume.Labels, volume.ETag}, client.ErrVolumeNotFound
 	case KindVariable:
 		var variable client.Variable
 		variable, err = c.GetVariable(ctx, node.Name)
-		labels, notFound = variable.Labels, client.ErrVariableNotFound
+		existing, notFound = resource{variable.Labels, variable.ETag}, client.ErrVariableNotFound
 	case KindSecret:
 		var secret client.Secret
 		secret, err = c.GetSecret(ctx, node.Name)
-		labels, notFound = secret.Labels, client.ErrSecretNotFound
+		existing, notFound = resource{secret.Labels, secret.ETag}, client.ErrSecretNotFound
 	case KindWorkload:
 		var workload client.Workload
 		workload, err = c.Get(ctx, node.Name)
-		labels, notFound = workload.Spec.Labels, client.ErrWorkloadNotFound
+		existing, notFound = resource{workload.Spec.Labels, workload.ETag}, client.ErrWorkloadNotFound
 	case KindService:
 		var service client.Service
 		service, err = c.GetService(ctx, node.Name)
-		labels, notFound = service.Labels, client.ErrServiceNotFound
+		existing, notFound = resource{service.Labels, service.ETag}, client.ErrServiceNotFound
 	default:
-		return nil, false, fmt.Errorf("unknown kind %q", node.Kind)
+		return resource{}, false, fmt.Errorf("unknown kind %q", node.Kind)
 	}
 
 	switch {
 	case errors.Is(err, notFound):
-		return nil, false, nil
+		return resource{}, false, nil
 	case err != nil:
-		return nil, false, fmt.Errorf("failed to look up %s: %w", node, err)
+		return resource{}, false, fmt.Errorf("failed to look up %s: %w", node, err)
 	default:
-		return labels, true, nil
+		return existing, true, nil
 	}
 }
