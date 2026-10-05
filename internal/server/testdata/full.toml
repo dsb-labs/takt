@@ -4,6 +4,7 @@ hosts = ["takt.example.com"]
 max-header-values = 250
 tls-cert = "/etc/takt/tls/cert.pem"
 tls-key = "/etc/takt/tls/key.pem"
+behind-tls = true
 
 [data]
 directory = "/var/lib/takt"
