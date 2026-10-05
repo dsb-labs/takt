@@ -22,6 +22,12 @@ import (
 	"github.com/dsb-labs/takt/internal/server/port"
 )
 
+var (
+	// ErrClientSecretReadable is returned when the OIDC client secret file can be
+	// read by someone other than its owner.
+	ErrClientSecretReadable = errors.New("oidc client secret file is readable by more than its owner")
+)
+
 type (
 	// The Config type contains the top-level configuration for the takt server.
 	Config struct {
@@ -255,6 +261,12 @@ type (
 		// The client secret, when the issuer treats takt as a confidential
 		// client. Empty for a public client using PKCE alone.
 		ClientSecret string `toml:"client-secret"`
+		// A file holding the client secret, as an alternative to writing it
+		// in client-secret. A configuration kept in a repository beside the
+		// manifests then carries a path rather than the secret. The file must
+		// be readable only by the user running the server, the same rule as
+		// tls-key. Set one of the two, not both.
+		ClientSecretFile string `toml:"client-secret-file"`
 		// The URL browsers reach this server by, such as
 		// "https://takt.example.com". Its presence is what enables the UI's
 		// login redirect, whose callback the issuer must be able to send the
@@ -647,6 +659,10 @@ func (c Config) PrivatePaths() []string {
 		paths = append(paths, c.HTTP.TLSKey)
 	}
 
+	if c.Auth != nil && c.Auth.OIDC.ClientSecretFile != "" {
+		paths = append(paths, c.Auth.OIDC.ClientSecretFile)
+	}
+
 	return paths
 }
 
@@ -655,9 +671,55 @@ func (c *AuthConfig) OIDCEnabled() bool {
 	return c != nil && c.OIDC.Issuer != ""
 }
 
+// ReadClientSecret returns the client secret, from client-secret-file when it
+// is set and from client-secret otherwise. A file whose mode lets anyone but its
+// owner read it is refused rather than narrowed, as the TLS key and the keyring
+// are: whoever could read it already had the chance.
+//
+// Read once at startup rather than on each exchange. The issuer holds the same
+// secret, so changing it is a change on both sides and a restart beside it is
+// no extra step.
+func (c OIDCConfig) ReadClientSecret() (string, error) {
+	if c.ClientSecretFile == "" {
+		return c.ClientSecret, nil
+	}
+
+	info, err := os.Stat(c.ClientSecretFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read oidc client secret file: %w", err)
+	}
+
+	if mode := info.Mode().Perm(); mode&0o077 != 0 {
+		return "", fmt.Errorf("%w: %s is %#o, want 0600", ErrClientSecretReadable, c.ClientSecretFile, mode)
+	}
+
+	secret, err := os.ReadFile(c.ClientSecretFile)
+	if err != nil {
+		return "", fmt.Errorf("failed to read oidc client secret file: %w", err)
+	}
+
+	// An editor leaves a newline at the end of the file, and a secret is
+	// never meant to carry one.
+	return strings.TrimRight(string(secret), "\r\n"), nil
+}
+
 func (c OIDCConfig) validate() error {
-	if c.Issuer == "" && c.ClientID == "" && c.ClientSecret == "" && c.RedirectURL == "" {
+	if c.Issuer == "" && c.ClientID == "" && c.ClientSecret == "" && c.ClientSecretFile == "" && c.RedirectURL == "" {
 		return nil
+	}
+
+	// One or the other, because two sources for one value leaves a reader
+	// guessing which the server used.
+	if c.ClientSecret != "" && c.ClientSecretFile != "" {
+		return errors.New("auth oidc client-secret and client-secret-file must not be set together")
+	}
+
+	// Absolute for the same reason as tls-key: the server's working directory
+	// is nowhere an operator meant to keep a secret. Whether the file exists
+	// is deliberately not checked, because everything that validates a
+	// configuration does not need it present.
+	if c.ClientSecretFile != "" && !filepath.IsAbs(c.ClientSecretFile) {
+		return fmt.Errorf("auth oidc client-secret-file must be absolute, got %q", c.ClientSecretFile)
 	}
 
 	// Parseable with a scheme and a host, and nothing more, for the reasons
