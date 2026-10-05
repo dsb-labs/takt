@@ -117,13 +117,17 @@ func (s *Suite) TestAuthLifecycle() {
 	tokens, err := admin.ListTokens(s.ctx())
 	s.Require().NoError(err)
 
-	var viewerID string
+	var viewerID, recoveryID string
 	for _, token := range tokens {
-		if token.Principal == "scraper" {
+		switch {
+		case token.Principal == "scraper":
 			viewerID = token.ID
+		case token.Type == "recovery":
+			recoveryID = token.ID
 		}
 	}
 	s.Require().NotEmpty(viewerID)
+	s.Require().NotEmpty(recoveryID)
 
 	s.Require().NoError(admin.DeleteToken(s.ctx(), viewerID))
 
@@ -138,6 +142,7 @@ func (s *Suite) TestAuthLifecycle() {
 
 	// The recovery token's revocation path is deliberately host-level.
 	s.Require().ErrorIs(admin.Logout(s.ctx()), client.ErrRecoveryLogout)
+	s.Require().ErrorIs(admin.DeleteToken(s.ctx(), recoveryID), client.ErrRecoveryDelete)
 }
 
 // TestWorkloadTokenMountAuthenticates covers the file form of
