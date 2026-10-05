@@ -113,6 +113,14 @@ func TestClient_DeleteToken(t *testing.T) {
 		assert.ErrorIs(t, c.DeleteToken(t.Context(), "id"), client.ErrTokenNotFound)
 	})
 
+	t.Run("reports the recovery token", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusConflict, api.ErrorResponse{Error: "the recovery token is revoked by the reset file, not by delete"})
+		})
+
+		assert.ErrorIs(t, c.DeleteToken(t.Context(), "id"), client.ErrRecoveryDelete)
+	})
+
 	t.Run("refuses an identifier that is not a path segment", func(t *testing.T) {
 		c := newTestClient(t, func(http.ResponseWriter, *http.Request) {
 			t.Fatal("no request should be sent")
