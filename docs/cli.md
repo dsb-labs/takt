@@ -658,6 +658,12 @@ A missing secret is prompted for without echo. `--secret name=value` is refused,
 for the reason `secret set` takes no value argument. Only a missing secret is
 set, since setting one that exists would redeploy every reader.
 
+Each resource that existed at the check is applied on condition that it still
+carries the version the check read. A change that lands in between, a hand edit
+to a workload for instance, is refused rather than written over, and the error
+names the resource. A resource the check did not find is created without a
+condition.
+
 A failure partway stops at once with no rollback. The output names what landed
 before the failure. On success the output is what was applied and what was
 pruned, as JSON.
