@@ -315,14 +315,26 @@ func TestAuthService_LoginToken(t *testing.T) {
 			return token.Source == "session" && token.Principal == "prometheus" && !token.ExpiresAt.IsZero()
 		})).Return(database.Token{ID: "session-id", Type: "client", Source: "session", Principal: "prometheus"}, nil).Once()
 
-		policies := NewMockPolicyReader(t)
-		policies.EXPECT().Get(mock.Anything).Return(service.Policy{Spec: grantAll, Version: 1}, nil).Once()
-
-		minted, session, err := newTestAuthService(t, tokens, policies, nil).LoginToken(t.Context(), credential)
+		minted, session, err := newTestAuthService(t, tokens, NewMockPolicyReader(t), nil).LoginToken(t.Context(), credential)
 		require.NoError(t, err)
 		assert.Equal(t, "session-id", minted.ID)
 		assert.NotEqual(t, credential, session)
 	})
+
+	// A session that minted its successor would never expire, and a workload
+	// token exchanged this way would outlive the revocation that retires it.
+	for _, source := range []string{"session", "oidc", "workload"} {
+		t.Run("refuses a "+source+" token", func(t *testing.T) {
+			tokens := NewMockTokenRepository(t)
+			tokens.EXPECT().GetByHash(mock.Anything, hash).Return(database.Token{
+				ID: "id", Type: "client", Source: source, Principal: "prometheus",
+			}, nil).Once()
+			tokens.EXPECT().Touch(mock.Anything, "id", mock.Anything).Return(nil).Once()
+
+			_, _, err := newTestAuthService(t, tokens, NewMockPolicyReader(t), nil).LoginToken(t.Context(), credential)
+			assert.ErrorIs(t, err, service.ErrInvalidCredential)
+		})
+	}
 
 	t.Run("refuses the recovery token", func(t *testing.T) {
 		recovery, recoveryHash, err := auth.NewToken(auth.KindRecovery)
