@@ -1539,6 +1539,46 @@ func TestDriver_Observe(t *testing.T) {
 		assert.Empty(t, instances[0].RuntimeHealth)
 	})
 
+	t.Run("reports a container stranded in created as failed", func(t *testing.T) {
+		now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+
+		client := NewMockClient(t)
+
+		// No ContainerInspect expectation: a container that never ran has no exit
+		// code or start time to read, so the verdict is reached from the listing.
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return([]dockercontainer.Summary{
+			{
+				ID:      "stranded",
+				State:   dockercontainer.StateCreated,
+				Created: now.Add(-time.Minute).Unix(),
+				Labels:  map[string]string{docker.LabelWorkload: "example"},
+			},
+			{
+				ID:      "starting",
+				State:   dockercontainer.StateCreated,
+				Created: now.Add(-time.Second).Unix(),
+				Labels:  map[string]string{docker.LabelWorkload: "example", docker.LabelInstance: "1"},
+			},
+		}, nil).Once()
+
+		d := docker.New(docker.Config{
+			Logger: newTestLogger(t),
+			Client: client,
+			Now:    func() time.Time { return now },
+		})
+
+		instances, err := d.Observe(t.Context())
+		require.NoError(t, err)
+		require.Len(t, instances, 2)
+
+		// A container created a minute ago and still not started was left behind
+		// between Start's create and its start. Pending would count it as up and
+		// park its slot, so it reads as failed and the reconciler restarts it. The
+		// one created a second ago is a Start in progress.
+		assert.Equal(t, driver.StateFailed, instances[0].State)
+		assert.Equal(t, driver.StatePending, instances[1].State)
+	})
+
 	t.Run("inspects stopped containers for their exit code", func(t *testing.T) {
 		client := NewMockClient(t)
 
@@ -2035,6 +2075,40 @@ func TestDriver_Start_NumbersEachAttempt(t *testing.T) {
 
 	_, err := d.Start(t.Context(), workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil))
 	require.NoError(t, err)
+}
+
+func TestDriver_Start_RemovesOnCancelledStart(t *testing.T) {
+	t.Parallel()
+
+	// A shutdown between the create and the start cancels the start. The remove
+	// that cleans up after it must not be cancelled too, or the container stays
+	// behind in created.
+	ctx, cancel := context.WithCancel(t.Context())
+
+	client := NewMockClient(t)
+
+	client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+	client.EXPECT().ImageList(mock.Anything, mock.Anything).
+		Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+	client.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+	client.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).
+		RunAndReturn(func(context.Context, string, dockerclient.ContainerStartOptions) error {
+			cancel()
+			return context.Canceled
+		}).Once()
+
+	client.EXPECT().ContainerRemove(mock.MatchedBy(func(ctx context.Context) bool {
+		return ctx.Err() == nil
+	}), "container-one", mock.Anything).Return(nil).Once()
+
+	d := testDriver(t, client)
+
+	_, err := d.Start(ctx, workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil))
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestDriver_Digest(t *testing.T) {

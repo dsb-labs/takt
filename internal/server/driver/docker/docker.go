@@ -185,6 +185,17 @@ type (
 // workload to the network.
 const defaultBind = "127.0.0.1"
 
+// How long a container may sit in docker's created state before it is reported
+// as failed rather than pending.
+//
+// Start creates a container and starts it in two calls, so a container is created
+// for the milliseconds between them. One that is still created after this long was
+// stranded between the two — the server stopped, or the daemon dropped the start —
+// and nothing will start it. Reporting it as pending would count it as up, which
+// parks its slot forever. Reporting it as failed hands it to the reconciler's
+// restart path, which removes it and starts another.
+const createdGrace = 30 * time.Second
+
 // Name returns the name this driver is registered under.
 func (d *Driver) Name() string {
 	return Name
@@ -319,8 +330,13 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	if err = d.client.ContainerStart(ctx, created.ID, client.ContainerStartOptions{}); err != nil {
 		// The container exists but won't run. Remove it so the next reconcile
 		// starts from a clean slate rather than finding a created-but-dead
-		// container it would have to reason about.
-		if removeErr := d.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true}); removeErr != nil {
+		// container it would have to reason about. The start may have failed
+		// because the context was cancelled, in which case the remove must not
+		// share its fate, or the container is left behind for the next pass to
+		// find.
+		cleanup := context.WithoutCancel(ctx)
+
+		if removeErr := d.client.ContainerRemove(cleanup, created.ID, client.ContainerRemoveOptions{Force: true}); removeErr != nil {
 			d.logger.With("workload", w.Name, "error", removeErr).Error("failed to remove container after failed start")
 		}
 
@@ -709,6 +725,12 @@ func (d *Driver) observe(ctx context.Context, name string, health bool) ([]drive
 		if instance.State == driver.StateExited || instance.State == driver.StateFailed ||
 			(health && hasHealthCheck(c.Status)) {
 			d.inspect(ctx, &instance)
+		}
+
+		// Decided after the inspect, which has nothing to say about a container
+		// that never ran: no exit code, no start time, no health.
+		if stranded(c, d.now()) {
+			instance.State = driver.StateFailed
 		}
 
 		instances = append(instances, instance)
@@ -1236,11 +1258,19 @@ func hasHealthCheck(status string) bool {
 		strings.Contains(status, "(unhealthy)")
 }
 
+// stranded reports whether a container was created and then never started, which
+// is a container older than createdGrace that docker still reports as created.
+func stranded(c container.Summary, now time.Time) bool {
+	return c.State == container.StateCreated && now.Sub(time.Unix(c.Created, 0)) > createdGrace
+}
+
 func state(status container.ContainerState) driver.State {
 	switch status {
 	case container.StateRunning, container.StateRestarting:
 		return driver.StateRunning
 	case container.StateCreated, container.StatePaused:
+		// Created is the moment between Start's two calls. One that stays created
+		// is caught by stranded, which observe applies over this.
 		return driver.StatePending
 	case container.StateRemoving:
 		// Being removed is takt's own doing — a replacement or a delete in
