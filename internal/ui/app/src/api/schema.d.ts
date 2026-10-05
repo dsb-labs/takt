@@ -1922,9 +1922,16 @@ export interface components {
      */
     SecretSpec: {
       /**
-       * @description The value to store. Stored encrypted and never returned by this API.
+       * Format: byte
+       * @description The value to store, encoded in base64. Stored encrypted and never
+       *     returned by this API.
        *
-       *     An empty string is a valid value. A workload reading it gets an empty
+       *     The bytes are stored as decoded, so the value does not have to be
+       *     text. A JSON string cannot carry bytes that are not UTF-8, and a
+       *     decoder replaces each invalid sequence with U+FFFD. Base64 is what
+       *     lets a DER certificate or a PKCS#12 bundle arrive unchanged.
+       *
+       *     An empty value is valid. A workload reading it gets an empty
        *     environment variable, which is different from one that is not set.
        */
       value: string;
