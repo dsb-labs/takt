@@ -87,8 +87,10 @@ to either too, though the exec runtime needs the host to delegate a cgroup subtr
 and refuses the limits when it does not. `logs:` caps what a workload's output may
 grow to, on either runtime.
 
-A `volumes` entry names a volume, a secret or a variable. A volume is storage. The
-other two are files holding the value takt stores under that name.
+A `volumes` entry names a volume, a secret, a variable, a token or a host path. A
+volume is storage. A secret, a variable or a token is a file holding the value takt
+stores or mints under that name. A host path is a file or directory on the host that
+takt does not manage, and the server has to allow it.
 
 A volume is created before the workload that mounts it and outlives that workload, so
 deleting a workload never destroys what it stored. Its manifest is a name and nothing

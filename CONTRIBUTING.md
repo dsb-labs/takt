@@ -276,14 +276,15 @@ internal/e2e/             the end-to-end suite
 internal/loadtest/        the load test scenarios are run from here
 licenses/                 the licences of the modules the binary is built from
 pkg/manifest/             the canonical specification, and parsing one
+pkg/score/                a score, and rendering its manifests
 pkg/client/               the Go client
 pkg/cli/                  the connection settings a client resolves
 docs/                     documentation
 ```
 
 `pkg/` holds the packages something outside takt would import: the manifest parser,
-the client, and the connection settings a client resolves. Everything else is
-`internal/`.
+the score renderer, the client, and the connection settings a client resolves.
+Everything else is `internal/`.
 
 ## The wire format stops at the API
 
