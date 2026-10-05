@@ -2260,9 +2260,10 @@ components:
     # needs: viewer, operator or admin. The roles are hierarchical, so a
     # caller holding admin passes an operator requirement. An operation whose
     # requirement carries no scope needs authentication but no role. An
-    # operation with `security: []` is anonymous, and the two probe routes
-    # under /api/v1/system are the whole anonymous surface an operator has to
-    # reason about.
+    # operation with `security: []` is anonymous. Seven are: the two probe
+    # routes under /api/v1/system, the token login and the three OIDC routes
+    # under /api/v1/auth, and /api/v1/acl/init, which succeeds only while no
+    # recovery token exists.
     #
     # None of this is enforced when the server's configuration carries no
     # [auth] block, in which case reaching the listener is the whole check.
