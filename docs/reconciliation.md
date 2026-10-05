@@ -73,7 +73,7 @@ flowchart TD
     observe --> split["split live instances from retained ones"]
     split --> ports["read the port allocations"]
     ports --> measure["record the workload states"]
-    measure --> register["register health checks, one per instance"]
+    measure --> register["register health checks, one per running instance"]
     register --> converge["converge every workload, in parallel"]
     converge --> orphans["discard work nothing asked for"]
     orphans --> prune["prune mounted values, every 64th pass"]
