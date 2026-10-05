@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -41,6 +42,11 @@ var (
 	// ErrHostPathReadOnly is returned when a path mount reaches a prefix the server's
 	// configuration grants for reading only, and the mount did not ask for that.
 	ErrHostPathReadOnly = errors.New("host path allowed read-only")
+
+	// ErrHostPathNotFile is returned when a path mount under a prefix granted for
+	// reading only reaches a socket, a FIFO or a device, which a read-only mount
+	// does not stop a workload from writing to.
+	ErrHostPathNotFile = errors.New("host path is not a regular file or directory")
 )
 
 // The HostPath type is one entry of the server's allow-host-paths configuration:
@@ -502,9 +508,17 @@ func NewWorkload(row database.Workload, hostPaths []HostPath) (Workload, error) 
 // either entry shadow the other. readOnly is what the mount asked for, and a prefix
 // granted for reading only refuses a mount that did not ask.
 //
-// Returns ErrHostPathDenied when the path sits under no prefix, and
+// A read-only grant holds for regular files and directories only. The kernel
+// applies a read-only mount to writes through the filesystem, and a connect on a
+// unix socket, a write to a FIFO or an ioctl on a device is none of those, so a
+// socket or device beneath a read-only prefix is refused however the mount was
+// asked for. A more specific prefix without the suffix opens it. A path that does
+// not exist yet is not judged, since the check runs again as each instance starts.
+//
+// Returns ErrHostPathDenied when the path sits under no prefix,
 // ErrHostPathReadOnly when the prefix it sits under is granted read-only and the
-// mount is not.
+// mount is not, and ErrHostPathNotFile when a read-only prefix covers something
+// other than a regular file or a directory.
 func ResolveHostPath(path string, readOnly bool, prefixes []HostPath) (string, error) {
 	resolved, err := resolve(path)
 	if err != nil {
@@ -535,6 +549,14 @@ func ResolveHostPath(path string, readOnly bool, prefixes []HostPath) (string, e
 		return "", fmt.Errorf("%w: %q is under %q, which this server's workload allow-host-paths "+
 			"configuration grants for reading only, so the mount must say readOnly: true",
 			ErrHostPathReadOnly, path, matched.Path)
+	case found && matched.ReadOnly:
+		if kind, ok := specialFile(resolved); ok {
+			return "", fmt.Errorf("%w: %q is a %s under %q, which this server's workload "+
+				"allow-host-paths configuration grants for reading only, and a read-only mount "+
+				"does not stop writes to a %s", ErrHostPathNotFile, path, kind, matched.Path, kind)
+		}
+
+		return resolved, nil
 	case found:
 		return resolved, nil
 	}
@@ -571,4 +593,25 @@ func resolve(path string) (string, error) {
 		rest = filepath.Join(filepath.Base(path), rest)
 		path = parent
 	}
+}
+
+// specialFile reports whether path is a socket, a FIFO or a device, and which. It
+// is asked of a resolved path, so the leaf is never a link, and a path that does
+// not exist is not special.
+func specialFile(path string) (string, bool) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", false
+	}
+
+	switch mode := info.Mode(); {
+	case mode&fs.ModeSocket != 0:
+		return "socket", true
+	case mode&fs.ModeNamedPipe != 0:
+		return "FIFO", true
+	case mode&fs.ModeDevice != 0:
+		return "device", true
+	}
+
+	return "", false
 }

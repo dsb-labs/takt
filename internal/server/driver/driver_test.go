@@ -2,8 +2,10 @@ package driver_test
 
 import (
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,6 +94,17 @@ func TestResolveHostPath(t *testing.T) {
 	require.NoError(t, os.Symlink(filepath.Join(root, "var", "run"), filepath.Join(root, "run")))
 	require.NoError(t, os.Symlink(root, filepath.Join(root, "mnt", "media", "escape")))
 	require.NoError(t, os.Symlink(filepath.Join(root, "mnt", "media"), filepath.Join(root, "mnt", "library")))
+	require.NoError(t, syscall.Mkfifo(filepath.Join(root, "var", "run", "pipe"), 0o600))
+
+	// A unix socket path is capped at a length t.TempDir can exceed, so the listener
+	// is opened through a short link to the tree.
+	short, err := os.MkdirTemp("/tmp", "takt")
+	require.NoError(t, err)
+	t.Cleanup(func() { os.RemoveAll(short) })
+	require.NoError(t, os.Symlink(filepath.Join(root, "var", "run"), filepath.Join(short, "run")))
+	socket, err := net.Listen("unix", filepath.Join(short, "run", "docker.sock"))
+	require.NoError(t, err)
+	t.Cleanup(func() { socket.Close() })
 
 	tt := []struct {
 		Name         string
@@ -210,6 +223,41 @@ func TestResolveHostPath(t *testing.T) {
 				{Path: filepath.Join(root, "mnt", "media"), ReadOnly: true},
 			},
 			ExpectsError: driver.ErrHostPathReadOnly,
+		},
+		{
+			// A read-only mount does not stop a connect on the socket, so the grant
+			// the prefix makes would be wider than it says.
+			Name:         "a read-only mount of a socket under a read-only prefix",
+			Path:         filepath.Join(root, "run", "docker.sock"),
+			Prefixes:     []driver.HostPath{{Path: "/", ReadOnly: true}},
+			ReadOnly:     true,
+			ExpectsError: driver.ErrHostPathNotFile,
+		},
+		{
+			Name:         "a read-only mount of a FIFO under a read-only prefix",
+			Path:         filepath.Join(root, "var", "run", "pipe"),
+			Prefixes:     []driver.HostPath{{Path: filepath.Join(root, "var"), ReadOnly: true}},
+			ReadOnly:     true,
+			ExpectsError: driver.ErrHostPathNotFile,
+		},
+		{
+			// The more specific prefix names the socket without the suffix, so the
+			// operator opened it on purpose.
+			Name: "a socket under a read-only root named by its own prefix",
+			Path: filepath.Join(root, "run", "docker.sock"),
+			Prefixes: []driver.HostPath{
+				{Path: "/", ReadOnly: true},
+				{Path: filepath.Join(root, "var", "run", "docker.sock")},
+			},
+			ReadOnly: true,
+			Expected: filepath.Join(root, "var", "run", "docker.sock"),
+		},
+		{
+			Name:     "a read-only mount of a socket under a writable prefix",
+			Path:     filepath.Join(root, "run", "docker.sock"),
+			Prefixes: []driver.HostPath{{Path: filepath.Join(root, "var", "run")}},
+			ReadOnly: true,
+			Expected: filepath.Join(root, "var", "run", "docker.sock"),
 		},
 	}
 
