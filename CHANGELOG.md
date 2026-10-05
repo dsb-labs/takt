@@ -8,6 +8,20 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Added
+
+- `behind-tls` under `[http]`, for a reverse proxy that terminates TLS in front
+  of a plain HTTP listener. With it set the session cookie is marked `Secure` and
+  every response carries `Strict-Transport-Security`, which before only an `https`
+  OIDC `redirect-url` switched on
+  ([#157](https://github.com/dsb-labs/takt/issues/157),
+  [#190](https://github.com/dsb-labs/takt/pull/190)).
+- `client-secret-file` under `[auth.oidc]`, a file holding the OIDC client
+  secret as an alternative to `client-secret`. The file must be readable only by
+  the user running the server, as `tls-key` must
+  ([#157](https://github.com/dsb-labs/takt/issues/157),
+  [#190](https://github.com/dsb-labs/takt/pull/190)).
+
 ### Changed
 
 - `takt dev loadtest` refuses to run unless `--address` names the server on the
