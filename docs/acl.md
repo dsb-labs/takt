@@ -164,8 +164,11 @@ the web UI's session cookie.
 - `takt token list` names every credential, including sessions, workload
   tokens and the recovery token, with when each was created and last used.
 - `takt token delete <id>` revokes one. `takt auth logout` revokes whatever
-  credential made the call, with one refusal: the recovery token, whose only
+  credential made the call. Both refuse the recovery token, whose only
   revocation path is the [reset file](#losing-the-recovery-token).
+- The web UI exchanges a pasted static token for a session that expires on
+  its own. No other token exchanges: a session cannot mint its successor,
+  and a workload token cannot yield a session that outlives the workload.
 
 ## Workload identity
 
