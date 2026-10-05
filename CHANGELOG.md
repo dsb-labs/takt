@@ -10,6 +10,20 @@ describes how an entry is written.
 
 ### Fixed
 
+- `takt token delete` and `DELETE /api/v1/tokens/{id}` removed the recovery
+  token, which re-armed the anonymous `acl init` and let an `admin` replace the
+  operator's recovery token with one only it held. Both now refuse it with a
+  `409`, and the reset file is the only revocation path, as `auth logout` already
+  enforced ([#154](https://github.com/dsb-labs/takt/issues/154),
+  [#187](https://github.com/dsb-labs/takt/pull/187)).
+
+- `POST /api/v1/auth` exchanged any token except the recovery token for a 12
+  hour session, so a session renewed itself forever and a workload or OIDC token
+  yielded a session that revocation and the issuer's expiry never reached. Only
+  a static token exchanges now, which is the UI's pasted-token login
+  ([#154](https://github.com/dsb-labs/takt/issues/154),
+  [#187](https://github.com/dsb-labs/takt/pull/187)).
+
 - **Breaking:** `value` in `PUT /api/v1/secrets/{name}` is now base64. The
   value travelled as a JSON string, which cannot carry bytes that are not
   UTF-8, so a DER certificate or a PKCS#12 bundle set with
