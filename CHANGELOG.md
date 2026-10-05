@@ -18,6 +18,21 @@ describes how an entry is written.
 
 ### Fixed
 
+- An image whose `VOLUME` directive names a path no takt volume covers, which
+  postgres, mysql and redis do by default, left an anonymous volume behind on every
+  attempt, and nothing removed it. The container driver now removes a container's
+  anonymous volumes with the container, as `docker rm -v` does. A takt volume is a
+  bind mount and is not affected
+  ([#169](https://github.com/dsb-labs/takt/issues/169),
+  [#191](https://github.com/dsb-labs/takt/pull/191)).
+
+- A workload whose `container.image` carried both a tag and a digest, as
+  `repo:1.2@sha256:...`, lost its image to the prune after `prune-delay` whenever
+  no container held it, and pulled it again on the next start. The prune now matches
+  such a reference on its digest
+  ([#169](https://github.com/dsb-labs/takt/issues/169),
+  [#191](https://github.com/dsb-labs/takt/pull/191)).
+
 - A container on the daemon carrying a `takt.workload` label with an empty value,
   from a `docker run --label takt.workload` or a compose file with a null value, was
   reported as a workload named `""`, swept as an orphan, and the discard of that name
