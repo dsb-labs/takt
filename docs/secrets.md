@@ -111,6 +111,11 @@ volumes:
 The syntax is documented in the
 [manifest reference](manifest.md#mounting-a-value).
 
+The value does not have to be text. `takt secret set --from-file` stores the bytes of
+the file as they are, so a DER certificate or a PKCS#12 bundle reaches the mount
+unchanged. The API carries the value in base64 for the same reason: a JSON string
+cannot hold bytes that are not UTF-8.
+
 **This writes the plaintext to the host filesystem.** There is no way to put a value
 inside a container without writing it somewhere first, so mounting a secret trades the
 "not on disk" guarantee above for a file the workload can open. It is worth knowing
