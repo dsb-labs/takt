@@ -5,6 +5,7 @@ package server_test
 import (
 	"net"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,6 +60,7 @@ func TestLoadConfig(t *testing.T) {
 				assert.Equal(t, "https://idp.example.com", config.Auth.OIDC.Issuer)
 				assert.Equal(t, "takt", config.Auth.OIDC.ClientID)
 				assert.Equal(t, "hunter2", config.Auth.OIDC.ClientSecret)
+				assert.Empty(t, config.Auth.OIDC.ClientSecretFile)
 				assert.Equal(t, "https://takt.example.com", config.Auth.OIDC.RedirectURL)
 			},
 		},
@@ -415,6 +417,47 @@ func TestConfig_Validate(t *testing.T) {
 			},
 			ExpectsError: true,
 		},
+		{
+			Name: "an oidc client secret file",
+			Mutate: func(c *server.Config) {
+				c.Auth = &server.AuthConfig{
+					OIDC: server.OIDCConfig{
+						Issuer:           "https://idp.example.com",
+						ClientID:         "takt",
+						ClientSecretFile: "/etc/takt/oidc-secret",
+					},
+				}
+			},
+		},
+		{
+			Name: "an oidc client secret file that is relative",
+			Mutate: func(c *server.Config) {
+				c.Auth = &server.AuthConfig{
+					OIDC: server.OIDCConfig{
+						Issuer:           "https://idp.example.com",
+						ClientID:         "takt",
+						ClientSecretFile: "oidc-secret",
+					},
+				}
+			},
+			ExpectsError: true,
+		},
+		{
+			// Two sources for one value leaves a reader guessing which the
+			// server used.
+			Name: "an oidc client secret given twice",
+			Mutate: func(c *server.Config) {
+				c.Auth = &server.AuthConfig{
+					OIDC: server.OIDCConfig{
+						Issuer:           "https://idp.example.com",
+						ClientID:         "takt",
+						ClientSecret:     "hunter2",
+						ClientSecretFile: "/etc/takt/oidc-secret",
+					},
+				}
+			},
+			ExpectsError: true,
+		},
 	}
 
 	for _, tc := range tt {
@@ -594,11 +637,80 @@ func TestConfig_PrivatePaths(t *testing.T) {
 	config.Data.Directory = "/var/lib/takt"
 	config.HTTP.TLSKey = "/etc/takt/tls/key.pem"
 
-	// The keyring, the configuration's directory and the TLS key: what an exec
-	// workload running as the server's user must be kept from.
+	config.Auth = &server.AuthConfig{OIDC: server.OIDCConfig{ClientSecretFile: "/run/secrets/takt-oidc"}}
+
+	// The keyring, the configuration's directory, the TLS key and the OIDC
+	// client secret: what an exec workload running as the server's user must
+	// be kept from.
 	assert.ElementsMatch(t, []string{
 		config.KeysPath(),
 		"/etc/takt",
 		"/etc/takt/tls/key.pem",
+		"/run/secrets/takt-oidc",
 	}, config.PrivatePaths())
+}
+
+func TestOIDCConfig_ReadClientSecret(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name     string
+		Config   func(t *testing.T) server.OIDCConfig
+		Expected string
+		Error    error
+	}{
+		{
+			Name: "the secret written in the configuration",
+			Config: func(*testing.T) server.OIDCConfig {
+				return server.OIDCConfig{ClientSecret: "hunter2"}
+			},
+			Expected: "hunter2",
+		},
+		{
+			// An editor leaves a newline at the end of the file, and a secret
+			// never carries one.
+			Name: "the secret read from a file",
+			Config: func(t *testing.T) server.OIDCConfig {
+				path := filepath.Join(t.TempDir(), "secret")
+				require.NoError(t, os.WriteFile(path, []byte("hunter2\n"), 0o600))
+
+				return server.OIDCConfig{ClientSecretFile: path}
+			},
+			Expected: "hunter2",
+		},
+		{
+			// Refused rather than narrowed, as the TLS key is: whoever could
+			// read it already had the chance.
+			Name: "a file anyone can read",
+			Config: func(t *testing.T) server.OIDCConfig {
+				path := filepath.Join(t.TempDir(), "secret")
+				require.NoError(t, os.WriteFile(path, []byte("hunter2"), 0o644))
+
+				return server.OIDCConfig{ClientSecretFile: path}
+			},
+			Error: server.ErrClientSecretReadable,
+		},
+		{
+			Name: "a file that does not exist",
+			Config: func(t *testing.T) server.OIDCConfig {
+				return server.OIDCConfig{ClientSecretFile: filepath.Join(t.TempDir(), "missing")}
+			},
+			Error: os.ErrNotExist,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+
+			secret, err := tc.Config(t).ReadClientSecret()
+			if tc.Error != nil {
+				assert.ErrorIs(t, err, tc.Error)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.Expected, secret)
+		})
+	}
 }

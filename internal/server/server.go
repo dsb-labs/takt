@@ -385,6 +385,13 @@ func Run(ctx context.Context, config Config) error {
 	)
 
 	if config.Auth.OIDCEnabled() {
+		// Before the issuer is dialled, so a secret file the server cannot
+		// read is reported without waiting on the network.
+		clientSecret, err := config.Auth.OIDC.ReadClientSecret()
+		if err != nil {
+			return err
+		}
+
 		oidcVerifier, endpoint, err := service.NewOIDCVerifier(ctx, config.Auth.OIDC.Issuer, config.Auth.OIDC.ClientID)
 		if err != nil {
 			return err
@@ -393,7 +400,7 @@ func Run(ctx context.Context, config Config) error {
 		verifier = oidcVerifier
 		// The CLI's loopback flow hands its authorization code to the server,
 		// because the exchange is what needs the client secret.
-		exchanger = service.NewOIDCExchanger(config.Auth.OIDC.ClientID, config.Auth.OIDC.ClientSecret, endpoint)
+		exchanger = service.NewOIDCExchanger(config.Auth.OIDC.ClientID, clientSecret, endpoint)
 		relyingParty = &api.OIDCRelyingParty{
 			Issuer:   config.Auth.OIDC.Issuer,
 			ClientID: config.Auth.OIDC.ClientID,
@@ -410,7 +417,7 @@ func Run(ctx context.Context, config Config) error {
 
 			relyingParty.Flow = &oauth2.Config{
 				ClientID:     config.Auth.OIDC.ClientID,
-				ClientSecret: config.Auth.OIDC.ClientSecret,
+				ClientSecret: clientSecret,
 				Endpoint:     endpoint,
 				RedirectURL:  strings.TrimSuffix(config.Auth.OIDC.RedirectURL, "/") + "/api/v1/auth/oidc/callback",
 				Scopes:       scopes,
