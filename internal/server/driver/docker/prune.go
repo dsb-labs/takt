@@ -145,13 +145,18 @@ func referenced(img image.Summary, named, used map[string]struct{}) bool {
 // several ways of writing one image compare as one. A reference that does not
 // parse — an older daemon lists a dangling image's tag as "<none>:<none>" — is
 // returned as written, which nothing a manifest names can equal.
+//
+// A reference carrying both a tag and a digest keeps the digest alone, as the
+// daemon does. The daemon lists an image's tags and digests apart, so a manifest
+// pinned as repo:tag@sha256:... would otherwise match neither, and the digest is
+// what identifies the image.
 func normalise(ref string) string {
-	named, err := reference.ParseNormalizedNamed(ref)
+	named, err := reference.ParseDockerRef(ref)
 	if err != nil {
 		return ref
 	}
 
-	return reference.TagNameOnly(named).String()
+	return named.String()
 }
 
 // removeImage removes one image the driver decided nothing references. A tagged
