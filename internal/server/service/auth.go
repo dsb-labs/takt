@@ -113,29 +113,9 @@ func NewAuthService(config AuthServiceConfig) *AuthService {
 // the very next request. Reports ErrInvalidCredential for anything that does
 // not authenticate.
 func (s *AuthService) Authenticate(ctx context.Context, credential string) (auth.Identity, error) {
-	if _, ok := auth.KindOf(credential); !ok {
-		return auth.Identity{}, ErrInvalidCredential
-	}
-
-	token, err := s.tokens.GetByHash(ctx, auth.HashToken(credential))
-	switch {
-	case errors.Is(err, database.ErrTokenNotFound):
-		return auth.Identity{}, ErrInvalidCredential
-	case err != nil:
+	token, err := s.lookup(ctx, credential)
+	if err != nil {
 		return auth.Identity{}, err
-	}
-
-	if !token.ExpiresAt.IsZero() && time.Now().After(token.ExpiresAt) {
-		return auth.Identity{}, ErrInvalidCredential
-	}
-
-	// Recorded at most once a minute, so the audit answer stays fresh without
-	// a scraper's every request becoming a write. A failure costs the
-	// freshness of last-used, not the request.
-	if now := time.Now().UTC(); token.LastUsedAt.IsZero() || now.Sub(token.LastUsedAt) > time.Minute {
-		if err = s.tokens.Touch(ctx, token.ID, now); err != nil {
-			s.logger.With("error", err, "token_id", token.ID).Warn("failed to record token use")
-		}
 	}
 
 	if token.Type == string(auth.KindRecovery) {
@@ -157,6 +137,37 @@ func (s *AuthService) Authenticate(ctx context.Context, credential string) (auth
 		Role:      role,
 		TokenID:   token.ID,
 	}, nil
+}
+
+// lookup resolves a presented credential to the token that records it,
+// refusing one that is unknown or expired, and records the use.
+func (s *AuthService) lookup(ctx context.Context, credential string) (database.Token, error) {
+	if _, ok := auth.KindOf(credential); !ok {
+		return database.Token{}, ErrInvalidCredential
+	}
+
+	token, err := s.tokens.GetByHash(ctx, auth.HashToken(credential))
+	switch {
+	case errors.Is(err, database.ErrTokenNotFound):
+		return database.Token{}, ErrInvalidCredential
+	case err != nil:
+		return database.Token{}, err
+	}
+
+	if !token.ExpiresAt.IsZero() && time.Now().After(token.ExpiresAt) {
+		return database.Token{}, ErrInvalidCredential
+	}
+
+	// Recorded at most once a minute, so the audit answer stays fresh without
+	// a scraper's every request becoming a write. A failure costs the
+	// freshness of last-used, not the request.
+	if now := time.Now().UTC(); token.LastUsedAt.IsZero() || now.Sub(token.LastUsedAt) > time.Minute {
+		if err = s.tokens.Touch(ctx, token.ID, now); err != nil {
+			s.logger.With("error", err, "token_id", token.ID).Warn("failed to record token use")
+		}
+	}
+
+	return token, nil
 }
 
 // Logout revokes the credential that authenticated the request, whatever its
@@ -262,23 +273,26 @@ func validateLoopbackRedirect(redirectURI string) error {
 	}
 }
 
-// LoginToken exchanges an existing client token for a short-lived session
-// token bound to the same principal and groups. This is how the UI holds a
-// credential that expires on its own rather than the standing one that was
-// pasted into it.
+// LoginToken exchanges a static token for a short-lived session token bound
+// to the same principal and groups. This is how the UI holds a credential
+// that expires on its own rather than the standing one that was pasted into
+// it.
+//
+// Only a static token exchanges. A session that could mint its successor
+// would never expire, a workload token would yield a session the workload's
+// revocation paths never see, and the recovery token bypasses policy
+// altogether.
 func (s *AuthService) LoginToken(ctx context.Context, credential string) (Token, string, error) {
-	identity, err := s.Authenticate(ctx, credential)
+	token, err := s.lookup(ctx, credential)
 	if err != nil {
 		return Token{}, "", err
 	}
 
-	// A recovery token stays out of sessions for the same reason it is not
-	// for daily use: everything it touches bypasses policy.
-	if identity.Recovery {
-		return Token{}, "", ErrInvalidCredential
+	if token.Source != "static" {
+		return Token{}, "", fmt.Errorf("%w: only a static token exchanges for a session", ErrInvalidCredential)
 	}
 
-	return s.mint(ctx, "session", identity.Principal, identity.Groups)
+	return s.mint(ctx, "session", token.Principal, token.Groups)
 }
 
 // mint stores a short-lived client token and returns it with its credential.
