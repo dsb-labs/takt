@@ -22,6 +22,9 @@ var (
 	// ErrInvalidPrincipal is returned when a token is created for a principal
 	// name takt will not accept.
 	ErrInvalidPrincipal = errors.New("invalid principal")
+	// ErrRecoveryDelete is returned when a delete names the recovery token.
+	// Its revocation path is deliberately host-level: the reset file.
+	ErrRecoveryDelete = errors.New("the recovery token is revoked by the reset file, not by delete")
 )
 
 // The longest principal name a token binds to. Generous enough for any email
@@ -47,6 +50,8 @@ type (
 		// Create should record the token and return it with its assigned
 		// identifier and creation time.
 		Create(ctx context.Context, token database.Token) (database.Token, error)
+		// Get should return the token with the given identifier.
+		Get(ctx context.Context, id string) (database.Token, error)
 		// GetByHash should return the token a presented credential hashes to.
 		GetByHash(ctx context.Context, hash string) (database.Token, error)
 		// List should return every token, newest first.
@@ -341,9 +346,24 @@ func (s *TokenService) List(ctx context.Context) ([]Token, error) {
 }
 
 // Delete revokes the token with the given identifier. Revocation is
-// immediate: the next request presenting the credential is refused.
+// immediate: the next request presenting the credential is refused. The one
+// refusal is the recovery token: deleting it would re-arm the anonymous init,
+// so an admin could replace the operator's recovery token with one it alone
+// holds.
 func (s *TokenService) Delete(ctx context.Context, id string) error {
-	err := s.tokens.Delete(ctx, id)
+	token, err := s.tokens.Get(ctx, id)
+	switch {
+	case errors.Is(err, database.ErrTokenNotFound):
+		return ErrTokenNotFound
+	case err != nil:
+		return err
+	}
+
+	if token.Type == string(auth.KindRecovery) {
+		return ErrRecoveryDelete
+	}
+
+	err = s.tokens.Delete(ctx, id)
 	switch {
 	case errors.Is(err, database.ErrTokenNotFound):
 		return ErrTokenNotFound
