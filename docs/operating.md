@@ -19,8 +19,18 @@ binding it to a network:
 - A WireGuard or Tailscale interface, so the port is only reachable inside it.
 - An SSH tunnel, for occasional access from one machine.
 
-Set `hosts` to the name the proxy serves when you put one in front of takt. See
-[Configuration](configuration.md#http).
+Set `hosts` to the name the proxy serves when you put one in front of takt. Set
+`behind-tls` when the proxy terminates TLS, so the session cookie is marked
+`Secure` and every response carries `Strict-Transport-Security`:
+
+```toml
+[http]
+address = "127.0.0.1:7373"
+hosts = ["takt.example.com"]
+behind-tls = true
+```
+
+See [Configuration](configuration.md#http).
 
 takt does not rate limit its own endpoints. A client token cannot be guessed, so a
 flood of login attempts is a cost rather than a way in: each is a database read,
@@ -100,8 +110,10 @@ Every response also carries the headers a browser reads as policy: a content
 security policy that loads scripts and styles from takt alone and refuses to be
 framed, `X-Content-Type-Options: nosniff`, and, when the server is reached over
 TLS, `Strict-Transport-Security`. A session cookie is marked `Secure` when the
-server terminates TLS or the OIDC `redirect-url` names an `https` address, which is
-how a proxy in front says the browser reaches takt over TLS.
+server terminates TLS, when `behind-tls` is set, or when the OIDC `redirect-url`
+names an `https` address. The last two are how a proxy in front says the browser
+reaches takt over TLS. Without one of them the browser also sends the cookie over
+plain `http://` to the same host.
 
 A request carrying a body must also declare `Content-Type: application/json`. That is
 already the only body the API reads, and requiring it turns away the form-encoded and
@@ -499,9 +511,9 @@ before it runs the command. A confined workload reaches:
 The system directories include `/etc`, and `/etc` is where the packaged install
 keeps takt's own configuration, which may hold an OIDC client secret, and where a
 TLS key often lives. Those are carved out: the directory the configuration was
-read from, the TLS key and the keyring are refused, and the directory holding each
-is granted entry by entry rather than whole. A workload reads `/etc/hostname` and
-not `/etc/takt`.
+read from, the TLS key, the OIDC client secret file and the keyring are refused,
+and the directory holding each is granted entry by entry rather than whole. A
+workload reads `/etc/hostname` and not `/etc/takt`.
 
 There is deliberately no grant for `/tmp`. It is shared by everything running
 as the server's user, so granting it would let one workload read what another

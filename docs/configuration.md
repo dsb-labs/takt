@@ -11,6 +11,7 @@ address = "127.0.0.1:7373"
 hosts = []
 tls-cert = ""
 tls-key = ""
+behind-tls = false
 max-header-values = 100
 
 [data]
@@ -47,6 +48,7 @@ keys = ""
 # issuer = ""
 # client-id = ""
 # client-secret = ""
+# client-secret-file = ""
 # redirect-url = ""
 # scopes = ["openid", "email", "profile"]
 
@@ -65,6 +67,7 @@ level = "info"
 | `hosts` | empty | The host names a request may name. |
 | `tls-cert` | empty | The PEM certificate the server presents when it serves TLS. |
 | `tls-key` | empty | The PEM private key for `tls-cert`. |
+| `behind-tls` | `false` | Whether a reverse proxy in front of the server terminates TLS. |
 | `max-header-values` | `100` | The most header values a request may carry, across every header. |
 
 The default is loopback. Reaching the API is enough to run code on the host, so read
@@ -93,6 +96,15 @@ which is the same rule the secret keyring applies. The pair is reread when the
 certificate file changes, so a renewal does not need a restart. See
 [Operating takt](operating.md#serving-tls-directly) for when to prefer this over
 a reverse proxy.
+
+Set `behind-tls` when a reverse proxy terminates TLS and the server itself
+listens for plain HTTP. The server then marks the session cookie `Secure` and
+sends `Strict-Transport-Security` on every response, as it does when it serves
+TLS itself. An `https` OIDC `redirect-url` says the same thing, so a deployment
+with the web UI's OIDC login needs no further key. A deployment with static
+tokens alone does, because nothing else names the scheme the browser uses. This
+is a setting rather than a forwarded header, because any client on the loopback
+network can send a header.
 
 A request body is read up to 1 MiB and no further. There is no key for it: a manifest
 is a document an operator wrote by hand, and anything past a megabyte is a mistake or
@@ -365,6 +377,7 @@ supervisor needs. [Access control](acl.md) covers the model and the lifecycle:
 | `issuer` | empty | The OIDC issuer logins verify identities against. Its presence enables OIDC. |
 | `client-id` | empty | The client identifier registered with the issuer. Required with an issuer. |
 | `client-secret` | empty | The client secret, for an issuer that treats takt as a confidential client. The server performs every code exchange, so the CLI never needs it. |
+| `client-secret-file` | empty | A file holding the client secret, as an alternative to `client-secret`. An absolute path, readable only by the user running the server. |
 | `redirect-url` | empty | The URL browsers reach this server by, such as `https://takt.example.com`. Its presence enables the web UI's login redirect. |
 | `scopes` | `["openid", "email", "profile"]` | The scopes the web UI's login requests from the issuer. Read only when `redirect-url` is set. |
 
@@ -373,6 +386,13 @@ auth login` and the web UI exchange an OIDC identity for a short-lived token.
 The issuer must permit two redirect URIs: `http://127.0.0.1:8250/oidc/callback`
 for the CLI's loopback flow, and `<redirect-url>/api/v1/auth/oidc/callback` for
 the UI's, when `redirect-url` is set.
+
+Give the client secret in one of two forms. `client-secret` holds it inline.
+`client-secret-file` names a file that holds it, for a configuration kept in a
+repository beside the manifests. The server reads the file once at startup and
+refuses to start when the file is readable by anyone but its owner, which is the
+rule `tls-key` and the secret keyring apply. A trailing newline is removed. Set
+one of the two, not both.
 
 Add whatever scope the issuer needs before it includes the claim the policy's
 `groupsClaim` reads — many issuers put group names behind a `groups` scope.
