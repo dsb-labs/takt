@@ -16,14 +16,23 @@ describes how an entry is written.
   `takt secret set --from-file` was stored with each invalid sequence replaced
   by U+FFFD, and nothing said so. The CLI and the UI send the new encoding. A
   caller of the API by hand has to base64 the value
-  ([#166](https://github.com/dsb-labs/takt/issues/166)).
+  ([#166](https://github.com/dsb-labs/takt/issues/166),
+  [#182](https://github.com/dsb-labs/takt/pull/182)).
 - A container the server created but did not start, because the server stopped or
   the daemon dropped the start between the two calls, read as `pending` on every
   pass and was never started or replaced. The container driver now reports one
   still created after 30 seconds as `failed`, so the reconciler removes it and
   starts another. The remove that cleans up after a failed start no longer shares
   the start's cancelled context
-  ([#162](https://github.com/dsb-labs/takt/issues/162)).
+  ([#162](https://github.com/dsb-labs/takt/issues/162),
+  [#183](https://github.com/dsb-labs/takt/pull/183)).
+- A health check's `startPeriod` counted from the first pass over the workload
+  rather than from the instance's start. A workload whose image pull, readiness
+  hold or backoff outlasted the grace was marked unhealthy before it ran, and the
+  instance that then started was stopped once for the stale verdict. The check
+  now registers when the instance is first seen running
+  ([#159](https://github.com/dsb-labs/takt/issues/159),
+  [#184](https://github.com/dsb-labs/takt/pull/184)).
 
 ## v0.11.1 - 2026-10-04
 
@@ -136,7 +145,8 @@ describes how an entry is written.
   `ETag`, `takt workload apply --if-match` carries it back, and takt refuses
   the apply when the resource has moved on since. Volume and service apply,
   secret and variable set, and `acl apply` take the same flag
-  ([#89](https://github.com/dsb-labs/takt/issues/89)).
+  ([#89](https://github.com/dsb-labs/takt/issues/89),
+  [#115](https://github.com/dsb-labs/takt/pull/115)).
 - `takt workload events --since` reads only the events a workload was last
   seen at after the given time, which a poller uses to pick up where it left
   off ([#89](https://github.com/dsb-labs/takt/issues/89),
@@ -144,7 +154,8 @@ describes how an entry is written.
 - A workload's `logs` block caps what its output may grow to, naming the
   size it is rotated at and how many files are kept. A container's is
   applied by the Docker daemon, and an exec workload's by takt against the
-  file the process writes ([#87](https://github.com/dsb-labs/takt/issues/87)).
+  file the process writes ([#87](https://github.com/dsb-labs/takt/issues/87),
+  [#116](https://github.com/dsb-labs/takt/pull/116)).
 
 ### Changed
 
@@ -155,15 +166,18 @@ describes how an entry is written.
   group beyond its primary, refuses `exec` workloads and says so at startup.
   A workload already running when the server is upgraded keeps its groups
   until it is next started
-  ([#73](https://github.com/dsb-labs/takt/issues/73)).
+  ([#73](https://github.com/dsb-labs/takt/issues/73),
+  [#118](https://github.com/dsb-labs/takt/pull/118)).
 - The server warns at startup when authentication is off and a workload
   shares the host's network, since such a workload reaches the API with
-  every permission ([#73](https://github.com/dsb-labs/takt/issues/73)).
+  every permission ([#73](https://github.com/dsb-labs/takt/issues/73),
+  [#118](https://github.com/dsb-labs/takt/pull/118)).
 - **Breaking:** the policy's `ETag` is a count of the applies that changed
   it, `"0"` before any apply, rather than a hash of the document. A tag read
   before upgrading no longer matches. `takt acl get` prints the document under
   `Spec` beside the tag, so capturing it into a file is now
-  `takt acl get | jq .Spec` ([#89](https://github.com/dsb-labs/takt/issues/89)).
+  `takt acl get | jq .Spec` ([#89](https://github.com/dsb-labs/takt/issues/89),
+  [#115](https://github.com/dsb-labs/takt/pull/115)).
 - Every operation requiring a role documents the 401 and 403 it can answer
   with, where most of them named neither
   ([#89](https://github.com/dsb-labs/takt/issues/89),
