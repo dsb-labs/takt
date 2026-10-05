@@ -716,9 +716,11 @@ export interface paths {
      * Exchange an identity for a short-lived token
      * @description Mints a short-lived client token. The exchange accepts either an
      *     authorization code from the CLI's loopback flow, which the server
-     *     trades with the configured issuer, or an existing client token, which
-     *     is how the browser UI trades the standing credential pasted into it
-     *     for a session that expires on its own.
+     *     trades with the configured issuer, or a static token, which is how
+     *     the browser UI trades the standing credential pasted into it for a
+     *     session that expires on its own. No other token exchanges: a session
+     *     cannot mint its successor, and a workload token cannot yield a
+     *     session its revocation would miss.
      *
      *     With `cookie` set, the response also carries the credential as an
      *     HttpOnly session cookie, which is what the UI stores. The credential
@@ -935,6 +937,9 @@ export interface paths {
      * Revoke a token
      * @description Removes the token with the given identifier. Revocation is immediate:
      *     the next request presenting the credential is refused.
+     *
+     *     The one refusal is the recovery token, whose revocation path is
+     *     deliberately host-level: the reset file in the data directory.
      */
     delete: operations["deleteToken"];
     options?: never;
@@ -2540,9 +2545,10 @@ export interface components {
      */
     LoginRequest: {
       /**
-       * @description An existing client token, exchanged for a session bound to the
-       *     same principal. This is how the browser UI trades a pasted
-       *     standing credential for one that expires on its own.
+       * @description A static token, exchanged for a session bound to the same
+       *     principal. This is how the browser UI trades a pasted standing
+       *     credential for one that expires on its own. Any other token is
+       *     refused.
        */
       token?: string;
       /**
@@ -4806,6 +4812,15 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
+      /** @description The identifier names the recovery token. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
       500: components["responses"]["InternalServerError"];
     };
   };
