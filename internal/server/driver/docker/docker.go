@@ -82,6 +82,10 @@ var (
 	// than zero. The error carries the status and the tail of what the command
 	// wrote.
 	ErrProbeFailed = errors.New("probe failed")
+	// ErrNoWorkloadName is returned when a call that acts on one workload names
+	// none. The driver finds a workload's containers by the value of its label,
+	// and an empty value would match every container the driver owns.
+	ErrNoWorkloadName = errors.New("no workload name given")
 )
 
 type (
@@ -681,15 +685,21 @@ func (d *Driver) ObserveWorkload(ctx context.Context, _, name string) ([]driver.
 // supersededBy groups by instance before choosing, so a listing narrowed to one
 // workload reaches the same answer for it as a listing of the host would.
 func (d *Driver) observe(ctx context.Context, name string, health bool) ([]driver.Instance, error) {
-	containers, err := d.containers(ctx, name)
-	if err != nil {
-		return nil, err
-	}
+	var (
+		containers []container.Summary
+		err        error
+	)
 
 	// Only an unfiltered listing can say a container is gone rather than merely
 	// out of scope, so it is the one that trims what the driver remembers.
 	if name == "" {
+		if containers, err = d.owned(ctx); err != nil {
+			return nil, err
+		}
+
 		d.forget(containers)
+	} else if containers, err = d.containers(ctx, name); err != nil {
+		return nil, err
 	}
 
 	superseded := supersededBy(containers)
@@ -973,15 +983,47 @@ func (d *Driver) containerLogs(ctx context.Context, out io.Writer, id string, op
 	return nil
 }
 
-// containers returns the summaries of the containers the driver owns. When
-// workload is empty every owned container is returned, otherwise only those
-// belonging to the named workload.
+// containers returns the summaries of the containers the driver owns for the named
+// workload.
+//
+// An empty name is refused rather than widened. The daemon's label filter matches
+// on the label's presence when no value is given, so an empty name would list every
+// container the driver owns, and a caller about to stop or remove what it is given
+// would act on all of them.
 func (d *Driver) containers(ctx context.Context, workload string) ([]container.Summary, error) {
-	label := LabelWorkload
-	if workload != "" {
-		label = LabelWorkload + "=" + workload
+	if workload == "" {
+		return nil, ErrNoWorkloadName
 	}
 
+	return d.list(ctx, LabelWorkload+"="+workload)
+}
+
+// owned returns the summaries of every container the driver owns, whichever
+// workload each belongs to.
+//
+// A container carrying the label with an empty value is left out. Something other
+// than this driver put the label there — a docker run with a bare --label, or a
+// compose file with a null value — and a name of "" is not a workload. Reported as
+// one, it would be swept as an orphan, and the sweep's discard of the workload
+// named "" would reach every container the driver owns.
+func (d *Driver) owned(ctx context.Context) ([]container.Summary, error) {
+	containers, err := d.list(ctx, LabelWorkload)
+	if err != nil {
+		return nil, err
+	}
+
+	return slices.DeleteFunc(containers, func(c container.Summary) bool {
+		if c.Labels[LabelWorkload] != "" {
+			return false
+		}
+
+		d.logger.With("container", c.ID).Debug("ignored a container whose workload label is empty")
+
+		return true
+	}), nil
+}
+
+func (d *Driver) list(ctx context.Context, label string) ([]container.Summary, error) {
 	containers, err := d.client.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
 		Filters: client.Filters{}.Add("label", label),
