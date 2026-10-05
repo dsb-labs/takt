@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  base64,
   bytes,
   cores,
   followPause,
@@ -118,5 +119,13 @@ describe("followPause", () => {
       text: 'workload "web" does not exist, retrying',
       final: false,
     });
+  });
+});
+
+describe("base64", () => {
+  it("encodes text as UTF-8", () => {
+    expect(base64("hunter2")).toBe("aHVudGVyMg==");
+    expect(base64("")).toBe("");
+    expect(base64("pässword")).toBe("cMOkc3N3b3Jk");
   });
 });
