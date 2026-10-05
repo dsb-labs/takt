@@ -147,3 +147,9 @@ export function followPause(
       };
   }
 }
+
+// base64 encodes text as UTF-8 for a wire field declared as bytes. btoa alone
+// takes only Latin-1, so the text is encoded first.
+export function base64(text: string): string {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+}

@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/vue-query";
 
 import { client } from "@/api/client";
+import { base64 } from "@/lib/format";
 
 // Every mutation invalidates the queries reading what it changed, so the view
 // reflects the action on the next render rather than the next poll.
@@ -57,7 +58,7 @@ export function useSetSecret() {
     mutationFn: async ({ name, value }: { name: string; value: string }) => {
       const { error } = await client.PUT("/api/v1/secrets/{name}", {
         params: { path: { name } },
-        body: { value },
+        body: { value: base64(value) },
       });
       if (error) throw new Error(error.error);
     },
