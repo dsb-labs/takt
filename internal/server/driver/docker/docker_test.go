@@ -2369,13 +2369,22 @@ func TestDriver_Prune(t *testing.T) {
 		},
 		{
 			Name: "keeps an image a workload names however it is written",
-			Keep: []manifest.Spec{spec("nginx"), spec("docker.io/library/redis:7"), spec("example/example@sha256:abc")},
+			Keep: []manifest.Spec{
+				spec("nginx"),
+				spec("docker.io/library/redis:7"),
+				spec("example/example@sha256:abc"),
+				// Pinned the way renovate pins: the daemon stores the digest and
+				// the tag apart, so a reference carrying both is matched on the
+				// digest, which is what identifies the image.
+				spec("example/pinned:1.2@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"),
+			},
 			SetupMocks: func(c *MockClient) {
 				c.EXPECT().ImageList(mock.Anything, mock.Anything).
 					Return([]image.Summary{
 						tagged("sha256:nginx", 10, "nginx:latest"),
 						tagged("sha256:redis", 10, "redis:7"),
 						{ID: "sha256:example", RepoDigests: []string{"example/example@sha256:abc"}},
+						{ID: "sha256:pinned", RepoTags: []string{"example/pinned:1.2"}, RepoDigests: []string{"example/pinned@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"}},
 					}, nil).Once()
 				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
 			},
