@@ -962,9 +962,16 @@ func TestDriver_Discard(t *testing.T) {
 		// Nothing is kept. A retained container exists so an operator can read why the
 		// previous attempt failed, and a workload nobody asked for has no such reader —
 		// one left behind is a container the orphan sweep finds on every pass forever.
+		//
+		// The anonymous volumes go with the container. An image's VOLUME directive
+		// creates one per attempt, and nothing can find it again once the container
+		// is gone. A takt volume is a bind mount, which the flag does not reach.
 		for _, id := range []string{"container-one", "container-two"} {
 			client.EXPECT().ContainerStop(mock.Anything, id, mock.Anything).Return(nil).Once()
-			client.EXPECT().ContainerRemove(mock.Anything, id, mock.Anything).Return(nil).Once()
+			client.EXPECT().ContainerRemove(mock.Anything, id, dockerclient.ContainerRemoveOptions{
+				Force:         true,
+				RemoveVolumes: true,
+			}).Return(nil).Once()
 		}
 
 		d := testDriver(t, client)

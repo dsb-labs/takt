@@ -287,9 +287,16 @@ daemon or a second socket gives it.
 
 takt removes the images on the daemon that nothing references. A tag bump, a rebuilt
 tag under `pull: always` and a deleted workload each leave an image behind, and nothing
-else would remove it until the disk filled. Images only: a container, a volume, a
-network and the build cache are never touched, so `takt workload logs --previous`
+else would remove it until the disk filled. Images only: a container, a named volume,
+a network and the build cache are never touched, so `takt workload logs --previous`
 still reads the retained attempt.
+
+An anonymous volume is the one exception, and it goes with its container rather than
+with the prune. An image whose `VOLUME` directive names a path no takt volume covers,
+which postgres, mysql and redis all do by default, gets a volume of its own on every
+attempt. Nothing can name that volume again once the container is gone, so takt
+removes it with the container, as `docker rm -v` does. Mount a takt volume at the
+path to keep the data. See [Volumes](volumes.md).
 
 An image stays while any of these holds:
 

@@ -340,7 +340,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		// find.
 		cleanup := context.WithoutCancel(ctx)
 
-		if removeErr := d.client.ContainerRemove(cleanup, created.ID, client.ContainerRemoveOptions{Force: true}); removeErr != nil {
+		if removeErr := d.client.ContainerRemove(cleanup, created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); removeErr != nil {
 			d.logger.With("workload", w.Name, "error", removeErr).Error("failed to remove container after failed start")
 		}
 
@@ -495,8 +495,13 @@ func (d *Driver) discard(ctx context.Context, workload string, containers []cont
 	return errors.Join(failed...)
 }
 
+// remove removes one container and the anonymous volumes the daemon created for
+// it. An image's VOLUME directive at a path no takt volume covers gives the
+// container a volume of its own, and nothing can find it again once the container
+// is gone. A takt volume is a bind mount, which the daemon never counts as one of
+// the container's own, so this removes nothing an operator could name.
 func (d *Driver) remove(ctx context.Context, id string) error {
-	if err := d.client.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true}); err != nil {
+	if err := d.client.ContainerRemove(ctx, id, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
 		return fmt.Errorf("failed to remove container: %w", err)
 	}
 
