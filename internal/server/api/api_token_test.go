@@ -124,4 +124,12 @@ func TestTokenAPI_DeleteToken(t *testing.T) {
 		resp := doToken(t, tokens, httptest.NewRequest(http.MethodDelete, "/api/v1/tokens/id", nil))
 		require.Equal(t, http.StatusNotFound, resp.Code)
 	})
+
+	t.Run("refuses the recovery token", func(t *testing.T) {
+		tokens := NewMockTokenService(t)
+		tokens.EXPECT().Delete(mock.Anything, "id").Return(service.ErrRecoveryDelete).Once()
+
+		resp := doToken(t, tokens, httptest.NewRequest(http.MethodDelete, "/api/v1/tokens/id", nil))
+		require.Equal(t, http.StatusConflict, resp.Code)
+	})
 }

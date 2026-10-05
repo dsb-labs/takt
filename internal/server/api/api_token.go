@@ -98,6 +98,10 @@ func (a *TokenAPI) DeleteToken(ctx context.Context, request api.DeleteTokenReque
 		return api.DeleteToken404JSONResponse{
 			Error: fmt.Sprintf("token %q does not exist", request.ID),
 		}, nil
+	case errors.Is(err, service.ErrRecoveryDelete):
+		return api.DeleteToken409JSONResponse{
+			Error: "the recovery token is revoked by the reset file, not by delete",
+		}, nil
 	case err != nil:
 		return api.DeleteToken500JSONResponse{
 			Error: internalError(a.logger, "delete token", err),
