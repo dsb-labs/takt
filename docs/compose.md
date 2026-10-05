@@ -99,7 +99,7 @@ takt workload apply app.yaml
 | `volumes: name:/path` | A volume manifest for `name`, and `volumes: [{name, to: /path}]` in the workload. See [Volumes](volumes.md). |
 | `volumes: /host/path:/path` | `volumes: [{path: /host/path, to: /path}]`, which the server has to allow. See [Mounting a host path](manifest.md#mounting-a-host-path). |
 | `restart: unless-stopped` or `always` | The default. `restart.policy: on-failure` and `never` are the others. See [Restart](manifest.md#restart). |
-| `healthcheck` | `health`, probed by takt from outside the container rather than by a command inside it. See [Health](manifest.md#health). |
+| `healthcheck` | `health`. An `http` or `tcp` check is probed by takt from outside the container. A `command` check runs inside it, as compose's does. See [Health](manifest.md#health). |
 | `deploy.resources.limits` | `resources`. See [Resources](manifest.md#resources). |
 | `deploy.replicas` | `count`. See [Count](manifest.md#count). |
 | `labels` | `labels`. |
@@ -133,9 +133,10 @@ change.
 reference instead, which also survives the port moving. A config file that names
 `db` becomes a variable naming `${workload:db:pg}`, mounted with `expand: true`.
 
-**`profiles`, `extends`, `x-` anchors.** A manifest is one workload and has no
-composition of its own. Generate manifests from whatever templating you already
-use, or keep one file per workload.
+**`profiles`, `extends`, `x-` anchors.** A manifest is one workload. A
+[score](score.md) names several manifests and templates their values, but it has no
+profiles and no inheritance between manifests. Generate manifests from whatever
+templating you already use, or keep one file per workload.
 
 **`docker compose up` as one operation.** Apply each manifest. The order only
 matters for volumes, which must exist before a workload mounts them. Everything

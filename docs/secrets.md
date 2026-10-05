@@ -130,10 +130,12 @@ exactly what that costs:
 - An exec workload is granted the files it mounts and no others, so one exec workload
   cannot read what another mounts even though both run as the same user. See
   [Confinement](operating.md#confinement).
-- The file is written as the workload starts and removed once nothing is running for it.
-  `takt workload delete` removes it from the disk.
-- A backup of the data directory includes it, in the clear. This is the one place a
-  secret's value is not encrypted at rest.
+- The file is written as the workload starts. It stays while the workload is stopped
+  or has failed, so a restart does not write it again. `takt workload stop` and
+  `takt workload delete` remove it from the disk.
+- `takt admin backup` leaves it out. A copy of the data directory taken any other way
+  includes it, in the clear. This is the one place a secret's value is not encrypted
+  at rest.
 
 An `env` reference remains the option that writes nothing to disk. Prefer it when the
 program will take a value that way.

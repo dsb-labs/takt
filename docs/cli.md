@@ -70,8 +70,9 @@ version the binary was built as.
 ## Connecting to a server
 
 Every command resolves how it connects from three places, most specific first.
-Two commands ignore all of them: `serve`, since it is the server, and
-`admin restore`, which works over the data directory without one running.
+Two commands never connect: `serve`, since it is the server, and `admin restore`,
+which works over the data directory without one running. Both still resolve the
+settings, so a config file that does not parse fails them too.
 
 1. Flags. `--address` (`-a`) is the URL of the server, defaulting to
    `http://localhost:7373`. `--ca-cert` names a PEM file holding the

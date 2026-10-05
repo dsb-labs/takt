@@ -953,7 +953,7 @@ health:
 | Field | Required | Default | Description |
 |---|---|---|---|
 | `http` | one of | | The path to request, starting with `/`. A query is allowed. Any 2xx response passes. |
-| `tcp` | one of | | Check that the port accepts a connection. |
+| `tcp` | one of | | `true` to check that the port accepts a connection. |
 | `command` | one of | | A command to run where the workload runs, and its arguments. Exit status zero passes. |
 | `port` | no | | Which published port to check, by name or by number. Needed when more than one TCP port is published — UDP ports do not count, since a check cannot use one. Does not apply to `command`. |
 | `interval` | no | `10s` | How often to check. |
@@ -983,6 +983,15 @@ failures.
 is worth preferring: the number is restated in two places otherwise, and a manifest
 that changes one and not the other still applies.
 
+`tcp` is a boolean. It names no port of its own, so a workload publishing more than
+one TCP port says which under `port`:
+
+```yaml
+health:
+  tcp: true
+  port: db
+```
+
 An `http` or `tcp` check needs a published TCP port, whatever the runtime. Both probes
 connect, and a connection to a UDP port succeeds whatever is behind it, so a check
 against one would report the workload as healthy however broken it is. A workload
@@ -1010,8 +1019,8 @@ command wrote. The output never reaches the workload's logs. A command that outl
 `timeout` fails the check. No shell is involved unless the command names one.
 
 On the `exec` runtime the command runs as the process does: in the same working
-directory, confined to the same paths, under the same resource limits, and with the
-workload's `env` as the process received it. Secrets and variables in the environment
+directory, confined to the same paths, in a cgroup beside the workload's that carries
+the same limits, and with the workload's `env` as the process received it. Secrets and variables in the environment
 are resolved again for every probe, so a `${token:}` reference in the `env` of an
 `exec` workload with a `command` check is refused — each probe would mint a credential.
 A mounted token is a file the workload already has, and is fine.

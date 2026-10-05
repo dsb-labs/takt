@@ -185,12 +185,20 @@ Three of the unit's settings carry behaviour documented elsewhere:
   limits enforceable. See [Delegation](#delegation).
 
 The unit also confines the server. `ProtectSystem=strict` makes the filesystem
-read-only outside `/var/lib/takt`, `ProtectHome=yes` hides home directories, and
-`NoNewPrivileges=yes` stops privilege escalation. An `exec` workload inherits these
-restrictions, and they compose with [Confinement](#confinement): the system
-directories a workload may read stay readable, and everything it may write sits
-under `/var/lib/takt`. One consequence is worth knowing — under
-`NoNewPrivileges=yes` a workload cannot run a setuid binary.
+read-only outside `/var/lib/takt`, `ProtectHome=yes` hides home directories,
+`PrivateTmp=yes` gives the unit a `/tmp` of its own, and `NoNewPrivileges=yes` stops
+privilege escalation. An `exec` workload inherits these restrictions, and they
+compose with [Confinement](#confinement): the system directories a workload may read
+stay readable, and everything it may write sits under `/var/lib/takt`. Three
+consequences are worth knowing:
+
+- Under `NoNewPrivileges=yes` a workload cannot run a setuid binary.
+- `ProtectHome=yes` empties `/home`, `/root` and `/run/user` for the server and for
+  every `exec` workload. An `allow-host-paths` entry under them serves a container
+  alone, because the daemon binds the path from outside the unit. The server then
+  cannot follow a symbolic link beneath that path either.
+- `PrivateTmp=yes` means the `/tmp` an `exec` workload sees is the unit's, not the
+  host's. A container mounting a path under `/tmp` gets the host's.
 
 The unit grants the server `CAP_DAC_OVERRIDE`, so `takt volume delete` can remove
 files a container wrote as another user, `CAP_CHOWN`, so a volume manifest can
@@ -206,8 +214,9 @@ workloads. See
 takt runs on the host, and the release deliberately publishes no container image.
 The `exec` runtime starts processes on the machine takt runs on, so inside a
 container those workloads would run inside it too. Volumes and mounted values break
-more quietly: the Docker daemon resolves a bind mount against the host filesystem,
-and takt would write them somewhere the daemon cannot see.
+as well: the Docker daemon resolves a bind mount against the host filesystem, and
+takt would write them somewhere the daemon cannot see. The daemon refuses a bind
+whose source does not exist, so every such start fails and says so.
 
 ## State on disk
 
@@ -237,9 +246,10 @@ recovered. Keeping the two apart is what makes the database safe to copy. See
 
 `mounts/files/` is the exception. A workload that mounts a secret gets a file holding
 the plaintext, because there is no way to put a value inside a container without writing
-it somewhere first. Those files are written as a workload starts and removed once
-nothing is running for it, and their directories are readable only by the user running
-the server. **A backup of the data directory includes them in the clear.** See
+it somewhere first. Those files are written as a workload starts and removed when the
+workload is stopped with `workload stop` or deleted, and their directories are readable only by the user
+running the server. `takt admin backup` leaves them out, but **a copy of the data
+directory taken any other way includes them in the clear.** See
 [Mounting a secret as a file](secrets.md#mounting-a-secret-as-a-file).
 
 The database holds desired state only. What is actually running is observed from the
@@ -275,8 +285,10 @@ covers the build-then-run cycle, and the worst outcome is a pull. Set `prune = f
 under `[docker]` on a host where images are managed by hand. See
 [Configuration](configuration.md#docker).
 
-The prune runs from the reconciler on its first pass and about every ten minutes after
-that, so an image goes between the delay and the delay plus that interval. An image has
+The prune runs from the reconciler on its first pass and every 64 passes after that.
+A pass runs on the reconcile interval and on every driver event, so on a quiet node
+at the default interval that is about every ten minutes, and on a busy one sooner.
+An image goes between the delay and the delay plus that gap. An image has
 no workload to record an event against, so a removal is a log line at `info` naming the
 image and its size, and two counters under [Scraping](#scraping).
 
@@ -504,11 +516,6 @@ workload can still send a signal to the server. The network is not restricted
 either, and a workload on the host's network reaches the API. What that hands it
 is described under
 [Reaching the API from a workload](acl.md#reaching-the-api-from-a-workload).
-
-There is deliberately no grant for `/tmp`. It is shared by every process running as
-the same user, so granting it would let one workload read what another wrote there. A
-workload needing scratch space has its own working directory, and `TMPDIR` will point
-a command at it.
 
 A `command` health check is confined too. The probe starts in the workload's working
 directory, through the same trampoline, with the same ruleset: the directory, the
