@@ -1171,9 +1171,10 @@ type LoginRequest struct {
 	// loopback address is refused.
 	RedirectURI *string `json:"redirectUri,omitempty"`
 
-	// Token An existing client token, exchanged for a session bound to the
-	// same principal. This is how the browser UI trades a pasted
-	// standing credential for one that expires on its own.
+	// Token A static token, exchanged for a session bound to the same
+	// principal. This is how the browser UI trades a pasted standing
+	// credential for one that expires on its own. Any other token is
+	// refused.
 	Token *string `json:"token,omitempty"`
 
 	// Verifier The PKCE verifier the code exchange proves.
@@ -3351,9 +3352,11 @@ type ClientInterface interface {
 	//
 	// Mints a short-lived client token. The exchange accepts either an
 	// authorization code from the CLI's loopback flow, which the server
-	// trades with the configured issuer, or an existing client token, which
-	// is how the browser UI trades the standing credential pasted into it
-	// for a session that expires on its own.
+	// trades with the configured issuer, or a static token, which is how
+	// the browser UI trades the standing credential pasted into it for a
+	// session that expires on its own. No other token exchanges: a session
+	// cannot mint its successor, and a workload token cannot yield a
+	// session its revocation would miss.
 	//
 	// With `cookie` set, the response also carries the credential as an
 	// HttpOnly session cookie, which is what the UI stores. The credential
@@ -3371,9 +3374,11 @@ type ClientInterface interface {
 	//
 	// Mints a short-lived client token. The exchange accepts either an
 	// authorization code from the CLI's loopback flow, which the server
-	// trades with the configured issuer, or an existing client token, which
-	// is how the browser UI trades the standing credential pasted into it
-	// for a session that expires on its own.
+	// trades with the configured issuer, or a static token, which is how
+	// the browser UI trades the standing credential pasted into it for a
+	// session that expires on its own. No other token exchanges: a session
+	// cannot mint its successor, and a workload token cannot yield a
+	// session its revocation would miss.
 	//
 	// With `cookie` set, the response also carries the credential as an
 	// HttpOnly session cookie, which is what the UI stores. The credential
@@ -3724,6 +3729,9 @@ type ClientInterface interface {
 	//
 	// Removes the token with the given identifier. Revocation is immediate:
 	// the next request presenting the credential is refused.
+	//
+	// The one refusal is the recovery token, whose revocation path is
+	// deliberately host-level: the reset file in the data directory.
 	//
 	// Corresponds with DELETE /api/v1/tokens/{id} (the `DeleteToken` operationId).
 	DeleteToken(ctx context.Context, id TokenID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -4478,9 +4486,11 @@ func (c *Client) GetAuth(ctx context.Context, reqEditors ...RequestEditorFn) (*h
 //
 // Mints a short-lived client token. The exchange accepts either an
 // authorization code from the CLI's loopback flow, which the server
-// trades with the configured issuer, or an existing client token, which
-// is how the browser UI trades the standing credential pasted into it
-// for a session that expires on its own.
+// trades with the configured issuer, or a static token, which is how
+// the browser UI trades the standing credential pasted into it for a
+// session that expires on its own. No other token exchanges: a session
+// cannot mint its successor, and a workload token cannot yield a
+// session its revocation would miss.
 //
 // With `cookie` set, the response also carries the credential as an
 // HttpOnly session cookie, which is what the UI stores. The credential
@@ -4508,9 +4518,11 @@ func (c *Client) LoginWithBody(ctx context.Context, contentType string, body io.
 //
 // Mints a short-lived client token. The exchange accepts either an
 // authorization code from the CLI's loopback flow, which the server
-// trades with the configured issuer, or an existing client token, which
-// is how the browser UI trades the standing credential pasted into it
-// for a session that expires on its own.
+// trades with the configured issuer, or a static token, which is how
+// the browser UI trades the standing credential pasted into it for a
+// session that expires on its own. No other token exchanges: a session
+// cannot mint its successor, and a workload token cannot yield a
+// session its revocation would miss.
 //
 // With `cookie` set, the response also carries the credential as an
 // HttpOnly session cookie, which is what the UI stores. The credential
@@ -5081,6 +5093,9 @@ func (c *Client) CreateToken(ctx context.Context, body CreateTokenJSONRequestBod
 //
 // Removes the token with the given identifier. Revocation is immediate:
 // the next request presenting the credential is refused.
+//
+// The one refusal is the recovery token, whose revocation path is
+// deliberately host-level: the reset file in the data directory.
 //
 // Corresponds with DELETE /api/v1/tokens/{id} (the `DeleteToken` operationId).
 func (c *Client) DeleteToken(ctx context.Context, id TokenID, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -8139,9 +8154,11 @@ type ClientWithResponsesInterface interface {
 	//
 	// Mints a short-lived client token. The exchange accepts either an
 	// authorization code from the CLI's loopback flow, which the server
-	// trades with the configured issuer, or an existing client token, which
-	// is how the browser UI trades the standing credential pasted into it
-	// for a session that expires on its own.
+	// trades with the configured issuer, or a static token, which is how
+	// the browser UI trades the standing credential pasted into it for a
+	// session that expires on its own. No other token exchanges: a session
+	// cannot mint its successor, and a workload token cannot yield a
+	// session its revocation would miss.
 	//
 	// With `cookie` set, the response also carries the credential as an
 	// HttpOnly session cookie, which is what the UI stores. The credential
@@ -8159,9 +8176,11 @@ type ClientWithResponsesInterface interface {
 	//
 	// Mints a short-lived client token. The exchange accepts either an
 	// authorization code from the CLI's loopback flow, which the server
-	// trades with the configured issuer, or an existing client token, which
-	// is how the browser UI trades the standing credential pasted into it
-	// for a session that expires on its own.
+	// trades with the configured issuer, or a static token, which is how
+	// the browser UI trades the standing credential pasted into it for a
+	// session that expires on its own. No other token exchanges: a session
+	// cannot mint its successor, and a workload token cannot yield a
+	// session its revocation would miss.
 	//
 	// With `cookie` set, the response also carries the credential as an
 	// HttpOnly session cookie, which is what the UI stores. The credential
@@ -8542,6 +8561,9 @@ type ClientWithResponsesInterface interface {
 	//
 	// Removes the token with the given identifier. Revocation is immediate:
 	// the next request presenting the credential is refused.
+	//
+	// The one refusal is the recovery token, whose revocation path is
+	// deliberately host-level: the reset file in the data directory.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -10916,6 +10938,8 @@ type DeleteTokenResponse struct {
 	JSON403 *Forbidden
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers401 the parsed response headers for an HTTP 401 response
@@ -10940,6 +10964,11 @@ func (r DeleteTokenResponse) GetJSON403() *Forbidden {
 // GetJSON404 returns the response for an HTTP 404 `application/json` response
 func (r DeleteTokenResponse) GetJSON404() *NotFound {
 	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DeleteTokenResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -12801,9 +12830,11 @@ func (c *ClientWithResponses) GetAuthWithResponse(ctx context.Context, reqEditor
 //
 // Mints a short-lived client token. The exchange accepts either an
 // authorization code from the CLI's loopback flow, which the server
-// trades with the configured issuer, or an existing client token, which
-// is how the browser UI trades the standing credential pasted into it
-// for a session that expires on its own.
+// trades with the configured issuer, or a static token, which is how
+// the browser UI trades the standing credential pasted into it for a
+// session that expires on its own. No other token exchanges: a session
+// cannot mint its successor, and a workload token cannot yield a
+// session its revocation would miss.
 //
 // With `cookie` set, the response also carries the credential as an
 // HttpOnly session cookie, which is what the UI stores. The credential
@@ -12827,9 +12858,11 @@ func (c *ClientWithResponses) LoginWithBodyWithResponse(ctx context.Context, con
 //
 // Mints a short-lived client token. The exchange accepts either an
 // authorization code from the CLI's loopback flow, which the server
-// trades with the configured issuer, or an existing client token, which
-// is how the browser UI trades the standing credential pasted into it
-// for a session that expires on its own.
+// trades with the configured issuer, or a static token, which is how
+// the browser UI trades the standing credential pasted into it for a
+// session that expires on its own. No other token exchanges: a session
+// cannot mint its successor, and a workload token cannot yield a
+// session its revocation would miss.
 //
 // With `cookie` set, the response also carries the credential as an
 // HttpOnly session cookie, which is what the UI stores. The credential
@@ -13342,6 +13375,9 @@ func (c *ClientWithResponses) CreateTokenWithResponse(ctx context.Context, body 
 //
 // Removes the token with the given identifier. Revocation is immediate:
 // the next request presenting the credential is refused.
+//
+// The one refusal is the recovery token, whose revocation path is
+// deliberately host-level: the reset file in the data directory.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -15692,6 +15728,13 @@ func ParseDeleteTokenResponse(rsp *http.Response) (*DeleteTokenResponse, error) 
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -21277,6 +21320,20 @@ func (response DeleteToken404JSONResponse) VisitDeleteTokenResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteToken409JSONResponse ErrorResponse
+
+func (response DeleteToken409JSONResponse) VisitDeleteTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }

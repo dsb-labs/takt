@@ -1668,9 +1668,11 @@ paths:
       description: |
         Mints a short-lived client token. The exchange accepts either an
         authorization code from the CLI's loopback flow, which the server
-        trades with the configured issuer, or an existing client token, which
-        is how the browser UI trades the standing credential pasted into it
-        for a session that expires on its own.
+        trades with the configured issuer, or a static token, which is how
+        the browser UI trades the standing credential pasted into it for a
+        session that expires on its own. No other token exchanges: a session
+        cannot mint its successor, and a workload token cannot yield a
+        session its revocation would miss.
 
         With `cookie` set, the response also carries the credential as an
         HttpOnly session cookie, which is what the UI stores. The credential
@@ -2058,6 +2060,9 @@ paths:
       description: |
         Removes the token with the given identifier. Revocation is immediate:
         the next request presenting the credential is refused.
+
+        The one refusal is the recovery token, whose revocation path is
+        deliberately host-level: the reset file in the data directory.
       responses:
         "200":
           description: |
@@ -2075,6 +2080,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: The identifier names the recovery token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -4102,9 +4113,10 @@ components:
         token:
           type: string
           description: |
-            An existing client token, exchanged for a session bound to the
-            same principal. This is how the browser UI trades a pasted
-            standing credential for one that expires on its own.
+            A static token, exchanged for a session bound to the same
+            principal. This is how the browser UI trades a pasted standing
+            credential for one that expires on its own. Any other token is
+            refused.
         code:
           type: string
           description: |
