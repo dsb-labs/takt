@@ -33,6 +33,14 @@ describes how an entry is written.
   now registers when the instance is first seen running
   ([#159](https://github.com/dsb-labs/takt/issues/159),
   [#184](https://github.com/dsb-labs/takt/pull/184)).
+- A `:ro` prefix in `allow-host-paths` let a workload mount a unix socket, a FIFO
+  or a device beneath it with `readOnly: true`, and a read-only mount does not stop
+  a connect on a socket or a write to a device. With `/:ro` that handed the docker
+  socket to any workload that asked. A path mount that reaches one of those under
+  a read-only prefix is now refused unless a more specific prefix names it without
+  the suffix
+  ([#153](https://github.com/dsb-labs/takt/issues/153),
+  [#186](https://github.com/dsb-labs/takt/pull/186)).
 
 ## v0.11.1 - 2026-10-04
 
