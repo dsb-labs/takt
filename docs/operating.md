@@ -256,6 +256,33 @@ The database holds desired state only. What is actually running is observed from
 runtime when asked, so nothing persisted can go stale against reality. A restarted
 server needs no recovery of takt's own bookkeeping.
 
+## Containers
+
+takt knows a container is its own by the labels it put on it at creation. Nothing
+else records which containers belong to a workload, so the labels are the contract
+between takt and the daemon:
+
+| Label | Value |
+|---|---|
+| `takt.workload` | The name of the workload. The daemon filters on this label for every listing. |
+| `takt.instance` | The index of the instance within the workload. |
+| `takt.attempt` | Which attempt at running the instance this container is. The higher attempt is current. The one below it is retained for `--previous`. |
+| `takt.version` | The version of the workload the container was started from. |
+| `takt.spec-hash` | The hash of the specification the container was started from. A moved hash is what marks a container stale. |
+
+A manifest's `container.labels` refuses keys under the `takt.` prefix, see
+[Manifest](manifest.md#labels). Do not set them by hand either.
+A container that carries `takt.workload` under a name no workload has is an orphan,
+and the reconciler removes it on its next pass. A container that carries the label
+with an empty value is not a workload. takt ignores it and logs the container at
+`debug`.
+
+The labels carry no server identity. Two servers pointed at one daemon each see the
+other's containers as orphans, and each removes the other's work on every pass. Run
+one takt server per docker daemon. An e2e harness or a staging config needs a daemon
+of its own, which a [rootless](https://docs.docker.com/engine/security/rootless/)
+daemon or a second socket gives it.
+
 ## Images
 
 takt removes the images on the daemon that nothing references. A tag bump, a rebuilt
