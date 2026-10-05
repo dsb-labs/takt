@@ -398,7 +398,8 @@ describes how an entry is written.
   revokes both when the workload goes. The token list reports them under the
   `workload` source ([#32](https://github.com/dsb-labs/takt/issues/32),
   [#33](https://github.com/dsb-labs/takt/pull/33)).
-- The credentials table in the web UI sorts by any column.
+- The credentials table in the web UI sorts by any column
+  ([#33](https://github.com/dsb-labs/takt/pull/33)).
 
 ### Changed
 
