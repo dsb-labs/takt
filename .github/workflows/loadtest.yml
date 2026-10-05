@@ -59,7 +59,7 @@ jobs:
           ./takt admin health --wait 30s
 
       - name: Run the smoke load test
-        run: ./takt dev loadtest scenarios/smoke.toml --data-dir "${{ github.workspace }}/data" > report.json
+        run: ./takt dev loadtest scenarios/smoke.toml --address http://localhost:7373 --data-dir "${{ github.workspace }}/data" > report.json
 
       - name: Report
         if: always()
