@@ -155,8 +155,6 @@ func TestRunner_Metrics(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 
-	var runs atomic.Int32
-
 	runner := job.New(job.Config{
 		Logger:        newTestLogger(t),
 		MeterProvider: provider,
@@ -164,8 +162,6 @@ func TestRunner_Metrics(t *testing.T) {
 			Name:     "failing",
 			Interval: time.Hour,
 			Run: func(context.Context) error {
-				runs.Add(1)
-
 				return errors.New("registry unreachable")
 			},
 		}},
@@ -174,32 +170,37 @@ func TestRunner_Metrics(t *testing.T) {
 	stop := run(t, runner)
 	defer stop()
 
-	require.Eventually(t, func() bool { return runs.Load() >= 1 }, time.Second, time.Millisecond)
+	// The duration is recorded after the job returns, so the job having run is
+	// not the signal to wait on. The metric itself is.
+	assert.Eventually(t, func() bool {
+		var collected metricdata.ResourceMetrics
+		if err := reader.Collect(t.Context(), &collected); err != nil {
+			return false
+		}
 
-	var collected metricdata.ResourceMetrics
-	require.NoError(t, reader.Collect(t.Context(), &collected))
+		for _, scope := range collected.ScopeMetrics {
+			for _, recorded := range scope.Metrics {
+				if recorded.Name != "takt.job.duration" {
+					continue
+				}
 
-	var found bool
-	for _, scope := range collected.ScopeMetrics {
-		for _, recorded := range scope.Metrics {
-			if recorded.Name != "takt.job.duration" {
-				continue
-			}
+				histogram, ok := recorded.Data.(metricdata.Histogram[float64])
+				if !ok {
+					return false
+				}
 
-			histogram, ok := recorded.Data.(metricdata.Histogram[float64])
-			require.True(t, ok)
-
-			for _, point := range histogram.DataPoints {
-				name, _ := point.Attributes.Value("job")
-				outcome, _ := point.Attributes.Value("outcome")
-				if name.AsString() == "failing" && outcome.AsString() == "error" {
-					found = point.Count >= 1
+				for _, point := range histogram.DataPoints {
+					name, _ := point.Attributes.Value("job")
+					outcome, _ := point.Attributes.Value("outcome")
+					if name.AsString() == "failing" && outcome.AsString() == "error" && point.Count >= 1 {
+						return true
+					}
 				}
 			}
 		}
-	}
 
-	assert.True(t, found, "expected a recorded run duration for the failing job")
+		return false
+	}, time.Second, time.Millisecond, "expected a recorded run duration for the failing job")
 }
 
 func TestRunner_Spans(t *testing.T) {
