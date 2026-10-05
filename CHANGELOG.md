@@ -8,6 +8,14 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Changed
+
+- `takt dev loadtest` refuses to run unless `--address` names the server on the
+  command line. It no longer reads `TAKT_ADDRESS` or the config file, so a shell
+  logged into a production server cannot load it by accident
+  ([#172](https://github.com/dsb-labs/takt/issues/172),
+  [#189](https://github.com/dsb-labs/takt/pull/189)).
+
 ### Fixed
 
 - A container on the daemon carrying a `takt.workload` label with an empty value,
@@ -63,6 +71,13 @@ describes how an entry is written.
   the suffix
   ([#153](https://github.com/dsb-labs/takt/issues/153),
   [#186](https://github.com/dsb-labs/takt/pull/186)).
+- `takt score apply` checked each resource and then wrote it unconditionally, so a
+  change made between the check and the apply was overwritten without notice, and
+  `--adopt` took whatever was there by the time the write landed. Each resource
+  that existed at the check is now applied on condition that it still carries the
+  version the check read, and a change in between is refused naming the resource
+  ([#172](https://github.com/dsb-labs/takt/issues/172),
+  [#189](https://github.com/dsb-labs/takt/pull/189)).
 
 ## v0.11.1 - 2026-10-04
 
