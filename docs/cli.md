@@ -914,8 +914,10 @@ Revokes the token with the identifier `token list` reports. Revocation is
 immediate: the next request presenting the credential is refused. Requires the
 `admin` role.
 
-This is the one command that revokes the recovery token, which `auth logout`
-refuses. Doing so re-arms `acl init`, so mint the replacement deliberately.
+The one refusal is the recovery token, which `auth logout` refuses too. Its
+only revocation path is the
+[reset file](acl.md#losing-the-recovery-token): deleting it through the API
+would re-arm `acl init` for whoever held an `admin` token.
 
 ## acl init
 
