@@ -102,13 +102,16 @@ TAKT_E2E_PRUNE=1 make e2e
 ## Load testing
 
 ```sh
-go run . dev loadtest scenarios/smoke.toml
+go run . dev loadtest scenarios/smoke.toml --address http://localhost:7373
 ```
 
 `takt dev loadtest` drives a running server through a scenario: it creates the
 secrets, variables and volumes the scenario names, applies the fleet at once, waits
 for it to converge, churns against it, tears it down and reports. The command is
-hidden, because it is for working on takt rather than for operating it.
+hidden, because it is for working on takt rather than for operating it. The server
+is named with `--address` every time: the command does not read `TAKT_ADDRESS` or
+the config file, so a shell logged into a production server cannot load it by
+accident.
 
 Run `smoke.toml` before a commit. It is a few of everything and takes seconds.
 
@@ -161,7 +164,7 @@ scenario's name and description, so a report read on its own says which run prod
 it and what that run was for.
 
 ```sh
-go run . dev loadtest scenarios/churn.toml > report.json
+go run . dev loadtest scenarios/churn.toml --address http://localhost:7373 > report.json
 ```
 
 The command exits non-zero when a request failed, a workload never ran, or something
@@ -174,7 +177,7 @@ host, and it is the only way to see a leak the API does not expose — a directo
 holding a secret's plaintext is not something any endpoint reports.
 
 ```sh
-go run . dev loadtest scenarios/secrets.toml --data-dir ./data
+go run . dev loadtest scenarios/secrets.toml --address http://localhost:7373 --data-dir ./data
 ```
 
 Everything a run creates is named after `--prefix`, which defaults to something unique
