@@ -147,7 +147,6 @@ container:
   image: nginx:1.27-alpine
   pull: missing
   command: ["nginx", "-g", "daemon off;"]
-  user: "65532:65532"
   readOnly: true
   capAdd: [NET_ADMIN]
   capDrop: [ALL]
@@ -218,6 +217,15 @@ this says otherwise.
 
 `capDrop: [ALL]` with `capAdd` naming what the workload actually needs is the hardened
 configuration. It is not the default because it breaks too many stock images.
+
+`capAdd` reaches a process running as root only. Docker adds the capability to the
+bounding set and nothing else, and a non-root process starts with an empty
+effective set whatever the bounding set holds. The one way such a process could pick
+a capability up is a file capability on the binary it runs, which
+`no-new-privileges` blocks. So `user` and `capAdd` together grant nothing, and the
+container starts without the capability and without a word about it. A workload that
+needs a capability runs as root with `capDrop: [ALL]` and the one capability named,
+and leaves `user` out.
 
 `readOnly` applies to the image's own filesystem. Mounted volumes and mounted values
 are separate mounts with rules of their own, so a volume stays writable and a mounted
