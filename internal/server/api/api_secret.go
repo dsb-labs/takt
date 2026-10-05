@@ -74,7 +74,7 @@ func (a *SecretAPI) SetSecret(ctx context.Context, request api.SetSecretRequestO
 
 	secret, created, err := a.secrets.Set(ctx, manifest.Secret{
 		Name:   request.Name,
-		Value:  []byte(request.Body.Value),
+		Value:  request.Body.Value,
 		Labels: labelsOf(request.Body.Labels),
 	}, ifMatch)
 	switch {

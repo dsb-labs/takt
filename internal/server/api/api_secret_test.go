@@ -46,7 +46,7 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 		{
 			Name:   "creates a secret",
 			Target: "/api/v1/secrets/db-password",
-			Body:   generated.SecretSpec{Value: "hunter2"},
+			Body:   generated.SecretSpec{Value: []byte("hunter2")},
 			SetupMocks: func(svc *MockSecretService) {
 				svc.EXPECT().Set(mock.Anything, secretNamed("db-password", []byte("hunter2")), 0).
 					Return(secret("db-password"), true, nil).Once()
@@ -60,7 +60,7 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 		{
 			Name:   "updates a secret",
 			Target: "/api/v1/secrets/db-password",
-			Body:   generated.SecretSpec{Value: "hunter3"},
+			Body:   generated.SecretSpec{Value: []byte("hunter3")},
 			SetupMocks: func(svc *MockSecretService) {
 				svc.EXPECT().Set(mock.Anything, secretNamed("db-password", []byte("hunter3")), 0).
 					Return(secret("db-password"), false, nil).Once()
@@ -70,7 +70,7 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 		{
 			Name:   "stores an empty value",
 			Target: "/api/v1/secrets/db-password",
-			Body:   generated.SecretSpec{Value: ""},
+			Body:   generated.SecretSpec{Value: []byte("")},
 			SetupMocks: func(svc *MockSecretService) {
 				// An empty secret is a value, not a missing one: a workload reading it
 				// gets an empty variable rather than none.
@@ -80,9 +80,21 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 			ExpectStatus: http.StatusCreated,
 		},
 		{
+			Name:   "stores bytes that are not text",
+			Target: "/api/v1/secrets/client-cert",
+			Body:   generated.SecretSpec{Value: []byte{0x30, 0x82, 0xff, 0xfe, 0x00}},
+			SetupMocks: func(svc *MockSecretService) {
+				// Base64 on the wire, so the two bytes that are not UTF-8 arrive as
+				// they were rather than as U+FFFD.
+				svc.EXPECT().Set(mock.Anything, secretNamed("client-cert", []byte{0x30, 0x82, 0xff, 0xfe, 0x00}), 0).
+					Return(secret("client-cert"), true, nil).Once()
+			},
+			ExpectStatus: http.StatusCreated,
+		},
+		{
 			Name:         "rejects a name takt would not accept",
 			Target:       "/api/v1/secrets/DB_PASSWORD",
-			Body:         generated.SecretSpec{Value: "hunter2"},
+			Body:         generated.SecretSpec{Value: []byte("hunter2")},
 			ExpectStatus: http.StatusBadRequest,
 			SetupMocks: func(svc *MockSecretService) {
 				svc.EXPECT().Set(mock.Anything, secretNamed("DB_PASSWORD", nil), 0).
@@ -92,7 +104,7 @@ func TestSecretAPI_SetSecret(t *testing.T) {
 		{
 			Name:         "reports a failure to store",
 			Target:       "/api/v1/secrets/db-password",
-			Body:         generated.SecretSpec{Value: "hunter2"},
+			Body:         generated.SecretSpec{Value: []byte("hunter2")},
 			ExpectStatus: http.StatusInternalServerError,
 			SetupMocks: func(svc *MockSecretService) {
 				svc.EXPECT().Set(mock.Anything, secretNamed("db-password", nil), 0).
@@ -150,7 +162,7 @@ func TestSecretAPI_SetSecret_Conditional(t *testing.T) {
 	set := func(t *testing.T, svc *MockSecretService, ifMatch string) *httptest.ResponseRecorder {
 		t.Helper()
 
-		body, err := json.Marshal(generated.SecretSpec{Value: "hunter2"})
+		body, err := json.Marshal(generated.SecretSpec{Value: []byte("hunter2")})
 		require.NoError(t, err)
 
 		req := httptest.NewRequest(http.MethodPut, "/api/v1/secrets/db-password", bytes.NewReader(body))
@@ -363,7 +375,7 @@ func TestSecretAPI_NeverReturnsAValue(t *testing.T) {
 			Name:   "set",
 			Method: http.MethodPut,
 			Target: "/api/v1/secrets/db-password",
-			Body:   generated.SecretSpec{Value: value},
+			Body:   generated.SecretSpec{Value: []byte(value)},
 			SetupMocks: func(svc *MockSecretService) {
 				svc.EXPECT().Set(mock.Anything, secretNamed("db-password", []byte(value)), 0).
 					Return(secret("db-password"), true, nil).Once()
@@ -435,7 +447,7 @@ func TestSecretAPI_HidesInternalFailures(t *testing.T) {
 			Name:   "set",
 			Method: http.MethodPut,
 			Target: "/api/v1/secrets/db-password",
-			Body:   generated.SecretSpec{Value: "hunter2"},
+			Body:   generated.SecretSpec{Value: []byte("hunter2")},
 			SetupMocks: func(svc *MockSecretService) {
 				svc.EXPECT().Set(mock.Anything, mock.Anything, 0).
 					Return(service.Secret{}, false, internal).Once()
