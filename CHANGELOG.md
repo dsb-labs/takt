@@ -8,6 +8,16 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Fixed
+
+- **Breaking:** `value` in `PUT /api/v1/secrets/{name}` is now base64. The
+  value travelled as a JSON string, which cannot carry bytes that are not
+  UTF-8, so a DER certificate or a PKCS#12 bundle set with
+  `takt secret set --from-file` was stored with each invalid sequence replaced
+  by U+FFFD, and nothing said so. The CLI and the UI send the new encoding. A
+  caller of the API by hand has to base64 the value
+  ([#166](https://github.com/dsb-labs/takt/issues/166)).
+
 ## v0.11.1 - 2026-10-04
 
 ### Fixed
