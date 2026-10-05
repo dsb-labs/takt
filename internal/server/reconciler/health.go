@@ -47,21 +47,28 @@ func (r *Reconciler) register(rows []database.Workload, observed map[string][]dr
 				r.checker.Set(row.Name, index, check)
 			default:
 				// The workload declares no check, or is on its way out, or is
-				// suspended, or this instance has ended and will not be restarted.
-				// None is worth probing, and probing the last would report a
-				// finished instance as unhealthy for no longer answering.
+				// suspended, or this slot has nothing running in it. None is worth
+				// probing, and probing the last would spend the start period on an
+				// instance that does not exist yet, or report a finished one as
+				// unhealthy for no longer answering.
 				r.checker.ForgetInstance(row.Name, index)
 			}
 		}
 	}
 }
 
-// checkable reports whether a slot is worth probing: something in it may yet run,
-// or the policy will bring something back.
+// checkable reports whether a slot is worth probing: something in it is up, or is on
+// its way up.
 //
-// A slot whose instances have all stopped, under a policy that asks for nothing
-// further, is not. Nor would probing it tell anything: a finished instance reads
-// as unhealthy for no longer answering.
+// A slot with nothing running is not. An empty one is still waiting on an image
+// pull, a readiness hold or a backoff, and a check registered against it would
+// spend its start period probing a port nothing listens on. The verdict that
+// leaves behind would fail the instance that eventually starts for checks it was
+// never given the chance to pass. A check is registered once the instance is
+// observed instead, so the grace counts from when there is something to probe.
+// Nor is a slot whose instances have all stopped worth probing: a finished instance
+// reads as unhealthy for no longer answering, and a restart forgets the check
+// before it starts a replacement.
 //
 // An instance the checker failed is not one that stopped. The runtime still reports
 // it running, and forgetting its check would have the next pass read it as running
@@ -69,7 +76,7 @@ func (r *Reconciler) register(rows []database.Workload, observed map[string][]dr
 // for a workload whose policy said to leave it. The check stays so the verdict
 // stays.
 func (r *Reconciler) checkable(row database.Workload, index int, instances []driver.Instance) bool {
-	if !retired(restartPolicy(row), instances) {
+	if slices.ContainsFunc(instances, running) {
 		return true
 	}
 

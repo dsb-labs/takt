@@ -906,6 +906,97 @@ func TestReconciler_Run_RegistersChecks(t *testing.T) {
 	assert.Equal(t, "/healthz", got.HTTP)
 }
 
+func TestReconciler_Run_RegistersNoCheckForAnEmptySlot(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+	ports, checker := NewMockPortRepository(t), newMockChecker(t)
+
+	checked := storedWorkload("example", "hash-one")
+	checked.ID = "workload-one"
+	checked.Spec = specWithHealth("example")
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{checked}, nil)
+
+	ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+		"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: 20080}},
+	}, nil)
+
+	// The first pass finds the slot empty and the image still being pulled. A check
+	// registered now would count its start period against a port nothing listens
+	// on, and fail the instance the moment it did start. So nothing is registered
+	// until the instance is observed, which the mock enforces: a Set on the first
+	// pass is a call it was not told to expect.
+	forgotten := make(chan struct{}, 1)
+	checker.EXPECT().ForgetInstance("example", 0).
+		Run(func(string, int) {
+			select {
+			case forgotten <- struct{}{}:
+			default:
+			}
+		}).Return()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			if passes.get() == 1 {
+				return nil, nil
+			}
+
+			return []driver.Instance{{
+				ID:       "container-one",
+				Workload: "example",
+				SpecHash: "hash-one",
+				State:    driver.StateRunning,
+			}}, nil
+		})
+
+	d.EXPECT().Start(mock.Anything, mock.Anything).Return("", driver.ErrImagePulling).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Checker:   checker,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
+	<-forgotten
+
+	// The instance is up, so this pass registers its check and the start period
+	// counts from here.
+	registered := make(chan struct{}, 1)
+	checker.EXPECT().Set("example", 0, mock.Anything).
+		Run(func(string, int, health.Check) {
+			select {
+			case registered <- struct{}{}:
+			default:
+			}
+		}).Return().Once()
+	checker.EXPECT().Result("example", 0).Return(health.Result{Status: health.StatusStarting}, true)
+
+	r.Notify()
+	passes.wait(t, 2)
+	awaitPasses(t, r, 2)
+	<-registered
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_RegistersCommandChecks(t *testing.T) {
 	t.Parallel()
 
