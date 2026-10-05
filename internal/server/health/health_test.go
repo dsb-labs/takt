@@ -420,8 +420,17 @@ func TestChecker_Set(t *testing.T) {
 
 		// Failures counted against the old check say nothing about a new one, so a
 		// changed address begins with a clean slate.
-		changed := check(freeAddress(t), "/readyz")
+		//
+		// The new address accepts and never answers. Set wakes the loop, and a probe
+		// against a refused address fails before Result can be read, which would count
+		// one failure against the new check and look like an inherited one.
+		hung, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = hung.Close() })
+
+		changed := check(hung.Addr().String(), "/readyz")
 		changed.StartPeriod = time.Minute
+		changed.Timeout = time.Minute
 		checker.Set("example", 0, changed)
 
 		result, ok := checker.Result("example", 0)
