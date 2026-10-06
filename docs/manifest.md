@@ -1168,6 +1168,11 @@ a time its schedule does not name. The workload reads as `completed` until its n
 occurrence, whatever its restart policy says. A run that failed reads as `failed`
 until the policy retries it or the next occurrence replaces it.
 
+`takt workload restart` is the one way to run a scheduled workload at a time of the
+operator's choosing. It replaces whatever the last occurrence left and starts the
+workload now. That run counts as the last run, so the next occurrence is the first
+the expression names after it.
+
 Occurrences missed while the server was down are missed. The occurrence takt runs is
 the first after the last run, so a workload down for several does not run once for each.
 Occurrences missed while the workload was stopped are missed the same way. A

@@ -436,6 +436,9 @@ Replaces the workload's running instances with new ones started from the unchang
 specification, so the version does not move. A stopped workload is refused, since
 nothing would start until it is started again.
 
+A scheduled workload runs now. The run counts as its last run, so the next occurrence
+is the first the expression names after it. See [Manifest](manifest.md#schedule).
+
 The request is held in memory rather than stored. One the server has not acted on
 yet is lost with the server, and can simply be sent again.
 
