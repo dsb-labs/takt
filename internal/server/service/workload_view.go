@@ -324,7 +324,8 @@ func newWorkload(row database.Workload, instances []driver.Instance, ports []dat
 
 // nextRun reports when a scheduled workload runs again, or the zero time when it runs
 // continuously. Before the first run the occurrence is counted from when the workload
-// was applied, so a schedule reports its next run as soon as it exists.
+// was applied, so a schedule reports its next run as soon as it exists, and after a
+// resume it is counted from the resume rather than the run suspension stopped.
 //
 // Derived on read rather than stored, like every other observed value: the occurrence
 // is a function of the expression and the last run, both of which are already known.
@@ -347,9 +348,9 @@ func nextRun(schedule *manifest.Schedule, instances []driver.Instance, applied t
 		}
 	}
 
-	// Counted from the last run, or from when the specification was applied for a
-	// workload that has not run yet, which is what the reconciler does.
-	if last.IsZero() {
+	// Counted from the last run or from when the specification was last touched,
+	// whichever is later, which is what the reconciler does.
+	if applied.After(last) {
 		last = applied
 	}
 

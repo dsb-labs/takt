@@ -1503,31 +1503,48 @@ func TestWorkloadService_Get_Pulling(t *testing.T) {
 func TestWorkloadService_Get_NextRun(t *testing.T) {
 	t.Parallel()
 
-	ran := time.Date(2026, 3, 1, 2, 0, 0, 0, time.UTC)
-	applied := time.Date(2026, 2, 20, 2, 0, 0, 0, time.UTC)
+	// The expression is read in local time, so the fixtures name local hours. The
+	// stored time is UTC the way the database returns it, which must not move the
+	// hour.
+	ran := time.Date(2026, 3, 1, 2, 0, 0, 0, time.Local)
+	applied := time.Date(2026, 2, 20, 2, 0, 0, 0, time.Local).UTC()
 
 	tt := []struct {
 		Name      string
 		Cron      string
+		Applied   time.Time
 		Instances []driver.Instance
 		Expected  time.Time
 	}{
 		{
 			// A daily expression names one time a day, so the occurrence after a run
 			// is the same time the next day.
-			Name: "reports the occurrence after the last run",
-			Cron: "0 2 * * *",
+			Name:    "reports the occurrence after the last run",
+			Cron:    "0 2 * * *",
+			Applied: applied,
 			Instances: []driver.Instance{
 				{ID: "one", Workload: "example", State: driver.StateExited, StartedAt: ran},
 			},
-			Expected: ran.Add(24 * time.Hour),
+			Expected: time.Date(2026, 3, 2, 2, 0, 0, 0, time.Local),
 		},
 		{
 			// Nothing has run, so the occurrence is counted from when the
 			// specification was applied, which is what the reconciler waits for.
 			Name:     "reports the first occurrence for a schedule that has not run",
 			Cron:     "0 2 * * *",
-			Expected: applied.Add(24 * time.Hour),
+			Applied:  applied,
+			Expected: time.Date(2026, 2, 21, 2, 0, 0, 0, time.Local),
+		},
+		{
+			// A resume moves updated_at past the run that suspension stopped, so the
+			// next run is counted from the resume rather than the stale run.
+			Name:    "reports the occurrence after a resume rather than after the stopped run",
+			Cron:    "0 2 * * *",
+			Applied: ran.Add(10 * 24 * time.Hour).UTC(),
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", State: driver.StateExited, StartedAt: ran},
+			},
+			Expected: time.Date(2026, 3, 12, 2, 0, 0, 0, time.Local),
 		},
 		{
 			Name: "reports nothing for a workload that runs continuously",
@@ -1552,7 +1569,7 @@ func TestWorkloadService_Get_NextRun(t *testing.T) {
 				row.Spec = encoded
 			}
 
-			row.UpdatedAt = applied
+			row.UpdatedAt = tc.Applied
 
 			repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
 			d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(tc.Instances, nil).Once()
@@ -1561,7 +1578,7 @@ func TestWorkloadService_Get_NextRun(t *testing.T) {
 
 			got, err := svc.Get(t.Context(), "example")
 			require.NoError(t, err)
-			assert.Equal(t, tc.Expected, got.NextRun)
+			assert.True(t, tc.Expected.Equal(got.NextRun), "expected %s, got %s", tc.Expected, got.NextRun)
 		})
 	}
 }
