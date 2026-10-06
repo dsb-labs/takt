@@ -32,6 +32,20 @@ describes how an entry is written.
 
 ### Fixed
 
+- A schedule read the time it counted from in whatever location that time carried.
+  The stored apply time is UTC, so `0 2 * * *` fired at 02:00 UTC on its first
+  occurrence and at 02:00 server time afterwards, and `takt workload get` reported
+  the UTC time as the next run before the first. The expression is now read in the
+  server's local time throughout, as the manifest reference says
+  ([#161](https://github.com/dsb-labs/takt/issues/161),
+  [#192](https://github.com/dsb-labs/takt/pull/192)).
+
+- A stopped scheduled workload ran the occurrence it missed the moment it was
+  started again, because the run that suspension stopped still counted as the last
+  run. The schedule now counts from the start, so the workload waits for its next
+  occurrence ([#161](https://github.com/dsb-labs/takt/issues/161),
+  [#192](https://github.com/dsb-labs/takt/pull/192)).
+
 - An image whose `VOLUME` directive names a path no takt volume covers, which
   postgres, mysql and redis do by default, left an anonymous volume behind on every
   attempt, and nothing removed it. The container driver now removes a container's
