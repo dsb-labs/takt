@@ -1251,9 +1251,27 @@ container:
 		require.NoError(t, err)
 
 		// A daily expression names one time a day, so the occurrence after one is the
-		// same time the next day.
-		from := time.Date(2026, 3, 1, 2, 0, 0, 0, time.UTC)
-		assert.Equal(t, time.Date(2026, 3, 2, 2, 0, 0, 0, time.UTC), parsed.Next(from))
+		// same time the next day. The expression is read in local time, so the
+		// occurrence is 02:00 on the server's clock.
+		from := time.Date(2026, 3, 1, 2, 0, 0, 0, time.Local)
+		assert.Equal(t, time.Date(2026, 3, 2, 2, 0, 0, 0, time.Local), parsed.Next(from))
+	})
+
+	t.Run("the expression is read in local time whatever location it is given", func(t *testing.T) {
+		schedule := manifest.Schedule{Cron: "0 2 * * *"}
+
+		parsed, err := schedule.Parsed()
+		require.NoError(t, err)
+
+		// The same instant in three locations names the same next occurrence. A
+		// stored time arrives in UTC and a driver reports whatever it has, and
+		// neither may move the hour the operator wrote.
+		from := time.Date(2026, 3, 1, 12, 0, 0, 0, time.Local)
+		expected := parsed.Next(from)
+
+		assert.True(t, expected.Equal(parsed.Next(from.UTC())))
+		assert.True(t, expected.Equal(parsed.Next(from.In(time.FixedZone("ahead", 5*60*60)))))
+		assert.Equal(t, 2, expected.In(time.Local).Hour())
 	})
 }
 

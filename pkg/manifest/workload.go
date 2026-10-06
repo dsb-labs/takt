@@ -655,6 +655,11 @@ func (p RestartPolicy) Restarts(exitCode int) bool {
 
 // Parsed returns the schedule's expression ready to ask for occurrence times.
 //
+// The expression is read in the server's local time whatever location the time
+// handed to Next carries. A stored time arrives in UTC and a driver reports a
+// start in whichever location it has, and a schedule evaluated in the location of
+// its input would name a different wall-clock hour depending on which it was given.
+//
 // Validation proves the expression parses, so an error here means the stored
 // specification and the rules have diverged rather than that the operator made a
 // mistake.
@@ -664,7 +669,21 @@ func (s *Schedule) Parsed() (cron.Schedule, error) {
 		return nil, fmt.Errorf("failed to parse cron expression %q: %w", s.Cron, err)
 	}
 
-	return parsed, nil
+	return localSchedule{Schedule: parsed}, nil
+}
+
+type (
+	// The localSchedule type evaluates a parsed expression in the server's local
+	// time. The parser leaves the location as time.Local, which robfig reads as
+	// "the location of the time given", so the conversion has to happen here.
+	localSchedule struct {
+		cron.Schedule
+	}
+)
+
+// Next returns the first occurrence after the given time, read in local time.
+func (s localSchedule) Next(since time.Time) time.Time {
+	return s.Schedule.Next(since.In(time.Local))
 }
 
 // Defaults fills in what the specification left unset, so that validation checks
