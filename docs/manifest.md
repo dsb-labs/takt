@@ -1170,6 +1170,9 @@ until the policy retries it or the next occurrence replaces it.
 
 Occurrences missed while the server was down are missed. The occurrence takt runs is
 the first after the last run, so a workload down for several does not run once for each.
+Occurrences missed while the workload was stopped are missed the same way. A
+`workload start` counts from the moment of the start, so the workload waits for its
+next occurrence rather than running the last one it missed.
 
 A scheduled workload cannot declare a health check. A check restarts a workload that
 stops answering, and a scheduled workload is expected to end.
