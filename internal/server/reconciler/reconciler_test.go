@@ -1819,16 +1819,20 @@ func TestReconciler_Run_LeavesARuntimeWithNoDriverAlone(t *testing.T) {
 func TestReconciler_Run_Schedule(t *testing.T) {
 	t.Parallel()
 
-	// A daily expression, so the times a test names are unambiguous.
+	// A daily expression, so the times a test names are unambiguous. The
+	// expression is read in local time, so the fixtures name local hours.
 	const daily = "0 2 * * *"
 
-	ran := time.Date(2026, 3, 1, 2, 0, 0, 0, time.UTC)
+	ran := time.Date(2026, 3, 1, 2, 0, 0, 0, time.Local)
 
 	tt := []struct {
-		Name        string
-		Cron        string
-		Overlap     manifest.OverlapPolicy
-		Now         time.Time
+		Name    string
+		Cron    string
+		Overlap manifest.OverlapPolicy
+		Now     time.Time
+		// When the specification was last touched. Zero means the fixture's
+		// first occurrence, as a workload applied at that moment would have.
+		Applied     time.Time
 		Instances   []driver.Instance
 		ExpectStart bool
 		ExpectStop  bool
@@ -1926,6 +1930,34 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 			ExpectStart: true,
 			ExpectStop:  true,
 		},
+		{
+			// The run suspension stopped is still the slot's instance after a
+			// resume, and its start is long past. The resume moved updated_at, and
+			// that is what the next occurrence counts from, so the occurrence the
+			// workload missed while suspended is not run the moment it comes back.
+			Name:    "a resumed workload waits for its next occurrence",
+			Cron:    daily,
+			Applied: ran.Add(5*24*time.Hour + time.Hour),
+			Now:     ran.Add(5*24*time.Hour + 2*time.Hour),
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateExited, StartedAt: ran},
+			},
+			ExpectStart: false,
+			ExpectStop:  false,
+		},
+		{
+			// The resume is behind the next occurrence, so the schedule counts
+			// from it and the occurrence runs when it comes.
+			Name:    "a resumed workload runs its next occurrence when it comes",
+			Cron:    daily,
+			Applied: ran.Add(5*24*time.Hour + time.Hour),
+			Now:     ran.Add(6 * 24 * time.Hour),
+			Instances: []driver.Instance{
+				{ID: "one", Workload: "example", SpecHash: "hash-one", State: driver.StateExited, StartedAt: ran},
+			},
+			ExpectStart: true,
+			ExpectStop:  true,
+		},
 	}
 
 	for _, tc := range tt {
@@ -1936,7 +1968,11 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 			row.Spec = specWithSchedule("example", tc.Cron, tc.Overlap)
 			// A workload that has not run counts its first occurrence from when its
 			// specification was applied, so the fixture has to say when that was.
-			row.UpdatedAt = ran
+			// Stored as UTC the way the database returns it.
+			row.UpdatedAt = ran.UTC()
+			if !tc.Applied.IsZero() {
+				row.UpdatedAt = tc.Applied.UTC()
+			}
 
 			repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
 

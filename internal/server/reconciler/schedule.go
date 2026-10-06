@@ -85,12 +85,15 @@ func overlap(row database.Workload) manifest.OverlapPolicy {
 // asked for, so several passing while the server was down produce one run rather than
 // one each.
 func (r *Reconciler) occurrence(ctx context.Context, row database.Workload, instances []driver.Instance, schedule cron.Schedule) error {
-	// The occurrence is counted from the last run, or from when the specification was
-	// applied for a workload that has not run yet. A schedule says when to run, and
-	// the moment of applying is not one of the times it names, so the first occurrence
-	// after that is what the workload waits for.
+	// The occurrence is counted from the last run or from when the specification was
+	// last touched, whichever is later. A schedule says when to run, and the moment
+	// of applying is not one of the times it names, so the first occurrence after
+	// that is what the workload waits for. A resume moves updated_at past the run
+	// that suspension stopped, so counting from the later of the two is what keeps
+	// a resumed workload waiting for its next occurrence rather than running the
+	// one it missed.
 	since := lastRun(instances)
-	if since.IsZero() {
+	if row.UpdatedAt.After(since) {
 		since = row.UpdatedAt
 	}
 
