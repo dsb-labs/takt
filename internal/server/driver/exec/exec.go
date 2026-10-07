@@ -471,14 +471,6 @@ func (d *Driver) supervise(ctx context.Context, workload string, instance int, p
 
 		err := process.cmd.Wait()
 
-		d.mux.Lock()
-		// Only forget this process if it is still the one registered. A replacement
-		// started while this one was ending owns the entry now.
-		if d.supervised[key] == process {
-			delete(d.supervised, key)
-		}
-		d.mux.Unlock()
-
 		code := 0
 
 		if exit, ok := errors.AsType[*exec.ExitError](err); ok {
@@ -500,6 +492,19 @@ func (d *Driver) supervise(ctx context.Context, workload string, instance int, p
 				_ = os.Remove(recorded.Cgroup)
 			}
 		}
+
+		// Forgotten only once the exit is on record. halt waits on the processes it
+		// finds here before the caller removes the directory the record is in, so a
+		// process forgotten before its record was written would let that removal
+		// run while this goroutine is still writing into the directory.
+		//
+		// Only forget this process if it is still the one registered. A replacement
+		// started while this one was ending owns the entry now.
+		d.mux.Lock()
+		if d.supervised[key] == process {
+			delete(d.supervised, key)
+		}
+		d.mux.Unlock()
 
 		d.logger.With("workload", workload, "exit_code", code).Debug("process ended")
 
