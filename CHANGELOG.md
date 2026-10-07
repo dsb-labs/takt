@@ -163,6 +163,11 @@ describes how an entry is written.
   reports a read error instead of a log that stopped or an archive that ends
   early ([#170](https://github.com/dsb-labs/takt/issues/170),
   [#196](https://github.com/dsb-labs/takt/pull/196)).
+- `takt workload logs` on an `exec` workload failed with `failed to locate
+  instance output` when a replacement removed an attempt between the read listing
+  it and reading it. The read now skips the attempt, as the reconciler's own
+  observation does ([#170](https://github.com/dsb-labs/takt/issues/170),
+  [#196](https://github.com/dsb-labs/takt/pull/196)).
 
 ## v0.11.1 - 2026-10-04
 
