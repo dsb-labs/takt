@@ -236,6 +236,7 @@ Everything takt keeps lives under the data directory, `~/.local/share/takt` by
 default:
 
 ```
+lock              held by the running server, so a second one on the directory stops
 state.db          the workloads that have been applied
 state.db-wal      SQLite's write-ahead log
 state.db-shm      SQLite's shared-memory index
@@ -248,7 +249,15 @@ mounts/state/     what takt wrote for each of them
 ```
 
 The database holds each workload's stored specification, environment included, so takt
-creates the directory and its files readable only by the user running the server.
+creates the directory and its files readable only by the user running the server. A
+data directory or keyring directory that already exists with a wider mode is refused
+at startup rather than narrowed, the way a readable key file is: whoever could reach
+it has already had the chance. The server also warns when it runs as root.
+
+The server holds a lock on `lock` for as long as it runs. A second server pointed at
+the same directory stops with `data directory is in use by another takt server`
+before it opens the database. The kernel releases the lock when the process exits,
+so a crash never leaves it held.
 
 A secret's value is encrypted in the database rather than held in a specification, so
 a backup of `state.db` alone does not disclose one. The keyring is what decrypts them,
@@ -291,7 +300,9 @@ with an empty value is not a workload. takt ignores it and logs the container at
 
 The labels carry no server identity. Two servers pointed at one daemon each see the
 other's containers as orphans, and each removes the other's work on every pass. Run
-one takt server per docker daemon. An e2e harness or a staging config needs a daemon
+one takt server per docker daemon. The lock on the data directory stops two servers
+sharing a directory, and it does not reach a second server with a directory of its
+own. An e2e harness or a staging config needs a daemon
 of its own, which a [rootless](https://docs.docker.com/engine/security/rootless/)
 daemon or a second socket gives it.
 
@@ -427,8 +438,11 @@ starts, mounts its volume, and finds it empty.
 `MissingKeys` is the other half. It names every key the secrets are sealed under that
 the keyring does not hold, which is what an archive taken without `--include-keys`
 leaves behind. Restore the keyring's own backup before starting the server. Without
-it every workload reading a secret fails to start, and nothing at the workload says
-why.
+it the server refuses to start, and the error names the keyring.
+
+A node holding no secrets reports nothing here. Its database still names a current
+key the keyring does not hold, and the server generates a new one at startup rather
+than stop over a key that opened nothing. The log says so at `warn`.
 
 ### What is deliberately not restored
 

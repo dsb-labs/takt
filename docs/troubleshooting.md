@@ -152,6 +152,17 @@ The log names what stopped it. The ones that come up:
 - **A key file that is readable by others.** The secret keyring and a TLS key
   must be readable by the server's user alone, and the server refuses to start
   otherwise rather than narrow the mode itself.
+- **`data directory is accessible to more than its owner`**, or the same of the
+  keyring directory. The directory existed before the server did, with group or
+  other bits set. `chmod 0700` it. The server narrows nothing itself, for the
+  reason it refuses a readable key file.
+- **`data directory is in use by another takt server`.** Another server holds the
+  lock on the data directory. Stop it, or point this one at a directory of its
+  own. Two servers sharing a directory would each adopt the other's work.
+- **`the current encryption key ... is not in the keyring`.** The database names
+  a key the keyring does not hold, and secrets are sealed under it. An archive
+  restored without `--include-keys` is the usual cause. Restore the keyring from
+  its own backup. See [Restoring a node](operating.md#restoring-a-node).
 
 ## Something else
 
