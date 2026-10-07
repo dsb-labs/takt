@@ -3,10 +3,14 @@ package e2e_test
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/dsb-labs/takt/internal/restore"
+	"github.com/dsb-labs/takt/internal/server"
+	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/pkg/client"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
@@ -178,6 +182,71 @@ func (s *Suite) TestBackupLeavesTheKeyringOut() {
 //
 // The workload is started before the rekey and read after it, so this covers the
 // value surviving the rewrite rather than merely being set again.
+// TestMissingCurrentKeyIsReplacedWhenNothingIsSealed covers a database restored
+// from an archive taken without the keyring, on a node holding no secrets. The
+// recorded key opens nothing, so the server generates a fresh one and starts
+// rather than refusing over a file nothing needs.
+func (s *Suite) TestMissingCurrentKeyIsReplacedWhenNothingIsSealed() {
+	directory := s.T().TempDir()
+	s.restart(withDataDirectory(directory))
+
+	keys := filepath.Join(directory, "keys")
+
+	entries, err := os.ReadDir(keys)
+	s.Require().NoError(err)
+	s.Require().Len(entries, 1)
+	s.Require().NoError(os.Remove(filepath.Join(keys, entries[0].Name())))
+
+	s.restart(withDataDirectory(directory))
+
+	// The new key is the one new secrets are sealed under, which a set proves.
+	secret := s.secretName()
+	s.T().Cleanup(func() { s.cleanupSecret(secret) })
+
+	_, _, err = s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("under-a-new-key")})
+	s.Require().NoError(err)
+
+	entries, err = os.ReadDir(keys)
+	s.Require().NoError(err)
+	s.Len(entries, 1)
+}
+
+// TestMissingCurrentKeyWithSecretsRefusesToStart is the other half: with a secret
+// sealed under the missing key, a fresh key would leave the value unopenable with
+// the database saying otherwise, so the server stops and names the keyring.
+func (s *Suite) TestMissingCurrentKeyWithSecretsRefusesToStart() {
+	directory := s.T().TempDir()
+	s.restart(withDataDirectory(directory))
+
+	secret := s.secretName()
+	_, _, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("sealed")})
+	s.Require().NoError(err)
+
+	s.stop()
+
+	keys := filepath.Join(directory, "keys")
+
+	entries, err := os.ReadDir(keys)
+	s.Require().NoError(err)
+	s.Require().Len(entries, 1)
+	s.Require().NoError(os.Remove(filepath.Join(keys, entries[0].Name())))
+
+	config := server.DefaultConfig()
+	config.HTTP.Address = "127.0.0.1:" + s.freePort()
+	config.Data.Directory = directory
+	config.Logging.Level = "error"
+
+	ctx, cancel := context.WithTimeout(s.ctx(), 30*time.Second)
+	defer cancel()
+
+	err = server.Run(ctx, config)
+	s.ErrorIs(err, database.ErrSecretsSealed)
+
+	// The suite's teardown stops whatever is running, and nothing is, so a
+	// server is started for it to find.
+	s.start()
+}
+
 func (s *Suite) TestRekeyKeepsSecretsReadable() {
 	name, secret := s.workloadName(), s.secretName()
 	s.T().Cleanup(func() { s.cleanup(name) })
