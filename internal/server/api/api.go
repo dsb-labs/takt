@@ -180,6 +180,22 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	_ = json.NewEncoder(w).Encode(ErrorResponse{Status: status, Message: message})
 }
 
+// The lateWriter type holds a response's status until its first byte, so that a
+// body which fails before writing anything can still be answered with a status.
+type lateWriter struct {
+	inner   http.ResponseWriter
+	started bool
+}
+
+func (w *lateWriter) Write(p []byte) (int, error) {
+	if !w.started {
+		w.inner.WriteHeader(http.StatusOK)
+		w.started = true
+	}
+
+	return w.inner.Write(p)
+}
+
 // endStream ends a response whose status has already gone out and whose body
 // then failed to write.
 //
