@@ -29,8 +29,32 @@ describes how an entry is written.
   logged into a production server cannot load it by accident
   ([#172](https://github.com/dsb-labs/takt/issues/172),
   [#189](https://github.com/dsb-labs/takt/pull/189)).
+- The server holds a lock on `lock` under the data directory while it runs. A
+  second server pointed at the same directory stops with `data directory is in
+  use by another takt server` instead of running a second reconciler over the
+  same daemon ([#167](https://github.com/dsb-labs/takt/issues/167),
+  [#195](https://github.com/dsb-labs/takt/pull/195)).
+- A data directory or keyring directory that already exists with group or other
+  bits set stops the server, the way a readable key file does. The packaged unit
+  creates the directory `0700`, so only a directory made by hand is affected.
+  The server also warns when it runs as root
+  ([#167](https://github.com/dsb-labs/takt/issues/167),
+  [#195](https://github.com/dsb-labs/takt/pull/195)).
 
 ### Fixed
+
+- A database whose current key the keyring did not hold stopped the server even
+  when no secret was sealed under it, which is the state `takt admin restore`
+  left an archive taken without `--include-keys` in on a node holding no secrets.
+  The server now generates a fresh key in that case and says so in the log. With
+  secrets sealed under the missing key it still refuses, and the error names the
+  keyring ([#167](https://github.com/dsb-labs/takt/issues/167),
+  [#195](https://github.com/dsb-labs/takt/pull/195)).
+- A new key file was flushed to disk before the database pointed at it, but its
+  directory entry was not, so a crash in between could leave a database naming
+  a key with no file behind it. The keyring directory is now synced too
+  ([#167](https://github.com/dsb-labs/takt/issues/167),
+  [#195](https://github.com/dsb-labs/takt/pull/195)).
 
 - A schedule read the time it counted from in whatever location that time carried.
   The stored apply time is UTC, so `0 2 * * *` fired at 02:00 UTC on its first
