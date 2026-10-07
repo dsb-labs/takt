@@ -153,3 +153,28 @@ func TestWrap_RecoveryIsLogged(t *testing.T) {
 	assert.Contains(t, logged, "http request")
 	assert.Contains(t, logged, "status=500")
 }
+
+func TestWrap_LetsAnAbortThrough(t *testing.T) {
+	t.Parallel()
+
+	// A handler that aborts is asking the server to drop the connection, which
+	// only the server can do. Recovering it would answer a 500 into a response
+	// whose status has already gone out.
+	var recorded strings.Builder
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/backup", nil)
+	req.Host = "127.0.0.1:7373"
+
+	logger := slog.New(slog.NewTextHandler(&recorded, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	handler := middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+
+		panic(http.ErrAbortHandler)
+	}), middleware.Config{Logger: logger})
+
+	assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
+		handler.ServeHTTP(httptest.NewRecorder(), req)
+	})
+	assert.NotContains(t, recorded.String(), "handler panicked")
+}

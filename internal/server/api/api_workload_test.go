@@ -1148,6 +1148,25 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs?follow=true&previous=true", nil)
 		assert.Equal(t, http.StatusBadRequest, resp.Code)
 	})
+
+	t.Run("breaks off a read that failed after its first line", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
+
+		// The status is out by the time the source fails, so the failure cannot
+		// become one. The connection is dropped instead, so the client holds a
+		// read error rather than a log that stopped.
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 100}).
+			RunAndReturn(func(_ context.Context, out io.Writer, _ string, _ driver.LogOptions) error {
+				_, _ = io.WriteString(out, "a line\n")
+
+				return errors.New("daemon gone")
+			}).Once()
+
+		assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
+			do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs", nil)
+		})
+	})
 }
 
 func TestWorkloadAPI_GetWorkloadEvents(t *testing.T) {
@@ -1260,6 +1279,7 @@ func do(t *testing.T, svc *MockWorkloadService, method, target string, body io.R
 	// come back as a routing failure rather than as the handler's answer.
 	mux := http.NewServeMux()
 	api.New(api.Config{
+		Logger:    logger,
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: NewMockVolumeService(t)}),
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: NewMockSecretService(t)}),
@@ -1279,7 +1299,6 @@ func do(t *testing.T, svc *MockWorkloadService, method, target string, body io.R
 	// layer passes every request as it did before the auth layer existed.
 	middleware.Authenticate(nil)(mux).ServeHTTP(resp, req)
 
-		Logger:    logger,
 	return resp
 }
 

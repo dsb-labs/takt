@@ -522,6 +522,8 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 	}
 
 	return logsResponse{
+		ctx:    ctx,
+		logger: a.logger,
 		follow: options.Follow,
 		// The connection's own writer, which is the only one that can be given a
 		// deadline. Nil when nothing put it there, and the read then lives under
@@ -540,6 +542,8 @@ func (a *WorkloadAPI) GetWorkloadLogs(ctx context.Context, request api.GetWorklo
 // straight to the response instead, so the server's memory use doesn't scale with how
 // much a container has to say.
 type logsResponse struct {
+	ctx    context.Context
+	logger *slog.Logger
 	// Whether the response stays open for as long as the workload keeps writing.
 	follow bool
 	// The connection's own writer, for the deadline the wrappers cannot carry.
@@ -566,7 +570,11 @@ func (r logsResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error 
 
 	w.WriteHeader(http.StatusOK)
 
-	return r.write(out)
+	if err := r.write(out); err != nil {
+		endStream(r.ctx, r.logger, "read workload logs", err)
+	}
+
+	return nil
 }
 
 // instanceHealth maps what takt established about a workload's health onto the wire
