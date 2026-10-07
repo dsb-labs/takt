@@ -1149,6 +1149,28 @@ func TestWorkloadAPI_GetWorkloadLogs(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, resp.Code)
 	})
 
+	t.Run("answers a read that failed before its first byte with a 500", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 100}).
+			Return(errors.New("daemon gone")).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs", nil)
+		require.Equal(t, http.StatusInternalServerError, resp.Code)
+		assert.Contains(t, resp.Header().Get("Content-Type"), "json")
+		assert.JSONEq(t, `{"error":"failed to read workload logs"}`, resp.Body.String())
+	})
+
+	t.Run("answers a read with nothing to say with an empty 200", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
+		svc.EXPECT().Logs(mock.Anything, mock.Anything, "example", driver.LogOptions{Tail: 100}).Return(nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/logs", nil)
+		require.Equal(t, http.StatusOK, resp.Code)
+		assert.Empty(t, resp.Body.String())
+	})
+
 	t.Run("breaks off a read that failed after its first line", func(t *testing.T) {
 		svc := NewMockWorkloadService(t)
 		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()

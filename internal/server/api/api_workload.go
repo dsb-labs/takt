@@ -555,23 +555,43 @@ type logsResponse struct {
 //
 // A followed read is kept open: exempt from the server's write timeout and
 // flushed as it goes, because the response lives for as long as the workload
-// does.
+// does. Its status goes out at once, so a caller watching a quiet workload
+// knows the follow is on.
+//
+// A finite read holds its status until the first byte instead. Most of what can
+// go wrong with one goes wrong before anything is written, and a failure there
+// is still a 500 the client can read. A failure after the first byte ends the
+// stream: see endStream.
 func (r logsResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "text/plain")
 
-	out := io.Writer(w)
-
 	if r.follow {
-		var err error
-		if out, err = keepOpen(w, r.conn); err != nil {
+		out, err := keepOpen(w, r.conn)
+		if err != nil {
 			return err
 		}
+
+		w.WriteHeader(http.StatusOK)
+
+		if err = r.write(out); err != nil {
+			endStream(r.ctx, r.logger, "read workload logs", err)
+		}
+
+		return nil
 	}
 
-	w.WriteHeader(http.StatusOK)
+	out := &lateWriter{inner: w}
 
-	if err := r.write(out); err != nil {
+	err := r.write(out)
+	switch {
+	case err != nil && !out.started:
+		return api.GetWorkloadLogs500JSONResponse{
+			Error: internalError(r.logger, "read workload logs", err),
+		}.VisitGetWorkloadLogsResponse(w)
+	case err != nil:
 		endStream(r.ctx, r.logger, "read workload logs", err)
+	case !out.started:
+		w.WriteHeader(http.StatusOK)
 	}
 
 	return nil
