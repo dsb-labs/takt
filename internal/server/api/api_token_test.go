@@ -24,6 +24,7 @@ func doToken(t *testing.T, tokens api.TokenService, req *http.Request) *httptest
 
 	mux := http.NewServeMux()
 	api.New(api.Config{
+		Logger: logger,
 		Tokens: api.NewTokenAPI(api.TokenAPIConfig{Logger: logger, Tokens: tokens}),
 	}).Register(mux)
 

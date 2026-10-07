@@ -1279,6 +1279,7 @@ func do(t *testing.T, svc *MockWorkloadService, method, target string, body io.R
 	// layer passes every request as it did before the auth layer existed.
 	middleware.Authenticate(nil)(mux).ServeHTTP(resp, req)
 
+		Logger:    logger,
 	return resp
 }
 

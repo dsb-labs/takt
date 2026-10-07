@@ -35,7 +35,8 @@ func doACL(t *testing.T, policies api.PolicyService, init api.ACLInitializer, re
 	// come back as a routing failure rather than as the handler's answer.
 	mux := http.NewServeMux()
 	api.New(api.Config{
-		ACL: api.NewACLAPI(api.ACLAPIConfig{Logger: logger, Policies: policies, Init: init}),
+		Logger: logger,
+		ACL:    api.NewACLAPI(api.ACLAPIConfig{Logger: logger, Policies: policies, Init: init}),
 	}).Register(mux)
 
 	resp := httptest.NewRecorder()

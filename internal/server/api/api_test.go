@@ -1,9 +1,12 @@
 package api_test
 
 import (
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,6 +35,7 @@ func doAuthorized(t *testing.T, authenticator middleware.Authenticator, req *htt
 
 	mux := http.NewServeMux()
 	api.New(api.Config{
+		Logger:    logger,
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: workloads}),
 		Tokens:    api.NewTokenAPI(api.TokenAPIConfig{Logger: logger, Tokens: tokens}),
 		Auth:      api.NewAuthAPI(api.AuthAPIConfig{Logger: logger, Auth: NewMockAuthService(t)}),
@@ -146,6 +150,72 @@ func TestAuthorize(t *testing.T) {
 			if tc.ExpectStatus == http.StatusUnauthorized {
 				assert.Equal(t, "Bearer", resp.Header().Get("WWW-Authenticate"))
 			}
+		})
+	}
+}
+
+func TestRegister_RequestErrors(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name         string
+		Target       string
+		Body         string
+		ExpectStatus int
+		ExpectError  string
+	}{
+		{
+			Name:         "a body that is not JSON is a 400 in the error shape",
+			Target:       "/api/v1/workloads/example",
+			Body:         "not json",
+			ExpectStatus: http.StatusBadRequest,
+			ExpectError:  "can't decode JSON body",
+		},
+		{
+			Name:         "a body over the limit is a 413 in the error shape",
+			Target:       "/api/v1/workloads/example",
+			Body:         `{"name":"` + strings.Repeat("a", 2<<20),
+			ExpectStatus: http.StatusRequestEntityTooLarge,
+			ExpectError:  "the request body is larger than",
+		},
+		{
+			Name:         "a parameter that does not parse is a 400 in the error shape",
+			Target:       "/api/v1/workloads/example?force=maybe",
+			ExpectStatus: http.StatusBadRequest,
+			ExpectError:  "force",
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+
+			logger := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError}))
+
+			mux := http.NewServeMux()
+			api.New(api.Config{
+				Logger:    logger,
+				Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: NewMockWorkloadService(t)}),
+			}).Register(mux)
+
+			method := http.MethodDelete
+			var body io.Reader
+			if tc.Body != "" {
+				method = http.MethodPut
+				body = strings.NewReader(tc.Body)
+			}
+
+			req := httptest.NewRequest(method, tc.Target, body)
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+
+			middleware.Limit(mux).ServeHTTP(resp, req)
+			require.Equal(t, tc.ExpectStatus, resp.Code)
+			assert.Equal(t, "application/json", resp.Header().Get("Content-Type"))
+
+			var answer api.ErrorResponse
+			require.NoError(t, json.NewDecoder(resp.Body).Decode(&answer))
+			assert.Contains(t, answer.Message, tc.ExpectError)
 		})
 	}
 }
