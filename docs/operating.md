@@ -829,7 +829,10 @@ everything else and declared in the same OpenAPI document:
 - `/api/v1/system/ready` reports whether the server can do its job: the database answers, and
   every configured driver answered the most recent attempt to observe it. A server
   whose Docker daemon has gone away is alive but not ready, and the two need
-  different answers. A not-ready response is a 503 carrying the reasons.
+  different answers. A not-ready response is a 503 carrying the reasons. Each
+  reason names the database or the driver that is not answering and nothing
+  else, because the route is anonymous. The error behind it is in the server's
+  log.
 - `/api/v1/system/metrics` serves everything the server measures in the Prometheus text format,
   ready to scrape with no collector in between.
 

@@ -58,7 +58,7 @@ func TestSystemAPI_GetReadiness(t *testing.T) {
 				"container": {At: observed},
 			},
 			ExpectStatus:  http.StatusServiceUnavailable,
-			ExpectReasons: []string{"database: database is locked"},
+			ExpectReasons: []string{"database: not answering"},
 		},
 		{
 			// The map is seeded before the first pass, so this is what a poller
@@ -78,7 +78,7 @@ func TestSystemAPI_GetReadiness(t *testing.T) {
 				"exec":      {At: observed},
 			},
 			ExpectStatus:  http.StatusServiceUnavailable,
-			ExpectReasons: []string{"driver container: daemon gone"},
+			ExpectReasons: []string{"driver container: not answering"},
 		},
 	}
 
