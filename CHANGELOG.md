@@ -40,6 +40,11 @@ describes how an entry is written.
   The server also warns when it runs as root
   ([#167](https://github.com/dsb-labs/takt/issues/167),
   [#195](https://github.com/dsb-labs/takt/pull/195)).
+- A not-ready `/api/v1/system/ready` reports `database: not answering` or
+  `driver <name>: not answering` instead of the error itself, which carried the
+  database path and the daemon's socket to an anonymous caller. The error is
+  in the server's log ([#170](https://github.com/dsb-labs/takt/issues/170),
+  [#196](https://github.com/dsb-labs/takt/pull/196)).
 
 ### Fixed
 
@@ -145,6 +150,19 @@ describes how an entry is written.
   version the check read, and a change in between is refused naming the resource
   ([#172](https://github.com/dsb-labs/takt/issues/172),
   [#189](https://github.com/dsb-labs/takt/pull/189)).
+
+- A request body the server could not decode, or a parameter it could not
+  parse, was answered as plain text, so `takt` printed `server responded with
+  Bad Request` and lost the detail. Every such refusal is now the same JSON
+  error every other failure uses, and a body over the 1 MiB limit is a 413
+  rather than a 400 ([#170](https://github.com/dsb-labs/takt/issues/170),
+  [#196](https://github.com/dsb-labs/takt/pull/196)).
+- A `logs --follow`, a `service list --follow` or an `admin backup` whose source
+  failed after the response started had the raw error appended to the body and
+  then ended as if complete. The server now drops the connection, so the client
+  reports a read error instead of a log that stopped or an archive that ends
+  early ([#170](https://github.com/dsb-labs/takt/issues/170),
+  [#196](https://github.com/dsb-labs/takt/pull/196)).
 
 ## v0.11.1 - 2026-10-04
 
