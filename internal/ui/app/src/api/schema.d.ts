@@ -3078,7 +3078,11 @@ export interface components {
     GetReadinessResult: {
       /** @description Whether the database and every configured driver answered. */
       ready: boolean;
-      /** @description Why the server is not ready. Absent when it is. */
+      /**
+       * @description What is not answering, one of `database: not answering`, `driver
+       *     <name>: not observed yet` and `driver <name>: not answering`. Absent
+       *     when the server is ready.
+       */
       reasons?: string[];
     };
   };
@@ -3094,6 +3098,15 @@ export interface components {
     };
     /** @description Nothing exists with the given name. */
     NotFound: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        "application/json": components["schemas"]["ErrorResponse"];
+      };
+    };
+    /** @description The request body is larger than the server reads. */
+    PayloadTooLarge: {
       headers: {
         [name: string]: unknown;
       };
@@ -3313,6 +3326,7 @@ export interface operations {
         };
       };
       412: components["responses"]["PreconditionFailed"];
+      413: components["responses"]["PayloadTooLarge"];
       /**
        * @description The specification is well-formed but names a runtime the server cannot
        *     run yet.
@@ -3543,6 +3557,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3583,6 +3598,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3623,6 +3639,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -3666,6 +3683,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      413: components["responses"]["PayloadTooLarge"];
       /**
        * @description The specification is well-formed but names a runtime the server cannot
        *     run yet.
@@ -3804,6 +3822,7 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       412: components["responses"]["PreconditionFailed"];
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4001,6 +4020,7 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       412: components["responses"]["PreconditionFailed"];
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4160,6 +4180,7 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       412: components["responses"]["PreconditionFailed"];
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4334,6 +4355,7 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       412: components["responses"]["PreconditionFailed"];
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4450,6 +4472,7 @@ export interface operations {
       };
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4501,6 +4524,7 @@ export interface operations {
       };
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4695,6 +4719,7 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       412: components["responses"]["PreconditionFailed"];
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4729,6 +4754,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorResponse"];
         };
       };
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4780,6 +4806,7 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      413: components["responses"]["PayloadTooLarge"];
       500: components["responses"]["InternalServerError"];
     };
   };
@@ -4887,7 +4914,11 @@ export interface operations {
         };
       };
       500: components["responses"]["InternalServerError"];
-      /** @description The server cannot currently do its job. The reasons say why. */
+      /**
+       * @description The server cannot currently do its job. The reasons name the database
+       *     or the driver that is not answering. The error behind each is in the
+       *     server's log, not here, because the route is anonymous.
+       */
       503: {
         headers: {
           [name: string]: unknown;
