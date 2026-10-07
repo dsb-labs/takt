@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dsb-labs/takt/internal/server"
 	"github.com/dsb-labs/takt/pkg/client"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
@@ -147,6 +148,42 @@ func (s *Suite) TestNode() {
 	s.InDelta(node.Allocated.CPU+0.25, after.Allocated.CPU, 0.001)
 	s.Equal(node.Allocated.UnlimitedMemory+1, after.Allocated.UnlimitedMemory)
 	s.Equal(node.Allocated.UnlimitedCPU+1, after.Allocated.UnlimitedCPU)
+}
+
+// TestDataDirectoryIsHeldByOneServer covers the lock on the data directory. A
+// second server pointed at the directory the suite's server holds is refused before
+// it opens the database, since two reconcilers over one daemon would each adopt the
+// other's processes and claim the other's ports.
+func (s *Suite) TestDataDirectoryIsHeldByOneServer() {
+	config := server.DefaultConfig()
+	config.HTTP.Address = "127.0.0.1:" + s.freePort()
+	config.Data.Directory = s.directory
+	config.Logging.Level = "error"
+
+	ctx, cancel := context.WithTimeout(s.ctx(), 30*time.Second)
+	defer cancel()
+
+	err := server.Run(ctx, config)
+	s.ErrorIs(err, server.ErrDataDirectoryInUse)
+}
+
+// TestDataDirectoryOthersCanReachIsRefused covers the mode check on an existing
+// data directory. MkdirAll leaves one that already exists alone, so a directory an
+// operator made world-readable would otherwise publish every stored specification.
+func (s *Suite) TestDataDirectoryOthersCanReachIsRefused() {
+	directory := filepath.Join(s.T().TempDir(), "data")
+	s.Require().NoError(os.Mkdir(directory, 0o755))
+
+	config := server.DefaultConfig()
+	config.HTTP.Address = "127.0.0.1:" + s.freePort()
+	config.Data.Directory = directory
+	config.Logging.Level = "error"
+
+	ctx, cancel := context.WithTimeout(s.ctx(), 30*time.Second)
+	defer cancel()
+
+	err := server.Run(ctx, config)
+	s.ErrorIs(err, server.ErrDataDirectoryShared)
 }
 
 // TestDebugBundle proves every test leaves the server's spans and logs on disk,

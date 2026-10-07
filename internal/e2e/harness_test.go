@@ -219,6 +219,14 @@ func (s *Suite) start(options ...option) {
 		option(&config)
 	}
 
+	// t.TempDir makes its directory 0777 under the umask, and the server refuses
+	// a data directory anyone else can reach. One that does not exist yet is
+	// created by the server with the mode it wants.
+	err = os.Chmod(config.Data.Directory, 0o700)
+	if !errors.Is(err, os.ErrNotExist) {
+		s.Require().NoError(err)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	group, ctx := errgroup.WithContext(ctx)
 
