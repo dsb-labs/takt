@@ -303,6 +303,27 @@ func TestServiceAPI_ListServices(t *testing.T) {
 		resp := doService(t, svc, http.MethodGet, "/api/v1/services?follow=true", nil)
 		require.Equal(t, http.StatusInternalServerError, resp.Code)
 	})
+
+	t.Run("breaks off a follow that failed after its first line", func(t *testing.T) {
+		t.Parallel()
+
+		// The status is out by the time the source fails, so the failure cannot
+		// become one. The connection is dropped instead, so the client holds a
+		// read error rather than a stream that went quiet.
+		svc := NewMockServiceService(t)
+		svc.EXPECT().Stream(mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, fn func([]service.Service) error, _ ...string) error {
+				if err := fn([]service.Service{testServiceResult()}); err != nil {
+					return err
+				}
+
+				return errors.New("database is gone")
+			}).Once()
+
+		assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
+			doService(t, svc, http.MethodGet, "/api/v1/services?follow=true", nil)
+		})
+	})
 }
 
 func TestServiceAPI_DeleteService(t *testing.T) {
@@ -344,6 +365,7 @@ func doService(t *testing.T, svc *MockServiceService, method, target string, bod
 	// come back as a routing failure rather than as the handler's answer.
 	mux := http.NewServeMux()
 	api.New(api.Config{
+		Logger:    logger,
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: NewMockWorkloadService(t)}),
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: NewMockVolumeService(t)}),
 		Services:  api.NewServiceAPI(api.ServiceAPIConfig{Logger: logger, Services: svc}),
@@ -365,5 +387,4 @@ func doService(t *testing.T, svc *MockServiceService, method, target string, bod
 	middleware.Authenticate(nil)(mux).ServeHTTP(resp, req)
 
 	return resp
-		Logger:    logger,
 }

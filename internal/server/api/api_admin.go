@@ -69,6 +69,7 @@ func (a *AdminAPI) GetBackup(ctx context.Context, request api.GetBackupRequestOb
 	}
 
 	return backupResponse{
+		ctx:    ctx,
 		logger: a.logger,
 		backup: backup,
 		// The connection's own writer, which is the only one that can be given a
@@ -85,6 +86,7 @@ func (a *AdminAPI) GetBackup(ctx context.Context, request api.GetBackupRequestOb
 // straight to the response instead, so the server's memory use doesn't scale with
 // the size of the database.
 type backupResponse struct {
+	ctx    context.Context
 	logger *slog.Logger
 	backup *service.Backup
 	// The connection's own writer, for the deadline the wrappers cannot carry.
@@ -92,6 +94,9 @@ type backupResponse struct {
 }
 
 // VisitGetBackupResponse writes the backup to w as a zip archive.
+//
+// An archive that fails part way is broken off rather than closed, so that the
+// client holds a read error and not a zip that ends early: see endStream.
 func (r backupResponse) VisitGetBackupResponse(w http.ResponseWriter) error {
 	defer func() {
 		if err := r.backup.Close(); err != nil {
@@ -125,7 +130,11 @@ func (r backupResponse) VisitGetBackupResponse(w http.ResponseWriter) error {
 	w.Header().Set("Content-Type", "application/zip")
 	w.WriteHeader(http.StatusOK)
 
-	return r.backup.Stream(w)
+	if err := r.backup.Stream(w); err != nil {
+		endStream(r.ctx, r.logger, "stream backup", err)
+	}
+
+	return nil
 }
 
 // Rekey re-encrypts every secret under a newly generated key and reports what moved.

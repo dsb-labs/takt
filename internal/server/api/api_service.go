@@ -149,6 +149,7 @@ func (a *ServiceAPI) ListServices(ctx context.Context, request api.ListServicesR
 
 	if request.Params.Follow != nil && *request.Params.Follow {
 		return servicesStream{
+			ctx:    ctx,
 			logger: a.logger,
 			conn:   middleware.Connection(ctx),
 			stream: func(fn func([]service.Service) error) error {
@@ -206,6 +207,7 @@ func (a *ServiceAPI) DeleteService(ctx context.Context, request api.DeleteServic
 // each line as the service reports it instead, so nothing sits between a change
 // and the client hearing of it.
 type servicesStream struct {
+	ctx    context.Context
 	logger *slog.Logger
 	// The connection's own writer, for the deadline the wrappers cannot carry.
 	conn   http.ResponseWriter
@@ -218,7 +220,7 @@ type servicesStream struct {
 // first line is the first read of the services, and that read can be refused: a
 // malformed query is a 400 here as it is for a list, which it could not be once
 // a 200 had gone out. A failure after the first line ends the stream, which is
-// all that can be done for it.
+// all that can be done for it: see endStream.
 func (r servicesStream) VisitListServicesResponse(w http.ResponseWriter) error {
 	out, err := keepOpen(w, r.conn)
 	if err != nil {
@@ -237,8 +239,12 @@ func (r servicesStream) VisitListServicesResponse(w http.ResponseWriter) error {
 	})
 
 	switch {
+	case started && err != nil:
+		endStream(r.ctx, r.logger, "stream services", err)
+
+		return nil
 	case started:
-		return err
+		return nil
 	case errors.Is(err, service.ErrInvalidQuery):
 		return api.ListServices400JSONResponse{Error: err.Error()}.VisitListServicesResponse(w)
 	case err != nil:
