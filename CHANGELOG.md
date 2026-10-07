@@ -168,6 +168,11 @@ describes how an entry is written.
   it and reading it. The read now skips the attempt, as the reconciler's own
   observation does ([#170](https://github.com/dsb-labs/takt/issues/170),
   [#196](https://github.com/dsb-labs/takt/pull/196)).
+- Stopping or deleting an `exec` workload could fail with `failed to remove
+  workload directory: directory not empty` when the process ended at the same
+  moment, because the driver was still recording the exit in the directory it
+  was removing. The exit is now recorded before the removal can start
+  ([#196](https://github.com/dsb-labs/takt/pull/196)).
 
 ## v0.11.1 - 2026-10-04
 
