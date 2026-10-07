@@ -203,6 +203,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The specification is well-formed but names a runtime the server cannot
@@ -509,6 +511,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -558,6 +562,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -609,6 +615,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -668,6 +676,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The specification is well-formed but names a runtime the server cannot
@@ -827,6 +837,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "412":
           $ref: "#/components/responses/PreconditionFailed"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1061,6 +1073,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "412":
           $ref: "#/components/responses/PreconditionFailed"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1252,6 +1266,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "412":
           $ref: "#/components/responses/PreconditionFailed"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1459,6 +1475,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "412":
           $ref: "#/components/responses/PreconditionFailed"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1629,6 +1647,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1703,6 +1723,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1943,6 +1965,8 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "412":
           $ref: "#/components/responses/PreconditionFailed"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1980,6 +2004,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -2043,6 +2069,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -2180,7 +2208,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/GetReadinessResult"
         "503":
-          description: The server cannot currently do its job. The reasons say why.
+          description: |
+            The server cannot currently do its job. The reasons name the database
+            or the driver that is not answering. The error behind each is in the
+            server's log, not here, because the route is anonymous.
           content:
             application/json:
               schema:
@@ -2380,6 +2411,13 @@ components:
 
     NotFound:
       description: Nothing exists with the given name.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    PayloadTooLarge:
+      description: The request body is larger than the server reads.
       content:
         application/json:
           schema:
@@ -4838,6 +4876,9 @@ components:
           description: Whether the database and every configured driver answered.
         reasons:
           type: array
-          description: Why the server is not ready. Absent when it is.
+          description: |
+            What is not answering, one of `database: not answering`, `driver
+            <name>: not observed yet` and `driver <name>: not answering`. Absent
+            when the server is ready.
           items:
             type: string
