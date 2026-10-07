@@ -12,6 +12,9 @@ var (
 	// ErrNoCurrentKey is returned when the database records no current encryption
 	// key.
 	ErrNoCurrentKey = errors.New("no current encryption key")
+	// ErrSecretsSealed is returned when the current key cannot be replaced because
+	// secrets are sealed under it.
+	ErrSecretsSealed = errors.New("secrets are sealed under the current encryption key")
 )
 
 type (
@@ -114,4 +117,42 @@ func (r *EncryptionKeyRepository) Adopt(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+// Replace records the given key as the current one in place of the key recorded
+// now, which is how a server whose keyring lost the current key starts again when
+// nothing was sealed under it.
+//
+// Refused when any secret exists. A secret is sealed under the current key, so
+// replacing that key while one is held would leave the value unopenable and the
+// database saying otherwise. The count is taken inside the transaction, so a secret
+// set between the caller's check and here is refused rather than orphaned. The
+// replaced key's row is kept, demoted, the way a rekey keeps the key it retired.
+func (r *EncryptionKeyRepository) Replace(ctx context.Context, id string) error {
+	return transaction(ctx, r.db, func(ctx context.Context, tx *sql.Tx) error {
+		const (
+			countQ   = `SELECT count(*) FROM secret`
+			demoteQ  = `UPDATE encryption_key SET is_current = 0 WHERE is_current = 1`
+			promoteQ = `INSERT INTO encryption_key (id, is_current, created_at) VALUES (?, 1, ?)`
+		)
+
+		var count int
+		if err := tx.QueryRowContext(ctx, countQ).Scan(&count); err != nil {
+			return fmt.Errorf("failed to count secrets: %w", err)
+		}
+
+		if count > 0 {
+			return fmt.Errorf("%w: %d secrets", ErrSecretsSealed, count)
+		}
+
+		if _, err := tx.ExecContext(ctx, demoteQ); err != nil {
+			return fmt.Errorf("failed to retire the current encryption key: %w", err)
+		}
+
+		if _, err := tx.ExecContext(ctx, promoteQ, id, formatTime(time.Now().UTC())); err != nil {
+			return fmt.Errorf("failed to record the current encryption key: %w", err)
+		}
+
+		return nil
+	})
 }
