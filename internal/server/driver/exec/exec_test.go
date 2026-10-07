@@ -9,6 +9,7 @@ import (
 	"encoding/base32"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	osexec "os/exec"
@@ -756,6 +757,34 @@ func TestDriver_Logs(t *testing.T) {
 		var out bytes.Buffer
 		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 3}))
 		assert.Equal(t, "98\n99\n100\n", out.String())
+	})
+
+	t.Run("skips an attempt whose record has gone", func(t *testing.T) {
+		d, root := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one", "echo first"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		// A replacement removes the record of the attempt it replaced between the
+		// read listing it and reading it. The read has nothing to say for that
+		// attempt, which is not a failure of the read.
+		removed := 0
+		require.NoError(t, filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.Name() != "state.json" {
+				return err
+			}
+
+			removed++
+
+			return os.Remove(path)
+		}))
+		require.Positive(t, removed)
+
+		var out bytes.Buffer
+		require.NoError(t, d.Logs(t.Context(), &out, "example", driver.LogOptions{Tail: 10}))
+		assert.Empty(t, out.String())
 	})
 
 	t.Run("writes nothing for a workload it has never run", func(t *testing.T) {

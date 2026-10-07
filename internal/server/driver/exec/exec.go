@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -1307,7 +1308,10 @@ func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, optio
 			followRecord = r.path
 
 			followDir, err = d.output(id, r)
-			if err != nil {
+			switch {
+			case errors.Is(err, fs.ErrNotExist):
+				followRecord = ""
+			case err != nil:
 				return err
 			}
 		}
@@ -1318,9 +1322,16 @@ func (d *Driver) Logs(ctx context.Context, out io.Writer, workload string, optio
 	// Output lives in the workload's own tree, which is the one it writes to. Which
 	// file holds which attempt is the whole of the bookkeeping: the current one
 	// writes to outputFile, and a stop moves it aside to previousFile.
+	//
+	// A record can go between the listing and the read, when a replacement removes
+	// the attempt it described. There is nothing to read for it, as Observe already
+	// treats it, rather than a failure of the read.
 	for _, r := range records {
 		path, err := d.output(id, r)
-		if err != nil {
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			continue
+		case err != nil:
 			return err
 		}
 
