@@ -337,7 +337,9 @@ decision, made in the file only the operator writes.
 | `keys` | empty | The directory holding the keys secrets are encrypted with. |
 
 Empty puts the keyring at `keys/` inside the data directory. A key is generated on
-first start, 32 random bytes, readable only by the user running the server.
+first start, 32 random bytes, readable only by the user running the server. A
+directory that already exists must be readable by that user alone, or the server
+refuses to start.
 
 It is a directory rather than a single file because `takt admin rekey` writes a new
 key before anything points at it. Each key is named by an identifier the database

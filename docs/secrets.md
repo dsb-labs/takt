@@ -205,8 +205,9 @@ database:
 ```
 
 A key is generated on first start, 32 random bytes, readable only by the user running
-the server. Point `secrets.keys` somewhere else to keep the keyring off the same disk
-as the database. See [Configuration](configuration.md).
+the server. The directory must be readable by that user alone too, or the server
+refuses to start. Point `secrets.keys` somewhere else to keep the keyring off the same
+disk as the database. See [Configuration](configuration.md).
 
 Each key is named by an identifier, and the database records which key sealed each
 secret. That is what lets `takt admin rekey` write a new key before anything points
