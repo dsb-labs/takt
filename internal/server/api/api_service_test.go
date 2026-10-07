@@ -365,4 +365,5 @@ func doService(t *testing.T, svc *MockServiceService, method, target string, bod
 	middleware.Authenticate(nil)(mux).ServeHTTP(resp, req)
 
 	return resp
+		Logger:    logger,
 }

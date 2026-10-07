@@ -42,6 +42,8 @@ type (
 	// makes the set of them satisfy that interface. None of them has to know the
 	// others exist.
 	API struct {
+		logger *slog.Logger
+
 		*WorkloadAPI
 		*VolumeAPI
 		*ServiceAPI
@@ -57,6 +59,9 @@ type (
 
 	// The Config type contains fields used to construct an API.
 	Config struct {
+		// The logger used to record failures the response deliberately doesn't
+		// describe.
+		Logger *slog.Logger
 		// The endpoints serving workloads.
 		Workloads *WorkloadAPI
 		// The endpoints serving volumes.
@@ -90,6 +95,7 @@ func (e ErrorResponse) Error() string {
 // New returns an API serving each of the given resources.
 func New(config Config) *API {
 	return &API{
+		logger:      config.Logger.With("component", "api"),
 		WorkloadAPI: config.Workloads,
 		VolumeAPI:   config.Volumes,
 		ServiceAPI:  config.Services,
@@ -109,9 +115,19 @@ func New(config Config) *API {
 // The routes themselves come from the generated handler, which is mounted onto the
 // caller's mux rather than one of its own so that the server keeps ownership of
 // routing and can wrap the whole surface in its own middleware.
+//
+// The generated code answers a request it cannot decode, and a response it
+// cannot write, with a plain-text body of its own. Both are routed through the
+// API's own error shape instead, so a client decodes every failure the same way.
 func (a *API) Register(mux *http.ServeMux) {
-	api.HandlerWithOptions(api.NewStrictHandler(a, []api.StrictMiddlewareFunc{authorize}), api.StdHTTPServerOptions{
-		BaseRouter: mux,
+	handler := api.NewStrictHandlerWithOptions(a, []api.StrictMiddlewareFunc{authorize}, api.StrictHTTPServerOptions{
+		RequestErrorHandlerFunc:  a.requestError,
+		ResponseErrorHandlerFunc: a.responseError,
+	})
+
+	api.HandlerWithOptions(handler, api.StdHTTPServerOptions{
+		BaseRouter:       mux,
+		ErrorHandlerFunc: a.requestError,
 	})
 
 	// A path under the API prefix that no operation claims is answered in the
@@ -129,6 +145,32 @@ func (a *API) Register(mux *http.ServeMux) {
 	}
 }
 
+// requestError answers a request the generated code refused before it reached a
+// handler: a body it could not decode, or a parameter it could not parse.
+//
+// The error names what was wrong with the request and nothing about the server,
+// so it is passed on as it is. A body the middleware cut short is the one case
+// with a status of its own.
+func (a *API) requestError(w http.ResponseWriter, _ *http.Request, err error) {
+	if tooLarge, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("the request body is larger than %d bytes", tooLarge.Limit))
+
+		return
+	}
+
+	writeError(w, http.StatusBadRequest, err.Error())
+}
+
+// responseError answers a response the generated code could not write.
+//
+// Every handler returns a response object rather than an error, so what reaches
+// this is a response that failed to write itself before its status went out. A
+// failure after the status is the stream's own to end, which is what endStream
+// does.
+func (a *API) responseError(w http.ResponseWriter, _ *http.Request, err error) {
+	writeError(w, http.StatusInternalServerError, internalError(a.logger, "write the response", err))
+}
+
 // writeError writes an error response in the shape every other failure uses, so that
 // a rejection before the handler reads the same way to a client as one after it.
 func writeError(w http.ResponseWriter, status int, message string) {
@@ -136,6 +178,27 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	w.WriteHeader(status)
 
 	_ = json.NewEncoder(w).Encode(ErrorResponse{Status: status, Message: message})
+}
+
+// endStream ends a response whose status has already gone out and whose body
+// then failed to write.
+//
+// Nothing can be said to the client at this point: a status cannot be changed,
+// and an error written into the body would arrive as more log lines, more
+// records, or more archive. So the failure is logged here, where it has a reader,
+// and the connection is closed without the terminating chunk. A client reads that
+// as a response that broke off, which is what happened, rather than as one that
+// completed.
+//
+// The one failure that is not worth a warning is the caller going away. The
+// stream ends on the request's context in that case, and the write that failed
+// was into a connection nobody holds.
+func endStream(ctx context.Context, logger *slog.Logger, operation string, err error) {
+	if ctx.Err() == nil {
+		logger.With("error", err, "operation", operation).Warn("stream ended early")
+	}
+
+	panic(http.ErrAbortHandler)
 }
 
 // labelsOf reads the labels off a request body, which carries none as a nil pointer.

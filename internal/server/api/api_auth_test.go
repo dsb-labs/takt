@@ -42,7 +42,8 @@ func doAuth(t *testing.T, svc api.AuthService, oidc *api.OIDCRelyingParty, authe
 
 	mux := http.NewServeMux()
 	api.New(api.Config{
-		Auth: api.NewAuthAPI(api.AuthAPIConfig{Logger: logger, Auth: svc, OIDC: oidc}),
+		Logger: logger,
+		Auth:   api.NewAuthAPI(api.AuthAPIConfig{Logger: logger, Auth: svc, OIDC: oidc}),
 	}).Register(mux)
 
 	resp := httptest.NewRecorder()

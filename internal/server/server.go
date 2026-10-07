@@ -558,6 +558,7 @@ func Run(ctx context.Context, config Config) error {
 
 	mux := http.NewServeMux()
 	api.New(api.Config{
+		Logger:    logger,
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: volumeSvc}),
 		Services:  api.NewServiceAPI(api.ServiceAPIConfig{Logger: logger, Services: serviceSvc}),

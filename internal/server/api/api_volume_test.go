@@ -562,6 +562,7 @@ func doVolume(t *testing.T, svc *MockVolumeService, method, target string, body 
 	// come back as a routing failure rather than as the handler's answer.
 	mux := http.NewServeMux()
 	api.New(api.Config{
+		Logger:    logger,
 		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: NewMockWorkloadService(t)}),
 		Volumes:   api.NewVolumeAPI(api.VolumeAPIConfig{Logger: logger, Volumes: svc}),
 		Secrets:   api.NewSecretAPI(api.SecretAPIConfig{Logger: logger, Secrets: NewMockSecretService(t)}),
