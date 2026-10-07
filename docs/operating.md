@@ -38,6 +38,16 @@ and a login by authorization code is an exchange with the issuer as well. Where
 that cost matters, apply the limit in the proxy in front of takt. The proxy sees
 the client's address, which takt behind it does not.
 
+Three responses stay open for longer than a request: `takt workload logs
+--follow`, `takt service list --follow` and `takt admin backup`. A follow writes
+nothing while the workload or the services are quiet, and the server sends no
+heartbeat to fill the silence. A proxy that times out a response between two
+reads from the upstream ends a quiet follow, which the client reports as an
+unexpected end of the stream. Raise that timeout on the `/api/v1/` routes, or
+disable it for them. On nginx it is `proxy_read_timeout`, 60 seconds by
+default. Traefik does not time out a response in flight unless its
+`respondingTimeouts.writeTimeout` is set.
+
 Encrypting secrets does not change this. An attacker who can reach the API can apply
 a workload that reads any secret, because that is what a workload is for. What
 encryption protects is the database file and a backup of it. See
