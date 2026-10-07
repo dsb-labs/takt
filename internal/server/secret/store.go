@@ -15,6 +15,9 @@ var (
 	// ErrKeyNotFound is returned when the keyring holds no key with the given
 	// identifier.
 	ErrKeyNotFound = errors.New("encryption key not found")
+	// ErrDirectoryShared is returned when the keyring directory can be reached by
+	// someone other than its owner.
+	ErrDirectoryShared = errors.New("keyring directory is accessible to more than its owner")
 )
 
 // The extension every key file in a keyring carries.
@@ -35,10 +38,21 @@ type Store struct {
 // nothing is there.
 //
 // The directory is readable only by the user running the server. Anything that can
-// read it can read every secret takt holds.
+// read it can read every secret takt holds. A directory that already exists with a
+// wider mode is refused rather than narrowed, for the reason Read refuses a key
+// file: whoever could reach it has already had the chance.
 func NewStore(directory string) (*Store, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create keyring directory: %w", err)
+	}
+
+	info, err := os.Stat(directory)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read keyring directory: %w", err)
+	}
+
+	if mode := info.Mode().Perm(); mode&0o077 != 0 {
+		return nil, fmt.Errorf("%w: %s is %#o, want 0700", ErrDirectoryShared, directory, mode)
 	}
 
 	return &Store{directory: directory}, nil
@@ -77,9 +91,19 @@ func (s *Store) Create() (string, error) {
 
 	// The bytes are on disk before the identifier is returned, so a crash after this
 	// point leaves a key that can still be read rather than a name with nothing
-	// behind it.
+	// behind it. Syncing the file alone is not enough: its directory entry is what
+	// makes it findable by name, and that lives in the directory, which has to be
+	// synced on its own.
 	if err = f.Sync(); err != nil {
 		return "", fmt.Errorf("failed to flush encryption key: %w", err)
+	}
+
+	if err = f.Close(); err != nil {
+		return "", fmt.Errorf("failed to close encryption key: %w", err)
+	}
+
+	if err = syncDirectory(s.directory); err != nil {
+		return "", err
 	}
 
 	return id, nil
@@ -149,4 +173,20 @@ func (s *Store) Remove(id string) error {
 
 func (s *Store) path(id string) string {
 	return filepath.Join(s.directory, id+keyExtension)
+}
+
+// syncDirectory flushes the directory's entries to disk, so a file created in it
+// is reachable by name after a crash.
+func syncDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open keyring directory: %w", err)
+	}
+	defer dir.Close()
+
+	if err = dir.Sync(); err != nil {
+		return fmt.Errorf("failed to flush keyring directory: %w", err)
+	}
+
+	return nil
 }

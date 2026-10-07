@@ -185,6 +185,17 @@ func TestStore(t *testing.T) {
 		assert.DirExists(t, dir)
 	})
 
+	// The directory is what keeps the keys from other users. One that already
+	// exists with a wider mode has already been reachable, so it is refused rather
+	// than narrowed, the way a readable key file is.
+	t.Run("refuses a directory others can reach", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "keys")
+		require.NoError(t, os.Mkdir(dir, 0o755))
+
+		_, err := secret.NewStore(dir)
+		assert.ErrorIs(t, err, secret.ErrDirectoryShared)
+	})
+
 	t.Run("lists nothing in an empty keyring", func(t *testing.T) {
 		ids, err := newTestStore(t).List()
 		require.NoError(t, err)
