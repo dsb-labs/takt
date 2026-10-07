@@ -87,13 +87,20 @@ func (a *SystemAPI) GetHealth(_ context.Context, _ api.GetHealthRequestObject) (
 
 // GetReadiness reports whether the server can do its job: the database answers,
 // and every configured driver answered the most recent attempt to observe it.
+//
+// The reasons name what is not answering and no more. The route is anonymous,
+// and the errors behind it carry the paths of the database and of the daemon's
+// socket. The database error is logged here, where it has a reader. A driver's
+// is already in the log from the pass that recorded it.
 func (a *SystemAPI) GetReadiness(ctx context.Context, _ api.GetReadinessRequestObject) (api.GetReadinessResponseObject, error) {
 	var reasons []string
 
 	// A live ping rather than a cached answer, unlike the drivers: the database
 	// is a local file, so asking costs no more than remembering would.
 	if err := a.db.PingContext(ctx); err != nil {
-		reasons = append(reasons, fmt.Sprintf("database: %v", err))
+		a.logger.With("error", err).Warn("database did not answer the readiness probe")
+
+		reasons = append(reasons, "database: not answering")
 	}
 
 	for name, observation := range a.observer.Observations() {
@@ -101,7 +108,7 @@ func (a *SystemAPI) GetReadiness(ctx context.Context, _ api.GetReadinessRequestO
 		case observation.At.IsZero():
 			reasons = append(reasons, fmt.Sprintf("driver %s: not observed yet", name))
 		case observation.Error != "":
-			reasons = append(reasons, fmt.Sprintf("driver %s: %s", name, observation.Error))
+			reasons = append(reasons, fmt.Sprintf("driver %s: not answering", name))
 		}
 	}
 
