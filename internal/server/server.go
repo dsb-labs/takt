@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sys/unix"
 
 	"github.com/dsb-labs/takt/internal/server/api"
 	"github.com/dsb-labs/takt/internal/server/certificate"
@@ -36,6 +37,15 @@ import (
 	"github.com/dsb-labs/takt/internal/server/telemetry"
 	"github.com/dsb-labs/takt/internal/ui"
 	"github.com/dsb-labs/takt/pkg/manifest"
+)
+
+var (
+	// ErrDataDirectoryShared is returned when the data directory can be reached by
+	// someone other than its owner.
+	ErrDataDirectoryShared = errors.New("data directory is accessible to more than its owner")
+	// ErrDataDirectoryInUse is returned when another server holds the data
+	// directory.
+	ErrDataDirectoryInUse = errors.New("data directory is in use by another takt server")
 )
 
 // Run starts the takt server using the given configuration and blocks until the
@@ -89,6 +99,32 @@ func Run(ctx context.Context, config Config) error {
 		return fmt.Errorf("failed to create data directory: %w", err)
 	}
 
+	// MkdirAll leaves a directory that already exists alone, so the mode above
+	// says nothing about one an operator or a package made first. Refused rather
+	// than narrowed, for the reason a readable key file is: whoever could reach it
+	// has already had the chance, and tightening the mode would hide that.
+	if err = privateDirectory(config.Data.Directory); err != nil {
+		return err
+	}
+
+	// One server per data directory. SQLite keeps the database itself intact under
+	// two writers, but two reconcilers against one daemon would each adopt the
+	// other's processes, both would claim ports, and both would write under
+	// mounts/. Held for the life of the server, and released by the kernel if the
+	// process dies.
+	lock, err := lockDirectory(config.Data.Directory)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
+	// Nothing stops root from running the server, but every workload it starts
+	// would then be confined only by what the drivers drop, and the unit's own
+	// hardening assumes an unprivileged user.
+	if os.Geteuid() == 0 {
+		logger.Warn("running as root: the packaged unit runs the server as the takt user, and exec confinement assumes an unprivileged one")
+	}
+
 	db, err := database.Open(ctx, database.Config{
 		Logger:         logger,
 		Path:           config.DatabasePath(),
@@ -115,14 +151,9 @@ func Run(ctx context.Context, config Config) error {
 
 	encryptionKeys := database.NewEncryptionKeyRepository(db)
 
-	keyID, err := currentKey(ctx, keys, encryptionKeys)
+	keyID, key, err := currentKey(ctx, logger, keys, encryptionKeys)
 	if err != nil {
 		return err
-	}
-
-	key, err := keys.Read(keyID)
-	if err != nil {
-		return fmt.Errorf("failed to read the secret encryption key: %w", err)
 	}
 
 	cipher, err := secret.New(key)
@@ -754,28 +785,106 @@ func notify(state string) error {
 // keys — a rekey keeps the one it replaced, because that key still opens the backups
 // taken before it — so which of them seals what is a question only the rows can
 // answer.
-func currentKey(ctx context.Context, keys *secret.Store, recorded *database.EncryptionKeyRepository) (string, error) {
+func currentKey(ctx context.Context, logger *slog.Logger, keys *secret.Store, recorded *database.EncryptionKeyRepository) (string, []byte, error) {
 	current, err := recorded.Current(ctx)
 	switch {
-	case err == nil:
-		return current.ID, nil
-	case !errors.Is(err, database.ErrNoCurrentKey):
-		return "", fmt.Errorf("failed to read the current encryption key: %w", err)
+	case errors.Is(err, database.ErrNoCurrentKey):
+		return generateKey(ctx, keys, recorded.Adopt)
+	case err != nil:
+		return "", nil, fmt.Errorf("failed to read the current encryption key: %w", err)
 	}
 
-	// Written to the keyring before it is recorded. A key recorded with nothing
-	// behind it would leave every secret sealed under it unopenable, where a key
-	// nothing records is inert and swept later.
+	key, err := keys.Read(current.ID)
+	switch {
+	case errors.Is(err, secret.ErrKeyNotFound):
+		// A database restored from an archive taken without the keyring names a
+		// key this host never had. With nothing sealed under it the key opens
+		// nothing, so a fresh one costs nothing and lets the node start. With
+		// secrets sealed under it the only answer is the keyring's own backup,
+		// and Replace is what refuses the swap in that case.
+		id, key, err := generateKey(ctx, keys, recorded.Replace)
+		switch {
+		case errors.Is(err, database.ErrSecretsSealed):
+			return "", nil, fmt.Errorf("the current encryption key %s is not in the keyring at %s and secrets are sealed under it, restore the keyring from its backup: %w", current.ID, keys.Directory(), err)
+		case err != nil:
+			return "", nil, err
+		}
+
+		logger.With("key", current.ID, "replacement", id, "keyring", keys.Directory()).
+			Warn("the current encryption key is not in the keyring and nothing was sealed under it, so a new key was generated")
+
+		return id, key, nil
+	case err != nil:
+		return "", nil, fmt.Errorf("failed to read the secret encryption key: %w", err)
+	}
+
+	return current.ID, key, nil
+}
+
+// generateKey writes a new key to the keyring, records it through the given
+// function, and returns its identifier and bytes.
+//
+// Written to the keyring before it is recorded. A key recorded with nothing behind
+// it would leave every secret sealed under it unopenable, where a key nothing
+// records is inert and swept later.
+func generateKey(ctx context.Context, keys *secret.Store, record func(context.Context, string) error) (string, []byte, error) {
 	id, err := keys.Create()
 	if err != nil {
-		return "", fmt.Errorf("failed to generate a secret encryption key: %w", err)
+		return "", nil, fmt.Errorf("failed to generate a secret encryption key: %w", err)
 	}
 
-	if err = recorded.Adopt(ctx, id); err != nil {
-		return "", err
+	if err = record(ctx, id); err != nil {
+		return "", nil, err
 	}
 
-	return id, nil
+	key, err := keys.Read(id)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to read the secret encryption key: %w", err)
+	}
+
+	return id, key, nil
+}
+
+// privateDirectory refuses a directory that group or other can reach.
+func privateDirectory(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("failed to read data directory: %w", err)
+	}
+
+	if mode := info.Mode().Perm(); mode&0o077 != 0 {
+		return fmt.Errorf("%w: %s is %#o, want 0700", ErrDataDirectoryShared, path, mode)
+	}
+
+	return nil
+}
+
+// lockDirectory takes an exclusive lock on the data directory and returns the
+// file holding it, which the caller closes to release it.
+//
+// A lock file rather than the database, because the database is on its own locks
+// and busy timeout and would let the second server in. The lock is advisory and
+// per open file description, so it is held as long as the returned file is open
+// and no longer.
+func lockDirectory(directory string) (*os.File, error) {
+	path := filepath.Join(directory, "lock")
+
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open the data directory lock: %w", err)
+	}
+
+	err = unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+	switch {
+	case errors.Is(err, unix.EWOULDBLOCK):
+		f.Close()
+		return nil, fmt.Errorf("%w: %s", ErrDataDirectoryInUse, directory)
+	case err != nil:
+		f.Close()
+		return nil, fmt.Errorf("failed to lock the data directory: %w", err)
+	}
+
+	return f, nil
 }
 
 // hostNetworked returns the names of the workloads that share the host's network:
