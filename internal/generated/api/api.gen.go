@@ -832,7 +832,9 @@ type GetReadinessResult struct {
 	// Ready Whether the database and every configured driver answered.
 	Ready bool `json:"ready"`
 
-	// Reasons Why the server is not ready. Absent when it is.
+	// Reasons What is not answering, one of `database: not answering`, `driver
+	// <name>: not observed yet` and `driver <name>: not answering`. Absent
+	// when the server is ready.
 	Reasons *[]string `json:"reasons,omitempty"`
 }
 
@@ -2756,6 +2758,9 @@ type InternalServerError = ErrorResponse
 
 // NotFound The body returned for any unsuccessful request.
 type NotFound = ErrorResponse
+
+// PayloadTooLarge The body returned for any unsuccessful request.
+type PayloadTooLarge = ErrorResponse
 
 // PreconditionFailed The body returned for any unsuccessful request.
 type PreconditionFailed = ErrorResponse
@@ -9141,6 +9146,8 @@ type ApplyACLPolicyResponse struct {
 	JSON403 *Forbidden
 	// JSON412 the response for an HTTP 412 `application/json` response
 	JSON412 *PreconditionFailed
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers200 the parsed response headers for an HTTP 200 response
@@ -9172,6 +9179,11 @@ func (r ApplyACLPolicyResponse) GetJSON403() *Forbidden {
 // GetJSON412 returns the response for an HTTP 412 `application/json` response
 func (r ApplyACLPolicyResponse) GetJSON412() *PreconditionFailed {
 	return r.JSON412
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r ApplyACLPolicyResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -9215,6 +9227,8 @@ type InitACLResponse struct {
 	JSON201 *InitACLResult
 	// JSON409 the response for an HTTP 409 `application/json` response
 	JSON409 *ErrorResponse
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 }
@@ -9227,6 +9241,11 @@ func (r InitACLResponse) GetJSON201() *InitACLResult {
 // GetJSON409 returns the response for an HTTP 409 `application/json` response
 func (r InitACLResponse) GetJSON409() *ErrorResponse {
 	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r InitACLResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -9339,6 +9358,8 @@ type RekeyResponse struct {
 	JSON401 *Unauthorized
 	// JSON403 the response for an HTTP 403 `application/json` response
 	JSON403 *Forbidden
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers401 the parsed response headers for an HTTP 401 response
@@ -9358,6 +9379,11 @@ func (r RekeyResponse) GetJSON401() *Unauthorized {
 // GetJSON403 returns the response for an HTTP 403 `application/json` response
 func (r RekeyResponse) GetJSON403() *Forbidden {
 	return r.JSON403
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r RekeyResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -9551,6 +9577,8 @@ type LoginResponse struct {
 	JSON400 *BadRequest
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Unauthorized
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers200 the parsed response headers for an HTTP 200 response
@@ -9572,6 +9600,11 @@ func (r LoginResponse) GetJSON400() *BadRequest {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r LoginResponse) GetJSON401() *Unauthorized {
 	return r.JSON401
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r LoginResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -10130,6 +10163,8 @@ type SetSecretResponse struct {
 	JSON403 *Forbidden
 	// JSON412 the response for an HTTP 412 `application/json` response
 	JSON412 *PreconditionFailed
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers200 the parsed response headers for an HTTP 200 response
@@ -10168,6 +10203,11 @@ func (r SetSecretResponse) GetJSON403() *Forbidden {
 // GetJSON412 returns the response for an HTTP 412 `application/json` response
 func (r SetSecretResponse) GetJSON412() *PreconditionFailed {
 	return r.JSON412
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r SetSecretResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -10469,6 +10509,8 @@ type ApplyServiceResponse struct {
 	JSON403 *Forbidden
 	// JSON412 the response for an HTTP 412 `application/json` response
 	JSON412 *PreconditionFailed
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers200 the parsed response headers for an HTTP 200 response
@@ -10507,6 +10549,11 @@ func (r ApplyServiceResponse) GetJSON403() *Forbidden {
 // GetJSON412 returns the response for an HTTP 412 `application/json` response
 func (r ApplyServiceResponse) GetJSON412() *PreconditionFailed {
 	return r.JSON412
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r ApplyServiceResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -10862,6 +10909,8 @@ type CreateTokenResponse struct {
 	JSON401 *Unauthorized
 	// JSON403 the response for an HTTP 403 `application/json` response
 	JSON403 *Forbidden
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers401 the parsed response headers for an HTTP 401 response
@@ -10886,6 +10935,11 @@ func (r CreateTokenResponse) GetJSON401() *Unauthorized {
 // GetJSON403 returns the response for an HTTP 403 `application/json` response
 func (r CreateTokenResponse) GetJSON403() *Forbidden {
 	return r.JSON403
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r CreateTokenResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -11277,6 +11331,8 @@ type SetVariableResponse struct {
 	JSON403 *Forbidden
 	// JSON412 the response for an HTTP 412 `application/json` response
 	JSON412 *PreconditionFailed
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers200 the parsed response headers for an HTTP 200 response
@@ -11315,6 +11371,11 @@ func (r SetVariableResponse) GetJSON403() *Forbidden {
 // GetJSON412 returns the response for an HTTP 412 `application/json` response
 func (r SetVariableResponse) GetJSON412() *PreconditionFailed {
 	return r.JSON412
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r SetVariableResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -11623,6 +11684,8 @@ type ApplyVolumeResponse struct {
 	JSON403 *Forbidden
 	// JSON412 the response for an HTTP 412 `application/json` response
 	JSON412 *PreconditionFailed
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers200 the parsed response headers for an HTTP 200 response
@@ -11661,6 +11724,11 @@ func (r ApplyVolumeResponse) GetJSON403() *Forbidden {
 // GetJSON412 returns the response for an HTTP 412 `application/json` response
 func (r ApplyVolumeResponse) GetJSON412() *PreconditionFailed {
 	return r.JSON412
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r ApplyVolumeResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -11971,6 +12039,8 @@ type ApplyWorkloadResponse struct {
 	JSON409 *ErrorResponse
 	// JSON412 the response for an HTTP 412 `application/json` response
 	JSON412 *PreconditionFailed
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON422 the response for an HTTP 422 `application/json` response
 	JSON422 *ErrorResponse
 	// JSON500 the response for an HTTP 500 `application/json` response
@@ -12018,6 +12088,11 @@ func (r ApplyWorkloadResponse) GetJSON409() *ErrorResponse {
 // GetJSON412 returns the response for an HTTP 412 `application/json` response
 func (r ApplyWorkloadResponse) GetJSON412() *PreconditionFailed {
 	return r.JSON412
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r ApplyWorkloadResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON422 returns the response for an HTTP 422 `application/json` response
@@ -12082,6 +12157,8 @@ type DryRunWorkloadResponse struct {
 	JSON403 *Forbidden
 	// JSON409 the response for an HTTP 409 `application/json` response
 	JSON409 *ErrorResponse
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON422 the response for an HTTP 422 `application/json` response
 	JSON422 *ErrorResponse
 	// JSON500 the response for an HTTP 500 `application/json` response
@@ -12113,6 +12190,11 @@ func (r DryRunWorkloadResponse) GetJSON403() *Forbidden {
 // GetJSON409 returns the response for an HTTP 409 `application/json` response
 func (r DryRunWorkloadResponse) GetJSON409() *ErrorResponse {
 	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r DryRunWorkloadResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON422 returns the response for an HTTP 422 `application/json` response
@@ -12331,6 +12413,8 @@ type RestartWorkloadResponse struct {
 	JSON404 *NotFound
 	// JSON409 the response for an HTTP 409 `application/json` response
 	JSON409 *ErrorResponse
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers401 the parsed response headers for an HTTP 401 response
@@ -12360,6 +12444,11 @@ func (r RestartWorkloadResponse) GetJSON404() *NotFound {
 // GetJSON409 returns the response for an HTTP 409 `application/json` response
 func (r RestartWorkloadResponse) GetJSON409() *ErrorResponse {
 	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r RestartWorkloadResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -12414,6 +12503,8 @@ type StartWorkloadResponse struct {
 	JSON404 *NotFound
 	// JSON409 the response for an HTTP 409 `application/json` response
 	JSON409 *ErrorResponse
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers401 the parsed response headers for an HTTP 401 response
@@ -12443,6 +12534,11 @@ func (r StartWorkloadResponse) GetJSON404() *NotFound {
 // GetJSON409 returns the response for an HTTP 409 `application/json` response
 func (r StartWorkloadResponse) GetJSON409() *ErrorResponse {
 	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r StartWorkloadResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -12497,6 +12593,8 @@ type StopWorkloadResponse struct {
 	JSON404 *NotFound
 	// JSON409 the response for an HTTP 409 `application/json` response
 	JSON409 *ErrorResponse
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *PayloadTooLarge
 	// JSON500 the response for an HTTP 500 `application/json` response
 	JSON500 *InternalServerError
 	// Headers401 the parsed response headers for an HTTP 401 response
@@ -12526,6 +12624,11 @@ func (r StopWorkloadResponse) GetJSON404() *NotFound {
 // GetJSON409 returns the response for an HTTP 409 `application/json` response
 func (r StopWorkloadResponse) GetJSON409() *ErrorResponse {
 	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r StopWorkloadResponse) GetJSON413() *PayloadTooLarge {
+	return r.JSON413
 }
 
 // GetJSON500 returns the response for an HTTP 500 `application/json` response
@@ -14130,6 +14233,13 @@ func ParseApplyACLPolicyResponse(rsp *http.Response) (*ApplyACLPolicyResponse, e
 		}
 		response.JSON412 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -14192,6 +14302,13 @@ func ParseInitACLResponse(rsp *http.Response) (*InitACLResponse, error) {
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -14292,6 +14409,13 @@ func ParseRekeyResponse(rsp *http.Response) (*RekeyResponse, error) {
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -14475,6 +14599,13 @@ func ParseLoginResponse(rsp *http.Response) (*LoginResponse, error) {
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -15014,6 +15145,13 @@ func ParseSetSecretResponse(rsp *http.Response) (*SetSecretResponse, error) {
 		}
 		response.JSON412 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -15328,6 +15466,13 @@ func ParseApplyServiceResponse(rsp *http.Response) (*ApplyServiceResponse, error
 			return nil, err
 		}
 		response.JSON412 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -15661,6 +15806,13 @@ func ParseCreateTokenResponse(rsp *http.Response) (*CreateTokenResponse, error) 
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -16035,6 +16187,13 @@ func ParseSetVariableResponse(rsp *http.Response) (*SetVariableResponse, error) 
 		}
 		response.JSON412 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -16353,6 +16512,13 @@ func ParseApplyVolumeResponse(rsp *http.Response) (*ApplyVolumeResponse, error) 
 			return nil, err
 		}
 		response.JSON412 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -16680,6 +16846,13 @@ func ParseApplyWorkloadResponse(rsp *http.Response) (*ApplyWorkloadResponse, err
 		}
 		response.JSON412 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest ErrorResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -16787,6 +16960,13 @@ func ParseDryRunWorkloadResponse(rsp *http.Response) (*DryRunWorkloadResponse, e
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
 		var dest ErrorResponse
@@ -17010,6 +17190,13 @@ func ParseRestartWorkloadResponse(rsp *http.Response) (*RestartWorkloadResponse,
 		}
 		response.JSON409 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -17084,6 +17271,13 @@ func ParseStartWorkloadResponse(rsp *http.Response) (*StartWorkloadResponse, err
 		}
 		response.JSON409 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -17157,6 +17351,13 @@ func ParseStopWorkloadResponse(rsp *http.Response) (*StopWorkloadResponse, error
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest PayloadTooLarge
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest InternalServerError
@@ -19188,6 +19389,8 @@ type InternalServerErrorJSONResponse ErrorResponse
 
 type NotFoundJSONResponse ErrorResponse
 
+type PayloadTooLargeJSONResponse ErrorResponse
+
 type PreconditionFailedJSONResponse ErrorResponse
 
 type UnauthorizedResponseHeaders struct {
@@ -19369,6 +19572,20 @@ func (response ApplyACLPolicy412JSONResponse) VisitApplyACLPolicyResponse(w http
 	return err
 }
 
+type ApplyACLPolicy413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response ApplyACLPolicy413JSONResponse) VisitApplyACLPolicyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ApplyACLPolicy500JSONResponse struct {
 	InternalServerErrorJSONResponse
 }
@@ -19417,6 +19634,20 @@ func (response InitACL409JSONResponse) VisitInitACLResponse(w http.ResponseWrite
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type InitACL413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response InitACL413JSONResponse) VisitInitACLResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -19561,6 +19792,20 @@ func (response Rekey403JSONResponse) VisitRekeyResponse(w http.ResponseWriter) e
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Rekey413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response Rekey413JSONResponse) VisitRekeyResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -19772,6 +20017,20 @@ func (response Login401JSONResponse) VisitLoginResponse(w http.ResponseWriter) e
 		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
 	}
 	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type Login413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response Login413JSONResponse) VisitLoginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -20434,6 +20693,20 @@ func (response SetSecret412JSONResponse) VisitSetSecretResponse(w http.ResponseW
 	return err
 }
 
+type SetSecret413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response SetSecret413JSONResponse) VisitSetSecretResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SetSecret500JSONResponse struct {
 	InternalServerErrorJSONResponse
 }
@@ -20869,6 +21142,20 @@ func (response ApplyService412JSONResponse) VisitApplyServiceResponse(w http.Res
 	return err
 }
 
+type ApplyService413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response ApplyService413JSONResponse) VisitApplyServiceResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ApplyService500JSONResponse struct {
 	InternalServerErrorJSONResponse
 }
@@ -21237,6 +21524,20 @@ func (response CreateToken403JSONResponse) VisitCreateTokenResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateToken413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response CreateToken413JSONResponse) VisitCreateTokenResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -21745,6 +22046,20 @@ func (response SetVariable412JSONResponse) VisitSetVariableResponse(w http.Respo
 	return err
 }
 
+type SetVariable413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response SetVariable413JSONResponse) VisitSetVariableResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type SetVariable500JSONResponse struct {
 	InternalServerErrorJSONResponse
 }
@@ -22148,6 +22463,20 @@ func (response ApplyVolume412JSONResponse) VisitApplyVolumeResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(412)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ApplyVolume413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response ApplyVolume413JSONResponse) VisitApplyVolumeResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -22573,6 +22902,20 @@ func (response ApplyWorkload412JSONResponse) VisitApplyWorkloadResponse(w http.R
 	return err
 }
 
+type ApplyWorkload413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response ApplyWorkload413JSONResponse) VisitApplyWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ApplyWorkload422JSONResponse ErrorResponse
 
 func (response ApplyWorkload422JSONResponse) VisitApplyWorkloadResponse(w http.ResponseWriter) error {
@@ -22695,6 +23038,20 @@ func (response DryRunWorkload409JSONResponse) VisitDryRunWorkloadResponse(w http
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DryRunWorkload413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response DryRunWorkload413JSONResponse) VisitDryRunWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -23004,6 +23361,20 @@ func (response RestartWorkload409JSONResponse) VisitRestartWorkloadResponse(w ht
 	return err
 }
 
+type RestartWorkload413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response RestartWorkload413JSONResponse) VisitRestartWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RestartWorkload500JSONResponse struct {
 	InternalServerErrorJSONResponse
 }
@@ -23102,6 +23473,20 @@ func (response StartWorkload409JSONResponse) VisitStartWorkloadResponse(w http.R
 	return err
 }
 
+type StartWorkload413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response StartWorkload413JSONResponse) VisitStartWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type StartWorkload500JSONResponse struct {
 	InternalServerErrorJSONResponse
 }
@@ -23196,6 +23581,20 @@ func (response StopWorkload409JSONResponse) VisitStopWorkloadResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type StopWorkload413JSONResponse struct{ PayloadTooLargeJSONResponse }
+
+func (response StopWorkload413JSONResponse) VisitStopWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
