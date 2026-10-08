@@ -455,9 +455,9 @@ func (s *WorkloadService) Delete(ctx context.Context, name string, force bool) (
 		return Workload{}, fmt.Errorf("failed to mark workload for deletion: %w", err)
 	}
 
-	// Rehashed once the workload is on its way out, for the reason a deleted secret
-	// rehashes what read it: what those workloads were started against no longer
-	// describes what takt holds, and the hash is how that is reported.
+	// Rehashed once the workload is on its way out: what those workloads were
+	// started against no longer describes what takt holds, and the hash is how that
+	// is reported.
 	s.rehashAll(ctx, name, referencing, event.AddressRemoved)
 
 	s.logger.With("workload", name).Debug("workload marked for deletion")

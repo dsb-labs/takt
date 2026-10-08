@@ -258,8 +258,11 @@ func (s *VariableService) List(ctx context.Context, queries ...string) ([]Variab
 // Delete removes the variable with the given name.
 //
 // A variable a workload references is refused unless force is set, and the error
-// names the workloads reading it. Forcing it through leaves those workloads running:
-// they find out at their next start, which is when the value is actually needed.
+// names the workloads reading it. Forcing it through leaves those workloads running,
+// and nothing is rehashed: a moved hash would have the reconciler replace each
+// instance with one that cannot start, one slot per pass, until the whole workload
+// was down. They find out at their next start, which is when the value is actually
+// needed, and a variable created again under the name rehashes them onto it.
 func (s *VariableService) Delete(ctx context.Context, name string, force bool) error {
 	usedBy, err := s.variables.UsedBy(ctx, name)
 	if err != nil {
@@ -275,13 +278,6 @@ func (s *VariableService) Delete(ctx context.Context, name string, force bool) e
 	case errors.Is(err, database.ErrVariableNotFound):
 		return fmt.Errorf("%w: %s", ErrVariableNotFound, name)
 	case err != nil:
-		return err
-	}
-
-	// The workloads that referenced it are rehashed for the same reason a change
-	// rehashes them: what they were started against no longer describes what takt
-	// holds, and the hash is how that is reported.
-	if err = s.redeploy(ctx, name); err != nil {
 		return err
 	}
 
@@ -336,16 +332,10 @@ func changedVariable(err error) error {
 	return err
 }
 
-// redeploy moves the specification hash of every workload referencing the named
-// variable, so that the reconciler replaces the instances reading the old value, and
-// records against each one that the variable changed.
-func (s *VariableService) redeploy(ctx context.Context, name string) error {
-	return s.rehashReaders(ctx, name, event.VariableChanged)
-}
-
-// rehashReaders rehashes every workload referencing the named variable, recording
-// the given reason against each one first. An empty reason records nothing, for a
-// set that changed no value and rehashes only to repair a reader left behind.
+// rehashReaders rehashes every workload referencing the named variable, so that the
+// reconciler replaces the instances reading the old value, recording the given reason
+// against each one first. An empty reason records nothing, for a set that changed no
+// value and rehashes only to repair a reader left behind.
 func (s *VariableService) rehashReaders(ctx context.Context, name string, reason event.Reason) error {
 	if s.rehash == nil {
 		return nil
