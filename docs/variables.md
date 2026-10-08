@@ -111,9 +111,12 @@ takt variable set log-level info
 takt workload get example | jq '.Version'
 ```
 
-Setting a variable to the value it already holds does nothing, so nothing is
+Setting a variable to the value it already holds writes nothing, so nothing is
 redeployed. A configuration management tool that sets every variable on every run
-therefore does not restart the fleet each time.
+therefore does not restart the fleet each time. The workloads reading the variable
+are still rehashed, which moves nothing when they are up to date. A change whose
+rehash failed, because a `pull: always` reader's registry did not answer, is finished
+by setting the value again once it does.
 
 What reaches the hash is the value itself, where a secret contributes a revision
 instead. A hash over a secret's value would let a guess at it be tested, and the hash

@@ -175,7 +175,8 @@ replaced. The digest is resolved when the server computes the hash: an apply, a
 changed secret or variable, or a port reallocation. Re-applying the manifest is how a
 rebuilt tag is picked up on demand. One cost follows from this. Each of those
 operations is a registry round-trip, and fails when the registry is unreachable —
-including changing a secret that a `pull: always` workload reads.
+including changing a secret that a `pull: always` workload reads. The value is stored
+by then, and setting it again once the registry answers redeploys the workload.
 
 A server with `docker.digest-interval` set also asks the registry on that interval
 what each pulled tag resolves to. A `pull: always` workload whose tag has moved on is
