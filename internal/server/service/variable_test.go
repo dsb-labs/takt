@@ -296,17 +296,18 @@ func TestVariableService_Set(t *testing.T) {
 		assert.Equal(t, []string{"two", "three"}, rehashed)
 	})
 
-	t.Run("redeploys nothing when the value is unchanged", func(t *testing.T) {
-		variables := NewMockVariableRepository(t)
+	t.Run("rehashes the readers without an event when the value is unchanged", func(t *testing.T) {
+		variables, events := NewMockVariableRepository(t), NewMockWorkloadEventRepository(t)
 
 		variables.EXPECT().Get(mock.Anything, "log-level").
 			Return(database.Variable{Name: "log-level", Value: "debug"}, nil).Once()
-		variables.EXPECT().UsedBy(mock.Anything, "log-level").Return([]string{"example"}, nil).Once()
+		variables.EXPECT().UsedBy(mock.Anything, "log-level").Return([]string{"one", "two"}, nil).Twice()
 
 		var rehashed []string
 		svc := service.NewVariableService(service.VariableServiceConfig{
 			Logger:    newTestLogger(t),
 			Variables: variables,
+			Events:    events,
 			Rehash: func(_ context.Context, workload string) error {
 				rehashed = append(rehashed, workload)
 
@@ -314,11 +315,14 @@ func TestVariableService_Set(t *testing.T) {
 			},
 		})
 
-		// The single UsedBy is the one hydrate makes for the response. Nothing is
-		// rehashed, because nothing about what the workload reads moved.
+		// Nothing is written, which the mock asserts by expecting no Upsert, and
+		// nothing is recorded, which the events mock asserts the same way. The
+		// readers are still rehashed: a rehash that failed when the value last
+		// changed left its reader on the old value, and setting the value again is
+		// how that is repaired.
 		_, _, err := svc.Set(t.Context(), manifest.Variable{Name: "log-level", Value: "debug"}, 0)
 		require.NoError(t, err)
-		assert.Empty(t, rehashed)
+		assert.Equal(t, []string{"one", "two"}, rehashed)
 	})
 
 	t.Run("refuses a name takt would not accept", func(t *testing.T) {

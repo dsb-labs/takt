@@ -169,10 +169,13 @@ func NewSecretService(config SecretServiceConfig) *SecretService {
 // Set stores the given secret, returning it as stored and whether it was newly
 // created.
 //
-// Setting a secret to the value it already holds is a no-op: the revision stays put,
-// so nothing reading it is redeployed. That mirrors applying an unchanged manifest,
-// and it means a configuration management tool that sets every secret on every run
-// does not restart the fleet each time.
+// Setting a secret to the value it already holds writes nothing: the revision stays
+// put, so nothing reading it is redeployed. That mirrors applying an unchanged
+// manifest, and it means a configuration management tool that sets every secret on
+// every run does not restart the fleet each time. The readers are still rehashed,
+// which moves nothing when they are up to date and repairs a reader whose rehash
+// failed the last time the value changed, so setting the value again is how such a
+// rotation is finished.
 //
 // A value that did change moves the revision, and every workload referencing the
 // secret is rehashed so the reconciler replaces its instances.
@@ -202,10 +205,16 @@ func (s *SecretService) Set(ctx context.Context, spec manifest.Secret, ifMatch i
 	// registry round trip, and a rekey waiting behind that would hold up every
 	// workload start on the node.
 	if moved {
-		if err = s.redeploy(ctx, name); err != nil {
-			return Secret{}, false, err
-		}
+		err = s.redeploy(ctx, name)
+	} else {
+		err = s.rehashReaders(ctx, name, "")
+	}
 
+	if err != nil {
+		return Secret{}, false, err
+	}
+
+	if moved {
 		s.logger.With("secret", name, "created", created).Info("secret set")
 	}
 
@@ -425,8 +434,16 @@ func (s *SecretService) unchanged(name string, stored, value []byte) bool {
 }
 
 // redeploy moves the specification hash of every workload referencing the named
-// secret, so that the reconciler replaces the instances reading the old value.
+// secret, so that the reconciler replaces the instances reading the old value, and
+// records against each one that the secret changed.
 func (s *SecretService) redeploy(ctx context.Context, name string) error {
+	return s.rehashReaders(ctx, name, event.SecretChanged)
+}
+
+// rehashReaders rehashes every workload referencing the named secret, recording the
+// given reason against each one first. An empty reason records nothing, for a set
+// that changed no value and rehashes only to repair a reader left behind.
+func (s *SecretService) rehashReaders(ctx context.Context, name string, reason event.Reason) error {
 	if s.rehash == nil {
 		return nil
 	}
@@ -445,7 +462,9 @@ func (s *SecretService) redeploy(ctx context.Context, name string) error {
 	for _, workload := range usedBy {
 		// Recorded here rather than by the rehash, which recomputes against every
 		// value a workload reads and so cannot say which of them moved.
-		record(ctx, s.logger, s.events, workload, event.SecretChanged, event.Fields{Name: name})
+		if reason != "" {
+			record(ctx, s.logger, s.events, workload, reason, event.Fields{Name: name})
+		}
 
 		if err = s.rehash(ctx, workload); err != nil {
 			failed = append(failed, fmt.Errorf("failed to redeploy workload %s: %w", workload, err))
