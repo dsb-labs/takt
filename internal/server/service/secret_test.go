@@ -241,6 +241,41 @@ func TestSecretService_Set(t *testing.T) {
 		assert.Equal(t, []string{"two", "three"}, rehashed)
 	})
 
+	t.Run("rehashes the readers without an event when the value is unchanged", func(t *testing.T) {
+		secrets, events := NewMockSecretRepository(t), NewMockWorkloadEventRepository(t)
+		cipher := newTestCipher(t)
+
+		sealed, err := cipher.Seal("db-password", []byte("hunter2"))
+		require.NoError(t, err)
+
+		secrets.EXPECT().Get(mock.Anything, "db-password").
+			Return(database.Secret{Name: "db-password", Value: sealed, Revision: "rev-one"}, nil).Once()
+		secrets.EXPECT().UsedBy(mock.Anything, "db-password").
+			Return([]string{"one", "two"}, nil).Twice()
+
+		var rehashed []string
+		svc := service.NewSecretService(service.SecretServiceConfig{
+			Logger:  newTestLogger(t),
+			Secrets: secrets,
+			Cipher:  cipher,
+			Events:  events,
+			Rehash: func(_ context.Context, workload string) error {
+				rehashed = append(rehashed, workload)
+
+				return nil
+			},
+		})
+
+		// Nothing is written, which the mock asserts by expecting no Upsert, and
+		// nothing is recorded, which the events mock asserts the same way. The
+		// readers are still rehashed: a rehash that failed when the value last
+		// changed left its reader on the old value, and setting the value again is
+		// how that is repaired.
+		_, _, err = svc.Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, 0)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"one", "two"}, rehashed)
+	})
+
 	t.Run("releases the cipher lock before rehashing the readers", func(t *testing.T) {
 		secrets := NewMockSecretRepository(t)
 

@@ -114,10 +114,12 @@ func NewVariableService(config VariableServiceConfig) *VariableService {
 // Set stores the given variable, returning it as stored and whether it was newly
 // created.
 //
-// Setting a variable to the value it already holds is a no-op: nothing reading it is
-// redeployed. That mirrors applying an unchanged manifest, and it means a
-// configuration management tool that sets every variable on every run does not
-// restart the fleet each time.
+// Setting a variable to the value it already holds writes nothing, so nothing
+// reading it is redeployed. That mirrors applying an unchanged manifest, and it means
+// a configuration management tool that sets every variable on every run does not
+// restart the fleet each time. The readers are still rehashed, which moves nothing
+// when they are up to date and repairs a reader whose rehash failed the last time
+// the value changed, so setting the value again is how such a change is finished.
 //
 // A value that did change moves the hash of every workload referencing the variable,
 // so the reconciler replaces their instances.
@@ -147,23 +149,25 @@ func (s *VariableService) Set(ctx context.Context, spec manifest.Variable, ifMat
 	case err == nil && ifMatch != 0 && existing.Version != ifMatch:
 		return Variable{}, false, ErrVariableChanged
 	case err == nil && existing.Value == value:
-		if maps.Equal(existing.Labels, labels) {
-			variable, err := s.hydrate(ctx, existing)
-
-			return variable, false, err
-		}
+		stored := existing
 
 		// The labels moved and the value did not. Written back through the same
 		// upsert, and nothing referencing the variable is redeployed: what redeploys
 		// a reader is the value it reads, and that is unchanged.
-		existing.Labels = labels
+		if !maps.Equal(existing.Labels, labels) {
+			existing.Labels = labels
 
-		relabelled, err := s.variables.Upsert(ctx, existing, ifMatch)
-		if err != nil {
-			return Variable{}, false, changedVariable(err)
+			stored, err = s.variables.Upsert(ctx, existing, ifMatch)
+			if err != nil {
+				return Variable{}, false, changedVariable(err)
+			}
 		}
 
-		variable, err := s.hydrate(ctx, relabelled)
+		if err = s.rehashReaders(ctx, name, ""); err != nil {
+			return Variable{}, false, err
+		}
+
+		variable, err := s.hydrate(ctx, stored)
 
 		return variable, false, err
 	}
@@ -193,7 +197,7 @@ func (s *VariableService) Set(ctx context.Context, spec manifest.Variable, ifMat
 
 	// The workloads reading it are rehashed after the value has landed, so nothing is
 	// redeployed to pick up a value that failed to store.
-	if err = s.redeployAll(ctx, name, usedBy); err != nil {
+	if err = s.redeployAll(ctx, name, usedBy, event.VariableChanged); err != nil {
 		return Variable{}, false, err
 	}
 
@@ -333,8 +337,16 @@ func changedVariable(err error) error {
 }
 
 // redeploy moves the specification hash of every workload referencing the named
-// variable, so that the reconciler replaces the instances reading the old value.
+// variable, so that the reconciler replaces the instances reading the old value, and
+// records against each one that the variable changed.
 func (s *VariableService) redeploy(ctx context.Context, name string) error {
+	return s.rehashReaders(ctx, name, event.VariableChanged)
+}
+
+// rehashReaders rehashes every workload referencing the named variable, recording
+// the given reason against each one first. An empty reason records nothing, for a
+// set that changed no value and rehashes only to repair a reader left behind.
+func (s *VariableService) rehashReaders(ctx context.Context, name string, reason event.Reason) error {
 	if s.rehash == nil {
 		return nil
 	}
@@ -344,12 +356,13 @@ func (s *VariableService) redeploy(ctx context.Context, name string) error {
 		return err
 	}
 
-	return s.redeployAll(ctx, name, usedBy)
+	return s.redeployAll(ctx, name, usedBy, reason)
 }
 
 // redeployAll rehashes each of the given workloads, which reference the named
-// variable, for a caller that has already read them.
-func (s *VariableService) redeployAll(ctx context.Context, name string, usedBy []string) error {
+// variable, for a caller that has already read them. The reason is recorded against
+// each one first, unless it is empty.
+func (s *VariableService) redeployAll(ctx context.Context, name string, usedBy []string, reason event.Reason) error {
 	if s.rehash == nil {
 		return nil
 	}
@@ -363,7 +376,9 @@ func (s *VariableService) redeployAll(ctx context.Context, name string, usedBy [
 	for _, workload := range usedBy {
 		// Recorded here rather than by the rehash, which recomputes against every
 		// value a workload reads and so cannot say which of them moved.
-		record(ctx, s.logger, s.events, workload, event.VariableChanged, event.Fields{Name: name})
+		if reason != "" {
+			record(ctx, s.logger, s.events, workload, reason, event.Fields{Name: name})
+		}
 
 		if err := s.rehash(ctx, workload); err != nil {
 			failed = append(failed, fmt.Errorf("failed to redeploy workload %s: %w", workload, err))
