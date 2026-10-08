@@ -757,9 +757,10 @@ the fleet.
 **A label is as readable as the secret's name.** The value is not, and a label is no
 place to put one.
 
-Setting a secret to the value it already holds does nothing, so a script that sets
+Setting a secret to the value it already holds writes nothing, so a script that sets
 every secret on every run does not restart the workloads reading them. A value that
-did change replaces those workloads, and reaches them as they start.
+did change replaces those workloads, and reaches them as they start. Setting the same
+value again finishes a rotation whose redeploy failed the first time.
 
 A secret carries an entity tag the same way a workload does, and `--if-match` reads
 the same. See [workload apply](#workload-apply). The tag moves on a relabel too,
@@ -837,9 +838,10 @@ both an argument and `--from-file` is refused.
 labels the variable had. Labelling one replaces no workload: what redeploys a reader
 is the value it reads.
 
-Setting a variable to the value it already holds does nothing, so a script that sets
+Setting a variable to the value it already holds writes nothing, so a script that sets
 every variable on every run does not restart the workloads reading them. A value that
-did change replaces those workloads, and reaches them as they start.
+did change replaces those workloads, and reaches them as they start. Setting the same
+value again finishes a change whose redeploy failed the first time.
 
 A variable carries an entity tag the same way a workload does, and `--if-match` reads
 the same. See [workload apply](#workload-apply).

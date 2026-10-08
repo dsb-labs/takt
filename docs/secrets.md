@@ -151,9 +151,12 @@ printf %s hunter3 | takt secret set db-password
 takt workload get example | jq '.Version'
 ```
 
-Setting a secret to the value it already holds does nothing. The revision stays put,
+Setting a secret to the value it already holds writes nothing. The revision stays put,
 so nothing is redeployed. A configuration management tool that sets every secret on
-every run therefore does not restart the fleet each time.
+every run therefore does not restart the fleet each time. The workloads reading the
+secret are still rehashed, which moves nothing when they are up to date. A rotation
+whose rehash failed, because a `pull: always` reader's registry did not answer, is
+finished by setting the value again once it does.
 
 The revision is random rather than a counter, and says nothing about the value. It is
 reported so that a rotation can be confirmed without the value being shown.
