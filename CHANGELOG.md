@@ -173,6 +173,24 @@ describes how an entry is written.
   moment, because the driver was still recording the exit in the directory it
   was removing. The exit is now recorded before the removal can start
   ([#196](https://github.com/dsb-labs/takt/pull/196)).
+- `takt secret delete --force` and `takt variable delete --force` took the
+  workloads reading the value down, one instance per pass, because the delete
+  moved their hash and the replacement could not resolve the name. The docs said
+  the readers keep running until something replaces them, and now they do
+  ([#165](https://github.com/dsb-labs/takt/issues/165),
+  [#197](https://github.com/dsb-labs/takt/pull/197)).
+- A secret or variable change whose redeploy failed, as it does when a
+  `pull: always` reader's registry is unreachable, left the reader on the old
+  value with no way back short of applying its manifest again. Setting the same
+  value again now rehashes the readers, without writing anything or recording an
+  event, so the rotation finishes once the registry answers
+  ([#165](https://github.com/dsb-labs/takt/issues/165),
+  [#197](https://github.com/dsb-labs/takt/pull/197)).
+- A secret change held the encryption lock while it redeployed every reader, so
+  a `takt admin rekey` waiting on it stopped every workload start on the node
+  until the slowest registry round trip returned. The lock is now released before
+  the redeploy ([#165](https://github.com/dsb-labs/takt/issues/165),
+  [#197](https://github.com/dsb-labs/takt/pull/197)).
 
 ## v0.11.1 - 2026-10-04
 
