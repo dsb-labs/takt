@@ -207,7 +207,7 @@ func (s *Suite) TestDeletingASecretInUseIsRefused() {
 	_, _, err = s.client.Apply(s.ctx(), spec)
 	s.Require().NoError(err)
 
-	s.awaitState(name, client.WorkloadStateRunning)
+	instance := s.awaitInstance(name)
 
 	err = s.client.DeleteSecret(s.ctx(), secret)
 	s.Require().ErrorIs(err, client.ErrSecretInUse)
@@ -225,13 +225,25 @@ func (s *Suite) TestDeletingASecretInUseIsRefused() {
 	_, err = s.client.GetSecret(s.ctx(), secret)
 	s.ErrorIs(err, client.ErrSecretNotFound)
 
-	// Re-creating it recovers the workload on its own, which is what the link
-	// outliving the secret is for.
+	// The workload keeps the instance it has. A forced delete that moved its hash
+	// would have the reconciler replace the instance with one that cannot start,
+	// and outlasting several passes is what proves it does not.
+	s.Never(func() bool {
+		workload, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(workload.Instances) != 1 {
+			return true
+		}
+
+		return workload.Instances[0].ID != instance || workload.Instances[0].State != client.InstanceStateRunning
+	}, 3*time.Second, 500*time.Millisecond, "a forced delete replaced the workload reading the secret")
+
+	// Re-creating it redeploys the workload onto the new value on its own, which is
+	// what the link outliving the secret is for.
 	_, created, err := s.client.SetSecret(s.ctx(), manifest.Secret{Name: secret, Value: []byte("restored")})
 	s.Require().NoError(err)
 	s.True(created)
 
-	s.awaitState(name, client.WorkloadStateRunning)
+	s.awaitInstanceOtherThan(name, instance)
 }
 
 // TestWorkloadReadingAnUnknownSecretIsRejected covers the apply being refused, so a
