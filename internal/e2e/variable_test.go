@@ -188,7 +188,7 @@ func (s *Suite) TestDeletingAVariableInUseIsRefused() {
 	_, _, err = s.client.Apply(s.ctx(), spec)
 	s.Require().NoError(err)
 
-	s.awaitState(name, client.WorkloadStateRunning)
+	instance := s.awaitInstance(name)
 
 	err = s.client.DeleteVariable(s.ctx(), variable)
 	s.Require().ErrorIs(err, client.ErrVariableInUse)
@@ -204,11 +204,24 @@ func (s *Suite) TestDeletingAVariableInUseIsRefused() {
 	_, err = s.client.GetVariable(s.ctx(), variable)
 	s.ErrorIs(err, client.ErrVariableNotFound)
 
-	// Re-creating it recovers the workload, which had been left unable to start.
-	_, _, err = s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "held"})
+	// The workload keeps the instance it has. A forced delete that moved its hash
+	// would have the reconciler replace the instance with one that cannot start,
+	// and outlasting several passes is what proves it does not.
+	s.Never(func() bool {
+		workload, err := s.client.Get(s.ctx(), name)
+		if err != nil || len(workload.Instances) != 1 {
+			return true
+		}
+
+		return workload.Instances[0].ID != instance || workload.Instances[0].State != client.InstanceStateRunning
+	}, 3*time.Second, 500*time.Millisecond, "a forced delete replaced the workload reading the variable")
+
+	// Re-creating it redeploys the workload onto the new value on its own, which is
+	// what the link outliving the variable is for.
+	_, _, err = s.client.SetVariable(s.ctx(), manifest.Variable{Name: variable, Value: "restored"})
 	s.Require().NoError(err)
 
-	s.awaitState(name, client.WorkloadStateRunning)
+	s.awaitInstanceOtherThan(name, instance)
 }
 
 // TestWorkloadReadingAnUnknownVariableIsRejected covers the apply being refused rather
