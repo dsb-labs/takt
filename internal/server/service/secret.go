@@ -187,59 +187,83 @@ func (s *SecretService) Set(ctx context.Context, spec manifest.Secret, ifMatch i
 		return Secret{}, false, fmt.Errorf("%w: name must be lowercase alphanumeric, optionally separated by dashes", ErrInvalidSecret)
 	}
 
-	// Held across the comparison, the sealing and the write, so a value cannot be
-	// sealed under one key and recorded against another. A rekey running at the same
-	// time waits for this rather than overtaking it.
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	if err := manifest.ValidateLabels(labels); err != nil {
 		return Secret{}, false, fmt.Errorf("%w: %v", ErrInvalidSecret, err)
 	}
+
+	stored, created, moved, err := s.store(ctx, name, value, labels, ifMatch)
+	if err != nil {
+		return Secret{}, false, err
+	}
+
+	// The workloads reading it are rehashed after the value has landed, so nothing is
+	// redeployed to pick up a value that failed to store. The cipher lock is released
+	// by then: a rehash is a transaction per reader and, for a pull-always reader, a
+	// registry round trip, and a rekey waiting behind that would hold up every
+	// workload start on the node.
+	if moved {
+		if err = s.redeploy(ctx, name); err != nil {
+			return Secret{}, false, err
+		}
+
+		s.logger.With("secret", name, "created", created).Info("secret set")
+	}
+
+	secret, err := s.hydrate(ctx, stored)
+
+	return secret, created, err
+}
+
+// store writes the secret under the cipher lock, returning the row as stored, whether
+// it was newly created and whether its revision moved.
+//
+// The lock is held across the comparison, the sealing and the write, so a value cannot
+// be sealed under one key and recorded against another. A rekey running at the same
+// time waits for this rather than overtaking it. Nothing that leaves the service
+// happens under it.
+func (s *SecretService) store(ctx context.Context, name string, value []byte, labels map[string]string, ifMatch int) (database.Secret, bool, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	existing, err := s.secrets.Get(ctx, name)
 	switch {
 	case errors.Is(err, database.ErrSecretNotFound) && ifMatch != 0:
 		// A conditional set names a version a secret that does not exist cannot
 		// be at.
-		return Secret{}, false, ErrSecretChanged
+		return database.Secret{}, false, false, ErrSecretChanged
 	case err != nil && !errors.Is(err, database.ErrSecretNotFound):
-		return Secret{}, false, fmt.Errorf("failed to load secret: %w", err)
+		return database.Secret{}, false, false, fmt.Errorf("failed to load secret: %w", err)
 	case err == nil && ifMatch != 0 && existing.Version != ifMatch:
-		return Secret{}, false, ErrSecretChanged
+		return database.Secret{}, false, false, ErrSecretChanged
 	case err == nil && s.unchanged(name, existing.Value, value):
 		if maps.Equal(existing.Labels, labels) {
-			secret, err := s.hydrate(ctx, existing)
-
-			return secret, false, err
+			return existing, false, false, nil
 		}
 
 		// The labels moved and the value did not. Written back through the same
 		// upsert, but under the revision the secret already holds: the revision is
 		// what says the value changed, and moving it for a label would replace every
-		// instance reading the secret. Nothing is redeployed for the same reason.
+		// instance reading the secret.
 		existing.Labels = labels
 
 		relabelled, err := s.secrets.Upsert(ctx, existing, ifMatch)
 		if err != nil {
-			return Secret{}, false, changedSecret(err)
+			return database.Secret{}, false, false, changedSecret(err)
 		}
 
-		secret, err := s.hydrate(ctx, relabelled)
-
-		return secret, false, err
+		return relabelled, false, false, nil
 	}
 
 	created := errors.Is(err, database.ErrSecretNotFound)
 
 	sealed, err := s.cipher.Seal(name, value)
 	if err != nil {
-		return Secret{}, false, fmt.Errorf("failed to encrypt secret: %w", err)
+		return database.Secret{}, false, false, fmt.Errorf("failed to encrypt secret: %w", err)
 	}
 
 	revision, err := newRevision()
 	if err != nil {
-		return Secret{}, false, err
+		return database.Secret{}, false, false, err
 	}
 
 	stored, err := s.secrets.Upsert(ctx, database.Secret{
@@ -250,20 +274,10 @@ func (s *SecretService) Set(ctx context.Context, spec manifest.Secret, ifMatch i
 		Labels:   labels,
 	}, ifMatch)
 	if err != nil {
-		return Secret{}, false, changedSecret(err)
+		return database.Secret{}, false, false, changedSecret(err)
 	}
 
-	// The workloads reading it are rehashed after the value has landed, so nothing is
-	// redeployed to pick up a value that failed to store.
-	if err = s.redeploy(ctx, name); err != nil {
-		return Secret{}, false, err
-	}
-
-	s.logger.With("secret", name, "created", created).Info("secret set")
-
-	secret, err := s.hydrate(ctx, stored)
-
-	return secret, created, err
+	return stored, created, true, nil
 }
 
 // Get returns the secret with the given name, along with the workloads referencing

@@ -241,6 +241,37 @@ func TestSecretService_Set(t *testing.T) {
 		assert.Equal(t, []string{"two", "three"}, rehashed)
 	})
 
+	t.Run("releases the cipher lock before rehashing the readers", func(t *testing.T) {
+		secrets := NewMockSecretRepository(t)
+
+		secrets.EXPECT().Get(mock.Anything, "db-password").
+			Return(database.Secret{}, database.ErrSecretNotFound).Once()
+		secrets.EXPECT().Upsert(mock.Anything, secretNamed("db-password"), 0).
+			Return(database.Secret{Name: "db-password", Revision: "rev-one"}, nil).Once()
+		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return([]string{"one"}, nil).Twice()
+		secrets.EXPECT().ListSealed(mock.Anything).Return(nil, nil).Once()
+		secrets.EXPECT().Rekey(mock.Anything, "new", mock.Anything).Return(nil).Once()
+
+		var svc *service.SecretService
+		svc = service.NewSecretService(service.SecretServiceConfig{
+			Logger:  newTestLogger(t),
+			Secrets: secrets,
+			Cipher:  newTestCipher(t),
+			KeyID:   "test-key",
+			Rehash: func(ctx context.Context, _ string) error {
+				// A rekey takes the write lock. Held through the rehash, which is a
+				// transaction per reader and a registry round trip for a pull-always
+				// one, it would wait here and hold up every workload start behind it.
+				_, _, err := svc.Rekey(ctx, newSeededCipher(t, 1), "new")
+
+				return err
+			},
+		})
+
+		_, _, err := svc.Set(t.Context(), manifest.Secret{Name: "db-password", Value: []byte("hunter2")}, 0)
+		require.NoError(t, err)
+	})
+
 	t.Run("refuses a name takt would not accept", func(t *testing.T) {
 		_, _, err := newTestSecretService(t, NewMockSecretRepository(t), nil).
 			Set(t.Context(), manifest.Secret{Name: "DB_PASSWORD", Value: []byte("hunter2")}, 0)
