@@ -23,9 +23,9 @@ import (
 // ordinary specification change, so the reconciler replaces the instances holding the
 // old value and the new one is resolved as they start.
 //
-// Something that has been deleted moves the hash too. The workload is then asking for
-// something takt no longer holds, which is reported when it next tries to start
-// rather than by silently leaving the old value running.
+// Something that has been deleted stays out of the hash, so a reader rehashed for any
+// other reason moves too. A forced delete does not call this: the reader keeps
+// running on the value it was started with, and finds out at its next start.
 //
 // A pull-always workload's image digest is resolved again here as well, so a rehash
 // can also pick up a rebuilt tag — and fails when the registry is unreachable, since

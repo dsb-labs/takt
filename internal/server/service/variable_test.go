@@ -459,25 +459,22 @@ func TestVariableService_Delete(t *testing.T) {
 	t.Run("removes one a workload reads when forced", func(t *testing.T) {
 		variables := NewMockVariableRepository(t)
 
-		variables.EXPECT().UsedBy(mock.Anything, "log-level").Return([]string{"example"}, nil).Twice()
+		variables.EXPECT().UsedBy(mock.Anything, "log-level").Return([]string{"example"}, nil).Once()
 		variables.EXPECT().Delete(mock.Anything, "log-level").Return(nil).Once()
 
-		var rehashed []string
 		svc := service.NewVariableService(service.VariableServiceConfig{
 			Logger:    newTestLogger(t),
 			Variables: variables,
 			Rehash: func(_ context.Context, workload string) error {
-				rehashed = append(rehashed, workload)
+				t.Fatalf("a forced delete must not rehash %s", workload)
 
 				return nil
 			},
 		})
 
+		// The workload keeps running on the value it was started with. A moved hash
+		// would have the reconciler replace it with an instance that cannot start.
 		require.NoError(t, svc.Delete(t.Context(), "log-level", true))
-
-		// The workload is rehashed so that what it was started against stops
-		// describing what takt holds.
-		assert.Equal(t, []string{"example"}, rehashed)
 	})
 
 	t.Run("reports one that does not exist", func(t *testing.T) {

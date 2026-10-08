@@ -341,8 +341,11 @@ func (s *SecretService) List(ctx context.Context, queries ...string) ([]Secret, 
 // Delete removes the secret with the given name.
 //
 // A secret a workload references is refused unless force is set, and the error names
-// the workloads reading it. Forcing it through leaves those workloads running: they
-// find out at their next start, which is when the value is actually needed.
+// the workloads reading it. Forcing it through leaves those workloads running, and
+// nothing is rehashed: a moved hash would have the reconciler replace each instance
+// with one that cannot start, one slot per pass, until the whole workload was down.
+// They find out at their next start, which is when the value is actually needed, and
+// a secret created again under the name rehashes them onto it.
 func (s *SecretService) Delete(ctx context.Context, name string, force bool) error {
 	usedBy, err := s.secrets.UsedBy(ctx, name)
 	if err != nil {
@@ -358,13 +361,6 @@ func (s *SecretService) Delete(ctx context.Context, name string, force bool) err
 	case errors.Is(err, database.ErrSecretNotFound):
 		return fmt.Errorf("%w: %s", ErrSecretNotFound, name)
 	case err != nil:
-		return err
-	}
-
-	// The workloads that referenced it are rehashed for the same reason a rotation
-	// rehashes them: what they were started against no longer describes what takt
-	// holds, and the hash is how that is reported.
-	if err = s.redeploy(ctx, name); err != nil {
 		return err
 	}
 

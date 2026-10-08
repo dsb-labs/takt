@@ -478,26 +478,23 @@ func TestSecretService_Delete(t *testing.T) {
 	t.Run("removes one a workload reads when forced", func(t *testing.T) {
 		secrets := NewMockSecretRepository(t)
 
-		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return([]string{"example"}, nil).Twice()
+		secrets.EXPECT().UsedBy(mock.Anything, "db-password").Return([]string{"example"}, nil).Once()
 		secrets.EXPECT().Delete(mock.Anything, "db-password").Return(nil).Once()
 
-		var rehashed []string
 		svc := service.NewSecretService(service.SecretServiceConfig{
 			Logger:  newTestLogger(t),
 			Secrets: secrets,
 			Cipher:  newTestCipher(t),
 			Rehash: func(_ context.Context, workload string) error {
-				rehashed = append(rehashed, workload)
+				t.Fatalf("a forced delete must not rehash %s", workload)
 
 				return nil
 			},
 		})
 
+		// The workload keeps running on the value it was started with. A moved hash
+		// would have the reconciler replace it with an instance that cannot start.
 		require.NoError(t, svc.Delete(t.Context(), "db-password", true))
-
-		// The workload is rehashed so that what it was started against stops
-		// describing what takt holds.
-		assert.Equal(t, []string{"example"}, rehashed)
 	})
 
 	t.Run("reports one that does not exist", func(t *testing.T) {
