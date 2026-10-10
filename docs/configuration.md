@@ -150,6 +150,7 @@ config-file = "/etc/takt/docker-config.json"
 
 The path must be absolute. The file is read when a pull happens rather than at
 startup, so a `docker login` on the host takes effect without restarting takt.
+The file is kept from `exec` workloads wherever it sits, as the keyring is.
 Credential helpers named by the file — a `credsStore` or `credHelpers` entry —
 are run, so logins kept in the OS keychain work, provided the helper is on the
 server's `PATH`. An absent file means anonymous pulls, which is all a public
@@ -323,7 +324,10 @@ allow-paths = ["/opt/jdk", "/nix/store"]
 
 Each path is granted read-only, so this widens what a workload may read and never what
 it may change. Each path must be absolute. A path that is not on the host is ignored,
-so one list can cover several hosts.
+so one list can cover several hosts. A path that is the data directory, or sits
+beneath it, is refused at startup: it would hand a workload the database and every
+other workload's values. A path above the data directory is accepted, and the data
+directory is carved out of it.
 
 There is no manifest equivalent, and that is deliberate. A manifest arrives from
 anything holding a write grant, so a workload able to name its own paths could
