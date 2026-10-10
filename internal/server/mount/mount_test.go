@@ -66,10 +66,11 @@ func TestMounter_Deliver(t *testing.T) {
 		require.Len(t, mounts, 1)
 
 		// A container runs as a user of its own, so a file only the server's user could
-		// read would be unreadable by the workload that mounted it.
+		// read would be unreadable by the workload that mounted it. The owner keeps
+		// write permission so that a rewrite never has to widen the mode first.
 		info, err := os.Stat(mounts[0].Host)
 		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0o444), info.Mode().Perm())
+		assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
 
 		// What keeps it private is the directory above, which nothing else on the host
 		// may enter.
@@ -293,6 +294,9 @@ func TestMounter_Refresh(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, mounts, 1)
 
+		delivered, err := os.Stat(mounts[0].Host)
+		require.NoError(t, err)
+
 		refreshed, err := svc.Refresh(t.Context(), "example", testVolumeID, 1, spec)
 		require.NoError(t, err)
 		require.Len(t, refreshed, 1)
@@ -304,9 +308,35 @@ func TestMounter_Refresh(t *testing.T) {
 		// The same file rather than a replacement, because a bind mount follows the
 		// inode: a swapped file would leave the container reading the old contents
 		// forever.
+		rewritten, err := os.Stat(mounts[0].Host)
+		require.NoError(t, err)
+		assert.True(t, os.SameFile(delivered, rewritten))
+
 		contents, err := os.ReadFile(mounts[0].Host)
 		require.NoError(t, err)
 		assert.Equal(t, "second", string(contents))
+	})
+
+	t.Run("trims a value shorter than the one it replaces", func(t *testing.T) {
+		secrets := NewMockValueStore(t)
+		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("a long first value", nil).Once()
+		secrets.EXPECT().Value(mock.Anything, "tls-cert").Return("short", nil).Once()
+
+		svc, _ := newMounter(t, secrets, nil)
+		spec := signalled()
+
+		mounts, err := svc.Deliver(t.Context(), testVolumeID, 1, spec)
+		require.NoError(t, err)
+		require.Len(t, mounts, 1)
+
+		_, err = svc.Refresh(t.Context(), "example", testVolumeID, 1, spec)
+		require.NoError(t, err)
+
+		// The new bytes go over the old rather than into an emptied file, so that a
+		// reader never sees nothing. What the old value had beyond them is trimmed.
+		contents, err := os.ReadFile(mounts[0].Host)
+		require.NoError(t, err)
+		assert.Equal(t, "short", string(contents))
 	})
 
 	t.Run("reports nothing when the value is unchanged", func(t *testing.T) {
@@ -344,7 +374,7 @@ func TestMounter_Refresh(t *testing.T) {
 		// it was just told to reload.
 		info, err := os.Stat(mounts[0].Host)
 		require.NoError(t, err)
-		assert.Equal(t, os.FileMode(0o444), info.Mode().Perm())
+		assert.Equal(t, os.FileMode(0o644), info.Mode().Perm())
 	})
 
 	t.Run("rewrites a rotated token and reports the signal", func(t *testing.T) {
