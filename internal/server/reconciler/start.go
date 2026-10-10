@@ -8,6 +8,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/event"
+	"github.com/dsb-labs/takt/internal/server/port"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
@@ -101,12 +102,12 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 		}
 
 		// A workload that cannot start may be sitting on a host port something
-		// outside takt has taken, which nothing takt does will free. Rather than
-		// try to recognise that specific failure — docker reports it as an
-		// untyped error whose wording is not part of any contract — any failure
-		// gives up the ports takt chose for this instance. Ports the specification
-		// pinned are left alone: they were asked for, so moving them would be
-		// overriding a decision rather than revising a guess.
+		// outside takt has taken, which nothing takt does will free. Docker
+		// reports that as an untyped error whose wording is not part of any
+		// contract, so rather than recognise the failure, the ports are asked
+		// whether they are held. Ports the specification pinned are left alone:
+		// they were asked for, so moving them would be overriding a decision
+		// rather than revising a guess.
 		r.abandonPorts(ctx, row, index)
 
 		return fmt.Errorf("failed to start workload: %w", err)
@@ -145,10 +146,19 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 	return nil
 }
 
-// abandonPorts gives up the host ports takt chose for a workload, so that the next
-// pass tries different ones. Failures are logged rather than returned: the caller is
-// already reporting why the workload didn't start, and a workload that keeps its
-// ports is no worse off than before.
+// abandonPorts gives up the host ports takt chose for a workload when something else
+// holds one of them, so that the next pass tries different ones. Failures are logged
+// rather than returned: the caller is already reporting why the workload didn't
+// start, and a workload that keeps its ports is no worse off than before.
+//
+// The ports are probed rather than given up on every failure. A start fails for
+// many reasons that have nothing to do with its ports — an image tag that does not
+// exist, a registry that is down, a daemon that is not answering — and a workload's
+// first instance moving is a specification change: its hash moves, every instance is
+// replaced, and everything reading its address is redeployed. Paying that on every
+// paced attempt of a workload whose image is misspelt churned every reader for
+// nothing. A port that something else is listening on is the one failure a move
+// fixes, so that is what earns one.
 func (r *Reconciler) abandonPorts(ctx context.Context, row database.Workload, index int) {
 	if r.reallocate == nil {
 		return
@@ -156,7 +166,12 @@ func (r *Reconciler) abandonPorts(ctx context.Context, row database.Workload, in
 
 	// Read before the reallocation rather than after it, because afterwards these
 	// are whatever the workload moved to rather than what it gave up.
-	abandoned := hostPorts(r.slotPorts(row, index))
+	held := r.slotPorts(row, index)
+	if !taken(held) {
+		return
+	}
+
+	abandoned := hostPorts(held)
 
 	changed, err := r.reallocate(ctx, row.Name, index)
 	switch {
@@ -167,6 +182,30 @@ func (r *Reconciler) abandonPorts(ctx context.Context, row database.Workload, in
 
 		r.record(ctx, row.Name, event.PortsAbandoned, event.Fields{Instance: index, Ports: abandoned})
 	}
+}
+
+// taken reports whether something on the host is listening on any dynamic host port
+// among the rows. Only dynamic ports are asked, since those are the only ones a
+// reallocation would move: a pinned port that is held is the operator's to resolve.
+//
+// A bind probe sees every listener in the host's network namespace, which is where a
+// process, a container's userland proxy or another program's socket all appear. A
+// daemon publishing ports without a userland proxy holds nothing a probe can see, so
+// a clash with a container takt did not start is missed there — the same blind spot
+// the allocator has when it picks a port, so no port it would have chosen is one it
+// now refuses to move away from.
+func taken(rows []database.Port) bool {
+	for _, row := range rows {
+		if !row.Dynamic {
+			continue
+		}
+
+		if !port.Available(port.Protocol(row.Protocol), row.Host) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // driverPorts maps port rows onto the shape a driver publishes.
