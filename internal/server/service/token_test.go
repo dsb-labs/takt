@@ -147,12 +147,9 @@ func TestTokenService_Sweep(t *testing.T) {
 func TestTokenService_MintWorkloadToken(t *testing.T) {
 	t.Parallel()
 
-	t.Run("mints an expiring shared token, replacing its predecessor", func(t *testing.T) {
+	t.Run("mints an expiring shared token, retiring its predecessor", func(t *testing.T) {
 		tokens := NewMockTokenRepository(t)
 
-		tokens.EXPECT().DeleteMinted(mock.Anything, "workload-id", "prometheus", (*int)(nil),
-			mock.MatchedBy(func(version *int) bool { return version != nil && *version == 3 })).
-			Return(nil).Once()
 		tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(token database.Token) bool {
 			return token.Type == "client" && token.Source == "workload" &&
 				token.Principal == "prometheus" && token.WorkloadID == "workload-id" &&
@@ -160,6 +157,15 @@ func TestTokenService_MintWorkloadToken(t *testing.T) {
 				token.WorkloadVersion != nil && *token.WorkloadVersion == 3 &&
 				time.Until(token.ExpiresAt) > 0
 		})).Return(database.Token{ID: "id"}, nil).Once()
+
+		// The predecessor outlives the mint by a grace period rather than dying
+		// before the new credential reaches the workload.
+		tokens.EXPECT().ExpireMinted(mock.Anything, "workload-id", "prometheus", 3, "id",
+			mock.MatchedBy(func(at time.Time) bool {
+				remaining := time.Until(at)
+
+				return remaining > 0 && remaining <= time.Minute
+			})).Return(nil).Once()
 
 		credential, err := newTestTokenService(t, tokens).
 			MintWorkloadToken(t.Context(), "prometheus", "workload-id", 3, true)
@@ -173,11 +179,11 @@ func TestTokenService_MintWorkloadToken(t *testing.T) {
 	t.Run("mints without an expiry when nothing can rotate it", func(t *testing.T) {
 		tokens := NewMockTokenRepository(t)
 
-		tokens.EXPECT().DeleteMinted(mock.Anything, "workload-id", "prometheus", (*int)(nil), mock.Anything).
-			Return(nil).Once()
 		tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(token database.Token) bool {
 			return token.ExpiresAt.IsZero()
 		})).Return(database.Token{ID: "id"}, nil).Once()
+		tokens.EXPECT().ExpireMinted(mock.Anything, "workload-id", "prometheus", 3, "id", mock.Anything).
+			Return(nil).Once()
 
 		_, err := newTestTokenService(t, tokens).
 			MintWorkloadToken(t.Context(), "prometheus", "workload-id", 3, false)
@@ -249,11 +255,11 @@ func TestTokenService_RefreshWorkloadToken(t *testing.T) {
 
 		tokens.EXPECT().GetForWorkload(mock.Anything, "workload-id", 3, "prometheus").
 			Return(database.Token{ExpiresAt: time.Now().UTC().Add(time.Hour)}, nil).Once()
-		tokens.EXPECT().DeleteMinted(mock.Anything, "workload-id", "prometheus", (*int)(nil), mock.Anything).
-			Return(nil).Once()
 		tokens.EXPECT().Create(mock.Anything, mock.MatchedBy(func(token database.Token) bool {
 			return token.Source == "workload" && !token.ExpiresAt.IsZero()
 		})).Return(database.Token{ID: "id"}, nil).Once()
+		tokens.EXPECT().ExpireMinted(mock.Anything, "workload-id", "prometheus", 3, "id", mock.Anything).
+			Return(nil).Once()
 
 		credential, refreshed, err := newTestTokenService(t, tokens).
 			RefreshWorkloadToken(t.Context(), "prometheus", "workload-id", 3, true)
@@ -269,10 +275,10 @@ func TestTokenService_RefreshWorkloadToken(t *testing.T) {
 
 		tokens.EXPECT().GetForWorkload(mock.Anything, "workload-id", 3, "prometheus").
 			Return(database.Token{}, database.ErrTokenNotFound).Once()
-		tokens.EXPECT().DeleteMinted(mock.Anything, "workload-id", "prometheus", (*int)(nil), mock.Anything).
-			Return(nil).Once()
 		tokens.EXPECT().Create(mock.Anything, mock.Anything).
 			Return(database.Token{ID: "id"}, nil).Once()
+		tokens.EXPECT().ExpireMinted(mock.Anything, "workload-id", "prometheus", 3, "id", mock.Anything).
+			Return(nil).Once()
 
 		_, refreshed, err := newTestTokenService(t, tokens).
 			RefreshWorkloadToken(t.Context(), "prometheus", "workload-id", 3, true)

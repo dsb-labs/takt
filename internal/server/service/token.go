@@ -41,6 +41,11 @@ const (
 	// server that is down for a while still holds a valid credential when it
 	// returns, and the reconcile interval gives many chances to rotate in time.
 	rotateMargin = workloadTokenTTL / 2
+	// How long the token a rotation replaced stays valid. The workload holds
+	// the old credential until it reads the file and handles the signal, both
+	// of which follow the mint within the same pass, so a minute covers them
+	// without leaving the token list to show two for long.
+	rotationGrace = time.Minute
 )
 
 type (
@@ -72,6 +77,10 @@ type (
 		// DeleteMinted should remove the token previously minted for the
 		// workload, principal, instance and version, if one exists.
 		DeleteMinted(ctx context.Context, workloadID, principal string, instance, version *int) error
+		// ExpireMinted should give every shared token minted for the workload,
+		// principal and version other than the one named an expiry of at,
+		// unless it already expires sooner.
+		ExpireMinted(ctx context.Context, workloadID, principal string, version int, except string, at time.Time) error
 		// DeleteForWorkload should remove every token minted for the workload.
 		DeleteForWorkload(ctx context.Context, workloadID string) error
 		// DeleteForInstance should remove every token minted for one instance
@@ -198,6 +207,11 @@ func (s *TokenService) Create(ctx context.Context, principal string) (Token, str
 // lifetime and is meant to be rotated in place before it elapses; without,
 // it lives until it is revoked, because nothing can renew a credential the
 // workload has already read.
+//
+// The predecessor is not revoked at once. The caller still has to write the
+// credential to the file and signal the workload, and until the workload
+// reloads it keeps using the old one, so the old one is given a short expiry
+// and is swept once that passes.
 func (s *TokenService) MintWorkloadToken(ctx context.Context, principal, workloadID string, version int, expires bool) (string, error) {
 	if err := validatePrincipal(principal); err != nil {
 		return "", err
@@ -205,10 +219,6 @@ func (s *TokenService) MintWorkloadToken(ctx context.Context, principal, workloa
 
 	credential, hash, err := auth.NewToken(auth.KindClient)
 	if err != nil {
-		return "", err
-	}
-
-	if err = s.tokens.DeleteMinted(ctx, workloadID, principal, nil, new(version)); err != nil {
 		return "", err
 	}
 
@@ -225,7 +235,12 @@ func (s *TokenService) MintWorkloadToken(ctx context.Context, principal, workloa
 		token.ExpiresAt = time.Now().UTC().Add(workloadTokenTTL)
 	}
 
-	if _, err = s.tokens.Create(ctx, token); err != nil {
+	stored, err := s.tokens.Create(ctx, token)
+	if err != nil {
+		return "", err
+	}
+
+	if err = s.tokens.ExpireMinted(ctx, workloadID, principal, version, stored.ID, time.Now().UTC().Add(rotationGrace)); err != nil {
 		return "", err
 	}
 
