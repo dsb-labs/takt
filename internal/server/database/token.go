@@ -230,13 +230,17 @@ func (r *TokenRepository) HasRecovery(ctx context.Context) (bool, error) {
 
 // GetForWorkload returns the token minted for the workload, version and
 // principal that every instance shares, reporting ErrTokenNotFound when none
-// exists. This is what the rotation check reads the expiry from.
+// exists. This is what the rotation check reads the expiry from. A rotation
+// leaves its predecessor alive for a grace period, so the newest is the one
+// returned while both exist.
 func (r *TokenRepository) GetForWorkload(ctx context.Context, workloadID string, version int, principal string) (Token, error) {
 	const q = `
 		SELECT id, hash, type, source, principal, asserted_groups, expires_at, created_at, last_used_at,
 			COALESCE(workload_id, ''), workload_instance, workload_version
 		FROM token
 		WHERE workload_id = ? AND workload_version = ? AND principal = ? AND workload_instance IS NULL
+		ORDER BY created_at DESC
+		LIMIT 1
 	`
 
 	token, err := scanToken(r.db.QueryRowContext(ctx, q, workloadID, version, principal))
@@ -262,6 +266,29 @@ func (r *TokenRepository) DeleteMinted(ctx context.Context, workloadID, principa
 
 	if _, err := r.db.ExecContext(ctx, q, workloadID, principal, instance, version); err != nil {
 		return fmt.Errorf("failed to delete minted token: %w", err)
+	}
+
+	return nil
+}
+
+// ExpireMinted gives every shared token minted for the workload, principal and
+// version other than the one named by except an expiry of at, unless it already
+// expires sooner. This is how a rotation retires the credential it replaced:
+// the workload still holds the old one until it reads the file and handles the
+// signal, so the old one stays valid for a grace period rather than dying
+// before the new one is written.
+func (r *TokenRepository) ExpireMinted(ctx context.Context, workloadID, principal string, version int, except string, at time.Time) error {
+	const q = `
+		UPDATE token
+		SET expires_at = ?
+		WHERE workload_id = ? AND principal = ? AND workload_version = ? AND workload_instance IS NULL
+			AND id != ? AND (expires_at = '' OR expires_at > ?)
+	`
+
+	expiresAt := formatTime(at)
+
+	if _, err := r.db.ExecContext(ctx, q, expiresAt, workloadID, principal, version, except, expiresAt); err != nil {
+		return fmt.Errorf("failed to expire minted token: %w", err)
 	}
 
 	return nil

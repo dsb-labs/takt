@@ -260,6 +260,80 @@ func TestTokenRepository(t *testing.T) {
 		assert.NoError(t, tokens.DeleteMinted(ctx, workload.ID, "prometheus", nil, new(1)))
 	})
 
+	t.Run("returns the newest shared token while a rotation overlaps", func(t *testing.T) {
+		db := newTestDatabase(t)
+		tokens := database.NewTokenRepository(db)
+		ctx := t.Context()
+
+		workload := createTestWorkload(t, db, "example")
+
+		_, err := tokens.Create(ctx, database.Token{
+			Hash: "old", Type: "client", Source: "workload", Principal: "prometheus",
+			WorkloadID: workload.ID, WorkloadVersion: new(1),
+		})
+		require.NoError(t, err)
+
+		// Minted a moment later, as a rotation does while its predecessor lives
+		// out its grace period.
+		fresh, err := tokens.Create(ctx, database.Token{
+			Hash: "new", Type: "client", Source: "workload", Principal: "prometheus",
+			WorkloadID: workload.ID, WorkloadVersion: new(1),
+		})
+		require.NoError(t, err)
+
+		loaded, err := tokens.GetForWorkload(ctx, workload.ID, 1, "prometheus")
+		require.NoError(t, err)
+		assert.Equal(t, fresh.ID, loaded.ID)
+	})
+
+	t.Run("gives the token a rotation replaced a grace expiry", func(t *testing.T) {
+		db := newTestDatabase(t)
+		tokens := database.NewTokenRepository(db)
+		ctx := t.Context()
+
+		workload := createTestWorkload(t, db, "example")
+
+		old, err := tokens.Create(ctx, database.Token{
+			Hash: "old", Type: "client", Source: "workload", Principal: "prometheus",
+			WorkloadID: workload.ID, WorkloadVersion: new(1),
+		})
+		require.NoError(t, err)
+
+		fresh, err := tokens.Create(ctx, database.Token{
+			Hash: "new", Type: "client", Source: "workload", Principal: "prometheus",
+			WorkloadID: workload.ID, WorkloadVersion: new(1),
+		})
+		require.NoError(t, err)
+
+		_, err = tokens.Create(ctx, database.Token{
+			Hash: "instance-0", Type: "client", Source: "workload", Principal: "prometheus",
+			WorkloadID: workload.ID, WorkloadInstance: new(0),
+		})
+		require.NoError(t, err)
+
+		sooner := time.Now().UTC().Add(time.Second)
+		require.NoError(t, tokens.ExpireMinted(ctx, workload.ID, "prometheus", 1, fresh.ID, sooner))
+
+		// A predecessor that already expires before the grace would end keeps
+		// the earlier time: a later rotation must not extend its life.
+		grace := time.Now().UTC().Add(time.Minute)
+		require.NoError(t, tokens.ExpireMinted(ctx, workload.ID, "prometheus", 1, fresh.ID, grace))
+
+		expired, err := tokens.Get(ctx, old.ID)
+		require.NoError(t, err)
+		assert.Equal(t, sooner, expired.ExpiresAt)
+
+		// The replacement itself, and the instance-bound token minted for
+		// something else, are left alone.
+		current, err := tokens.Get(ctx, fresh.ID)
+		require.NoError(t, err)
+		assert.True(t, current.ExpiresAt.IsZero())
+
+		bound, err := tokens.GetByHash(ctx, "instance-0")
+		require.NoError(t, err)
+		assert.True(t, bound.ExpiresAt.IsZero())
+	})
+
 	t.Run("retires the tokens a replacement superseded", func(t *testing.T) {
 		db := newTestDatabase(t)
 		tokens := database.NewTokenRepository(db)
