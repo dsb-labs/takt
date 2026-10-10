@@ -48,6 +48,15 @@ describes how an entry is written.
 
 ### Fixed
 
+- An `exec` workload's confinement left only the keyring, the configuration
+  directory, the TLS key and the OIDC secret file out of what it granted, so a
+  data directory under `/opt`, `/usr`, `/etc` or an `exec.allow-paths` entry
+  was granted entry by entry, database and every other workload's mounted
+  values included. The data directory and the docker `config-file` are now
+  kept from every `exec` workload wherever they sit, and an `allow-paths`
+  entry at or beneath the data directory is refused at startup
+  ([#155](https://github.com/dsb-labs/takt/issues/155),
+  [#204](https://github.com/dsb-labs/takt/pull/204)).
 - A mounted value was emptied and then written on every rewrite, so a program
   that rereads the file on its own clock, such as prometheus with
   `credentials_file`, could read an empty file. The file was also unreadable to a
