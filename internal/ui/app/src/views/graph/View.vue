@@ -34,7 +34,7 @@ const hideUnconnected = ref(false);
 const nodes = ref<Node[]>([]);
 const edges = ref<Edge[]>([]);
 
-const { fitView, onNodesInitialized } = useVueFlow();
+const { fitView, onNodesInitialized, updateNodeData } = useVueFlow();
 
 // Whether a fresh layout is waiting for its nodes to be measured. A fit that
 // runs before the canvas has measured newly added nodes computes its bounds
@@ -50,7 +50,9 @@ onNodesInitialized(() => {
 
 // The layout runs only when the set of nodes or edges changes. A poll that
 // changes nothing but a workload's state recolours the nodes in place, so the
-// graph does not jump under the pointer every five seconds.
+// graph does not jump under the pointer every five seconds. The canvas owns
+// the positions once a layout has been handed over: a poll that replaced the
+// array would put every node back where the layout left it, undoing a drag.
 let structure = "";
 
 watch(
@@ -82,10 +84,9 @@ watch(
       .join("|");
 
     if (key === structure) {
-      nodes.value = nodes.value.map((node) => {
-        const fresh = graph.nodes.find((candidate) => candidate.id === node.id);
-        return fresh ? { ...node, data: fresh } : node;
-      });
+      for (const node of graph.nodes) {
+        updateNodeData(node.id, node, { replace: true });
+      }
 
       return;
     }
