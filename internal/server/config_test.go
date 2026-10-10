@@ -355,6 +355,34 @@ func TestConfig_Validate(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			// The confinement keeps the data directory from a workload by leaving
+			// it out of what it grants, so a grant of the directory itself would
+			// hand over the database and every other workload's values.
+			Name: "the data directory as a path an exec workload may read",
+			Mutate: func(c *server.Config) {
+				c.Data.Directory = "/var/lib/takt"
+				c.Exec.AllowPaths = []string{"/var/lib/takt"}
+			},
+			ExpectsError: true,
+		},
+		{
+			Name: "a path beneath the data directory an exec workload may read",
+			Mutate: func(c *server.Config) {
+				c.Data.Directory = "/var/lib/takt"
+				c.Exec.AllowPaths = []string{"/var/lib/takt/mounts/../volumes"}
+			},
+			ExpectsError: true,
+		},
+		{
+			// A directory above the data directory is granted entry by entry with
+			// the data directory left out, as /etc is with the configuration.
+			Name: "a path above the data directory an exec workload may read",
+			Mutate: func(c *server.Config) {
+				c.Data.Directory = "/var/lib/takt"
+				c.Exec.AllowPaths = []string{"/var/lib", "/var/lib/takt-sibling"}
+			},
+		},
+		{
 			Name:   "absolute prefixes a path mount may sit beneath",
 			Mutate: func(c *server.Config) { c.Workload.AllowHostPaths = []string{"/mnt/media", "/:ro"} },
 		},
@@ -637,16 +665,21 @@ func TestConfig_PrivatePaths(t *testing.T) {
 	config.Data.Directory = "/var/lib/takt"
 	config.HTTP.TLSKey = "/etc/takt/tls/key.pem"
 
+	config.Docker.ConfigFile = "/etc/takt/docker-config.json"
+
 	config.Auth = &server.AuthConfig{OIDC: server.OIDCConfig{ClientSecretFile: "/run/secrets/takt-oidc"}}
 
-	// The keyring, the configuration's directory, the TLS key and the OIDC
-	// client secret: what an exec workload running as the server's user must
-	// be kept from.
+	// The data directory, the configuration's directory, the TLS key, the OIDC
+	// client secret and the docker credential file: what an exec workload
+	// running as the server's user must be kept from. The data directory whole
+	// rather than the keyring alone, since it also holds the database and every
+	// workload's mounted values.
 	assert.ElementsMatch(t, []string{
-		config.KeysPath(),
+		"/var/lib/takt",
 		"/etc/takt",
 		"/etc/takt/tls/key.pem",
 		"/run/secrets/takt-oidc",
+		"/etc/takt/docker-config.json",
 	}, config.PrivatePaths())
 }
 

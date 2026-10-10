@@ -456,7 +456,7 @@ func (c *Config) Validate() error {
 		c.Reconcile.validate(),
 		c.Workload.validate(),
 		c.Docker.validate(),
-		c.Exec.validate(),
+		c.Exec.validate(c.Data.Directory),
 		c.Auth.validate(),
 		c.Telemetry.validate(),
 		c.Logging.validate(),
@@ -605,7 +605,9 @@ func (c DockerConfig) validate() error {
 	return nil
 }
 
-func (c ExecConfig) validate() error {
+// validate checks the allowed paths against the data directory, which is
+// already absolute by the time this runs.
+func (c ExecConfig) validate(dataDirectory string) error {
 	for _, path := range c.AllowPaths {
 		// Absolute, because this opens a path to every exec workload and each one runs
 		// in a directory of its own. A relative path would name somewhere different for
@@ -613,9 +615,25 @@ func (c ExecConfig) validate() error {
 		if !filepath.IsAbs(path) {
 			return fmt.Errorf("exec allowed path must be absolute, got %q", path)
 		}
+
+		// The data directory is kept from every workload, and the confinement
+		// does that by leaving it out of the directories it grants. An allowed
+		// path at or beneath it would be granted whole and hand a workload the
+		// database and every other workload's values. A path above it is fine:
+		// the confinement grants that one entry by entry with the data directory
+		// left out, as it does for /etc.
+		if dataDirectory != "" && within(filepath.Clean(path), dataDirectory) {
+			return fmt.Errorf("exec allowed path %q is inside the data directory", path)
+		}
 	}
 
 	return nil
+}
+
+// within reports whether path is directory or sits beneath it. Both are
+// expected clean and absolute.
+func within(path, directory string) bool {
+	return path == directory || strings.HasPrefix(path, directory+string(filepath.Separator))
 }
 
 // validate is nil-safe because an absent [auth] block is the layer switched
@@ -645,11 +663,20 @@ func (c *Config) ServedOverTLS() bool {
 }
 
 // PrivatePaths returns the paths on the host that hold the server's own secrets:
-// the directory its configuration was read from, which may hold an OIDC client
-// secret, the TLS private key, and the keyring. An exec workload runs as the
-// server's user, so these are what its confinement has to keep from it.
+// the data directory, which holds the database, the keyring and every workload's
+// mounted values, the directory its configuration was read from, which may hold
+// an OIDC client secret, the TLS private key, the OIDC client secret file and the
+// docker credential file. An exec workload runs as the server's user, so these
+// are what its confinement has to keep from it.
+//
+// The data directory is named whole, although a workload's own working directory,
+// its volumes and the values it mounts sit beneath it. The confinement grants
+// those by name, and a grant by name does not depend on the directory above it
+// being granted. Without this entry a data directory placed under a system
+// directory, or under an allowed path, is granted entry by entry with only the
+// keyring left out.
 func (c Config) PrivatePaths() []string {
-	paths := []string{c.KeysPath()}
+	paths := []string{c.Data.Directory}
 
 	if c.Source != "" {
 		paths = append(paths, filepath.Dir(c.Source))
@@ -661,6 +688,10 @@ func (c Config) PrivatePaths() []string {
 
 	if c.Auth != nil && c.Auth.OIDC.ClientSecretFile != "" {
 		paths = append(paths, c.Auth.OIDC.ClientSecretFile)
+	}
+
+	if c.Docker.ConfigFile != "" {
+		paths = append(paths, c.Docker.ConfigFile)
 	}
 
 	return paths
