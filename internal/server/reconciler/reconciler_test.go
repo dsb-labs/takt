@@ -2026,6 +2026,63 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 	}
 }
 
+func TestReconciler_Run_PacesFailedOccurrence(t *testing.T) {
+	t.Parallel()
+
+	d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
+
+	applied := time.Date(2026, 3, 1, 2, 0, 0, 0, time.Local)
+
+	row := storedWorkload("example", "hash-one")
+	row.Spec = specWithSchedule("example", "0 2 * * *", "")
+	row.UpdatedAt = applied.UTC()
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+	// The occurrence is due and the start fails. It stays due, since nothing ran,
+	// so without pacing every pass would clear and start again. Once each is the
+	// assertion: the clock never moves, so the hold the failure earned never ends.
+	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
+	d.EXPECT().Start(mock.Anything, mock.Anything).Return("", errors.New("no such image")).Once()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).
+		RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
+
+			return nil, nil
+		})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Events:    recorder,
+		Interval:  time.Hour,
+		Now:       func() time.Time { return applied.Add(24 * time.Hour) },
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	awaitPasses(t, r, 1)
+
+	for i := uint64(2); i <= 3; i++ {
+		r.Notify()
+		awaitPasses(t, r, i)
+	}
+
+	cancel()
+	require.NoError(t, <-done)
+
+	assert.Equal(t, 1, recorder.count(event.RestartPaced), "the failed occurrence was not paced")
+}
+
 func TestReconciler_Run_AbandonsPortsOnlyWhenHeld(t *testing.T) {
 	t.Parallel()
 

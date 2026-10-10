@@ -103,7 +103,14 @@ func (r *Reconciler) occurrence(ctx context.Context, row database.Workload, inst
 		return r.between(ctx, row, instances)
 	}
 
-	// An occurrence is due. Anything still running is from the previous one.
+	// An occurrence is due. A start that failed is paced here as it is anywhere
+	// else: the occurrence stays due until a run lands, so without the hold the
+	// next pass tried again at whatever rate the daemon answered.
+	if r.waiting(row.Name, 0) {
+		return nil
+	}
+
+	// Anything still running is from the previous one.
 	if slices.ContainsFunc(instances, running) {
 		if overlap(row) == manifest.OverlapSkip {
 			r.logger.With("workload", row.Name).Info("skipped an occurrence, the previous run is still going")
@@ -122,9 +129,21 @@ func (r *Reconciler) occurrence(ctx context.Context, row database.Workload, inst
 		return fmt.Errorf("failed to clear the previous run: %w", err)
 	}
 
-	r.settleAll(row.Name)
+	// The previous run's exits and verdicts are forgotten, and its backoff is not:
+	// that is what paces this occurrence's attempts, and a failed one has to be
+	// counted against the next.
+	r.forgetRun(row.Name)
 
-	return r.start(ctx, row, 0, event.RunStarted)
+	if err := r.start(ctx, row, 0, event.RunStarted); err != nil {
+		state := r.hold(ctx, row.Name, 0, restartPolicy(row))
+		r.paced(ctx, row.Name, state, err)
+
+		return fmt.Errorf("%w: %w", errPaced, err)
+	}
+
+	r.settle(row.Name, 0)
+
+	return nil
 }
 
 // between decides what to do with a scheduled workload when no occurrence is due.

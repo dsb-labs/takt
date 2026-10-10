@@ -221,9 +221,27 @@ func (r *Reconciler) settle(workload string, index int) {
 	delete(r.backoff, slot{workload: workload, instance: index})
 }
 
-// settleAll forgets every instance's backoff, for the paths that act on the whole
-// workload: a teardown, a suspension, a schedule.
+// settleAll forgets everything held about a workload's instances, backoff included,
+// for the paths that act on the whole workload and leave nothing of it running: a
+// teardown, a suspension.
 func (r *Reconciler) settleAll(workload string) {
+	r.forgetRun(workload)
+
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	for key := range r.backoff {
+		if key.workload == workload {
+			delete(r.backoff, key)
+		}
+	}
+}
+
+// forgetRun drops what was seen of a workload's last run — its exits, its health
+// verdicts and the moments it was found unhealthy — and keeps its backoff. A
+// scheduled occurrence replaces the run, so what the run did no longer counts, but
+// how the start before it fared does.
+func (r *Reconciler) forgetRun(workload string) {
 	r.mux.Lock()
 	defer r.mux.Unlock()
 
@@ -242,12 +260,6 @@ func (r *Reconciler) settleAll(workload string) {
 	for key := range r.unhealthy {
 		if key.workload == workload {
 			delete(r.unhealthy, key)
-		}
-	}
-
-	for key := range r.backoff {
-		if key.workload == workload {
-			delete(r.backoff, key)
 		}
 	}
 }
