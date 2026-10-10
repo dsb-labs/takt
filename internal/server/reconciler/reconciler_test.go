@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -2021,6 +2022,93 @@ func TestReconciler_Run_Schedule(t *testing.T) {
 			if tc.ExpectReason != "" {
 				assert.Equal(t, 1, recorder.count(tc.ExpectReason))
 			}
+		})
+	}
+}
+
+func TestReconciler_Run_AbandonsPortsOnlyWhenHeld(t *testing.T) {
+	t.Parallel()
+
+	// A listener on a port the kernel chose, so the test holds a port the way a
+	// process outside takt would. Closed before the free case so the same number
+	// is known to be free.
+	listener, err := net.Listen("tcp", ":0")
+	require.NoError(t, err)
+
+	held := listener.Addr().(*net.TCPAddr).Port
+
+	tt := []struct {
+		Name string
+		// Whether the listener stays open for the pass.
+		Held bool
+		// How many times the ports are expected to be given up.
+		Expect int
+	}{
+		{
+			// Something is listening on the port the start was given, which is
+			// the one failure moving the port fixes.
+			Name:   "gives up a port something else holds",
+			Held:   true,
+			Expect: 1,
+		},
+		{
+			// The port is free, so the start failed for some other reason and
+			// moving the port would replace every reader for nothing.
+			Name:   "keeps a port nothing holds",
+			Held:   false,
+			Expect: 0,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			if !tc.Held {
+				require.NoError(t, listener.Close())
+			}
+
+			d, repo, recorder := newMockDriver(t), NewMockWorkloadRepository(t), newTestRecorder(t)
+			ports := NewMockPortRepository(t)
+
+			row := storedWorkload("example", "hash-one")
+			row.ID = "workload-one"
+
+			repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+			ports.EXPECT().ListAll(mock.Anything).Return(map[string][]database.Port{
+				"workload-one": {{WorkloadID: "workload-one", Container: 80, Host: held, Protocol: "tcp", Dynamic: true}},
+			}, nil)
+
+			d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+			d.EXPECT().Observe(mock.Anything).Return(nil, nil)
+			d.EXPECT().Start(mock.Anything, mock.Anything).Return("", errors.New("driver failed to bind")).Once()
+
+			reallocated := newCounter()
+
+			r := reconciler.New(reconciler.Config{
+				Logger:    newTestLogger(t),
+				Drivers:   map[string]reconciler.Driver{docker.Name: d},
+				Workloads: repo,
+				Ports:     ports,
+				Events:    recorder,
+				Reallocate: func(context.Context, string, int) (bool, error) {
+					reallocated.inc()
+
+					return true, nil
+				},
+				Interval: time.Hour,
+			})
+
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+
+			go func() { done <- r.Run(ctx) }()
+
+			awaitPasses(t, r, 1)
+
+			cancel()
+			require.NoError(t, <-done)
+
+			assert.Equal(t, tc.Expect, reallocated.get())
+			assert.Equal(t, tc.Expect, recorder.count(event.PortsAbandoned))
 		})
 	}
 }
