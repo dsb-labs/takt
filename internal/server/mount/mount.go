@@ -786,38 +786,45 @@ func (m *Mounter) version(tree, id string, version int) (string, error) {
 }
 
 // write puts value in the file at path, creating it if it does not exist and
-// truncating it if it does.
+// rewriting it over the existing bytes if it does.
 //
 // The same file is rewritten rather than replaced, because a bind mount follows the
 // inode: a container reads what was mounted, so a file swapped underneath it would
 // leave the workload reading the old contents indefinitely.
 //
-// The file ends up read-only and readable by anyone who can reach it, which is wider
-// than takt's other files. A container runs as a user of its own, rarely the one
-// running the server, so a file only that user could read would be unreadable by the
-// workload that mounted it. What keeps it private is the directory above, which only
-// the server's user may enter.
+// It is rewritten without truncating first. A workload that rereads the file on its
+// own clock, as prometheus does with credentials_file, may open it at any moment, and
+// a truncate followed by a write would hand such a reader an empty file. Writing the
+// new bytes over the old and trimming the length afterwards leaves a reader seeing
+// either the old value or a prefix of the new, never nothing.
 //
-// Rewriting one therefore has to widen the mode first: a read-only file cannot be
-// opened for writing even by its owner. The window that opens is inside a directory
-// nothing else on the host can enter, and the mode is narrowed again before the caller
-// signals anything.
+// The file is readable by anyone who can reach it, which is wider than takt's other
+// files. A container runs as a user of its own, rarely the one running the server, so
+// a file only that user could read would be unreadable by the workload that mounted
+// it. What keeps it private is the directory above, which only the server's user may
+// enter. The owner keeps write permission so that a rewrite never has to widen the
+// mode first: a window in which the file is unreadable to the workload, and a crash
+// that would leave it so.
 func write(path, value string) error {
-	// A file that does not exist yet is the ordinary case, since a value is written
-	// before it is ever rewritten. Anything else is reported here rather than left to
-	// fail the write below, which would name the write when the mode is what stopped it.
-	if err := os.Chmod(path, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+	// A file an earlier server left read-only cannot be opened for writing even by
+	// its owner. A file that does not exist yet is the ordinary case, since a value
+	// is written before it is ever rewritten.
+	if err := os.Chmod(path, 0o644); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("failed to make mounted value writable: %w", pathless(err))
 	}
 
-	if err := os.WriteFile(path, []byte(value), 0o444); err != nil {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to open mounted value: %w", pathless(err))
+	}
+	defer file.Close()
+
+	if _, err = file.WriteAt([]byte(value), 0); err != nil {
 		return fmt.Errorf("failed to write mounted value: %w", pathless(err))
 	}
 
-	// WriteFile applies the mode only when it creates the file, so one that already
-	// existed still carries what it was widened to.
-	if err := os.Chmod(path, 0o444); err != nil {
-		return fmt.Errorf("failed to set mounted value permissions: %w", pathless(err))
+	if err = file.Truncate(int64(len(value))); err != nil {
+		return fmt.Errorf("failed to trim mounted value: %w", pathless(err))
 	}
 
 	return nil
