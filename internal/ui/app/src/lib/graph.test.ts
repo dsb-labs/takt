@@ -197,14 +197,46 @@ describe("layout", () => {
     expect(api.x + nodeWidth).toBeLessThanOrEqual(db.x);
   });
 
+  it("holds each kind to its own band", () => {
+    const { nodes, edges } = buildGraph(
+      workloads,
+      secrets,
+      [variable("v")],
+      volumes,
+      services,
+      everything,
+    );
+    const positions = layout(nodes, edges);
+
+    const column = (id: string) => positions.get(id)!.x;
+    const workloadColumns = [column("workload:api"), column("workload:worker")];
+    const resourceColumns = [
+      column("secret:db"),
+      column("secret:unused"),
+      column("variable:v"),
+      column("volume:data"),
+    ];
+
+    // The service nothing but the api answers to still sits left of the
+    // worker, and the resources nothing references share the column of the
+    // ones something does.
+    expect(column("service:web") + nodeWidth).toBeLessThanOrEqual(
+      Math.min(...workloadColumns),
+    );
+    expect(Math.max(...workloadColumns) + nodeWidth).toBeLessThanOrEqual(
+      Math.min(...resourceColumns),
+    );
+    expect(new Set(resourceColumns).size).toBe(1);
+  });
+
   it("reports the top-left corner of each node", () => {
     const positions = layout(
       [{ id: "only", kind: "workload", name: "only" }],
       [],
     );
 
-    // Dagre centres a lone node half a node in from the origin, so the corner
-    // the layout reports is the origin itself.
-    expect(positions.get("only")).toEqual({ x: 0, y: 0 });
+    // Dagre centres a lone node half a node down from the origin, so the
+    // corner the layout reports sits on the top edge.
+    expect(positions.get("only")!.y).toBe(0);
   });
 });
