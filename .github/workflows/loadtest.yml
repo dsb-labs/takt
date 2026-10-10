@@ -20,6 +20,7 @@ on:
       - 'Makefile'
       - 'scripts/delegated.sh'
       - '.github/workflows/loadtest.yml'
+      - '.github/actions/setup-go/action.yml'
   pull_request:
     paths:
       - '**.go'
@@ -33,6 +34,7 @@ on:
       - 'Makefile'
       - 'scripts/delegated.sh'
       - '.github/workflows/loadtest.yml'
+      - '.github/actions/setup-go/action.yml'
   schedule:
     - cron: '43 4 * * *'
   workflow_dispatch:
@@ -45,10 +47,9 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Install Go
-        uses: actions/setup-go@v7
+        uses: ./.github/actions/setup-go
         with:
-          go-version-file: go.mod
-          cache: true
+          cache-name: loadtest
 
       - name: Build takt
         run: go build -o takt .
@@ -73,3 +74,10 @@ jobs:
           path: |
             report.json
             server.log
+
+      - name: Save the Go caches
+        if: always()
+        uses: ./.github/actions/setup-go
+        with:
+          mode: save
+          cache-name: loadtest
