@@ -16,6 +16,14 @@ updates:
       actions:
         patterns:
           - "*"
+  - package-ecosystem: github-actions
+    directory: "/.github/actions/setup-go"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - "*"
   - package-ecosystem: npm
     directory: "/internal/ui/app"
     schedule:
