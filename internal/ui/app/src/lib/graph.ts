@@ -133,12 +133,21 @@ export function buildGraph(
 // layout places the nodes in layers along the dependency direction, and
 // returns the top-left position of each, which is the corner the canvas
 // positions by where dagre reports centres.
+//
+// Dagre ranks a node by the longest path into it, so left to itself it puts
+// every unselected workload, every stray secret and every service in the
+// first column, and a volume in the column of the workloads that are selected.
+// With a few dozen resources the kinds interleave and the edges cross. Two
+// anchor nodes, dropped before the positions are returned, hold each kind to
+// its own band instead: the services on the left, the resources on the right,
+// and the workloads between them, where a workload that references another
+// still sits to its left.
 export function layout(
   nodes: GraphNode[],
   edges: GraphEdge[],
 ): Map<string, { x: number; y: number }> {
   const graph = new dagre.graphlib.Graph();
-  graph.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 96 });
+  graph.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 48 });
   graph.setDefaultEdgeLabel(() => ({}));
 
   for (const node of nodes) {
@@ -146,6 +155,30 @@ export function layout(
   }
   for (const edge of edges) {
     graph.setEdge(edge.source, edge.target);
+  }
+
+  // The anchors sit between the bands: every service points at the first and
+  // the first at every workload, every workload points at the second and the
+  // second at every resource. Sized at nothing, each costs its band a gap of
+  // one nodesep and no more. Each also takes a rank of its own, which is why
+  // ranksep is half the gap wanted between the bands.
+  const workloads = "anchor:workloads";
+  const resources = "anchor:resources";
+  graph.setNode(workloads, { width: 0, height: 0 });
+  graph.setNode(resources, { width: 0, height: 0 });
+
+  for (const node of nodes) {
+    switch (node.kind) {
+      case "service":
+        graph.setEdge(node.id, workloads);
+        break;
+      case "workload":
+        graph.setEdge(workloads, node.id);
+        graph.setEdge(node.id, resources);
+        break;
+      default:
+        graph.setEdge(resources, node.id);
+    }
   }
 
   dagre.layout(graph);
