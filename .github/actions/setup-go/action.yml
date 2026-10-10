@@ -40,6 +40,14 @@ runs:
         restore-keys: |
           go-mod-${{ runner.os }}-
 
+    # Whichever workflow saves the module cache first wins the go.sum key,
+    # and a workflow that only builds never fetches the tool modules. A full
+    # download on a miss makes the saved cache complete for every caller.
+    - name: Download the modules
+      if: inputs.mode == 'restore' && steps.restore-mod.outputs.cache-hit != 'true'
+      shell: bash
+      run: go mod download
+
     - name: Restore the build cache
       if: inputs.mode == 'restore'
       id: restore-build
