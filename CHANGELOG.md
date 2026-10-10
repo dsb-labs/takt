@@ -48,6 +48,19 @@ describes how an entry is written.
 
 ### Fixed
 
+- A mounted value was emptied and then written on every rewrite, so a program
+  that rereads the file on its own clock, such as prometheus with
+  `credentials_file`, could read an empty file. The file was also unreadable to a
+  container running as another user for the moment its mode was widened, and a
+  crash in that moment left it so. The file is now written over its old bytes
+  and kept readable throughout
+  ([#171](https://github.com/dsb-labs/takt/issues/171),
+  [#198](https://github.com/dsb-labs/takt/pull/198)).
+- A mounted token's rotation revoked the old credential before the new one was
+  written and the workload signalled, so every request in between was refused.
+  The old token now stays valid for one minute after the rotation
+  ([#171](https://github.com/dsb-labs/takt/issues/171),
+  [#198](https://github.com/dsb-labs/takt/pull/198)).
 - A database whose current key the keyring did not hold stopped the server even
   when no secret was sealed under it, which is the state `takt admin restore`
   left an archive taken without `--include-keys` in on a node holding no secrets.
