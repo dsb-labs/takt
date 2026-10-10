@@ -1,0 +1,82 @@
+name: Set up Go
+description: |
+  Installs Go and restores the module, build and staticcheck caches. The
+  module cache is keyed on go.sum, since it only changes with a dependency
+  bump. The build cache is keyed on the commit, with a fallback to the most
+  recent save, so every run starts from the objects the last one compiled.
+  Go's build cache is content-addressed, so a stale entry is harmless.
+
+  Call the action twice in a job. The first call, in restore mode, installs
+  Go and restores the caches. The last call, in save mode, saves them, and
+  runs with `if: always()` so a failed run still saves what it compiled.
+
+inputs:
+  mode:
+    description: Either restore or save.
+    default: restore
+  cache-name:
+    description: |
+      A name that separates build caches that share little, such as a race
+      test run and a release cross-compile. Use the workflow name.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Go
+      if: inputs.mode == 'restore'
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+        cache: false
+
+    - name: Restore the module cache
+      if: inputs.mode == 'restore'
+      id: restore-mod
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/go/pkg/mod
+        key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+        restore-keys: |
+          go-mod-${{ runner.os }}-
+
+    - name: Restore the build cache
+      if: inputs.mode == 'restore'
+      id: restore-build
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/.cache/staticcheck
+        key: go-build-${{ runner.os }}-${{ inputs.cache-name }}-${{ github.sha }}
+        restore-keys: |
+          go-build-${{ runner.os }}-${{ inputs.cache-name }}-
+          go-build-${{ runner.os }}-
+
+    # The save call is a separate invocation of this action, so step outputs
+    # from the restore call are out of reach. The hits go through the job
+    # environment instead.
+    - name: Record the cache hits
+      if: inputs.mode == 'restore'
+      shell: bash
+      run: |
+        echo "SETUP_GO_MOD_CACHE_HIT=${{ steps.restore-mod.outputs.cache-hit }}" >> "$GITHUB_ENV"
+        echo "SETUP_GO_BUILD_CACHE_HIT=${{ steps.restore-build.outputs.cache-hit }}" >> "$GITHUB_ENV"
+
+    # A failed job may have stopped partway through a download. The key is
+    # go.sum alone, so a partial module cache would never be replaced.
+    - name: Save the module cache
+      if: inputs.mode == 'save' && env.SETUP_GO_MOD_CACHE_HIT != 'true' && job.status == 'success'
+      uses: actions/cache/save@v6
+      with:
+        path: ~/go/pkg/mod
+        key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+
+    - name: Save the build cache
+      if: inputs.mode == 'save' && env.SETUP_GO_BUILD_CACHE_HIT != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/.cache/staticcheck
+        key: go-build-${{ runner.os }}-${{ inputs.cache-name }}-${{ github.sha }}
