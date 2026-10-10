@@ -48,6 +48,17 @@ describes how an entry is written.
 
 ### Fixed
 
+- A workload with dynamic ports gave them up on every failed start, including a
+  misspelt image tag or a registry that was down, so its first instance's address
+  moved on every paced attempt and every workload reading it was replaced each
+  time. The ports now move only when something else on the host is listening on
+  one of them ([#160](https://github.com/dsb-labs/takt/issues/160),
+  [#207](https://github.com/dsb-labs/takt/pull/207)).
+- A scheduled occurrence whose start failed was tried again on every pass, as
+  fast as the daemon answered, because the occurrence stayed due and nothing
+  paced it. The start is now paced by the restart backoff the way any other is
+  ([#160](https://github.com/dsb-labs/takt/issues/160),
+  [#207](https://github.com/dsb-labs/takt/pull/207)).
 - An `exec` workload's confinement left only the keyring, the configuration
   directory, the TLS key and the OIDC secret file out of what it granted, so a
   data directory under `/opt`, `/usr`, `/etc` or an `exec.allow-paths` entry
