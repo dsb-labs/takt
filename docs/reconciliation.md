@@ -205,17 +205,24 @@ A manifest that sets `restart.attempts` puts a limit on the pacing. An instance
 that reaches it is given up on: left exactly as it ended so the outcome stays
 readable, counted once on the `takt_workload_giveups_total` metric, and started
 again only by a specification change. Zero attempts — the default — means takt
-keeps trying, which is what a long-running service wants.
+keeps trying, which is what a long-running service wants. The attempts are
+counted in memory, so a restart of the server starts them over: every instance
+that was given up on is tried again, paced from the beginning.
+
+A scheduled occurrence whose start fails is paced the same way, and the
+occurrence stays due until a run lands. The next occurrence runs whatever the
+last one did.
 
 Why a start failed is recorded as an event against the workload and reported by
-`takt workload events`. A failed start also
-abandons the host ports takt chose for that instance — the port may be what the
-start is failing on, and the next attempt tries different ones. For the first
-instance that reaches further than the instance: its ports are the workload's
-advertised address and live in the stored specification, so moving them is a
-specification change that replaces every instance and redeploys everything
-reading the address. A later instance's ports move alone. Pinned ports are
-left alone either way: they were asked for.
+`takt workload events`. A failed start also asks whether something else is
+listening on a host port takt chose for the instance. If one is held, the
+instance abandons its dynamic ports and the next attempt tries different ones.
+If every one is free, the start failed for some other reason, and the ports
+stay. For the first instance the move reaches further than the instance: its
+ports are the workload's advertised address and live in the stored
+specification, so moving them is a specification change that replaces every
+instance and redeploys everything reading the address. A later instance's
+ports move alone. Pinned ports are left alone either way: they were asked for.
 
 ## The life of a workload
 

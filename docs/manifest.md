@@ -942,6 +942,10 @@ as `failed` when it did not. The policy decides whether to run it again. The exi
 decides whether it worked, so a workload retired under `never` still reports that it
 failed.
 
+The attempts are counted in memory. A restart of the server starts the count over,
+so an instance that was given up on is tried again, as many times as `attempts`
+allows.
+
 Changing the specification runs a completed workload again, because what already ran
 is then out of date. Applying an unchanged manifest does nothing, so a repeated apply
 does not run a job twice. To run an unchanged job again, delete it and apply it.
