@@ -213,6 +213,18 @@ describes how an entry is written.
   until the slowest registry round trip returned. The lock is now released before
   the redeploy ([#165](https://github.com/dsb-labs/takt/issues/165),
   [#197](https://github.com/dsb-labs/takt/pull/197)).
+- A node dragged on the Graph page jumped back to where the layout put it on
+  the next poll, a few seconds later. The canvas now keeps the position a node
+  was dropped at until the set of nodes or edges changes
+  ([#177](https://github.com/dsb-labs/takt/issues/177),
+  [#206](https://github.com/dsb-labs/takt/pull/206)).
+- The Graph page put services, workloads nothing selects and resources nothing
+  references in the same column, and a referenced volume in the column of the
+  selected workloads, so the edges crossed on a deployment of any size. Each
+  kind now has its own band: services on the left, resources on the right and
+  workloads between them
+  ([#177](https://github.com/dsb-labs/takt/issues/177),
+  [#206](https://github.com/dsb-labs/takt/pull/206)).
 
 ## v0.11.1 - 2026-10-04
 
