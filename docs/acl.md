@@ -192,8 +192,9 @@ The credential's life is the instance's life. It is revoked when the
 instance is replaced, suspended or deleted, so a rolling replacement rotates
 it and the token list never fills with credentials for workloads that are
 gone. A mounted token naming a signal also rotates in place before its
-lifetime elapses. The syntax and the rotation rules are in the
-[manifest reference](manifest.md#mounting-a-token).
+lifetime elapses, and the token it replaced stays valid for one minute after,
+so the workload is not refused while it handles the signal. The syntax and the
+rotation rules are in the [manifest reference](manifest.md#mounting-a-token).
 
 The principal is not restricted, `admin` included, so an `operator` reaches an
 admin identity through a workload that mounts one. A workload automating an

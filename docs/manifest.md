@@ -790,7 +790,8 @@ volumes:
 
 takt then rewrites the file in place and sends the signal. The workload keeps running,
 so a program that rereads its configuration keeps its connections and its uptime
-through a rotation.
+through a rotation. The rewrite does not empty the file first, so a program that
+rereads it on its own clock rather than on the signal never reads an empty file.
 
 | Signal | |
 |---|---|
@@ -896,7 +897,9 @@ With a `signal`, the token also rotates in place. It is minted with the lifetime
 login's token carries, and once less than half of that remains the server rewrites
 the file with a fresh one and sends the signal — so a consumer that rereads the
 file, such as prometheus through `credentials_file`, picks up the rotation without
-a restart. Without a signal the token does not expire, because nothing could
+a restart. The token it replaced stays valid for one minute after the rotation, so
+a request the workload makes before it has handled the signal is not refused.
+Without a signal the token does not expire, because nothing could
 deliver a renewal to a file the workload reads once, and revocation with the
 instance is what ends its life.
 
