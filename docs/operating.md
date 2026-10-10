@@ -535,9 +535,13 @@ before it runs the command. A confined workload reaches:
 The system directories include `/etc`, and `/etc` is where the packaged install
 keeps takt's own configuration, which may hold an OIDC client secret, and where a
 TLS key often lives. Those are carved out: the directory the configuration was
-read from, the TLS key, the OIDC client secret file and the keyring are refused,
-and the directory holding each is granted entry by entry rather than whole. A
-workload reads `/etc/hostname` and not `/etc/takt`.
+read from, the TLS key, the OIDC client secret file, the docker credential file
+and the data directory are refused, and the directory holding each is granted
+entry by entry rather than whole. A workload reads `/etc/hostname` and not
+`/etc/takt`. Placing the data directory under `/opt`, or beneath an
+`exec.allow-paths` entry, does not open the database or another workload's
+values. An `exec.allow-paths` entry at or beneath the data directory is refused
+at startup for the same reason.
 
 There is deliberately no grant for `/tmp`. It is shared by everything running
 as the server's user, so granting it would let one workload read what another
@@ -586,6 +590,18 @@ workload can still send a signal to the server. The network is not restricted
 either, and a workload on the host's network reaches the API. What that hands it
 is described under
 [Reaching the API from a workload](acl.md#reaching-the-api-from-a-workload).
+
+Mode and ownership changes are not covered either. Landlock mediates opening,
+creating and removing, and not `chmod`, `chown` or `utimes`, and it does not gate
+path resolution. A workload runs as the server's user, so it can change the mode
+of anything that user owns, the data directory included, without being able to
+open it. The directory holding mounted values is `0700` and is what keeps them
+from other users on the host. A workload that widens it exposes every workload's
+values to any local user, and one that sets `state.db` or the keyring to `0000`
+can stop the server. This sits in the same class as a signal: a
+process holding the server's uid can harm the server, and only a uid per
+workload would close it, which takt does not do. A host whose exec workloads are
+not trusted to that degree should run them as containers.
 
 A `command` health check is confined too. The probe starts in the workload's working
 directory, through the same trampoline, with the same ruleset: the directory, the
