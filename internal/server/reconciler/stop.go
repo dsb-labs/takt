@@ -85,6 +85,7 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 	// workload that happens to reuse the name.
 	r.settleAll(row.Name)
 	r.forgetStarted(row.Name)
+	r.forgetReclaimed(row.ID)
 
 	// A restart asked for before the deletion landed dies with the workload, for
 	// the same reason: it would otherwise lie in wait for a later workload that

@@ -61,6 +61,12 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 		return nil
 	}
 
+	// Ahead of anything this pass starts, from what it observed. A version's files
+	// and shared tokens go once nothing observed runs that version, and the
+	// instances this pass replaces are still in the observation, so a version
+	// is never reclaimed on the pass that replaces its last reader.
+	r.reclaimSuperseded(ctx, row, instances)
+
 	count := countOf(row)
 
 	// An operator asked for the instances to be replaced. Every slot gets the same
@@ -561,6 +567,85 @@ func (r *Reconciler) refresh(ctx context.Context, row database.Workload) error {
 	}
 
 	return nil
+}
+
+// reclaimSuperseded removes the mounted files and revokes the shared tokens of
+// every version of a workload but its current one, once no instance of an older
+// version is observed.
+//
+// A replacement's files are written beside those the instances being replaced
+// still read, and a counted workload rolls one instance per pass, so the older
+// version has readers until its last instance is gone. Reclaiming after each
+// start, as this once did, pulled the files and tokens out from under the
+// instances still waiting their turn. A retained instance does not count: it has
+// ended, and reads nothing.
+//
+// Once per version rather than every pass. The sweep reads a directory and the
+// revoke runs a delete, and a pass runs on every event the runtime reports, so
+// the version reclaimed is remembered and the work repeats only when it moves. A
+// failure leaves plaintext on the disk that nothing reads, which is worth a
+// warning and not worth failing the pass, and the next pass tries again.
+func (r *Reconciler) reclaimSuperseded(ctx context.Context, row database.Workload, instances []driver.Instance) {
+	if r.mounts == nil && r.tokens == nil {
+		return
+	}
+
+	if r.reclaimedVersion(row.ID) == row.Version {
+		return
+	}
+
+	if slices.ContainsFunc(instances, func(instance driver.Instance) bool {
+		return !instance.Retained && instance.Version != row.Version
+	}) {
+		return
+	}
+
+	if r.mounts != nil {
+		if err := r.mounts.Reclaim(row.ID, row.Version); err != nil {
+			r.logger.With("workload", row.Name, "error", err).
+				Warn("failed to reclaim superseded mounted values")
+
+			return
+		}
+	}
+
+	if r.tokens != nil {
+		if err := r.tokens.RevokeSuperseded(ctx, row.ID, row.Version); err != nil {
+			r.logger.With("workload", row.Name, "error", err).
+				Warn("failed to revoke superseded workload tokens")
+
+			return
+		}
+	}
+
+	r.markReclaimed(row.ID, row.Version)
+}
+
+// reclaimedVersion reports the version a workload's superseded files and tokens
+// were most recently reclaimed up to, or zero when none have been.
+func (r *Reconciler) reclaimedVersion(id string) int {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	return r.reclaimed[id]
+}
+
+// markReclaimed records that everything a workload held before the given version
+// is gone.
+func (r *Reconciler) markReclaimed(id string, version int) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	r.reclaimed[id] = version
+}
+
+// forgetReclaimed drops what is remembered of a workload's reclaims, once the
+// workload itself is gone.
+func (r *Reconciler) forgetReclaimed(id string) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	delete(r.reclaimed, id)
 }
 
 // signalsOf returns the set of signals a batch of refreshed mounts asks for.

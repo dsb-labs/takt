@@ -383,9 +383,9 @@ func (m *Mounter) Forget(id string) error {
 // workload — a certificate rotated monthly accumulated a private key a month, read by
 // nothing and removed by nothing.
 //
-// Called after the replacement has started rather than before. Removing the old
-// version first would pull the files out from under an instance that is still running
-// if the start then fails.
+// Called once no instance of an older version is observed. Removing the old
+// version while one still runs would pull the files out from under it, and a
+// counted workload keeps its older instances until each is replaced in turn.
 //
 // Sweeping everything but the current version rather than removing a named one also
 // reclaims what a crash between delivering and starting left behind. A workload that

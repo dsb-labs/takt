@@ -330,7 +330,7 @@ func (s *TokenService) RevokeForInstance(ctx context.Context, workloadID string,
 }
 
 // RevokeSuperseded revokes the shared tokens of every workload version but the
-// given one, once a replacement has started and nothing reading them remains.
+// given one, once no instance of an older version remains to read them.
 func (s *TokenService) RevokeSuperseded(ctx context.Context, workloadID string, version int) error {
 	deleted, err := s.tokens.DeleteSuperseded(ctx, workloadID, version)
 	if err != nil {
