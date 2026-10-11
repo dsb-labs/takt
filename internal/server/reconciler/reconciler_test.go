@@ -3217,40 +3217,47 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 		assert.Equal(t, []driver.Volume{delivered}, volumes)
 	})
 
-	// The superseded version's plaintext has to go, and it has to go after the
-	// replacement is running. Sweeping first would pull the files out from under the
-	// instance being replaced if the start then failed.
-	t.Run("reclaims superseded values once the replacement has started", func(t *testing.T) {
+	// The superseded version's plaintext has to go, and it has to go once nothing
+	// reads it. A counted workload rolls one instance per pass, so the older
+	// version has readers until its last instance has been replaced, and sweeping
+	// on the first replacement would pull the files out from under the rest.
+	t.Run("reclaims superseded values once no older instance remains", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 		mounts := NewMockMounts(t)
 
-		row := storedWorkload("example", "hash-one")
+		row := storedWorkloadWithCount("example", "hash-two", 2)
 		row.ID = "workload-id"
 		row.Version = 4
 
 		repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
-		d.EXPECT().Observe(mock.Anything).Return(nil, nil)
 		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+		d.EXPECT().StopInstance(mock.Anything, "workload-id", "example", mock.Anything).Return(nil)
+		d.EXPECT().Start(mock.Anything, mock.Anything).Return("replacement", nil)
 		mounts.EXPECT().Prune(mock.Anything).Return(nil).Maybe()
 		mounts.EXPECT().Deliver(mock.Anything, "workload-id", 4, mock.Anything).Return(nil, nil)
 
-		var order []string
+		// Each pass replaces one slot, so the runtime reports the previous
+		// version's instances leaving one at a time.
+		passes := newCounter()
+		d.EXPECT().Observe(mock.Anything).RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+			passes.inc()
 
-		d.EXPECT().Start(mock.Anything, mock.Anything).
-			RunAndReturn(func(context.Context, driver.Workload) (string, error) {
-				order = append(order, "start")
+			instances := make([]driver.Instance, 0, 2)
+			for index := range 2 {
+				instance := driver.Instance{ID: "old-" + strconv.Itoa(index), Workload: "example", Index: index, Version: 3, SpecHash: "hash-one", State: driver.StateRunning}
+				if passes.get() > index+1 {
+					instance = driver.Instance{ID: "new-" + strconv.Itoa(index), Workload: "example", Index: index, Version: 4, SpecHash: "hash-two", State: driver.StateRunning}
+				}
 
-				return "instance-one", nil
-			})
-
-		reclaimed := make(chan int, 1)
-		mounts.EXPECT().Reclaim("workload-id", 4).RunAndReturn(func(_ string, keep int) error {
-			order = append(order, "reclaim")
-
-			select {
-			case reclaimed <- keep:
-			default:
+				instances = append(instances, instance)
 			}
+
+			return instances, nil
+		})
+
+		reclaims := newCounter()
+		mounts.EXPECT().Reclaim("workload-id", 4).RunAndReturn(func(string, int) error {
+			reclaims.inc()
 
 			return nil
 		})
@@ -3268,14 +3275,29 @@ func TestReconciler_Run_DeliversMountedValues(t *testing.T) {
 
 		go func() { done <- r.Run(ctx) }()
 
-		// The version kept is the one that just started, so everything older goes.
-		assert.Equal(t, 4, <-reclaimed)
+		// The first two passes each replace one instance while the other still
+		// reads the previous version's files.
+		for i := 1; i <= 2; i++ {
+			passes.wait(t, i)
+			awaitPasses(t, r, uint64(i))
+			assert.Zero(t, reclaims.get(), "the sweep ran while an instance of the previous version was still observed")
+
+			r.Notify()
+		}
+
+		// The third observes only the current version, so the sweep runs, and it
+		// runs once rather than on every pass that follows.
+		passes.wait(t, 3)
+		awaitPasses(t, r, 3)
+		assert.Equal(t, 1, reclaims.get())
+
+		r.Notify()
+		passes.wait(t, 4)
+		awaitPasses(t, r, 4)
+		assert.Equal(t, 1, reclaims.get(), "the sweep repeated on a pass whose version had not moved")
 
 		cancel()
 		require.NoError(t, <-done)
-
-		require.GreaterOrEqual(t, len(order), 2)
-		assert.Equal(t, []string{"start", "reclaim"}, order[:2], "the sweep ran before the replacement started")
 	})
 
 	// A sweep that fails leaves plaintext nothing reads, which is worth a warning and
@@ -4137,7 +4159,7 @@ func TestReconciler_Run_RevokesWorkloadTokens(t *testing.T) {
 		assert.Zero(t, instance)
 	})
 
-	t.Run("retires superseded shared tokens once a start succeeds", func(t *testing.T) {
+	t.Run("retires superseded shared tokens once no older instance remains", func(t *testing.T) {
 		d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
 		tokens := NewMockTokens(t)
 
@@ -4150,8 +4172,8 @@ func TestReconciler_Run_RevokesWorkloadTokens(t *testing.T) {
 		d.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
 		d.EXPECT().Start(mock.Anything, mock.Anything).Return("container-one", nil).Once()
 
-		// After the start, as the files are reclaimed after it: the versions the
-		// start superseded had readers until the replacement was running.
+		// Nothing of an older version is observed, so the tokens it held go the
+		// way its files do.
 		retired := make(chan int, 1)
 		tokens.EXPECT().RevokeSuperseded(mock.Anything, "workload-id", 2).
 			RunAndReturn(func(_ context.Context, _ string, version int) error {

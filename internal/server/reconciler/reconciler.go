@@ -317,6 +317,11 @@ type (
 		// consumed by the next pass over each. In memory rather than stored,
 		// because a request the server loses can simply be made again.
 		restarts map[string]struct{}
+		// The version each workload's superseded mounted files and shared tokens
+		// were most recently reclaimed up to, keyed by the workload's identifier,
+		// so that a pass sweeps a workload once per version rather than every
+		// time it runs.
+		reclaimed map[string]int
 		// Counts completed passes, so that a caller can tell a pass has finished
 		// rather than inferring it from something a pass happens to do first.
 		passes atomic.Uint64
@@ -476,6 +481,7 @@ func New(config Config) *Reconciler {
 		verdicts:     make(map[slot]health.Status),
 		unhealthy:    make(map[slot]string),
 		restarts:     make(map[string]struct{}),
+		reclaimed:    make(map[string]int),
 		started:      make(map[slot]int),
 		held:         make(map[slot]time.Time),
 		pulling:      make(map[slot]struct{}),

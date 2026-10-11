@@ -117,32 +117,6 @@ func (r *Reconciler) start(ctx context.Context, row database.Workload, index int
 	r.record(ctx, row.Name, reason, event.Fields{Instance: index})
 	r.markStarted(row.Name, index, row.Version)
 
-	// After the start rather than before it. A replacement's files are written
-	// alongside those the instance being replaced is still reading, and sweeping them
-	// first would pull those out from under it if this start then failed.
-	//
-	// A failure here leaves plaintext on the disk that nothing reads, which is worth
-	// a warning and is not worth failing a workload that started. The next start
-	// sweeps it, since this removes everything but the current version rather than
-	// the one it just replaced.
-	if r.mounts != nil {
-		if err = r.mounts.Reclaim(row.ID, row.Version); err != nil {
-			r.logger.With("workload", row.Name, "error", err).
-				Warn("failed to reclaim superseded mounted values")
-		}
-	}
-
-	// The shared tokens of the versions this start superseded go the way their
-	// files just did, and a failure is a warning for the reason the reclaim's
-	// is: the next start sweeps everything but the current version again, and
-	// the teardown revokes whatever remains.
-	if r.tokens != nil {
-		if err = r.tokens.RevokeSuperseded(ctx, row.ID, row.Version); err != nil {
-			r.logger.With("workload", row.Name, "error", err).
-				Warn("failed to revoke superseded workload tokens")
-		}
-	}
-
 	return nil
 }
 
