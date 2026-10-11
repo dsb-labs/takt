@@ -433,8 +433,11 @@ takt workload restart example --wait
 | `--wait`, `-w` | Block until a replacement instance has appeared. |
 
 Replaces the workload's running instances with new ones started from the unchanged
-specification, so the version does not move. A stopped workload is refused, since
-nothing would start until it is started again.
+specification, so the version does not move. takt replaces the instances one at a
+time, and each waits for the last replacement to settle. A workload with a `count`
+above one keeps serving through the restart. `--wait` returns once the first
+replacement is up. A stopped workload is refused, since nothing would start until
+it is started again.
 
 A scheduled workload runs now. The run counts as its last run, so the next occurrence
 is the first the expression names after it. See [Manifest](manifest.md#schedule).

@@ -153,8 +153,9 @@ briefly observed as running, so the backoff clears only once an instance has sta
 up.
 
 An operator can also ask for one. `workload restart` replaces the instances from the
-unchanged specification on the next pass, and the restart policy has no say: the
-request is explicit, so giving up does not apply to it.
+unchanged specification. They roll one at a time, each gated on the last replacement
+settling, as a specification change does. The restart policy has no say: the request
+is explicit, so giving up does not apply to it.
 
 ## Stopping without deleting
 
