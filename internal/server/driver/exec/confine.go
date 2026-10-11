@@ -104,6 +104,12 @@ var systemPaths = []string{
 	// to read a second workload's environment.
 	"/proc",
 	"/sys",
+	// Where /etc/resolv.conf points on a host running systemd-resolved. A denied
+	// path under /etc has that directory granted entry by entry, and a Landlock
+	// rule names the inode it was made from: resolved rewrites its file through a
+	// rename, so a workload granted the link alone lost the resolver the first
+	// time the network changed. Granting the directory follows the rewrite.
+	"/run/systemd/resolve",
 }
 
 // The devices a workload may read and write.

@@ -543,6 +543,14 @@ Placing the data directory under `/opt`, or beneath an
 values. An `exec.allow-paths` entry at or beneath the data directory is refused
 at startup for the same reason.
 
+A directory granted entry by entry is granted as it stood when the workload
+started. A workload does not see a file added to `/etc` after that. A file
+replaced through a rename, as an editor or a package upgrade does, is refused
+after the rename, because the grant names the file that was there.
+`/etc/resolv.conf` is the exception. On a host running `systemd-resolved` it
+points into `/run/systemd/resolve`, which is granted whole, so a workload
+follows the resolver configuration as it changes.
+
 There is deliberately no grant for `/tmp`. It is shared by everything running
 as the server's user, so granting it would let one workload read what another
 wrote there. A workload that insists on a temporary directory can be pointed
