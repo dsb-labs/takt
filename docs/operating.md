@@ -534,11 +534,11 @@ before it runs the command. A confined workload reaches:
 
 The system directories include `/etc`, and `/etc` is where the packaged install
 keeps takt's own configuration, which may hold an OIDC client secret, and where a
-TLS key often lives. Those are carved out: the directory the configuration was
-read from, the TLS key, the OIDC client secret file, the docker credential file
-and the data directory are refused, and the directory holding each is granted
-entry by entry rather than whole. A workload reads `/etc/hostname` and not
-`/etc/takt`. Placing the data directory under `/opt`, or beneath an
+TLS key often lives. Those are carved out: the configuration file, the TLS key,
+the OIDC client secret file, the docker credential file and the data directory
+are refused, and the directory holding each is granted entry by entry rather
+than whole. A workload reads `/etc/hostname` and not `/etc/takt/config.toml`.
+Placing the data directory under `/opt`, or beneath an
 `exec.allow-paths` entry, does not open the database or another workload's
 values. An `exec.allow-paths` entry at or beneath the data directory is refused
 at startup for the same reason.

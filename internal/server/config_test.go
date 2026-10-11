@@ -669,14 +669,15 @@ func TestConfig_PrivatePaths(t *testing.T) {
 
 	config.Auth = &server.AuthConfig{OIDC: server.OIDCConfig{ClientSecretFile: "/run/secrets/takt-oidc"}}
 
-	// The data directory, the configuration's directory, the TLS key, the OIDC
-	// client secret and the docker credential file: what an exec workload
-	// running as the server's user must be kept from. The data directory whole
-	// rather than the keyring alone, since it also holds the database and every
-	// workload's mounted values.
+	// The data directory, the configuration file, the TLS key, the OIDC client
+	// secret and the docker credential file: what an exec workload running as
+	// the server's user must be kept from. The data directory whole rather than
+	// the keyring alone, since it also holds the database and every workload's
+	// mounted values. The configuration file rather than its directory, which
+	// is /etc itself when the file is not in a directory of its own.
 	assert.ElementsMatch(t, []string{
 		"/var/lib/takt",
-		"/etc/takt",
+		"/etc/takt/config.toml",
 		"/etc/takt/tls/key.pem",
 		"/run/secrets/takt-oidc",
 		"/etc/takt/docker-config.json",

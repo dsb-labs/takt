@@ -664,10 +664,14 @@ func (c *Config) ServedOverTLS() bool {
 
 // PrivatePaths returns the paths on the host that hold the server's own secrets:
 // the data directory, which holds the database, the keyring and every workload's
-// mounted values, the directory its configuration was read from, which may hold
-// an OIDC client secret, the TLS private key, the OIDC client secret file and the
-// docker credential file. An exec workload runs as the server's user, so these
-// are what its confinement has to keep from it.
+// mounted values, the configuration file, which may hold an OIDC client secret,
+// the TLS private key, the OIDC client secret file and the docker credential file.
+// An exec workload runs as the server's user, so these are what its confinement
+// has to keep from it.
+//
+// The configuration file rather than its directory. The directory is what holds
+// the host's own files when the file sits in /etc directly, and denying it denied
+// a workload every one of them.
 //
 // The data directory is named whole, although a workload's own working directory,
 // its volumes and the values it mounts sit beneath it. The confinement grants
@@ -679,7 +683,7 @@ func (c Config) PrivatePaths() []string {
 	paths := []string{c.Data.Directory}
 
 	if c.Source != "" {
-		paths = append(paths, filepath.Dir(c.Source))
+		paths = append(paths, c.Source)
 	}
 
 	if c.HTTP.TLSKey != "" {
