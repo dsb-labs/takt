@@ -70,7 +70,7 @@ func TestPolicyService_Apply(t *testing.T) {
 		policies.EXPECT().Apply(mock.Anything, mock.Anything, 1).
 			Return(database.Policy{Document: document, Version: 2}, nil).Once()
 
-		applied, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, 1)
+		applied, err := newTestPolicyService(t, policies).Apply(t.Context(), actor, valid, 1)
 		require.NoError(t, err)
 		assert.Equal(t, valid, applied.Spec)
 		assert.Equal(t, 2, applied.Version)
@@ -81,7 +81,7 @@ func TestPolicyService_Apply(t *testing.T) {
 		policies.EXPECT().Apply(mock.Anything, mock.Anything, 0).
 			Return(database.Policy{Document: document, Version: 1}, nil).Once()
 
-		applied, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, 0)
+		applied, err := newTestPolicyService(t, policies).Apply(t.Context(), actor, valid, 0)
 		require.NoError(t, err)
 		assert.Equal(t, 1, applied.Version)
 	})
@@ -91,7 +91,7 @@ func TestPolicyService_Apply(t *testing.T) {
 		policies.EXPECT().Apply(mock.Anything, mock.Anything, 1).
 			Return(database.Policy{}, database.ErrPolicyChanged).Once()
 
-		_, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, 1)
+		_, err := newTestPolicyService(t, policies).Apply(t.Context(), actor, valid, 1)
 		assert.ErrorIs(t, err, service.ErrPolicyChanged)
 	})
 
@@ -101,7 +101,7 @@ func TestPolicyService_Apply(t *testing.T) {
 			Grants:  []manifest.PolicyGrant{{Principals: []string{"someone"}, Role: "root"}},
 		}
 
-		_, err := newTestPolicyService(t, NewMockPolicyRepository(t)).Apply(t.Context(), invalid, 1)
+		_, err := newTestPolicyService(t, NewMockPolicyRepository(t)).Apply(t.Context(), actor, invalid, 1)
 		assert.ErrorIs(t, err, service.ErrInvalidPolicy)
 	})
 
@@ -110,7 +110,7 @@ func TestPolicyService_Apply(t *testing.T) {
 		policies.EXPECT().Apply(mock.Anything, document, 1).
 			Return(database.Policy{Document: document, Version: 2}, nil).Once()
 
-		_, err := newTestPolicyService(t, policies).Apply(t.Context(), valid, 1)
+		_, err := newTestPolicyService(t, policies).Apply(t.Context(), actor, valid, 1)
 		require.NoError(t, err)
 	})
 }

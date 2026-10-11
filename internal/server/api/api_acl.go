@@ -6,6 +6,8 @@ import (
 	"log/slog"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/auth"
+	"github.com/dsb-labs/takt/internal/server/middleware"
 	"github.com/dsb-labs/takt/internal/server/service"
 	"github.com/dsb-labs/takt/internal/wire"
 	"github.com/dsb-labs/takt/pkg/manifest"
@@ -20,8 +22,8 @@ type (
 		Get(ctx context.Context) (service.Policy, error)
 		// Apply should validate the document and replace the current one with
 		// it, on the condition that ifMatch is the version of the document
-		// being replaced.
-		Apply(ctx context.Context, policy manifest.Policy, ifMatch int) (service.Policy, error)
+		// being replaced, recording the actor as who changed it.
+		Apply(ctx context.Context, actor auth.Identity, policy manifest.Policy, ifMatch int) (service.Policy, error)
 	}
 
 	// The ACLInitializer interface describes how the API mints the recovery
@@ -101,7 +103,7 @@ func (a *ACLAPI) ApplyACLPolicy(ctx context.Context, request api.ApplyACLPolicyR
 		}, nil
 	}
 
-	policy, err := a.policies.Apply(ctx, wire.ToPolicy(*request.Body), ifMatch)
+	policy, err := a.policies.Apply(ctx, middleware.CallerIdentity(ctx), wire.ToPolicy(*request.Body), ifMatch)
 	switch {
 	case errors.Is(err, service.ErrInvalidPolicy):
 		return api.ApplyACLPolicy400JSONResponse{

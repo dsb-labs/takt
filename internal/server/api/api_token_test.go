@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/auth"
 	"github.com/dsb-labs/takt/internal/server/middleware"
 	"github.com/dsb-labs/takt/internal/server/service"
 )
@@ -42,7 +43,7 @@ func TestTokenAPI_CreateToken(t *testing.T) {
 
 	t.Run("mints a token and reports the credential once", func(t *testing.T) {
 		tokens := NewMockTokenService(t)
-		tokens.EXPECT().Create(mock.Anything, "prometheus").Return(service.Token{
+		tokens.EXPECT().Create(mock.Anything, auth.Identity{Disabled: true}, "prometheus").Return(service.Token{
 			ID:        "id",
 			Type:      "client",
 			Source:    "static",
@@ -69,7 +70,7 @@ func TestTokenAPI_CreateToken(t *testing.T) {
 
 	t.Run("refuses a principal the service will not accept", func(t *testing.T) {
 		tokens := NewMockTokenService(t)
-		tokens.EXPECT().Create(mock.Anything, "group:infra").
+		tokens.EXPECT().Create(mock.Anything, mock.Anything, "group:infra").
 			Return(service.Token{}, "", service.ErrInvalidPrincipal).Once()
 
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/tokens", strings.NewReader(`{"principal": "group:infra"}`))
@@ -111,7 +112,7 @@ func TestTokenAPI_DeleteToken(t *testing.T) {
 
 	t.Run("revokes a token", func(t *testing.T) {
 		tokens := NewMockTokenService(t)
-		tokens.EXPECT().Delete(mock.Anything, "id").Return(nil).Once()
+		tokens.EXPECT().Delete(mock.Anything, auth.Identity{Disabled: true}, "id").Return(nil).Once()
 
 		resp := doToken(t, tokens, httptest.NewRequest(http.MethodDelete, "/api/v1/tokens/id", nil))
 		require.Equal(t, http.StatusOK, resp.Code)
@@ -120,7 +121,7 @@ func TestTokenAPI_DeleteToken(t *testing.T) {
 
 	t.Run("reports a token that does not exist", func(t *testing.T) {
 		tokens := NewMockTokenService(t)
-		tokens.EXPECT().Delete(mock.Anything, "id").Return(service.ErrTokenNotFound).Once()
+		tokens.EXPECT().Delete(mock.Anything, mock.Anything, "id").Return(service.ErrTokenNotFound).Once()
 
 		resp := doToken(t, tokens, httptest.NewRequest(http.MethodDelete, "/api/v1/tokens/id", nil))
 		require.Equal(t, http.StatusNotFound, resp.Code)
@@ -128,7 +129,7 @@ func TestTokenAPI_DeleteToken(t *testing.T) {
 
 	t.Run("refuses the recovery token", func(t *testing.T) {
 		tokens := NewMockTokenService(t)
-		tokens.EXPECT().Delete(mock.Anything, "id").Return(service.ErrRecoveryDelete).Once()
+		tokens.EXPECT().Delete(mock.Anything, mock.Anything, "id").Return(service.ErrRecoveryDelete).Once()
 
 		resp := doToken(t, tokens, httptest.NewRequest(http.MethodDelete, "/api/v1/tokens/id", nil))
 		require.Equal(t, http.StatusConflict, resp.Code)

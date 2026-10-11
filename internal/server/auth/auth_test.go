@@ -150,3 +150,40 @@ func TestEvaluate(t *testing.T) {
 		})
 	}
 }
+
+func TestIdentity_LogValue(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name     string
+		Identity auth.Identity
+		Expected string
+	}{
+		{
+			Name:     "a principal",
+			Identity: auth.Identity{Principal: "david@dsb.dev", TokenID: "id"},
+			Expected: "[principal=david@dsb.dev token_id=id]",
+		},
+		{
+			Name:     "the recovery identity",
+			Identity: auth.Identity{Recovery: true, TokenID: "id"},
+			Expected: "[principal=recovery token_id=id]",
+		},
+		{
+			Name:     "the anonymous identity",
+			Identity: auth.Identity{},
+			Expected: "[principal=anonymous token_id=]",
+		},
+		{
+			Name:     "the disabled identity",
+			Identity: auth.Identity{Disabled: true},
+			Expected: "[principal=anonymous token_id=]",
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			assert.Equal(t, tc.Expected, tc.Identity.LogValue().String())
+		})
+	}
+}

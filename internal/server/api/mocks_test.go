@@ -45,8 +45,8 @@ func (_m *MockPolicyService) EXPECT() *MockPolicyService_Expecter {
 }
 
 // Apply provides a mock function for the type MockPolicyService
-func (_mock *MockPolicyService) Apply(ctx context.Context, policy manifest.Policy, ifMatch int) (service.Policy, error) {
-	ret := _mock.Called(ctx, policy, ifMatch)
+func (_mock *MockPolicyService) Apply(ctx context.Context, actor auth.Identity, policy manifest.Policy, ifMatch int) (service.Policy, error) {
+	ret := _mock.Called(ctx, actor, policy, ifMatch)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Apply")
@@ -54,16 +54,16 @@ func (_mock *MockPolicyService) Apply(ctx context.Context, policy manifest.Polic
 
 	var r0 service.Policy
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Policy, int) (service.Policy, error)); ok {
-		return returnFunc(ctx, policy, ifMatch)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, auth.Identity, manifest.Policy, int) (service.Policy, error)); ok {
+		return returnFunc(ctx, actor, policy, ifMatch)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, manifest.Policy, int) service.Policy); ok {
-		r0 = returnFunc(ctx, policy, ifMatch)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, auth.Identity, manifest.Policy, int) service.Policy); ok {
+		r0 = returnFunc(ctx, actor, policy, ifMatch)
 	} else {
 		r0 = ret.Get(0).(service.Policy)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, manifest.Policy, int) error); ok {
-		r1 = returnFunc(ctx, policy, ifMatch)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, auth.Identity, manifest.Policy, int) error); ok {
+		r1 = returnFunc(ctx, actor, policy, ifMatch)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -77,30 +77,36 @@ type MockPolicyService_Apply_Call struct {
 
 // Apply is a helper method to define mock.On call
 //   - ctx context.Context
+//   - actor auth.Identity
 //   - policy manifest.Policy
 //   - ifMatch int
-func (_e *MockPolicyService_Expecter) Apply(ctx any, policy any, ifMatch any) *MockPolicyService_Apply_Call {
-	return &MockPolicyService_Apply_Call{Call: _e.mock.On("Apply", ctx, policy, ifMatch)}
+func (_e *MockPolicyService_Expecter) Apply(ctx any, actor any, policy any, ifMatch any) *MockPolicyService_Apply_Call {
+	return &MockPolicyService_Apply_Call{Call: _e.mock.On("Apply", ctx, actor, policy, ifMatch)}
 }
 
-func (_c *MockPolicyService_Apply_Call) Run(run func(ctx context.Context, policy manifest.Policy, ifMatch int)) *MockPolicyService_Apply_Call {
+func (_c *MockPolicyService_Apply_Call) Run(run func(ctx context.Context, actor auth.Identity, policy manifest.Policy, ifMatch int)) *MockPolicyService_Apply_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 manifest.Policy
+		var arg1 auth.Identity
 		if args[1] != nil {
-			arg1 = args[1].(manifest.Policy)
+			arg1 = args[1].(auth.Identity)
 		}
-		var arg2 int
+		var arg2 manifest.Policy
 		if args[2] != nil {
-			arg2 = args[2].(int)
+			arg2 = args[2].(manifest.Policy)
+		}
+		var arg3 int
+		if args[3] != nil {
+			arg3 = args[3].(int)
 		}
 		run(
 			arg0,
 			arg1,
 			arg2,
+			arg3,
 		)
 	})
 	return _c
@@ -111,7 +117,7 @@ func (_c *MockPolicyService_Apply_Call) Return(policy1 service.Policy, err error
 	return _c
 }
 
-func (_c *MockPolicyService_Apply_Call) RunAndReturn(run func(ctx context.Context, policy manifest.Policy, ifMatch int) (service.Policy, error)) *MockPolicyService_Apply_Call {
+func (_c *MockPolicyService_Apply_Call) RunAndReturn(run func(ctx context.Context, actor auth.Identity, policy manifest.Policy, ifMatch int) (service.Policy, error)) *MockPolicyService_Apply_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1773,8 +1779,8 @@ func (_m *MockTokenService) EXPECT() *MockTokenService_Expecter {
 }
 
 // Create provides a mock function for the type MockTokenService
-func (_mock *MockTokenService) Create(ctx context.Context, principal string) (service.Token, string, error) {
-	ret := _mock.Called(ctx, principal)
+func (_mock *MockTokenService) Create(ctx context.Context, actor auth.Identity, principal string) (service.Token, string, error) {
+	ret := _mock.Called(ctx, actor, principal)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Create")
@@ -1783,21 +1789,21 @@ func (_mock *MockTokenService) Create(ctx context.Context, principal string) (se
 	var r0 service.Token
 	var r1 string
 	var r2 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (service.Token, string, error)); ok {
-		return returnFunc(ctx, principal)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, auth.Identity, string) (service.Token, string, error)); ok {
+		return returnFunc(ctx, actor, principal)
 	}
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) service.Token); ok {
-		r0 = returnFunc(ctx, principal)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, auth.Identity, string) service.Token); ok {
+		r0 = returnFunc(ctx, actor, principal)
 	} else {
 		r0 = ret.Get(0).(service.Token)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, string) string); ok {
-		r1 = returnFunc(ctx, principal)
+	if returnFunc, ok := ret.Get(1).(func(context.Context, auth.Identity, string) string); ok {
+		r1 = returnFunc(ctx, actor, principal)
 	} else {
 		r1 = ret.Get(1).(string)
 	}
-	if returnFunc, ok := ret.Get(2).(func(context.Context, string) error); ok {
-		r2 = returnFunc(ctx, principal)
+	if returnFunc, ok := ret.Get(2).(func(context.Context, auth.Identity, string) error); ok {
+		r2 = returnFunc(ctx, actor, principal)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -1811,24 +1817,30 @@ type MockTokenService_Create_Call struct {
 
 // Create is a helper method to define mock.On call
 //   - ctx context.Context
+//   - actor auth.Identity
 //   - principal string
-func (_e *MockTokenService_Expecter) Create(ctx any, principal any) *MockTokenService_Create_Call {
-	return &MockTokenService_Create_Call{Call: _e.mock.On("Create", ctx, principal)}
+func (_e *MockTokenService_Expecter) Create(ctx any, actor any, principal any) *MockTokenService_Create_Call {
+	return &MockTokenService_Create_Call{Call: _e.mock.On("Create", ctx, actor, principal)}
 }
 
-func (_c *MockTokenService_Create_Call) Run(run func(ctx context.Context, principal string)) *MockTokenService_Create_Call {
+func (_c *MockTokenService_Create_Call) Run(run func(ctx context.Context, actor auth.Identity, principal string)) *MockTokenService_Create_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 auth.Identity
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(auth.Identity)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
 		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -1839,22 +1851,22 @@ func (_c *MockTokenService_Create_Call) Return(token service.Token, s string, er
 	return _c
 }
 
-func (_c *MockTokenService_Create_Call) RunAndReturn(run func(ctx context.Context, principal string) (service.Token, string, error)) *MockTokenService_Create_Call {
+func (_c *MockTokenService_Create_Call) RunAndReturn(run func(ctx context.Context, actor auth.Identity, principal string) (service.Token, string, error)) *MockTokenService_Create_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Delete provides a mock function for the type MockTokenService
-func (_mock *MockTokenService) Delete(ctx context.Context, id string) error {
-	ret := _mock.Called(ctx, id)
+func (_mock *MockTokenService) Delete(ctx context.Context, actor auth.Identity, id string) error {
+	ret := _mock.Called(ctx, actor, id)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Delete")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = returnFunc(ctx, id)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, auth.Identity, string) error); ok {
+		r0 = returnFunc(ctx, actor, id)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1868,24 +1880,30 @@ type MockTokenService_Delete_Call struct {
 
 // Delete is a helper method to define mock.On call
 //   - ctx context.Context
+//   - actor auth.Identity
 //   - id string
-func (_e *MockTokenService_Expecter) Delete(ctx any, id any) *MockTokenService_Delete_Call {
-	return &MockTokenService_Delete_Call{Call: _e.mock.On("Delete", ctx, id)}
+func (_e *MockTokenService_Expecter) Delete(ctx any, actor any, id any) *MockTokenService_Delete_Call {
+	return &MockTokenService_Delete_Call{Call: _e.mock.On("Delete", ctx, actor, id)}
 }
 
-func (_c *MockTokenService_Delete_Call) Run(run func(ctx context.Context, id string)) *MockTokenService_Delete_Call {
+func (_c *MockTokenService_Delete_Call) Run(run func(ctx context.Context, actor auth.Identity, id string)) *MockTokenService_Delete_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
 			arg0 = args[0].(context.Context)
 		}
-		var arg1 string
+		var arg1 auth.Identity
 		if args[1] != nil {
-			arg1 = args[1].(string)
+			arg1 = args[1].(auth.Identity)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
 		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
@@ -1896,7 +1914,7 @@ func (_c *MockTokenService_Delete_Call) Return(err error) *MockTokenService_Dele
 	return _c
 }
 
-func (_c *MockTokenService_Delete_Call) RunAndReturn(run func(ctx context.Context, id string) error) *MockTokenService_Delete_Call {
+func (_c *MockTokenService_Delete_Call) RunAndReturn(run func(ctx context.Context, actor auth.Identity, id string) error) *MockTokenService_Delete_Call {
 	_c.Call.Return(run)
 	return _c
 }

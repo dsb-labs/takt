@@ -13,6 +13,7 @@ import (
 	"encoding/base32"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -46,6 +47,25 @@ type (
 	// The Kind type names the two types of token.
 	Kind string
 )
+
+// LogValue reports the identity as the actor of a change: the principal and
+// the token that authenticated it. The recovery identity reads as the
+// "recovery" principal, and the anonymous and disabled identities as
+// "anonymous", so a log line always names who acted.
+func (i Identity) LogValue() slog.Value {
+	principal := i.Principal
+	switch {
+	case i.Recovery:
+		principal = "recovery"
+	case principal == "":
+		principal = "anonymous"
+	}
+
+	return slog.GroupValue(
+		slog.String("principal", principal),
+		slog.String("token_id", i.TokenID),
+	)
+}
 
 const (
 	// KindRecovery is the token `takt acl init` prints once. It sits above
