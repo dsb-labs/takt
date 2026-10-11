@@ -1493,6 +1493,28 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 		assert.Equal(t, "written\n", string(contents))
 	})
 
+	t.Run("allows a file to be moved between its own directories", func(t *testing.T) {
+		// Write-then-rename is how a program replaces a file without a reader seeing
+		// it half written, and the rename often crosses into a subdirectory. Landlock
+		// refuses a rename or a link across directories unless the right to reparent
+		// is granted, so without it every such program fails with "Invalid
+		// cross-device link" inside a directory it otherwise owns.
+		//
+		// A hard link rather than mv, which hides the refusal by falling back to a
+		// copy. ln does not, so it fails the way a program calling rename(2) does.
+		d, root := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one",
+			"mkdir sub && echo moved > file.tmp && ln file.tmp sub/file 2>&1; exit 0"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		contents, err := os.ReadFile(filepath.Join(root, "workloads", idOf(t), "0", "1", "cwd", "sub", "file"))
+		require.NoError(t, err, "a confined workload could not move a file into its own subdirectory: %s", output(t, d, "example"))
+		assert.Equal(t, "moved\n", string(contents))
+	})
+
 	t.Run("allows a volume it mounts", func(t *testing.T) {
 		// A volume lives outside the working directory and is reached through a link
 		// into it. The kernel resolves the link before deciding, so the volume has to be
