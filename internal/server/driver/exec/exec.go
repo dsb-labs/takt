@@ -110,6 +110,9 @@ type (
 	// The Driver type runs workloads as processes on the host.
 	Driver struct {
 		logger *slog.Logger
+		// Where the driver keeps everything, which is what a failure to confine is
+		// reported without.
+		root string
 		// Where the driver keeps its own records, which a workload has no path to.
 		state string
 		// Where a workload keeps its working directory and its output, which it
@@ -193,6 +196,7 @@ func New(config Config) *Driver {
 		// Two trees rather than one. A workload runs in a directory of its own and can
 		// reach everything beneath it, so the records the driver trusts to identify a
 		// running process are kept where the workload has no path to them.
+		root:       config.Root,
 		state:      filepath.Join(config.Root, stateDir),
 		workloads:  filepath.Join(config.Root, workloadDir),
 		allowed:    config.AllowPaths,
@@ -375,7 +379,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	closePipes()
 	limits.close()
 
-	if err = confineWith(cmd, rules, status, ruleset{
+	if err = confineWith(cmd, rules, status, d.root, ruleset{
 		Command: command,
 		// Its own directory and its volumes, which is everything it may write. The
 		// volumes are named by where they are on the host rather than by the link

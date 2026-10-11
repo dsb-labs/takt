@@ -464,7 +464,12 @@ func pipes(cmd *osexec.Cmd) (rules, status *os.File, close func(), err error) {
 //
 // This is what makes a refused path a failure to start rather than an exit code nobody
 // can explain.
-func confineWith(cmd *osexec.Cmd, rules, status *os.File, rs ruleset) error {
+//
+// The reason names paths, and the error reaches the API. One beneath root is the
+// driver's own tree, which is a detail of the host a caller has no business seeing,
+// so root is cut from it the way pathless cuts the path from the driver's own
+// errors. What is left still says which directory or value was refused.
+func confineWith(cmd *osexec.Cmd, rules, status *os.File, root string, rs ruleset) error {
 	// The parent's copies of the child's ends are already closed, so reading the status
 	// below reaches end of file rather than blocking on a descriptor this process holds.
 	defer status.Close()
@@ -485,7 +490,9 @@ func confineWith(cmd *osexec.Cmd, rules, status *os.File, rs ruleset) error {
 	}
 
 	if len(reason) > 0 {
-		return fmt.Errorf("%w: %s", ErrNotConfined, strings.TrimSpace(string(reason)))
+		text := strings.ReplaceAll(strings.TrimSpace(string(reason)), root+string(filepath.Separator), "")
+
+		return fmt.Errorf("%w: %s", ErrNotConfined, text)
 	}
 
 	return nil

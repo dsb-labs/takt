@@ -1697,6 +1697,23 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 		assert.True(t, os.IsNotExist(err), "a workload wrote a path granted only for reading")
 	})
 
+	t.Run("reports a refused path without the driver's own tree", func(t *testing.T) {
+		// The failure to confine reaches the API with the path the kernel refused,
+		// and a path under the data directory is a detail of the host a caller has
+		// no business seeing. The driver's own errors already leave it out.
+		d, root := newDriver(t)
+
+		missing := filepath.Join(root, "volumes", "not-here")
+
+		w := workload(t, "example", 1, "hash-one", "exit 0")
+		w.Volumes = []driver.Volume{{Name: "not-here", Host: missing, Target: "/data"}}
+
+		_, err := d.Start(t.Context(), w)
+		require.ErrorIs(t, err, exec.ErrNotConfined)
+		assert.NotContains(t, err.Error(), root, "a failure to confine named the driver's tree")
+		assert.Contains(t, err.Error(), "not-here", "a failure to confine did not say which path was refused")
+	})
+
 	t.Run("refuses a command that is not there, naming it", func(t *testing.T) {
 		// Reported as a failure to start rather than as an exit code, because a command
 		// that cannot be found is not a workload that ran and failed.
