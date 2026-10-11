@@ -142,6 +142,8 @@ type ruleset struct {
 	// The individual files the workload may read, which is what a mounted value is,
 	// and the command's own binary.
 	Files []string `json:"files"`
+	// The file the workload's output is written to, which it may write.
+	Output string `json:"output,omitempty"`
 }
 
 // Confine turns this process into a workload's confined command, when it was started
@@ -335,6 +337,15 @@ func restrict(rs ruleset) error {
 	// every other workload's, so granting the directory would hand over all of them.
 	if len(rs.Files) > 0 {
 		rules = append(rules, landlock.ROFiles(rs.Files...))
+	}
+
+	// The output file is already open on the command's standard streams, and a
+	// descriptor that is open needs no grant. Opening it again by path does:
+	// /dev/stdout and /dev/stderr lead through /proc/self/fd to the file, which the
+	// kernel judges by where it is, and it is inside the driver's tree. Granted so
+	// that a program redirecting to its own standard error is not refused.
+	if rs.Output != "" {
+		rules = append(rules, landlock.RWFiles(rs.Output))
 	}
 
 	return landlock.V3.RestrictPaths(rules...)

@@ -1652,6 +1652,27 @@ func TestDriver_Start_ConfinesTheWorkload(t *testing.T) {
 		assert.Contains(t, out, "wrote-devnull")
 	})
 
+	t.Run("allows its own standard streams to be opened by path", func(t *testing.T) {
+		// /dev/stderr leads through /proc/self/fd to the output file, which sits in
+		// the driver's tree where nothing else is granted. The kernel judges the open
+		// by where the file is, so a shell redirecting to /dev/stderr was refused.
+		//
+		// Appending, because the two streams are one file: opening it through
+		// /dev/stderr with ">" truncates it, as it does whenever standard error is a
+		// file, and the second echo would erase the first.
+		d, _ := newDriver(t)
+
+		_, err := d.Start(t.Context(), workload(t, "example", 1, "hash-one",
+			"echo via-stderr >> /dev/stderr 2>&1; echo via-stdout >> /dev/stdout 2>&1; exit 0"))
+		require.NoError(t, err)
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		out := output(t, d, "example")
+		assert.Contains(t, out, "via-stderr", "a confined workload could not open its own standard error")
+		assert.Contains(t, out, "via-stdout", "a confined workload could not open its own standard output")
+	})
+
 	t.Run("allows a path the operator granted", func(t *testing.T) {
 		// The escape hatch, for a runtime that lives somewhere the host's own
 		// directories do not cover. Read-only, and the operator's decision rather than
