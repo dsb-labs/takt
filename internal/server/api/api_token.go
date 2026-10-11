@@ -115,8 +115,8 @@ func (a *TokenAPI) DeleteToken(ctx context.Context, request api.DeleteTokenReque
 	return api.DeleteToken200JSONResponse{}, nil
 }
 
-// newToken maps a token record to its wire shape. Optional times are sent as
-// absent rather than as zero values.
+// newToken maps a token record to its wire shape. Optional times and the
+// workload fields are sent as absent rather than as zero values.
 func newToken(token service.Token) api.Token {
 	out := api.Token{
 		ID:        token.ID,
@@ -124,6 +124,8 @@ func newToken(token service.Token) api.Token {
 		Source:    api.TokenSource(token.Source),
 		Principal: token.Principal,
 		CreatedAt: token.CreatedAt,
+		Instance:  token.WorkloadInstance,
+		Version:   token.WorkloadVersion,
 	}
 
 	if !token.ExpiresAt.IsZero() {
@@ -131,6 +133,9 @@ func newToken(token service.Token) api.Token {
 	}
 	if !token.LastUsedAt.IsZero() {
 		out.LastUsedAt = new(token.LastUsedAt)
+	}
+	if token.WorkloadID != "" {
+		out.Workload = new(token.WorkloadID)
 	}
 
 	return out

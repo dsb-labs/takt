@@ -1994,6 +1994,11 @@ type Token struct {
 	// ID The identifier the server assigns, which a delete names.
 	ID string `json:"id"`
 
+	// Instance The instance the token was minted for, when one instance holds
+	// it in its environment. Omitted for a token every instance of
+	// the workload shares, and for a token not minted for a workload.
+	Instance *int `json:"instance,omitempty"`
+
 	// LastUsedAt When the token last authenticated a request, recorded at most
 	// once a minute. Omitted when it never has.
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
@@ -2009,6 +2014,16 @@ type Token struct {
 
 	// Type Whether this is the recovery token or a client token.
 	Type TokenType `json:"type"`
+
+	// Version The workload version the token was minted for, when every
+	// instance of that version shares it from a file. Omitted for an
+	// instance's own token, and for a token not minted for a workload.
+	Version *int `json:"version,omitempty"`
+
+	// Workload The workload the server minted the token for, which is how the
+	// manifest that asked for it is found. Omitted for a token not
+	// minted for a workload.
+	Workload *string `json:"workload,omitempty"`
 }
 
 // TokenSource What minted the token: init, an operator's create, an OIDC login, a

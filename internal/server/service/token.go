@@ -100,7 +100,8 @@ type (
 		ID string
 		// Whether the token is the recovery token or a client token.
 		Type string
-		// What minted the token: "init", "static", "oidc" or "session".
+		// What minted the token: "init", "static", "oidc", "session" or
+		// "workload".
 		Source string
 		// The principal the token authenticates as. Empty for the recovery
 		// token.
@@ -113,6 +114,16 @@ type (
 		// The time the token last authenticated a request. Zero when it never
 		// has.
 		LastUsedAt time.Time
+		// The workload the token was minted for. Empty for a token not
+		// minted for one.
+		WorkloadID string
+		// The instance the token was minted for. Nil for a token every
+		// instance of the workload shares, and for a token not minted for a
+		// workload.
+		WorkloadInstance *int
+		// The workload version the token was minted for. Nil for an
+		// instance's own token, and for a token not minted for a workload.
+		WorkloadVersion *int
 	}
 
 	// The TokenService type owns the credentials that authenticate API
@@ -412,13 +423,16 @@ func (s *TokenService) Sweep(ctx context.Context) error {
 // carries no hash.
 func newToken(token database.Token) Token {
 	return Token{
-		ID:         token.ID,
-		Type:       token.Type,
-		Source:     token.Source,
-		Principal:  token.Principal,
-		ExpiresAt:  token.ExpiresAt,
-		CreatedAt:  token.CreatedAt,
-		LastUsedAt: token.LastUsedAt,
+		ID:               token.ID,
+		Type:             token.Type,
+		Source:           token.Source,
+		Principal:        token.Principal,
+		ExpiresAt:        token.ExpiresAt,
+		CreatedAt:        token.CreatedAt,
+		LastUsedAt:       token.LastUsedAt,
+		WorkloadID:       token.WorkloadID,
+		WorkloadInstance: token.WorkloadInstance,
+		WorkloadVersion:  token.WorkloadVersion,
 	}
 }
 

@@ -129,13 +129,18 @@ func TestTokenService_List(t *testing.T) {
 	tokens := NewMockTokenRepository(t)
 	tokens.EXPECT().List(mock.Anything).Return([]database.Token{
 		{ID: "one", Hash: "secret-hash", Type: "client", Source: "static", Principal: "ci"},
+		{ID: "two", Hash: "secret-hash", Type: "client", Source: "workload", Principal: "runner", WorkloadID: "ci", WorkloadVersion: new(3)},
 	}, nil).Once()
 
 	listed, err := newTestTokenService(t, tokens).List(t.Context())
 	require.NoError(t, err)
-	require.Len(t, listed, 1)
+	require.Len(t, listed, 2)
 	assert.Equal(t, "one", listed[0].ID)
 	assert.Equal(t, "ci", listed[0].Principal)
+	assert.Empty(t, listed[0].WorkloadID)
+	assert.Equal(t, "ci", listed[1].WorkloadID)
+	assert.Equal(t, new(3), listed[1].WorkloadVersion)
+	assert.Nil(t, listed[1].WorkloadInstance)
 }
 
 func TestTokenService_Sweep(t *testing.T) {
