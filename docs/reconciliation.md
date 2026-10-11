@@ -107,11 +107,12 @@ flowchart TD
     suspended -- yes --> hold["stop what runs, keep the row and the output"]
     suspended -- no --> driver{"a driver for the runtime?"}
     driver -- no --> leave["store it, leave it alone"]
-    driver -- yes --> restart{"operator asked for a restart?"}
-    restart -- yes --> replaceall["stop every instance, start them again"]
-    restart -- no --> scheduled{"on a schedule?"}
-    scheduled -- yes --> occurrence["run when due, wait in between"]
-    scheduled -- no --> shrink["discard slots at or past the count"]
+    driver -- yes --> scheduled{"on a schedule?"}
+    scheduled -- yes --> occurrence["run when due, or now on a restart"]
+    scheduled -- no --> restart{"operator asked for a restart?"}
+    restart -- yes --> mark["mark every slot for replacement"]
+    restart -- no --> shrink["discard slots at or past the count"]
+    mark --> shrink
     shrink --> slots["converge each slot from 0 to count-1"]
     slots --> refresh["refresh mounted values that signal"]
 ```
@@ -129,6 +130,10 @@ Some of those branches in more detail:
   or skips a run still going, as the manifest's `overlap` says. Between
   occurrences only a failed run is retried — a clean one did what the occurrence
   asked.
+- **A restart** marks every slot for replacement rather than stopping them all.
+  Each slot is then replaced by the same one-at-a-time roll a specification
+  change gets, so a counted workload keeps serving through it. A scheduled
+  workload has one slot, and a restart runs it now instead.
 - **A shrunk count** discards the slots past it, retained remnants included:
   nothing will read the output of an instance the count no longer asks for.
 
