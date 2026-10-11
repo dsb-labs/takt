@@ -204,8 +204,8 @@ role that may apply such a workload can therefore reach that principal's
 authority through it. That is deliberate: applying a workload is already
 the powerful act, and naming the principal its token binds to is a smaller
 step than the apply takes. takt's part is visibility — the token appears in
-`takt token list` under the `workload` source, and the manifest that asks
-for it is reviewable where it lives.
+`takt token list` under the `workload` source, naming the workload it was
+minted for, and the manifest that asks for it is reviewable where it lives.
 
 For the workloads that hold no token, nothing changes: identity is opt-in,
 and a workload without a reference holds no credential at all.
