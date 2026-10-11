@@ -970,6 +970,16 @@ func mount(cwd string, volumes []driver.Volume) error {
 			}
 		}
 
+		// A link already there is one a previous attempt at this version left: a
+		// start that failed after mounting, or a server that died between the two,
+		// leaves no record behind and so nothing a stop would remove. Replaced
+		// rather than reported, since the attempt it belonged to is not running.
+		if info, err := root.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if err = root.Remove(target); err != nil {
+				return fmt.Errorf("%w: volume %q: %w", ErrInvalidMount, volume.Name, pathless(err))
+			}
+		}
+
 		// The link points outside the root, which is the whole point: a volume
 		// outlives the workload, so it cannot live in a directory that is removed
 		// with it.

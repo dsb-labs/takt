@@ -1415,6 +1415,36 @@ func TestDriver_Start_MountsVolumes(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("starts again at a version whose first start failed after mounting", func(t *testing.T) {
+		t.Parallel()
+
+		// The volumes are linked into the working directory before the command is
+		// resolved, so a command that is not there leaves the links behind with no
+		// record of a process to stop. The reconciler retries the start as it is,
+		// and the retry used to fail on the links the first attempt left.
+		d, _ := newDriver(t)
+		volume := newVolume(t, "example-data")
+
+		w := workload(t, "example", 1, "hash-one", "exit 0")
+		w.Spec.Exec.Command = []string{"definitely-not-a-command-on-this-host"}
+		w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: "/var/lib/example"}}
+
+		_, err := d.Start(t.Context(), w)
+		require.Error(t, err)
+
+		w = workload(t, "example", 1, "hash-one", "echo written > var/lib/example/file")
+		w.Volumes = []driver.Volume{{Name: "example-data", Host: volume, Target: "/var/lib/example"}}
+
+		_, err = d.Start(t.Context(), w)
+		require.NoError(t, err, "a version whose first start failed could not be started again")
+
+		awaitState(t, d, "example", driver.StateExited)
+
+		contents, err := os.ReadFile(filepath.Join(volume, "file"))
+		require.NoError(t, err)
+		assert.Equal(t, "written\n", string(contents))
+	})
+
 	t.Run("keeps a volume inside the working directory", func(t *testing.T) {
 		t.Parallel()
 
