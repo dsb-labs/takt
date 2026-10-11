@@ -23,7 +23,8 @@ type (
 	//
 	// It travels beside the instances rather than being worked out again where the
 	// replacement happens, because only the comparison that found them stale knows
-	// which of the two it was.
+	// which it was. A replacement the operator asked for carries no reason: the
+	// request was recorded when it was consumed, and the operator expects it.
 	staleness struct {
 		reason event.Reason
 		fields event.Fields
@@ -69,25 +70,6 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 
 	count := countOf(row)
 
-	// An operator asked for the instances to be replaced. Every slot gets the same
-	// stop-then-start a stale instance gets, from the unchanged specification.
-	if r.restartRequested(row.Name) {
-		if slices.ContainsFunc(instances, terminating) {
-			r.logger.With("workload", row.Name).Debug("waiting for workload to finish terminating")
-
-			return nil
-		}
-
-		r.logger.With("workload", row.Name).Info("restarting workload on request")
-		r.record(ctx, row.Name, event.RestartRequested, event.Fields{})
-
-		if err := r.stop(ctx, row); err != nil {
-			return fmt.Errorf("failed to stop workload for restart: %w", err)
-		}
-
-		return r.startAll(ctx, row, count)
-	}
-
 	// A scheduled workload runs when its expression says to and waits in between, so
 	// the schedule decides rather than the restart policy. Validation refuses a
 	// schedule with a count above one, so the whole path converges a single
@@ -99,7 +81,32 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 			return nil
 		}
 
+		// An operator asked for a scheduled workload to run now. Whatever the last
+		// occurrence left is cleared and the workload started, which is the one
+		// way to run it at a time its expression does not name.
+		if r.restartRequested(row.Name) {
+			r.logger.With("workload", row.Name).Info("restarting workload on request")
+			r.record(ctx, row.Name, event.RestartRequested, event.Fields{})
+
+			if err := r.stop(ctx, row); err != nil {
+				return fmt.Errorf("failed to stop workload for restart: %w", err)
+			}
+
+			return r.startAll(ctx, row, count)
+		}
+
 		return r.occurrence(ctx, row, instances, schedule)
+	}
+
+	// An operator asked for the instances to be replaced. The request becomes a
+	// mark on every slot, and each slot gets the stop-then-start a stale instance
+	// gets, from the unchanged specification, under the same one-at-a-time roll.
+	// Stopping every instance first was an outage on every restart, which is what
+	// a count above one exists to avoid.
+	if r.restartRequested(row.Name) {
+		r.logger.With("workload", row.Name).Info("restarting workload on request")
+		r.record(ctx, row.Name, event.RestartRequested, event.Fields{})
+		r.markReplacing(row.Name, count)
 	}
 
 	// A slot at or past the count is one a smaller count removed. Discarded rather
@@ -167,11 +174,18 @@ func (r *Reconciler) converge(ctx context.Context, row database.Workload, instan
 // The states the health check folds in count: an instance still in its start
 // period reads as pending, and one failing its check reads as failed, and neither
 // has settled. A slot whose expected hash cannot be resolved is left out, since
-// staleSlot leaves such a slot alone either way.
+// staleSlot leaves such a slot alone either way. So is a slot an operator's
+// restart has yet to replace: its instance is current, but it is the subject of
+// the replacement rather than the outcome of one, and an unsettled one would
+// otherwise hold the roll that is meant to replace it.
 func (r *Reconciler) rolling(ctx context.Context, row database.Workload, count int, byIndex map[int][]driver.Instance) bool {
 	now := r.now()
 
 	for index := range count {
+		if r.replacingRequested(row.Name, index) {
+			continue
+		}
+
 		expected, err := r.slotHash(ctx, row, index)
 		if err != nil {
 			continue
@@ -228,7 +242,14 @@ func (r *Reconciler) convergeSlot(ctx context.Context, row database.Workload, in
 		// Recorded here rather than where the staleness was found, so a slot that is
 		// due but rolls on a later pass does not report a replacement that has not
 		// happened.
-		r.record(ctx, row.Name, why.reason, why.fields)
+		if why.reason != "" {
+			r.record(ctx, row.Name, why.reason, why.fields)
+		}
+
+		// Cleared on sight rather than on success, as the request itself was: a
+		// replacement that fails to start is retried and paced by the ordinary
+		// paths, and acting on the mark again would repeat work those own.
+		r.clearReplacing(row.Name, index)
 
 		if err := r.stopInstance(ctx, row, index); err != nil {
 			return false, fmt.Errorf("failed to stop stale instance: %w", err)
@@ -260,6 +281,10 @@ func (r *Reconciler) convergeSlot(ctx context.Context, row database.Workload, in
 	}
 
 	if len(instances) == 0 {
+		// A restart asked for while the slot was empty has nothing to replace.
+		// The start below is what the operator would have got.
+		r.clearReplacing(row.Name, index)
+
 		if r.notReady(ctx, row, index) {
 			return false, nil
 		}
@@ -354,6 +379,13 @@ func (r *Reconciler) staleSlot(
 			reason: event.PortsDrifted,
 			fields: event.Fields{Instance: index, Ports: hostPorts(ports)},
 		}
+	}
+
+	// Last, so a slot that is stale on its own account reports why. An operator's
+	// restart makes every instance in the slot stale, ended ones included: a job
+	// that finished is run again, as the request asks.
+	if r.replacingRequested(row.Name, index) {
+		return slices.Clone(instances), staleness{}
 	}
 
 	return nil, staleness{}

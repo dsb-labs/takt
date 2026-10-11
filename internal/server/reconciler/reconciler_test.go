@@ -417,7 +417,7 @@ func TestReconciler_Run_RestartsOnRequest(t *testing.T) {
 	// The instance is current and running, so nothing but the request explains a
 	// stop. Both calls are expected exactly once: the pass that acts on the
 	// request consumes it, so the passes that follow leave the replacement alone.
-	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
+	d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", 0).Return(nil).Once()
 	d.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
 		return w.Name == "example" && w.SpecHash == "hash-one"
 	})).Return("container-two", nil).Once()
@@ -5282,6 +5282,168 @@ func TestReconciler_Run_RollsOnceTheReplacementHasSettled(t *testing.T) {
 	passes.wait(t, 5)
 	awaitPasses(t, r, 5)
 	assert.Equal(t, 3, starts.get())
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
+func TestReconciler_Run_RestartRollsAcrossInstances(t *testing.T) {
+	t.Parallel()
+
+	d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+	// Three current instances and an operator's restart. Stopping them all at once
+	// was an outage on every restart, so the request rolls the way a change does:
+	// one slot per pass, and the next only once the last replacement has settled.
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{storedWorkloadWithCount("example", "hash-one", 3)}, nil)
+	ports.EXPECT().ListAll(mock.Anything).Return(nil, nil)
+
+	var now atomic.Int64
+	epoch := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	now.Store(0)
+
+	clock := func() time.Time { return epoch.Add(time.Duration(now.Load())) }
+
+	// Every instance is current, so only the request tells a replacement from an
+	// instance to leave alone. A replacement lands started at the moment it was.
+	var mux sync.Mutex
+	current := map[int]time.Time{}
+
+	passes := newCounter()
+	d.EXPECT().Observe(mock.Anything).RunAndReturn(func(context.Context) ([]driver.Instance, error) {
+		passes.inc()
+
+		mux.Lock()
+		defer mux.Unlock()
+
+		instances := make([]driver.Instance, 0, 3)
+		for index := range 3 {
+			instance := driver.Instance{ID: "old-" + strconv.Itoa(index), Workload: "example", Index: index, SpecHash: "hash-one", State: driver.StateRunning}
+			if started, ok := current[index]; ok {
+				instance = driver.Instance{ID: "new-" + strconv.Itoa(index), Workload: "example", Index: index, SpecHash: "hash-one", State: driver.StateRunning, StartedAt: started}
+			}
+
+			instances = append(instances, instance)
+		}
+
+		return instances, nil
+	})
+
+	d.EXPECT().StopInstance(mock.Anything, mock.Anything, "example", mock.Anything).Return(nil)
+
+	starts := newCounter()
+	d.EXPECT().Start(mock.Anything, mock.Anything).RunAndReturn(func(_ context.Context, w driver.Workload) (string, error) {
+		starts.inc()
+
+		mux.Lock()
+		current[w.Instance] = clock()
+		mux.Unlock()
+
+		return "new", nil
+	})
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Ports:     ports,
+		Interval:  time.Hour,
+		Now:       clock,
+	})
+
+	r.Restart("example")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	// The first pass replaces one slot. Passes that follow at once replace
+	// nothing more, since the replacement has not settled.
+	passes.wait(t, 1)
+	awaitPasses(t, r, 1)
+	assert.Equal(t, 1, starts.get())
+
+	for i := 2; i <= 3; i++ {
+		r.Notify()
+		passes.wait(t, i)
+		awaitPasses(t, r, uint64(i))
+	}
+
+	assert.Equal(t, 1, starts.get(), "a second slot was replaced before the first replacement had settled")
+
+	// Once the replacement has been up for the settle period the roll moves on,
+	// again by one, until every slot has been replaced exactly once.
+	now.Store(int64(11 * time.Second))
+	r.Notify()
+	passes.wait(t, 4)
+	awaitPasses(t, r, 4)
+	assert.Equal(t, 2, starts.get())
+
+	now.Store(int64(22 * time.Second))
+	r.Notify()
+	passes.wait(t, 5)
+	awaitPasses(t, r, 5)
+	assert.Equal(t, 3, starts.get())
+
+	now.Store(int64(33 * time.Second))
+	r.Notify()
+	passes.wait(t, 6)
+	awaitPasses(t, r, 6)
+	assert.Equal(t, 3, starts.get(), "a slot was replaced again after the request had been served")
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
+func TestReconciler_Run_RestartRunsAScheduledWorkloadNow(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	applied := time.Date(2026, 3, 1, 2, 0, 0, 0, time.Local)
+
+	row := storedWorkload("example", "hash-one")
+	row.Spec = specWithSchedule("example", "0 2 * * *", "")
+	row.UpdatedAt = applied.UTC()
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{row}, nil)
+
+	// The last run finished an hour ago and the next occurrence is not due. Only
+	// the request explains a run, and a scheduled workload has one slot, so it
+	// is cleared and started rather than rolled.
+	d.EXPECT().Observe(mock.Anything).Return([]driver.Instance{
+		{ID: "run-one", Workload: "example", SpecHash: "hash-one", State: driver.StateExited, StartedAt: applied.Add(time.Hour)},
+	}, nil)
+	d.EXPECT().Stop(mock.Anything, mock.Anything, "example").Return(nil).Once()
+	d.EXPECT().Start(mock.Anything, mock.Anything).Return("run-two", nil).Once()
+
+	events := make(chan driver.Event)
+	d.EXPECT().Watch(mock.Anything).Return(events, nil).Once()
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+		Now:       func() time.Time { return applied.Add(2 * time.Hour) },
+	})
+
+	r.Restart("example")
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	awaitPasses(t, r, 1)
+
+	// A second pass over the same state must not act on the request again.
+	r.Notify()
+	awaitPasses(t, r, 2)
 
 	cancel()
 	require.NoError(t, <-done)
