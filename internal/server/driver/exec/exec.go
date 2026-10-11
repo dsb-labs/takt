@@ -692,9 +692,21 @@ func (d *Driver) halt(ctx context.Context, workload string, records []record) er
 			continue
 		}
 
-		if recorded.alive() {
+		// A leader that has already gone may have left the rest of its group
+		// behind, and the group is what holds the workload's ports. Killed only
+		// when a member still names the leader's session: the pid could since
+		// have been reused by an unrelated process group, and a session of the
+		// same number is what the driver's own Setsid gave this one. A pid the
+		// driver would refuse to signal is not looked for: kernel threads sit in
+		// session zero, and nothing the driver started can be either.
+		switch {
+		case recorded.alive():
 			if err = d.terminate(ctx, recorded.PID); err != nil {
 				return fmt.Errorf("failed to stop process: %w", err)
+			}
+		case signalable(recorded.PID) && inSession(recorded.PID):
+			if err = d.kill(recorded.PID); err != nil {
+				return fmt.Errorf("failed to stop process group: %w", err)
 			}
 		}
 
@@ -1036,6 +1048,11 @@ func signalable(pid int) bool {
 }
 
 // terminate asks a process group to stop and kills it if it does not.
+//
+// The group is killed once the leader has gone as well as when it has not. The
+// leader exiting says nothing about what it started, and a child that ignored the
+// request would otherwise outlive the workload holding its ports, so the next
+// attempt could not bind them.
 func (d *Driver) terminate(ctx context.Context, pid int) error {
 	if !signalable(pid) {
 		return fmt.Errorf("refusing to signal pid %d", pid)
@@ -1048,7 +1065,7 @@ func (d *Driver) terminate(ctx context.Context, pid int) error {
 	deadline := time.Now().Add(stopGrace)
 	for time.Now().Before(deadline) {
 		if err := syscall.Kill(pid, 0); err != nil {
-			return nil
+			break
 		}
 
 		select {

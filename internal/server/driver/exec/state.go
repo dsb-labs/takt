@@ -5,8 +5,10 @@ package exec
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -256,39 +258,75 @@ func (s state) alive() bool {
 	return ticks == s.StartTicks
 }
 
-// startTicks reads when a process started, in clock ticks since boot.
-//
-// Field 22 of /proc/<pid>/stat is the value, counted from the start of the line. The
-// second field is the executable name in parentheses and may itself contain spaces or
+// The fields of /proc/<pid>/stat this driver reads, counted from after the
+// executable name. The name is the second field and may itself contain spaces or
 // parentheses, so the fields are counted from after the last closing parenthesis
-// rather than by splitting the whole line.
+// rather than by splitting the whole line: field 6 overall is the fourth after it,
+// and field 22 the twentieth.
+const (
+	statSession   = 3
+	statStartTime = 19
+)
+
+// startTicks reads when a process started, in clock ticks since boot.
 func startTicks(pid int) (uint64, error) {
+	field, err := stat(pid, statStartTime)
+	if err != nil {
+		return 0, err
+	}
+
+	ticks, err := strconv.ParseUint(field, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse process start time: %w", err)
+	}
+
+	return ticks, nil
+}
+
+// inSession reports whether any process still belongs to the session a leader
+// made, which is what a process the driver started with Setsid left behind when it
+// exited before the rest of its group.
+//
+// The session rather than the process group: a group ends when its last member
+// does, and a pid the kernel has handed out again could lead an unrelated group of
+// the same number. One that also made a session of the same number is as near to
+// impossible as this can check without a cgroup.
+func inSession(sid int) bool {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return false
+	}
+
+	return slices.ContainsFunc(entries, func(entry fs.DirEntry) bool {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			return false
+		}
+
+		field, err := stat(pid, statSession)
+
+		return err == nil && field == strconv.Itoa(sid)
+	})
+}
+
+// stat reads one field of /proc/<pid>/stat, counted from after the executable name.
+func stat(pid, field int) (string, error) {
 	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
 	if err != nil {
-		return 0, fmt.Errorf("failed to read process stat: %w", err)
+		return "", fmt.Errorf("failed to read process stat: %w", err)
 	}
 
 	line := string(data)
 
 	end := strings.LastIndex(line, ")")
 	if end < 0 || end+2 > len(line) {
-		return 0, fmt.Errorf("process stat for %d is malformed", pid)
+		return "", fmt.Errorf("process stat for %d is malformed", pid)
 	}
 
 	fields := strings.Fields(line[end+2:])
-
-	// Field 22 overall is the twentieth after the executable name, which is the
-	// second field.
-	const startTime = 19
-
-	if len(fields) <= startTime {
-		return 0, fmt.Errorf("process stat for %d has too few fields", pid)
+	if len(fields) <= field {
+		return "", fmt.Errorf("process stat for %d has too few fields", pid)
 	}
 
-	ticks, err := strconv.ParseUint(fields[startTime], 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse process start time: %w", err)
-	}
-
-	return ticks, nil
+	return fields[field], nil
 }
