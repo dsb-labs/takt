@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/dsb-labs/takt/internal/server/auth"
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
@@ -90,8 +91,10 @@ func (s *PolicyService) Get(ctx context.Context) (Policy, error) {
 // replaces, so a grant absent from it is revoked.
 //
 // Returns the policy as applied, which is what a get would now report. An
-// apply that changes nothing leaves the version where it is.
-func (s *PolicyService) Apply(ctx context.Context, policy manifest.Policy, ifMatch int) (Policy, error) {
+// apply that changes nothing leaves the version where it is. The actor is
+// the identity that asked, recorded with the apply so the log says who
+// changed the policy and not only that it changed.
+func (s *PolicyService) Apply(ctx context.Context, actor auth.Identity, policy manifest.Policy, ifMatch int) (Policy, error) {
 	if err := manifest.ValidatePolicy(policy); err != nil {
 		return Policy{}, fmt.Errorf("%w: %v", ErrInvalidPolicy, err)
 	}
@@ -109,7 +112,7 @@ func (s *PolicyService) Apply(ctx context.Context, policy manifest.Policy, ifMat
 		return Policy{}, err
 	}
 
-	s.logger.With("version", stored.Version, "grants", len(policy.Grants)).Info("policy applied")
+	s.logger.With("version", stored.Version, "grants", len(policy.Grants), "actor", actor).Info("policy applied")
 
 	return hydratePolicy(stored)
 }

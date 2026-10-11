@@ -7,6 +7,8 @@ import (
 	"log/slog"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/server/auth"
+	"github.com/dsb-labs/takt/internal/server/middleware"
 	"github.com/dsb-labs/takt/internal/server/service"
 )
 
@@ -15,12 +17,14 @@ type (
 	// exposes.
 	TokenService interface {
 		// Create should mint a client token bound to the given principal,
-		// returning the stored token and the credential itself.
-		Create(ctx context.Context, principal string) (service.Token, string, error)
+		// returning the stored token and the credential itself, recording the
+		// actor as who minted it.
+		Create(ctx context.Context, actor auth.Identity, principal string) (service.Token, string, error)
 		// List should return every token, newest first.
 		List(ctx context.Context) ([]service.Token, error)
-		// Delete should revoke the token with the given identifier.
-		Delete(ctx context.Context, id string) error
+		// Delete should revoke the token with the given identifier, recording
+		// the actor as who revoked it.
+		Delete(ctx context.Context, actor auth.Identity, id string) error
 	}
 
 	// The TokenAPI type exposes HTTP endpoints for managing tokens.
@@ -55,7 +59,7 @@ func (a *TokenAPI) CreateToken(ctx context.Context, request api.CreateTokenReque
 		}, nil
 	}
 
-	token, credential, err := a.tokens.Create(ctx, request.Body.Principal)
+	token, credential, err := a.tokens.Create(ctx, middleware.CallerIdentity(ctx), request.Body.Principal)
 	switch {
 	case errors.Is(err, service.ErrInvalidPrincipal):
 		return api.CreateToken400JSONResponse{
@@ -92,7 +96,7 @@ func (a *TokenAPI) ListTokens(ctx context.Context, _ api.ListTokensRequestObject
 
 // DeleteToken revokes the token with the given identifier.
 func (a *TokenAPI) DeleteToken(ctx context.Context, request api.DeleteTokenRequestObject) (api.DeleteTokenResponseObject, error) {
-	err := a.tokens.Delete(ctx, request.ID)
+	err := a.tokens.Delete(ctx, middleware.CallerIdentity(ctx), request.ID)
 	switch {
 	case errors.Is(err, service.ErrTokenNotFound):
 		return api.DeleteToken404JSONResponse{

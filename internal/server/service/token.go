@@ -175,8 +175,9 @@ func (s *TokenService) Reset(ctx context.Context) error {
 
 // Create mints a client token bound to the given principal, returning the
 // stored token and the credential itself. This is the only time the
-// credential is reported.
-func (s *TokenService) Create(ctx context.Context, principal string) (Token, string, error) {
+// credential is reported. The actor is the identity that asked, recorded
+// with the create so the log says who minted the token.
+func (s *TokenService) Create(ctx context.Context, actor auth.Identity, principal string) (Token, string, error) {
 	if err := validatePrincipal(principal); err != nil {
 		return Token{}, "", err
 	}
@@ -196,7 +197,7 @@ func (s *TokenService) Create(ctx context.Context, principal string) (Token, str
 		return Token{}, "", err
 	}
 
-	s.logger.With("principal", principal).Info("token created")
+	s.logger.With("principal", principal, "token_id", stored.ID, "actor", actor).Info("token created")
 
 	return newToken(stored), credential, nil
 }
@@ -365,7 +366,7 @@ func (s *TokenService) List(ctx context.Context) ([]Token, error) {
 // refusal is the recovery token: deleting it would re-arm the anonymous init,
 // so an admin could replace the operator's recovery token with one it alone
 // holds.
-func (s *TokenService) Delete(ctx context.Context, id string) error {
+func (s *TokenService) Delete(ctx context.Context, actor auth.Identity, id string) error {
 	token, err := s.tokens.Get(ctx, id)
 	switch {
 	case errors.Is(err, database.ErrTokenNotFound):
@@ -386,7 +387,7 @@ func (s *TokenService) Delete(ctx context.Context, id string) error {
 		return err
 	}
 
-	s.logger.With("token_id", id).Info("token deleted")
+	s.logger.With("token_id", id, "principal", token.Principal, "actor", actor).Info("token deleted")
 
 	return nil
 }

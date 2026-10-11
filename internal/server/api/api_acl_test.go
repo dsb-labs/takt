@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/auth"
 	"github.com/dsb-labs/takt/internal/server/middleware"
 	"github.com/dsb-labs/takt/internal/server/service"
 	"github.com/dsb-labs/takt/pkg/manifest"
@@ -101,7 +102,9 @@ func TestACLAPI_ApplyACLPolicy(t *testing.T) {
 		policies := NewMockPolicyService(t)
 		// The quotes the header carries are stripped before the service sees
 		// the tag.
-		policies.EXPECT().Apply(mock.Anything, grantViewer, 1).
+		// The caller's identity reaches the service as the actor, which here
+		// is the disabled identity the test middleware resolves.
+		policies.EXPECT().Apply(mock.Anything, auth.Identity{Disabled: true}, grantViewer, 1).
 			Return(service.Policy{Spec: grantViewer, Version: 2}, nil).Once()
 
 		resp := apply(t, policies, `"1"`)
@@ -111,7 +114,7 @@ func TestACLAPI_ApplyACLPolicy(t *testing.T) {
 
 	t.Run("accepts a bare tag without quotes", func(t *testing.T) {
 		policies := NewMockPolicyService(t)
-		policies.EXPECT().Apply(mock.Anything, grantViewer, 1).
+		policies.EXPECT().Apply(mock.Anything, mock.Anything, grantViewer, 1).
 			Return(service.Policy{Spec: grantViewer, Version: 2}, nil).Once()
 
 		resp := apply(t, policies, "1")
@@ -120,7 +123,7 @@ func TestACLAPI_ApplyACLPolicy(t *testing.T) {
 
 	t.Run("refuses a stale tag", func(t *testing.T) {
 		policies := NewMockPolicyService(t)
-		policies.EXPECT().Apply(mock.Anything, mock.Anything, 1).
+		policies.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, 1).
 			Return(service.Policy{}, service.ErrPolicyChanged).Once()
 
 		resp := apply(t, policies, `"1"`)
@@ -129,7 +132,7 @@ func TestACLAPI_ApplyACLPolicy(t *testing.T) {
 
 	t.Run("refuses an invalid document", func(t *testing.T) {
 		policies := NewMockPolicyService(t)
-		policies.EXPECT().Apply(mock.Anything, mock.Anything, 1).
+		policies.EXPECT().Apply(mock.Anything, mock.Anything, mock.Anything, 1).
 			Return(service.Policy{}, service.ErrInvalidPolicy).Once()
 
 		resp := apply(t, policies, "1")
@@ -145,7 +148,7 @@ func TestACLAPI_ApplyACLPolicy(t *testing.T) {
 	// carries it back where a named resource's first apply carries nothing.
 	t.Run("applies the first document against version zero", func(t *testing.T) {
 		policies := NewMockPolicyService(t)
-		policies.EXPECT().Apply(mock.Anything, grantViewer, 0).
+		policies.EXPECT().Apply(mock.Anything, mock.Anything, grantViewer, 0).
 			Return(service.Policy{Spec: grantViewer, Version: 1}, nil).Once()
 
 		resp := apply(t, policies, `"0"`)
