@@ -296,9 +296,11 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 	}
 
 	// Opened before the process is confined, and stays writable to it afterwards: a
-	// descriptor already open is not reached through a path, so the ruleset does not
-	// have to grant the file the driver's own tree holds.
-	output, err := os.OpenFile(filepath.Join(workload, outputFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	// descriptor already open is not reached through a path. The ruleset grants the
+	// file as well, for a program that opens its own standard error by path.
+	outputPath := filepath.Join(workload, outputFile)
+
+	output, err := os.OpenFile(outputPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return "", fmt.Errorf("failed to open workload output: %w", pathless(err))
 	}
@@ -378,6 +380,9 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		// other workload's. Granting the file rather than the directory is what stops
 		// one workload reading another's.
 		Files: append(files(w.Volumes), command[0]),
+		// Reached by path through /dev/stderr and /dev/stdout, as well as by the
+		// descriptors the command already holds.
+		Output: outputPath,
 	}); err != nil {
 		// The process is confined or it is not running, so there is nothing left to
 		// supervise either way.
