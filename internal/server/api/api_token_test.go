@@ -92,6 +92,15 @@ func TestTokenAPI_ListTokens(t *testing.T) {
 			Source:    "init",
 			CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
+		{
+			ID:               "minted",
+			Type:             "client",
+			Source:           "workload",
+			Principal:        "runner",
+			CreatedAt:        time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+			WorkloadID:       "ci",
+			WorkloadInstance: new(0),
+		},
 	}, nil).Once()
 
 	resp := doToken(t, tokens, httptest.NewRequest(http.MethodGet, "/api/v1/tokens", nil))
@@ -103,6 +112,14 @@ func TestTokenAPI_ListTokens(t *testing.T) {
 			"source": "init",
 			"principal": "",
 			"createdAt": "2026-01-01T00:00:00Z"
+		}, {
+			"id": "minted",
+			"type": "client",
+			"source": "workload",
+			"principal": "runner",
+			"createdAt": "2026-01-01T00:00:00Z",
+			"workload": "ci",
+			"instance": 0
 		}]
 	}`, resp.Body.String())
 }
