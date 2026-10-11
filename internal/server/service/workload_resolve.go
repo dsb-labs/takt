@@ -121,14 +121,19 @@ func (s *WorkloadService) resolve(ctx context.Context, spec manifest.Spec) (reso
 		return resolution{}, fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
 
-	// Validation proved the limits are well formed, but whether they can be
-	// enforced is a fact about this host that the manifest rules cannot know: the
-	// exec driver needs a delegated cgroup subtree. Refused here rather than at
-	// start, because the operator applying the manifest is the one who can act on
-	// the refusal — a workload accepted and never started would fail where nobody
-	// is looking. A dry run shares this resolve, so it reports the same refusal.
-	if spec.Resources != nil {
-		if d, ok := s.drivers[string(runtime)]; ok {
+	// Validation proved the specification is well formed, but whether this host
+	// can run it is a fact the manifest rules cannot know: the exec driver needs a
+	// kernel that confines, and a delegated cgroup subtree to enforce limits with.
+	// Refused here rather than at start, because the operator applying the
+	// manifest is the one who can act on the refusal — a workload accepted and
+	// never started would fail where nobody is looking. A dry run shares this
+	// resolve, so it reports the same refusal.
+	if d, ok := s.drivers[string(runtime)]; ok {
+		if err = d.Confinable(); err != nil {
+			return resolution{}, fmt.Errorf("%w: %v", ErrUnsupportedRuntime, err)
+		}
+
+		if spec.Resources != nil {
 			if err = d.Enforceable(); err != nil {
 				return resolution{}, fmt.Errorf("%w: %v", ErrUnsupportedRuntime, err)
 			}

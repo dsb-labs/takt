@@ -210,6 +210,14 @@ func (d *Driver) Name() string {
 	return Name
 }
 
+// Confinable reports whether this host can confine a workload, returning
+// ErrNotConfinable when it cannot. It answers the package-level question for a
+// caller that holds the driver rather than the package, which is what lets the
+// service refuse a manifest at apply rather than the reconciler at start.
+func (d *Driver) Confinable() error {
+	return Confinable()
+}
+
 // Start runs the workload's command, returning the identifier of the process.
 //
 // The process is given a directory of its own, a process group of its own, and an

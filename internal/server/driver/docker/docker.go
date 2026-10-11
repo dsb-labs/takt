@@ -212,6 +212,12 @@ func (d *Driver) Enforceable() error {
 	return nil
 }
 
+// Confinable reports that this driver can always confine a workload. A container
+// is confined by the daemon, so nothing of the host beyond the daemon is needed.
+func (d *Driver) Confinable() error {
+	return nil
+}
+
 // New returns a Driver that runs containers through the client in config.
 func New(config Config) *Driver {
 	bind := config.Bind

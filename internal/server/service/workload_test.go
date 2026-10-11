@@ -282,6 +282,24 @@ func TestWorkloadService_ExecResourceLimits(t *testing.T) {
 		assert.True(t, created)
 		assert.Equal(t, manifest.RuntimeExec, got.Runtime)
 	})
+
+	t.Run("refuses an apply the host cannot confine", func(t *testing.T) {
+		t.Parallel()
+
+		// Whether the manifest names limits or not: a host whose kernel cannot
+		// confine runs no exec workload at all, and one accepted here would fail
+		// in the reconciler's backoff loop where nobody is looking.
+		unlimited := spec
+		unlimited.Resources = nil
+
+		svc := newHostService(t, exec.ErrNotConfinable, nil, NewMockWorkloadRepository(t))
+
+		_, _, err := svc.Apply(t.Context(), unlimited, 0)
+		assert.ErrorIs(t, err, service.ErrUnsupportedRuntime)
+
+		_, err = svc.DryRun(t.Context(), unlimited)
+		assert.ErrorIs(t, err, service.ErrUnsupportedRuntime)
+	})
 }
 
 // newLimitedService builds a service whose exec driver answers the enforceability
@@ -289,8 +307,18 @@ func TestWorkloadService_ExecResourceLimits(t *testing.T) {
 func newLimitedService(t *testing.T, enforce error, repo *MockWorkloadRepository) *service.WorkloadService {
 	t.Helper()
 
+	return newHostService(t, nil, enforce, repo)
+}
+
+// newHostService builds a service whose exec driver answers the two questions
+// about the host, whether it confines and whether it enforces limits, with the
+// given errors.
+func newHostService(t *testing.T, confine, enforce error, repo *MockWorkloadRepository) *service.WorkloadService {
+	t.Helper()
+
 	d := NewMockDriver(t)
 	d.EXPECT().Name().Return(exec.Name).Maybe()
+	d.EXPECT().Confinable().Return(confine).Maybe()
 	d.EXPECT().Enforceable().Return(enforce).Maybe()
 	d.EXPECT().ObserveWorkload(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
@@ -4577,6 +4605,7 @@ func newMockDriver(t *testing.T) *MockDriver {
 
 	d := NewMockDriver(t)
 	d.EXPECT().Name().Return(docker.Name).Maybe()
+	d.EXPECT().Confinable().Return(nil).Maybe()
 	d.EXPECT().Usage(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 
 	return d
