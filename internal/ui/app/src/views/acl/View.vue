@@ -105,6 +105,21 @@ await Promise.all([
               </td>
               <td class="hidden px-4 py-2 sm:table-cell">
                 {{ token.source }}
+                <template v-if="token.workload">
+                  <RouterLink
+                    :to="`/workloads/${token.workload}`"
+                    class="text-pulse-700 dark:text-pulse-300 hover:underline"
+                  >
+                    {{ token.workload }}
+                  </RouterLink>
+                  <span class="text-slate-500 dark:text-slate-400">
+                    {{
+                      token.instance !== undefined
+                        ? `instance ${token.instance}`
+                        : `version ${token.version}`
+                    }}
+                  </span>
+                </template>
               </td>
               <td
                 class="hidden px-4 py-2 md:table-cell"
