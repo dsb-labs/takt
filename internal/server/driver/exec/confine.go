@@ -297,11 +297,6 @@ func ungroupable() error {
 //
 // Applied without best-effort, so a kernel offering less than the ruleset asks for
 // fails here rather than confining the workload to less than it was promised.
-//
-// The reparenting right is not asked for. Moving a file within a granted directory
-// works without it, moving one between two of them is not something a workload needs
-// takt's help to avoid, and asking for it falls back to no confinement at all on
-// kernels below 5.19 — which is the one outcome this must not produce.
 func restrict(rs ruleset) error {
 	rules := []landlock.Rule{
 		// The host's own files, and the devices a program expects to find. Missing
@@ -324,8 +319,15 @@ func restrict(rs ruleset) error {
 	// working directory and resolved every volume before starting this. One that is
 	// missing means the workload would run without somewhere it was told it had, so it
 	// is reported rather than ignored.
+	//
+	// With the right to move files between directories. From the second Landlock
+	// interface a rename or a link across two directories is refused with EXDEV
+	// unless both hold it, and that includes two directories inside one grant: a
+	// program that writes a temporary file and renames it into a subdirectory of
+	// its own working directory fails without it. The right changes no boundary,
+	// since the destination still has to be inside a granted hierarchy.
 	if len(rs.Write) > 0 {
-		rules = append(rules, landlock.RWDirs(rs.Write...))
+		rules = append(rules, landlock.RWDirs(rs.Write...).WithRefer())
 	}
 
 	// The command's binary and the values the workload mounts, each granted as a file
