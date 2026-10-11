@@ -86,6 +86,12 @@ type (
 		// does not. A driver whose limits need nothing of the host answers nil
 		// unconditionally, as the container runtime does.
 		Enforceable() error
+		// Confinable should report whether the host lets the driver confine a
+		// workload at all, returning an error naming what is missing when it
+		// does not. A driver that confines through something other than the
+		// host's kernel answers nil unconditionally, as the container runtime
+		// does.
+		Confinable() error
 	}
 
 	// The WorkloadRepository interface describes the persistence operations the
