@@ -24,6 +24,12 @@ describes how an entry is written.
 
 ### Changed
 
+- `takt workload restart` replaces the instances one at a time, each after the
+  last replacement has settled, the way a specification change does. Before, it
+  stopped every instance and then started them all, which was an outage on every
+  restart of a workload with a `count` above one
+  ([#164](https://github.com/dsb-labs/takt/issues/164),
+  [#208](https://github.com/dsb-labs/takt/pull/208)).
 - `takt dev loadtest` refuses to run unless `--address` names the server on the
   command line. It no longer reads `TAKT_ADDRESS` or the config file, so a shell
   logged into a production server cannot load it by accident
@@ -48,6 +54,11 @@ describes how an entry is written.
 
 ### Fixed
 
+- A workload with a `count` above one lost the mounted files and the shared
+  token of its previous version as soon as the first replacement started, while
+  the other instances still read them. Both now go once no instance of the
+  previous version remains ([#164](https://github.com/dsb-labs/takt/issues/164),
+  [#208](https://github.com/dsb-labs/takt/pull/208)).
 - A workload with dynamic ports gave them up on every failed start, including a
   misspelt image tag or a registry that was down, so its first instance's address
   moved on every paced attempt and every workload reading it was replaced each
