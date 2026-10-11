@@ -16,6 +16,12 @@ describes how an entry is written.
   OIDC `redirect-url` switched on
   ([#157](https://github.com/dsb-labs/takt/issues/157),
   [#190](https://github.com/dsb-labs/takt/pull/190)).
+- `takt token list` and the credentials table in the UI name the workload a
+  token was minted for, with the instance that holds it or the version that
+  shares it. Before, a workload token showed only its principal, so the
+  manifest that asked for it was found by reading every manifest
+  ([#158](https://github.com/dsb-labs/takt/issues/158),
+  [#209](https://github.com/dsb-labs/takt/pull/209)).
 - `client-secret-file` under `[auth.oidc]`, a file holding the OIDC client
   secret as an alternative to `client-secret`. The file must be readable only by
   the user running the server, as `tls-key` must
@@ -24,6 +30,11 @@ describes how an entry is written.
 
 ### Changed
 
+- A policy apply, a token create and a token delete log the caller's principal
+  and token id as the `actor`, so the server's log says who changed access and
+  not only that it changed
+  ([#158](https://github.com/dsb-labs/takt/issues/158),
+  [#209](https://github.com/dsb-labs/takt/pull/209)).
 - `takt workload restart` replaces the instances one at a time, each after the
   last replacement has settled, the way a specification change does. Before, it
   stopped every instance and then started them all, which was an outage on every
