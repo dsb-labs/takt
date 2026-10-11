@@ -914,9 +914,10 @@ takt token list
 Names every credential the server holds — static tokens, logins, sessions,
 workload tokens and the recovery token — with when each was created and last
 used. With `takt acl get`, this answers who can touch the server, completely.
-A workload token carries the `workload` source, which is how a credential the
-server minted for a manifest is told from one an operator created. Requires
-the `admin` role.
+A workload token carries the `workload` source and names the workload it was
+minted for, with the instance that holds it or the version that shares it, so
+the manifest that asked for it is found without reading every manifest.
+Requires the `admin` role.
 
 ## token delete
 
