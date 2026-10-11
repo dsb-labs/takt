@@ -317,6 +317,12 @@ type (
 		// consumed by the next pass over each. In memory rather than stored,
 		// because a request the server loses can simply be made again.
 		restarts map[string]struct{}
+		// The slots an operator's restart has yet to replace. A request is
+		// turned into one mark per slot when a pass consumes it, and each mark
+		// is cleared as its slot is replaced, so the replacement rolls across
+		// the instances the way a specification change does rather than
+		// stopping them all at once.
+		replacing map[slot]struct{}
 		// The version each workload's superseded mounted files and shared tokens
 		// were most recently reclaimed up to, keyed by the workload's identifier,
 		// so that a pass sweeps a workload once per version rather than every
@@ -481,6 +487,7 @@ func New(config Config) *Reconciler {
 		verdicts:     make(map[slot]health.Status),
 		unhealthy:    make(map[slot]string),
 		restarts:     make(map[string]struct{}),
+		replacing:    make(map[slot]struct{}),
 		reclaimed:    make(map[string]int),
 		started:      make(map[slot]int),
 		held:         make(map[slot]time.Time),
@@ -536,6 +543,51 @@ func (r *Reconciler) restartRequested(workload string) bool {
 	delete(r.restarts, workload)
 
 	return ok
+}
+
+// markReplacing records that every slot of a workload up to the count is due
+// to be replaced, which is what an operator's restart asks for.
+func (r *Reconciler) markReplacing(workload string, count int) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	for index := range count {
+		r.replacing[slot{workload: workload, instance: index}] = struct{}{}
+	}
+}
+
+// replacingRequested reports whether an operator's restart has yet to replace
+// the slot.
+func (r *Reconciler) replacingRequested(workload string, index int) bool {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	_, ok := r.replacing[slot{workload: workload, instance: index}]
+
+	return ok
+}
+
+// clearReplacing clears a slot's mark once the replacement an operator asked for has
+// been acted on, or once there was nothing in the slot to replace.
+func (r *Reconciler) clearReplacing(workload string, index int) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	delete(r.replacing, slot{workload: workload, instance: index})
+}
+
+// forgetReplacing drops every mark an operator's restart left on a workload,
+// once the workload is gone or held down. A mark left behind would replace
+// the instances of whatever next runs under the name.
+func (r *Reconciler) forgetReplacing(workload string) {
+	r.mux.Lock()
+	defer r.mux.Unlock()
+
+	for key := range r.replacing {
+		if key.workload == workload {
+			delete(r.replacing, key)
+		}
+	}
 }
 
 // record stores an event against a workload, saying what this pass observed

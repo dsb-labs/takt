@@ -91,6 +91,7 @@ func (r *Reconciler) teardown(ctx context.Context, row database.Workload, instan
 	// the same reason: it would otherwise lie in wait for a later workload that
 	// reuses the name.
 	r.restartRequested(row.Name)
+	r.forgetReplacing(row.Name)
 
 	r.logger.With("workload", row.Name).Info("workload deleted")
 
@@ -151,6 +152,7 @@ func (r *Reconciler) suspend(ctx context.Context, row database.Workload, instanc
 	// A restart asked for before the suspension landed is superseded by it. What
 	// was running is stopped either way, and a resume should not replay it.
 	r.restartRequested(row.Name)
+	r.forgetReplacing(row.Name)
 
 	return nil
 }
@@ -259,6 +261,7 @@ func (r *Reconciler) discardInstance(ctx context.Context, row database.Workload,
 	delete(r.started, key)
 	delete(r.held, key)
 	delete(r.pulling, key)
+	delete(r.replacing, key)
 	r.mux.Unlock()
 
 	if r.checker != nil {
