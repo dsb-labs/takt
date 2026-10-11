@@ -136,7 +136,7 @@ func (d *Driver) Probe(ctx context.Context, w driver.Workload, probe driver.Prob
 	// what ends anything that escaped the group.
 	defer limits.discard()
 
-	err = confineWith(cmd, rules, status, ruleset{
+	err = confineWith(cmd, rules, status, d.root, ruleset{
 		Command: command,
 		Write:   append([]string{cwd}, hosts(recorded.Volumes)...),
 		Read:    d.allowed,
