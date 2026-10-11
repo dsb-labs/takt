@@ -79,16 +79,28 @@ func TestClient_ListTokens(t *testing.T) {
 					Principal: "david@dsb.dev",
 					ExpiresAt: new(expires),
 				},
+				{
+					ID:        "minted",
+					Type:      api.TokenTypeClient,
+					Source:    api.TokenSourceWorkload,
+					Principal: "runner",
+					Workload:  new("ci"),
+					Version:   new(3),
+				},
 			},
 		})
 	})
 
 	tokens, err := c.ListTokens(t.Context())
 	require.NoError(t, err)
-	require.Len(t, tokens, 1)
+	require.Len(t, tokens, 2)
 	assert.Equal(t, "session", tokens[0].Source)
 	assert.Equal(t, expires, tokens[0].ExpiresAt)
 	assert.True(t, tokens[0].LastUsedAt.IsZero())
+	assert.Empty(t, tokens[0].Workload)
+	assert.Equal(t, "ci", tokens[1].Workload)
+	assert.Equal(t, new(3), tokens[1].Version)
+	assert.Nil(t, tokens[1].Instance)
 }
 
 func TestClient_DeleteToken(t *testing.T) {

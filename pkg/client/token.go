@@ -31,6 +31,17 @@ type Token struct {
 	// The time the token last authenticated a request. Zero when it never
 	// has.
 	LastUsedAt time.Time
+	// The workload the server minted the token for. Empty for a token not
+	// minted for one.
+	Workload string
+	// The instance the token was minted for, when one instance holds it in
+	// its environment. Nil for a token every instance of the workload
+	// shares, and for a token not minted for a workload.
+	Instance *int
+	// The workload version the token was minted for, when every instance
+	// of that version shares it from a file. Nil for an instance's own
+	// token, and for a token not minted for a workload.
+	Version *int
 }
 
 // checkTokenID reports whether an identifier is usable as a single segment of
@@ -125,6 +136,8 @@ func newToken(token api.Token) Token {
 		Source:    string(token.Source),
 		Principal: token.Principal,
 		CreatedAt: token.CreatedAt,
+		Instance:  token.Instance,
+		Version:   token.Version,
 	}
 
 	if token.ExpiresAt != nil {
@@ -132,6 +145,9 @@ func newToken(token api.Token) Token {
 	}
 	if token.LastUsedAt != nil {
 		out.LastUsedAt = *token.LastUsedAt
+	}
+	if token.Workload != nil {
+		out.Workload = *token.Workload
 	}
 
 	return out
