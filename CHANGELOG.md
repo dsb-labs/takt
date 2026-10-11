@@ -8,6 +8,8 @@ describes how an entry is written.
 
 ## Unreleased
 
+## v0.12.0 - 2026-10-11
+
 ### Added
 
 - `behind-tls` under `[http]`, for a reverse proxy that terminates TLS in front
@@ -151,7 +153,6 @@ describes how an entry is written.
   a key with no file behind it. The keyring directory is now synced too
   ([#167](https://github.com/dsb-labs/takt/issues/167),
   [#195](https://github.com/dsb-labs/takt/pull/195)).
-
 - A schedule read the time it counted from in whatever location that time carried.
   The stored apply time is UTC, so `0 2 * * *` fired at 02:00 UTC on its first
   occurrence and at 02:00 server time afterwards, and `takt workload get` reported
@@ -159,13 +160,11 @@ describes how an entry is written.
   server's local time throughout, as the manifest reference says
   ([#161](https://github.com/dsb-labs/takt/issues/161),
   [#192](https://github.com/dsb-labs/takt/pull/192)).
-
 - A stopped scheduled workload ran the occurrence it missed the moment it was
   started again, because the run that suspension stopped still counted as the last
   run. The schedule now counts from the start, so the workload waits for its next
   occurrence ([#161](https://github.com/dsb-labs/takt/issues/161),
   [#192](https://github.com/dsb-labs/takt/pull/192)).
-
 - An image whose `VOLUME` directive names a path no takt volume covers, which
   postgres, mysql and redis do by default, left an anonymous volume behind on every
   attempt, and nothing removed it. The container driver now removes a container's
@@ -173,14 +172,12 @@ describes how an entry is written.
   bind mount and is not affected
   ([#169](https://github.com/dsb-labs/takt/issues/169),
   [#191](https://github.com/dsb-labs/takt/pull/191)).
-
 - A workload whose `container.image` carried both a tag and a digest, as
   `repo:1.2@sha256:...`, lost its image to the prune after `prune-delay` whenever
   no container held it, and pulled it again on the next start. The prune now matches
   such a reference on its digest
   ([#169](https://github.com/dsb-labs/takt/issues/169),
   [#191](https://github.com/dsb-labs/takt/pull/191)).
-
 - A container on the daemon carrying a `takt.workload` label with an empty value,
   from a `docker run --label takt.workload` or a compose file with a null value, was
   reported as a workload named `""`, swept as an orphan, and the discard of that name
@@ -188,21 +185,18 @@ describes how an entry is written.
   container and refuses to stop, discard, signal or read the logs of an empty name
   ([#156](https://github.com/dsb-labs/takt/issues/156),
   [#188](https://github.com/dsb-labs/takt/pull/188)).
-
 - `takt token delete` and `DELETE /api/v1/tokens/{id}` removed the recovery
   token, which re-armed the anonymous `acl init` and let an `admin` replace the
   operator's recovery token with one only it held. Both now refuse it with a
   `409`, and the reset file is the only revocation path, as `auth logout` already
   enforced ([#154](https://github.com/dsb-labs/takt/issues/154),
   [#187](https://github.com/dsb-labs/takt/pull/187)).
-
 - `POST /api/v1/auth` exchanged any token except the recovery token for a 12
   hour session, so a session renewed itself forever and a workload or OIDC token
   yielded a session that revocation and the issuer's expiry never reached. Only
   a static token exchanges now, which is the UI's pasted-token login
   ([#154](https://github.com/dsb-labs/takt/issues/154),
   [#187](https://github.com/dsb-labs/takt/pull/187)).
-
 - **Breaking:** `value` in `PUT /api/v1/secrets/{name}` is now base64. The
   value travelled as a JSON string, which cannot carry bytes that are not
   UTF-8, so a DER certificate or a PKCS#12 bundle set with
@@ -241,7 +235,6 @@ describes how an entry is written.
   version the check read, and a change in between is refused naming the resource
   ([#172](https://github.com/dsb-labs/takt/issues/172),
   [#189](https://github.com/dsb-labs/takt/pull/189)).
-
 - A request body the server could not decode, or a parameter it could not
   parse, was answered as plain text, so `takt` printed `server responded with
   Bad Request` and lost the detail. Every such refusal is now the same JSON
