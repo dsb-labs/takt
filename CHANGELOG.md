@@ -65,6 +65,42 @@ describes how an entry is written.
 
 ### Fixed
 
+- An `exec` workload could not rename or link a file between two directories
+  inside its own working directory or a volume. The kernel refused it with
+  "Invalid cross-device link", and `mv` hid that by copying instead
+  ([#168](https://github.com/dsb-labs/takt/issues/168),
+  [#210](https://github.com/dsb-labs/takt/pull/210)).
+- An `exec` workload mounting a volume whose first start failed before its
+  process ran, as one whose command is not on `PATH` does, could not start
+  again at that version until its specification changed
+  ([#168](https://github.com/dsb-labs/takt/issues/168),
+  [#210](https://github.com/dsb-labs/takt/pull/210)).
+- Stopping an `exec` workload on a host without a delegated cgroup left behind
+  any process that outlived the command or ignored the stop, and it kept the
+  workload's ports from the next attempt. The whole process group is now killed
+  once the command has gone ([#168](https://github.com/dsb-labs/takt/issues/168),
+  [#210](https://github.com/dsb-labs/takt/pull/210)).
+- An `exec` workload redirecting to `/dev/stdout` or `/dev/stderr` was refused
+  with "Permission denied" ([#168](https://github.com/dsb-labs/takt/issues/168),
+  [#210](https://github.com/dsb-labs/takt/pull/210)).
+- `takt serve /etc/takt.toml` kept every `exec` workload from all of `/etc`,
+  because the confinement denied the configuration file's directory. It now
+  denies the file ([#168](https://github.com/dsb-labs/takt/issues/168),
+  [#210](https://github.com/dsb-labs/takt/pull/210)).
+- An `exec` workload on a host running `systemd-resolved` lost
+  `/etc/resolv.conf` the first time resolved rewrote it. `/run/systemd/resolve`
+  is now readable, and the operating guide says what a workload sees of a file
+  added to `/etc` after it started
+  ([#168](https://github.com/dsb-labs/takt/issues/168),
+  [#210](https://github.com/dsb-labs/takt/pull/210)).
+- An `exec` manifest applied on a host whose kernel cannot confine was accepted
+  and then failed on every paced start. `workload apply` and a dry run now
+  refuse it, as they already did for resource limits the host cannot enforce
+  ([#168](https://github.com/dsb-labs/takt/issues/168),
+  [#210](https://github.com/dsb-labs/takt/pull/210)).
+- A failure to confine an `exec` workload named a path under the data
+  directory in the API error ([#168](https://github.com/dsb-labs/takt/issues/168),
+  [#210](https://github.com/dsb-labs/takt/pull/210)).
 - A workload with a `count` above one lost the mounted files and the shared
   token of its previous version as soon as the first replacement started, while
   the other instances still read them. Both now go once no instance of the
