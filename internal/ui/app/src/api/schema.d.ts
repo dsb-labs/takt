@@ -2637,6 +2637,24 @@ export interface components {
        *     once a minute. Omitted when it never has.
        */
       lastUsedAt?: string;
+      /**
+       * @description The workload the server minted the token for, which is how the
+       *     manifest that asked for it is found. Omitted for a token not
+       *     minted for a workload.
+       */
+      workload?: string;
+      /**
+       * @description The instance the token was minted for, when one instance holds
+       *     it in its environment. Omitted for a token every instance of
+       *     the workload shares, and for a token not minted for a workload.
+       */
+      instance?: number;
+      /**
+       * @description The workload version the token was minted for, when every
+       *     instance of that version shares it from a file. Omitted for an
+       *     instance's own token, and for a token not minted for a workload.
+       */
+      version?: number;
     };
     /**
      * @description The body returned when tokens are listed.
