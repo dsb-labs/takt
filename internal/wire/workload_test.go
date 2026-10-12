@@ -2,6 +2,7 @@ package wire_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -41,6 +42,17 @@ func TestToSpec(t *testing.T) {
 		assert.ErrorContains(t, err, `"half an hour" is not a duration`)
 	})
 
+	t.Run("rejects a stop timeout that is not a duration", func(t *testing.T) {
+		_, err := wire.ToSpec(api.WorkloadSpec{
+			Version:     "v1",
+			Name:        "example",
+			StopTimeout: new("a while"),
+			Container:   &api.ContainerSpec{Image: "example/example:latest"},
+		})
+
+		assert.ErrorContains(t, err, `"a while" is not a duration`)
+	})
+
 	t.Run("rejects a health check timing that is not a duration", func(t *testing.T) {
 		_, err := wire.ToSpec(api.WorkloadSpec{
 			Version:   "v1",
@@ -78,6 +90,11 @@ func TestFromSpec(t *testing.T) {
 		assert.Nil(t, spec.Container.ReadOnly)
 		assert.Nil(t, spec.Container.CapAdd)
 		assert.Nil(t, spec.Container.CapDrop)
+		assert.Nil(t, spec.Container.Entrypoint)
+		assert.Nil(t, spec.Container.Tmpfs)
+		assert.Nil(t, spec.Container.ShmSize)
+		assert.Nil(t, spec.Container.Devices)
+		assert.Nil(t, spec.StopTimeout)
 		assert.Nil(t, spec.Env)
 		assert.Nil(t, spec.Ports)
 		assert.Nil(t, spec.Exec)
@@ -107,11 +124,12 @@ func TestFromSpec(t *testing.T) {
 			Labels:   map[string]string{"some-key": "some-value"},
 			// Resolved rather than empty, because a round trip runs the value
 			// through ToSpec, which applies the defaults.
-			Restart:   &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay},
-			Ports:     []manifest.Port{{Name: "http", To: 8080, From: 4141, Protocol: manifest.ProtocolTCP}},
-			Env:       map[string]string{"EXAMPLE": "EXAMPLE"},
-			Resources: &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 100},
-			Logs:      &manifest.Logs{MaxSize: "10m", MaxFiles: 3},
+			Restart:     &manifest.Restart{Policy: manifest.RestartAlways, Delay: manifest.DefaultRestartDelay},
+			Ports:       []manifest.Port{{Name: "http", To: 8080, From: 4141, Protocol: manifest.ProtocolTCP}},
+			Env:         map[string]string{"EXAMPLE": "EXAMPLE"},
+			Resources:   &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 100},
+			Logs:        &manifest.Logs{MaxSize: "10m", MaxFiles: 3},
+			StopTimeout: 45 * time.Second,
 			Volumes: []manifest.VolumeMount{
 				{Name: "example-data", To: "/var/lib/example", ReadOnly: true},
 				{Path: "/mnt/media", To: "/media", ReadOnly: true, Propagation: "rslave"},
@@ -120,13 +138,17 @@ func TestFromSpec(t *testing.T) {
 				{Var: "datasources", To: "/etc/grafana/datasources.yaml", Expand: true, Signal: manifest.SignalHUP},
 			},
 			Container: &manifest.Container{
-				Image:    "example/example:latest",
-				Pull:     manifest.PullAlways,
-				Command:  []string{"sh", "-c", "exit 0"},
-				User:     "65532:65532",
-				ReadOnly: true,
-				CapAdd:   []string{"NET_ADMIN"},
-				CapDrop:  []string{"ALL"},
+				Image:      "example/example:latest",
+				Pull:       manifest.PullAlways,
+				Command:    []string{"sh", "-c", "exit 0"},
+				Entrypoint: []string{"/bin/entrypoint.sh"},
+				User:       "65532:65532",
+				ReadOnly:   true,
+				CapAdd:     []string{"NET_ADMIN"},
+				CapDrop:    []string{"ALL"},
+				Tmpfs:      []string{"/tmp", "/run"},
+				ShmSize:    "256m",
+				Devices:    []manifest.Device{{Path: "/dev/dri"}, {Path: "/dev/snd", To: "/dev/audio"}},
 			},
 		}
 

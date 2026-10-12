@@ -90,6 +90,13 @@ func ToSpec(spec api.WorkloadSpec) (manifest.Spec, error) {
 	out.Resources = toResources(spec.Resources)
 	out.Logs = toLogs(spec.Logs)
 
+	stopTimeout, err := duration(spec.StopTimeout)
+	if err != nil {
+		return manifest.Spec{}, fmt.Errorf("failed to parse stop timeout: %w", err)
+	}
+
+	out.StopTimeout = stopTimeout
+
 	if spec.Container != nil {
 		out.Container = &manifest.Container{Image: spec.Container.Image}
 
@@ -98,6 +105,9 @@ func ToSpec(spec api.WorkloadSpec) (manifest.Spec, error) {
 		}
 		if spec.Container.Command != nil {
 			out.Container.Command = *spec.Container.Command
+		}
+		if spec.Container.Entrypoint != nil {
+			out.Container.Entrypoint = *spec.Container.Entrypoint
 		}
 		if spec.Container.User != nil {
 			out.Container.User = *spec.Container.User
@@ -116,6 +126,18 @@ func ToSpec(spec api.WorkloadSpec) (manifest.Spec, error) {
 		}
 		if spec.Container.NetworkMode != nil {
 			out.Container.NetworkMode = string(*spec.Container.NetworkMode)
+		}
+		if spec.Container.Tmpfs != nil {
+			out.Container.Tmpfs = *spec.Container.Tmpfs
+		}
+		if spec.Container.ShmSize != nil {
+			out.Container.ShmSize = *spec.Container.ShmSize
+		}
+		if spec.Container.Devices != nil {
+			out.Container.Devices = make([]manifest.Device, 0, len(*spec.Container.Devices))
+			for _, device := range *spec.Container.Devices {
+				out.Container.Devices = append(out.Container.Devices, toDevice(device))
+			}
 		}
 	}
 
@@ -265,6 +287,17 @@ func toResources(spec *api.ResourcesSpec) *manifest.Resources {
 	return &resources
 }
 
+// toDevice maps a wire device onto the canonical shape.
+func toDevice(spec api.DeviceSpec) manifest.Device {
+	device := manifest.Device{Path: spec.Path}
+
+	if spec.To != nil {
+		device.To = *spec.To
+	}
+
+	return device
+}
+
 // toLogs maps a wire output cap onto the canonical shape.
 //
 // The size is carried across as written, for the reason a memory limit is.
@@ -403,6 +436,9 @@ func FromSpec(s manifest.Spec) api.WorkloadSpec {
 		if len(s.Container.Command) > 0 {
 			spec.Container.Command = new(s.Container.Command)
 		}
+		if len(s.Container.Entrypoint) > 0 {
+			spec.Container.Entrypoint = new(s.Container.Entrypoint)
+		}
 		if s.Container.User != "" {
 			spec.Container.User = new(s.Container.User)
 		}
@@ -421,6 +457,26 @@ func FromSpec(s manifest.Spec) api.WorkloadSpec {
 		if s.Container.NetworkMode != "" {
 			spec.Container.NetworkMode = new(api.ContainerSpecNetworkMode(s.Container.NetworkMode))
 		}
+		if len(s.Container.Tmpfs) > 0 {
+			spec.Container.Tmpfs = new(s.Container.Tmpfs)
+		}
+		if s.Container.ShmSize != "" {
+			spec.Container.ShmSize = new(s.Container.ShmSize)
+		}
+		if len(s.Container.Devices) > 0 {
+			devices := make([]api.DeviceSpec, 0, len(s.Container.Devices))
+			for _, device := range s.Container.Devices {
+				devices = append(devices, fromDevice(device))
+			}
+
+			spec.Container.Devices = &devices
+		}
+	}
+
+	// Sent as absent rather than as "0s", so a specification naming no grace
+	// hashes as it did before the field existed.
+	if s.StopTimeout != 0 {
+		spec.StopTimeout = new(s.StopTimeout.String())
 	}
 
 	if s.Exec != nil {
@@ -428,6 +484,19 @@ func FromSpec(s manifest.Spec) api.WorkloadSpec {
 	}
 
 	return spec
+}
+
+// fromDevice maps a canonical device onto the type the API accepts. An unset
+// target is sent as absent rather than as an empty string, for the reason an
+// unnamed port is.
+func fromDevice(device manifest.Device) api.DeviceSpec {
+	out := api.DeviceSpec{Path: device.Path}
+
+	if device.To != "" {
+		out.To = new(device.To)
+	}
+
+	return out
 }
 
 // FromVolumeMount maps a canonical mount onto the type the API accepts.
