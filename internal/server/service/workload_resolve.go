@@ -174,6 +174,13 @@ func (s *WorkloadService) resolve(ctx context.Context, spec manifest.Spec) (reso
 		return resolution{}, err
 	}
 
+	// A device is gated as a path mount is, and for the same reason: it reaches
+	// outside takt-managed state. Checked here so that a device the host will
+	// never hand over is refused at apply rather than reported as a failed start.
+	if err = s.checkDevices(spec); err != nil {
+		return resolution{}, err
+	}
+
 	// The secrets the workload reads are resolved to their revisions rather than their
 	// values, and the variables to their values. Either reaches the hash so that
 	// changing one replaces the instances reading it. A secret's value stays out of
@@ -291,6 +298,23 @@ func (s *WorkloadService) resolveVolumes(ctx context.Context, spec manifest.Spec
 	spec.Volumes = mounts
 
 	return spec, nil
+}
+
+// checkDevices refuses a container device the server's allowed host paths do not
+// cover. The path is stored as written and resolved again as each instance starts,
+// as a path mount's is.
+func (s *WorkloadService) checkDevices(spec manifest.Spec) error {
+	if spec.Container == nil {
+		return nil
+	}
+
+	for _, device := range spec.Container.Devices {
+		if _, err := driver.ResolveHostPath(device.Path, true, s.hostPaths); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+		}
+	}
+
+	return nil
 }
 
 // resolveReferences returns what the specification's environment references, along

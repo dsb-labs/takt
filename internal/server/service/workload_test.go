@@ -728,6 +728,33 @@ func TestWorkloadService_Apply_ResolvesVolumes(t *testing.T) {
 		assert.ErrorIs(t, err, service.ErrInvalidSpec)
 	})
 
+	t.Run("refuses a device outside the allowed prefixes", func(t *testing.T) {
+		t.Parallel()
+
+		// A device is a host path, so the same gate applies and nothing is stored.
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		deviceSpec := containerSpec("example", "example/example:latest")
+		deviceSpec.Container.Devices = []manifest.Device{{Path: "/dev/dri"}}
+
+		repo.EXPECT().Get(mock.Anything, "example").
+			Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		repo.EXPECT().ReferencedBy(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:         newTestLogger(t),
+			Drivers:        map[string]service.Driver{docker.Name: d},
+			Workloads:      repo,
+			Ports:          ports,
+			Claimer:        newTestClaimer(ports, allocatorStub{}),
+			AllowHostPaths: []driver.HostPath{{Path: "/mnt/media"}},
+		})
+
+		_, _, err := svc.Apply(t.Context(), deviceSpec, 0)
+		assert.ErrorIs(t, err, service.ErrInvalidSpec)
+	})
+
 	t.Run("refuses a host path reaching outside the prefixes through a link", func(t *testing.T) {
 		t.Parallel()
 
