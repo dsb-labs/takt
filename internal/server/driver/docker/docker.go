@@ -303,20 +303,34 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		return "", err
 	}
 
+	shmSize, err := size(spec.ShmSize)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse shared memory size %q: %w", spec.ShmSize, err)
+	}
+
+	limits.Devices = devices(w.Devices)
+
 	created, err := d.client.ContainerCreate(ctx,
 		&container.Config{
 			Image: spec.Image,
 			// Nil rather than empty when the workload names no command, so the image
 			// keeps the one it declares. An empty slice would replace it with nothing.
 			Cmd:          spec.Command,
+			Entrypoint:   spec.Entrypoint,
 			User:         spec.User,
 			Env:          environment(w.Env),
 			Labels:       labels,
 			ExposedPorts: exposed,
+			// Carried by the container rather than passed at each stop, so that a
+			// stop issued by anyone — the daemon shutting down included — honours
+			// the same grace.
+			StopTimeout: stopTimeout(w.Spec.StopTimeout),
 		},
 		&container.HostConfig{
 			PortBindings: bindings,
 			Mounts:       mounts(w.Volumes),
+			Tmpfs:        tmpfs(spec.Tmpfs),
+			ShmSize:      shmSize,
 			Resources:    limits,
 			// Applied here rather than carried in the specification, so that it
 			// cannot reach the specification hash and replace every running
@@ -1596,6 +1610,61 @@ func logConfig(spec *manifest.Logs) container.LogConfig {
 	}
 
 	return container.LogConfig{Config: options}
+}
+
+// size reads a size the manifest holds as written, zero for none.
+func size(value string) (int64, error) {
+	if value == "" {
+		return 0, nil
+	}
+
+	return units.RAMInBytes(value)
+}
+
+// stopTimeout maps the workload's grace onto the seconds docker counts in, nil
+// for a workload naming none so the daemon's own default applies. Rounded up, so a
+// grace under a second is not read as none.
+func stopTimeout(grace time.Duration) *int {
+	if grace <= 0 {
+		return nil
+	}
+
+	return new(int(math.Ceil(grace.Seconds())))
+}
+
+// tmpfs maps the paths a container backs with memory onto the shape docker takes,
+// nil for none. Each is given no options, so docker's defaults apply.
+func tmpfs(paths []string) map[string]string {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	out := make(map[string]string, len(paths))
+	for _, path := range paths {
+		out[path] = ""
+	}
+
+	return out
+}
+
+// devices maps the resolved devices onto the shape docker takes, nil for none.
+// Each is granted read, write and mknod, as docker's own --device flag grants by
+// default: a device is used by ioctl, which a narrower grant would not stop.
+func devices(resolved []driver.Device) []container.DeviceMapping {
+	if len(resolved) == 0 {
+		return nil
+	}
+
+	out := make([]container.DeviceMapping, 0, len(resolved))
+	for _, device := range resolved {
+		out = append(out, container.DeviceMapping{
+			PathOnHost:        device.Host,
+			PathInContainer:   device.Target,
+			CgroupPermissions: "rwm",
+		})
+	}
+
+	return out
 }
 
 // resources converts a specification's resource limits into the cgroup settings
