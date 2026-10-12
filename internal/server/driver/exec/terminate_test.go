@@ -28,7 +28,7 @@ func TestDriver_Terminate(t *testing.T) {
 		leader, child := group(t)
 
 		d := &Driver{logger: slog.New(slog.DiscardHandler)}
-		require.NoError(t, d.terminate(t.Context(), leader))
+		require.NoError(t, d.terminate(t.Context(), leader, 0))
 
 		assert.Eventually(t, func() bool {
 			return syscall.Kill(child, 0) != nil
