@@ -174,6 +174,9 @@ type (
 		Ports []Port
 		// The volumes the work mounts, each already resolved to a path on the host.
 		Volumes []Volume
+		// The host devices the work may use, each already checked against the
+		// server's allowed host paths. Only a container runtime reads them.
+		Devices []Device
 		// Arbitrary key-value pairs the operator attached to the workload.
 		Labels map[string]string
 		// The specification the workload was stored with, which carries the runtime
@@ -354,6 +357,15 @@ type (
 		Propagation string
 	}
 
+	// The Device type describes a host device a workload may use, with the path it
+	// is at on the host already resolved.
+	Device struct {
+		// The device on the host, with every link in its path followed.
+		Host string
+		// Where the workload finds it.
+		Target string
+	}
+
 	// The Event type reports that a driver's view of an instance has changed, so
 	// that the server can reconcile sooner than its next scheduled pass.
 	//
@@ -487,6 +499,26 @@ func NewWorkload(row database.Workload, hostPaths []HostPath) (Workload, error) 
 					Propagation: mount.Propagation,
 				})
 			}
+		}
+	}
+
+	if spec.Container != nil && len(spec.Container.Devices) > 0 {
+		w.Devices = make([]Device, 0, len(spec.Container.Devices))
+		for _, device := range spec.Container.Devices {
+			// Asked for as a writable mount would be. A device is written to by
+			// ioctl, which a read-only mount does not stop, so a prefix granted for
+			// reading only refuses it however it is asked for.
+			host, err := ResolveHostPath(device.Path, true, hostPaths)
+			if err != nil {
+				return Workload{}, err
+			}
+
+			target := device.To
+			if target == "" {
+				target = device.Path
+			}
+
+			w.Devices = append(w.Devices, Device{Host: host, Target: target})
 		}
 	}
 

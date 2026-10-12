@@ -83,6 +83,47 @@ func TestNewWorkload(t *testing.T) {
 		}), []driver.HostPath{{Path: filepath.Join(root, "media")}})
 		assert.ErrorIs(t, err, driver.ErrHostPathDenied)
 	})
+
+	t.Run("maps devices to where they reach", func(t *testing.T) {
+		root := tempRoot(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "dev", "dri"), 0o755))
+		require.NoError(t, os.Symlink(filepath.Join(root, "dev", "dri"), filepath.Join(root, "gpu")))
+
+		w, err := driver.NewWorkload(row(t, manifest.Spec{
+			Version: "v1",
+			Name:    "example",
+			Container: &manifest.Container{
+				Image: "example/example:latest",
+				Devices: []manifest.Device{
+					{Path: filepath.Join(root, "gpu")},
+					{Path: filepath.Join(root, "dev", "dri"), To: "/dev/dri"},
+				},
+			},
+		}), []driver.HostPath{{Path: filepath.Join(root, "dev")}})
+		require.NoError(t, err)
+
+		// A device with no target appears where it is on the host, as written, and
+		// what the driver hands the runtime is where the path reaches.
+		assert.Equal(t, []driver.Device{
+			{Host: filepath.Join(root, "dev", "dri"), Target: filepath.Join(root, "gpu")},
+			{Host: filepath.Join(root, "dev", "dri"), Target: "/dev/dri"},
+		}, w.Devices)
+	})
+
+	t.Run("refuses a device outside the allowed prefixes", func(t *testing.T) {
+		root := tempRoot(t)
+		require.NoError(t, os.MkdirAll(filepath.Join(root, "dev"), 0o755))
+
+		_, err := driver.NewWorkload(row(t, manifest.Spec{
+			Version: "v1",
+			Name:    "example",
+			Container: &manifest.Container{
+				Image:   "example/example:latest",
+				Devices: []manifest.Device{{Path: filepath.Join(root, "dev", "sda")}},
+			},
+		}), []driver.HostPath{{Path: filepath.Join(root, "media")}})
+		assert.ErrorIs(t, err, driver.ErrHostPathDenied)
+	})
 }
 
 func TestResolveHostPath(t *testing.T) {
