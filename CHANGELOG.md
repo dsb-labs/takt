@@ -8,6 +8,23 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Added
+
+- `entrypoint`, `tmpfs`, `shmSize` and `devices` under `container`, for the
+  compose fields the manifest could not express. A device goes through
+  `allow-host-paths` the way a path mount does
+  ([#175](https://github.com/dsb-labs/takt/issues/175),
+  [#211](https://github.com/dsb-labs/takt/pull/211)).
+- `stopTimeout` on a workload, how long an instance is given to stop before it is
+  killed. Both runtimes honour it
+  ([#175](https://github.com/dsb-labs/takt/issues/175),
+  [#211](https://github.com/dsb-labs/takt/pull/211)).
+
+### Fixed
+
+- The access view ran a token's workload and version together in its source
+  column ([#211](https://github.com/dsb-labs/takt/pull/211)).
+
 ## v0.12.0 - 2026-10-11
 
 ### Added
