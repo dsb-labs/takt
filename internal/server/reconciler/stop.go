@@ -178,7 +178,7 @@ func (r *Reconciler) stop(ctx context.Context, row database.Workload) error {
 	// instance's containers in turn, so a count of three under a slow daemon has
 	// a third of the time per container that a count of one does — and a budget
 	// that expires mid-workload turns the rest into work for the next pass.
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(countOf(row))*driverTimeout)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(countOf(row))*stopBudget(row))
 	defer cancel()
 
 	if err := d.Stop(ctx, row.ID, row.Name); err != nil {
@@ -202,7 +202,7 @@ func (r *Reconciler) stopInstance(ctx context.Context, row database.Workload, in
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
+	ctx, cancel := context.WithTimeout(ctx, stopBudget(row))
 	defer cancel()
 
 	if err := d.StopInstance(ctx, row.ID, row.Name, index); err != nil {
@@ -233,7 +233,7 @@ func (r *Reconciler) discardInstance(ctx context.Context, row database.Workload,
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, driverTimeout)
+	ctx, cancel := context.WithTimeout(ctx, stopBudget(row))
 	defer cancel()
 
 	if err := d.DiscardInstance(ctx, row.ID, row.Name, index); err != nil {
@@ -308,7 +308,7 @@ func (r *Reconciler) discard(ctx context.Context, row database.Workload) error {
 	}
 
 	// One deadline per instance, for the reason stop gives.
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(countOf(row))*driverTimeout)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(countOf(row))*stopBudget(row))
 	defer cancel()
 
 	if err := d.Discard(ctx, row.ID, row.Name); err != nil {
