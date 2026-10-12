@@ -1184,6 +1184,19 @@ export interface components {
       health?: components["schemas"]["HealthSpec"];
       resources?: components["schemas"]["ResourcesSpec"];
       logs?: components["schemas"]["LogsSpec"];
+      /**
+       * @description How long an instance is given to stop on its own, after it is asked
+       *     to, before it is killed. Absent keeps the runtime's own grace, which
+       *     is ten seconds on either runtime.
+       *
+       *     It sits alongside the runtime blocks because how long a workload
+       *     needs to stop is a question about the workload, and the grace means
+       *     the same thing on either runtime: the process is signalled, and
+       *     killed when it is still running at the end of it. A database that
+       *     flushes on shutdown is the usual reason to name one.
+       * @example 30s
+       */
+      stopTimeout?: string;
       container?: components["schemas"]["ContainerSpec"];
       exec?: components["schemas"]["ExecSpec"];
     };
@@ -1216,6 +1229,19 @@ export interface components {
        *     ]
        */
       command?: string[];
+      /**
+       * @description The entrypoint to run, replacing the one the image declares. Given the
+       *     way command is, as the program and its arguments, with command appended
+       *     as further arguments the way docker appends them.
+       *
+       *     Leave it out to run what the image already declares. An image whose
+       *     entrypoint is a script that then runs the command is the usual reason
+       *     to name one: naming the program directly skips the script.
+       * @example [
+       *       "/usr/local/bin/app"
+       *     ]
+       */
+      entrypoint?: string[];
       /**
        * @description The user to run the container's process as, replacing the one the image
        *     declares. Given in the forms docker accepts, such as a name, a numeric
@@ -1274,6 +1300,52 @@ export interface components {
        * @enum {string}
        */
       networkMode?: "host";
+      /**
+       * @description Paths inside the container backed by memory rather than by its root
+       *     filesystem, each absolute. This is what gives a read-only container
+       *     somewhere to write temporary files. What is written there is gone
+       *     when the instance is.
+       *
+       *     A path that is also a mount is refused, since the daemon would refuse
+       *     the duplicate when the instance starts.
+       * @example [
+       *       "/tmp",
+       *       "/run"
+       *     ]
+       */
+      tmpfs?: string[];
+      /**
+       * @description The size of the container's shared memory, written as a size such as
+       *     "256m". Absent keeps docker's default of 64m, which a browser or a
+       *     database sharing memory between processes can outgrow.
+       * @example 256m
+       */
+      shmSize?: string;
+      /**
+       * @description Host devices the container may use, such as a GPU for a workload that
+       *     transcodes.
+       *
+       *     A device is a host path, and the server gates it the way it gates a
+       *     path mount: the device must sit beneath a prefix the server's
+       *     allow-host-paths configuration names, and one granted for reading
+       *     only does not cover it, since a read-only mount does not stop an
+       *     ioctl. The gate runs when the specification is applied and again as
+       *     each instance starts.
+       */
+      devices?: components["schemas"]["DeviceSpec"][];
+    };
+    /** @description A host device a container may use. */
+    DeviceSpec: {
+      /**
+       * @description The device on the host, written as an absolute path.
+       * @example /dev/dri
+       */
+      path: string;
+      /**
+       * @description Where the container finds it. Absent places it at the same path.
+       * @example /dev/dri
+       */
+      to?: string;
     };
     /**
      * @description When the docker driver pulls the workload's image.
