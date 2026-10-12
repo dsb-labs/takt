@@ -141,6 +141,17 @@ type (
 		// The cap on what the workload's output may grow to. Nil applies none, so
 		// the output grows as it always did.
 		Logs *Logs `json:"logs,omitempty"`
+		// How long an instance is given to stop on its own, after it is asked to,
+		// before it is killed. Zero keeps the runtime's own grace: ten seconds on
+		// either runtime.
+		//
+		// It sits beside the runtime blocks because how long a workload needs to
+		// stop is a question about the workload, and the grace means the same thing
+		// on either runtime: the process is signalled, and killed when it is still
+		// running at the end of it.
+		//
+		// The yaml tag is explicit for the reason Health.StartPeriod's is.
+		StopTimeout time.Duration `yaml:"stopTimeout" json:"stopTimeout,omitempty"`
 		// The container to run. Exactly one runtime must be set.
 		Container *Container `json:"container,omitempty"`
 		// The command to run on the host. Exactly one runtime must be set.
@@ -236,6 +247,9 @@ type (
 		// The command to run, replacing the one the image declares. Empty runs what
 		// the image already declares.
 		Command []string `json:"command,omitempty"`
+		// The entrypoint to run, replacing the one the image declares. Empty runs
+		// what the image already declares, with Command as its arguments.
+		Entrypoint []string `json:"entrypoint,omitempty"`
 		// The user to run as, replacing the one the image declares. Any form docker
 		// accepts: a name, a numeric identifier, or a "user:group" pair. Empty runs
 		// as the user the image declares.
@@ -267,6 +281,31 @@ type (
 		// is why such a workload cannot run more than one instance — two
 		// containers cannot both bind one host port.
 		NetworkMode string `yaml:"networkMode" json:"networkMode,omitempty"`
+		// Paths inside the container backed by memory rather than by its root
+		// filesystem, each written as an absolute path. This is what gives a
+		// read-only container somewhere to write temporary files. What is written
+		// there is gone when the instance is.
+		Tmpfs []string `json:"tmpfs,omitempty"`
+		// The size of the container's shared memory, written as a size such as
+		// "256m". Empty keeps docker's default of 64m, which a browser or a database
+		// sharing memory between processes can outgrow.
+		//
+		// Held as the operator wrote it, for the reason Resources.Memory is.
+		ShmSize string `yaml:"shmSize" json:"shmSize,omitempty"`
+		// Host devices the container may use, such as a GPU for a workload that
+		// transcodes. A device reaches outside takt-managed state, so the server
+		// accepts one only when its configuration allows the path, the way it does
+		// a mounted host path. This package cannot check that, because it validates
+		// manifests on machines that are not the host.
+		Devices []Device `json:"devices,omitempty"`
+	}
+
+	// The Device type describes a host device a container may use.
+	Device struct {
+		// The device on the host, written as an absolute path.
+		Path string `json:"path"`
+		// Where the container finds it. Empty places it at the same path.
+		To string `json:"to,omitempty"`
 	}
 
 	// The Port type describes a port to publish.
@@ -899,6 +938,16 @@ func ValidateWorkload(spec Spec) error {
 		return err
 	}
 
+	if spec.StopTimeout < 0 {
+		return errors.New("invalid manifest: stopTimeout must not be negative")
+	}
+
+	if spec.Container != nil {
+		if err = validateTmpfs(spec.Container.Tmpfs, spec.Volumes); err != nil {
+			return err
+		}
+	}
+
 	switch runtime {
 	case RuntimeContainer:
 		return validateContainer(*spec.Container)
@@ -1455,6 +1504,20 @@ func validateContainer(spec Container) error {
 		return fmt.Errorf("invalid container: %w", err)
 	}
 
+	if err := validCommand(spec.Entrypoint); err != nil {
+		return fmt.Errorf("invalid container: entrypoint: %w", err)
+	}
+
+	if spec.ShmSize != "" {
+		if size, err := units.RAMInBytes(spec.ShmSize); err != nil || size <= 0 {
+			return fmt.Errorf("invalid container: shmSize %q is not a size", spec.ShmSize)
+		}
+	}
+
+	if err := validateDevices(spec.Devices); err != nil {
+		return err
+	}
+
 	// Empty is accepted and means PullMissing. It is not resolved to it here, so that
 	// a manifest which says nothing encodes nothing on the wire.
 	switch spec.Pull {
@@ -1489,6 +1552,86 @@ func validateContainer(spec Container) error {
 	// names, and the others make ports mean something takt does not model.
 	if spec.NetworkMode != "" && spec.NetworkMode != "host" {
 		return errors.New(`invalid container: networkMode must be "host" or absent`)
+	}
+
+	return nil
+}
+
+// validateDevices reports whether the container's devices are ones takt can hand to
+// the runtime.
+//
+// Whether the host allows each device is not asked here, for the reason a path
+// mount's host path is not: this package validates manifests on machines that are
+// not the host.
+func validateDevices(devices []Device) error {
+	paths := make(map[string]struct{}, len(devices))
+	targets := make(map[string]struct{}, len(devices))
+
+	for _, device := range devices {
+		if !path.IsAbs(device.Path) {
+			return fmt.Errorf("invalid container: device %q must be an absolute path", device.Path)
+		}
+
+		// Cleaned before it is used as a key, so that "/dev/dri" and "/dev/dri/"
+		// are recognised as the same device rather than as two.
+		source := path.Clean(device.Path)
+		if _, ok := paths[source]; ok {
+			return fmt.Errorf("invalid container: device %q is named more than once", device.Path)
+		}
+		paths[source] = struct{}{}
+
+		target := source
+		if device.To != "" {
+			if !path.IsAbs(device.To) {
+				return fmt.Errorf("invalid container: device %q must name an absolute path to appear at, got %q",
+					device.Path, device.To)
+			}
+
+			target = path.Clean(device.To)
+		}
+
+		if _, ok := targets[target]; ok {
+			return fmt.Errorf("invalid container: two devices appear at %q", target)
+		}
+		targets[target] = struct{}{}
+	}
+
+	return nil
+}
+
+// validateTmpfs reports whether the container's memory-backed paths are ones the
+// runtime can make.
+//
+// The mounts are passed so that a path both backed by memory and mounted from
+// somewhere is refused here rather than by the daemon, which would report it as
+// the instance failing to start.
+func validateTmpfs(tmpfs []string, mounts []VolumeMount) error {
+	mounted := make(map[string]struct{}, len(mounts))
+	for _, mount := range mounts {
+		mounted[path.Clean(mount.To)] = struct{}{}
+	}
+
+	seen := make(map[string]struct{}, len(tmpfs))
+	for _, entry := range tmpfs {
+		if !path.IsAbs(entry) {
+			return fmt.Errorf("invalid container: tmpfs %q must be an absolute path", entry)
+		}
+
+		// Cleaned before comparing, so that "/tmp" and "/tmp/" are recognised as
+		// the same path rather than as two.
+		cleaned := path.Clean(entry)
+		if cleaned == "/" {
+			return fmt.Errorf("invalid container: tmpfs cannot be mounted at %q", entry)
+		}
+
+		if _, ok := seen[cleaned]; ok {
+			return fmt.Errorf("invalid container: tmpfs %q is named more than once", entry)
+		}
+		seen[cleaned] = struct{}{}
+
+		if _, ok := mounted[cleaned]; ok {
+			return fmt.Errorf("invalid container: tmpfs %q is also a mount", entry)
+		}
 	}
 
 	return nil

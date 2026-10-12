@@ -1,0 +1,14 @@
+version: v1
+name: example
+stopTimeout: 45s
+container:
+  image: example/example:latest
+  entrypoint: ["/bin/entrypoint.sh"]
+  command: ["serve"]
+  readOnly: true
+  tmpfs: [/tmp, /run]
+  shmSize: 256m
+  devices:
+    - path: /dev/dri
+    - path: /dev/snd
+      to: /dev/audio
