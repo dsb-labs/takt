@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -428,6 +429,51 @@ func TestDriver_Start(t *testing.T) {
 							host.Memory == 0 && host.MemorySwap == 0 &&
 							host.NanoCPUs == 0 && host.PidsLimit == nil &&
 							!host.ReadonlyRootfs && host.CapAdd == nil && host.CapDrop == nil
+					}),
+					mock.Anything, mock.Anything, "takt-example-1-0-1",
+				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+
+				c.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+			},
+			Assert: func(t *testing.T, id string) {
+				assert.Equal(t, "container-one", id)
+			},
+		},
+		{
+			Name: "applies the entrypoint, tmpfs, shared memory, devices and stop timeout",
+			Workload: func() driver.Workload {
+				w := workload("example", 1, "hash-one", manifest.Container{
+					Image:      "example/example:latest",
+					Entrypoint: []string{"/bin/entrypoint.sh"},
+					Command:    []string{"serve"},
+					Tmpfs:      []string{"/tmp", "/run"},
+					ShmSize:    "256m",
+				}, nil, nil)
+				w.Spec.StopTimeout = 45*time.Second + 500*time.Millisecond
+				w.Devices = []driver.Device{{Host: "/dev/dri", Target: "/dev/gpu"}}
+
+				return w
+			}(),
+			SetupMocks: func(c *MockClient) {
+				c.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+
+				c.EXPECT().ImageList(mock.Anything, mock.Anything).
+					Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+				c.EXPECT().ContainerCreate(mock.Anything,
+					mock.MatchedBy(func(config *dockercontainer.Config) bool {
+						// The grace is rounded up to whole seconds, which is what
+						// docker counts in.
+						return slices.Equal(config.Entrypoint, []string{"/bin/entrypoint.sh"}) &&
+							slices.Equal(config.Cmd, []string{"serve"}) &&
+							config.StopTimeout != nil && *config.StopTimeout == 46
+					}),
+					mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+						return maps.Equal(host.Tmpfs, map[string]string{"/tmp": "", "/run": ""}) &&
+							host.ShmSize == 256*1024*1024 &&
+							slices.Equal(host.Devices, []dockercontainer.DeviceMapping{
+								{PathOnHost: "/dev/dri", PathInContainer: "/dev/gpu", CgroupPermissions: "rwm"},
+							})
 					}),
 					mock.Anything, mock.Anything, "takt-example-1-0-1",
 				).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
