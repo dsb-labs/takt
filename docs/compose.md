@@ -94,6 +94,7 @@ takt workload apply app.yaml
 | `services.<name>` | One workload manifest, `name: <name>`. |
 | `image` | `container.image`. See [container](manifest.md#container). |
 | `command` | `container.command`, as a list. |
+| `entrypoint` | `container.entrypoint`, as a list. |
 | `environment` | `env`. A value may read a secret, a variable, or another workload's address. See [Environment](manifest.md#environment). |
 | `ports: "8080:80"` | `ports: [{to: 80, from: 8080}]`. Leave `from` out to let takt choose a host port. See [Ports](manifest.md#ports). |
 | `volumes: name:/path` | A volume manifest for `name`, and `volumes: [{name, to: /path}]` in the workload. See [Volumes](volumes.md). |
@@ -103,6 +104,10 @@ takt workload apply app.yaml
 | `deploy.resources.limits` | `resources`. See [Resources](manifest.md#resources). |
 | `deploy.replicas` | `count`. See [Count](manifest.md#count). |
 | `labels` | `labels`. |
+| `tmpfs` | `container.tmpfs`, as a list of paths. |
+| `shm_size` | `container.shmSize`. |
+| `devices: "/dev/dri:/dev/dri"` | `container.devices: [{path: /dev/dri}]`, which the server has to allow. See [Devices](manifest.md#devices). |
+| `stop_grace_period` | `stopTimeout`, at the top level, since an `exec` workload honours it too. See [Stop timeout](manifest.md#stop-timeout). |
 | `cap_add`, `cap_drop`, `read_only`, `user`, `pid: host`, `network_mode: host` | The same fields under `container`. |
 | `env_file`, `secrets` | `takt secret set` and `${secret:name}`, or a mounted secret. See [Secrets](secrets.md). |
 
@@ -143,6 +148,20 @@ matters for volumes, which must exist before a workload mounts them. Everything
 else converges whatever order it arrives in. A [score](score.md) names the
 manifests together and applies them in one command, in dependency order, which
 is the closer match for a compose file.
+
+**`ports: "127.0.0.1:8080:80"`.** A port's bind address is not per port. `bind`
+under `[workload]` in the server's configuration sets it for every port takt
+publishes, so a server behind a reverse proxy names `127.0.0.1` there once. See
+[Configuration](configuration.md).
+
+**`stop_signal`.** takt sends what the image's `STOPSIGNAL` names, which is
+`SIGTERM` unless the image says otherwise. Set it in the image.
+
+**`working_dir`, `hostname`, `extra_hosts`, `dns`, `ulimits`, `sysctls`, `init`.**
+No equivalent. A working directory and a hostname belong to the image. Hosts and
+resolvers are the host's, and a workload reaches another through the address
+reference rather than by name. A limit or a kernel parameter the image needs is a
+reason to open an issue.
 
 ## What you gain
 

@@ -46,6 +46,8 @@ logs:
   maxSize: 10m
   maxFiles: 3
 
+stopTimeout: 30s
+
 container:
   image: nginx:1.27-alpine
   command: ["nginx", "-g", "daemon off;"]
@@ -65,6 +67,7 @@ container:
 | `health` | no | How takt decides the workload is working. |
 | `resources` | no | The resource limits the workload runs under. |
 | `logs` | no | The cap on what the workload's output may grow to. |
+| `stopTimeout` | no | How long an instance is given to stop before it is killed. See [Stop timeout](#stop-timeout). |
 | `container` | one of | Run the workload as a Docker container. |
 | `exec` | one of | Run the workload as a command on the host. |
 
@@ -148,6 +151,7 @@ container:
   pull: missing
   command: ["nginx", "-g", "daemon off;"]
   readOnly: true
+  tmpfs: [/var/cache/nginx, /run]
   capAdd: [NET_ADMIN]
   capDrop: [ALL]
 ```
@@ -157,8 +161,12 @@ container:
 | `image` | yes | The image reference to run, in the form `docker pull` accepts. |
 | `pull` | no | When the image is pulled: `always`, `follow`, `missing` or `never`. Defaults to `missing`. |
 | `command` | no | Replaces the command the image declares. |
+| `entrypoint` | no | Replaces the entrypoint the image declares. |
 | `user` | no | The user to run as, replacing the one the image declares. |
 | `readOnly` | no | Make the root filesystem read-only. |
+| `tmpfs` | no | Paths backed by memory rather than by the root filesystem. |
+| `shmSize` | no | The size of the container's shared memory, as a size such as `256m`. |
+| `devices` | no | Host devices the container may use. See [Devices](#devices). |
 | `capAdd` | no | Kernel capabilities to grant beyond the default set. |
 | `capDrop` | no | Kernel capabilities to remove from the default set. |
 | `pidMode` | no | The pid namespace the container runs in. Only `host` is accepted. |
@@ -228,10 +236,25 @@ container starts without the capability and without a word about it. A workload 
 needs a capability runs as root with `capDrop: [ALL]` and the one capability named,
 and leaves `user` out.
 
+`entrypoint` replaces the entrypoint the image declares, the way `command` replaces
+its command. Docker runs the entrypoint with the command appended as its arguments,
+so the two are usually named together. The usual reason to name one is an image
+whose entrypoint is a script that then runs the command: naming the program
+directly skips the script.
+
 `readOnly` applies to the image's own filesystem. Mounted volumes and mounted values
 are separate mounts with rules of their own, so a volume stays writable and a mounted
 value stays readable whatever this says. An image that writes temporary files needs
-them pointed at a volume before it can run read-only.
+somewhere to write them before it can run read-only, which is what `tmpfs` is for.
+
+`tmpfs` lists paths inside the container that are backed by memory rather than by
+the root filesystem. Each is absolute, and what is written there is gone when the
+instance is. A path that is also a mount is refused, since the daemon would refuse
+the duplicate when the instance starts.
+
+`shmSize` sets the size of the container's shared memory, `/dev/shm`. Docker's
+default is 64m, which a browser or a database that shares memory between its
+processes can outgrow. Written as a size, the way `resources.memory` is.
 
 `pidMode: host` runs the container in the host's pid namespace, the way an `exec`
 workload always runs. It is for a workload whose job is observing the host's
@@ -251,6 +274,31 @@ binds is the host port, so a port's `from` equals its `to`: leave `from` out and
 takt derives it, and naming a `from` that differs from `to` is rejected, because
 host networking has no mapping to make. Two containers cannot both bind one host
 port, so a host-networked workload cannot run a [count](#count) above one.
+
+### Devices
+
+```yaml
+container:
+  image: lscr.io/linuxserver/jellyfin:latest
+  devices:
+    - path: /dev/dri
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `path` | yes | The device on the host, as an absolute path. |
+| `to` | no | Where the container finds it. The same path when omitted. |
+
+A device is how a container reaches the host's hardware: a GPU for a workload that
+transcodes, a serial adapter for one that talks to it. The container is granted
+read, write and mknod on the device, which is what `docker run --device` grants.
+
+A device is a host path, and the server gates it the way it gates a
+[host path mount](#mounting-a-host-path): the path must sit beneath a prefix in
+`allow-host-paths`, and the server refuses the apply otherwise. A prefix granted
+for reading only never covers a device, because a read-only mount does not stop an
+ioctl. The check runs again as each instance starts, with symbolic links followed,
+so the device the container is handed is the one the check saw.
 
 ### exec
 
@@ -953,6 +1001,26 @@ does not run a job twice. To run an unchanged job again, delete it and apply it.
 `delay` is the first wait, and each consecutive failure doubles it up to a ceiling
 takt sets. A workload that reaches `attempts` is left exactly as it ended, so its
 outcome stays readable. Changing its specification starts it again.
+
+## Stop timeout
+
+```yaml
+stopTimeout: 30s
+```
+
+How long an instance is given to stop on its own, after it is asked to, before it
+is killed. The default is ten seconds on either runtime. A database that flushes on
+shutdown, or a worker that finishes the job in hand, is the usual reason to name a
+longer one.
+
+The grace means the same thing on either runtime. A container is stopped by the
+daemon, which sends the image's stop signal and kills the container at the end of
+the grace. An exec workload's process group is sent `SIGTERM` and killed at the end
+of the grace. Either way the instance is replaced or removed once it has gone.
+
+The timeout sits beside the runtime blocks because how long a workload needs to stop
+is a question about the workload. It is not a cap on how long a stop may take in
+total: a stop under a slow daemon still gets takt's own deadline on top of it.
 
 ## Health
 

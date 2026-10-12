@@ -253,9 +253,10 @@ This applies to a port takt publishes for a workload, which means a container. A
 this setting does not reach it.
 
 `allow-host-paths` is what lets a manifest mount a host path — see
-[Mounting a host path](manifest.md#mounting-a-host-path). A path mount is accepted
+[Mounting a host path](manifest.md#mounting-a-host-path) — or hand a container a
+device — see [Devices](manifest.md#devices). A path mount or a device is accepted
 when its path is one of these prefixes or sits beneath one, and refused otherwise.
-The default is empty, which refuses every path mount:
+The default is empty, which refuses every path mount and every device:
 
 ```toml
 [workload]
@@ -284,8 +285,9 @@ A read-only grant covers regular files and directories only. A read-only mount
 stops writes through the filesystem. It does not stop a connect on a unix socket, a
 write to a FIFO or an ioctl on a device, so a path mount that reaches one of those
 beneath a `:ro` prefix is refused however the manifest asked for it. The docker
-socket under a read-only `/` is the usual case. Name the socket in its own prefix
-when a workload is meant to reach it, and the more specific prefix opens it:
+socket under a read-only `/` is the usual case, and a device beneath a read-only
+prefix is refused for the same reason. Name the socket or the device in its own
+prefix when a workload is meant to reach it, and the more specific prefix opens it:
 
 ```toml
 [workload]
