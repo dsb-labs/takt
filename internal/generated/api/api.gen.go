@@ -564,6 +564,29 @@ type ContainerSpec struct {
 	// Examples: ["sh","-c","echo hello"]
 	Command *[]string `json:"command,omitempty"`
 
+	// Devices Host devices the container may use, such as a GPU for a workload that
+	// transcodes.
+	//
+	// A device is a host path, and the server gates it the way it gates a
+	// path mount: the device must sit beneath a prefix the server's
+	// allow-host-paths configuration names, and one granted for reading
+	// only does not cover it, since a read-only mount does not stop an
+	// ioctl. The gate runs when the specification is applied and again as
+	// each instance starts.
+	Devices *[]DeviceSpec `json:"devices,omitempty"`
+
+	// Entrypoint The entrypoint to run, replacing the one the image declares. Given the
+	// way command is, as the program and its arguments, with command appended
+	// as further arguments the way docker appends them.
+	//
+	// Leave it out to run what the image already declares. An image whose
+	// entrypoint is a script that then runs the command is the usual reason
+	// to name one: naming the program directly skips the script.
+	//
+	//
+	// Examples: ["/usr/local/bin/app"]
+	Entrypoint *[]string `json:"entrypoint,omitempty"`
+
 	// Image The image reference to run.
 	//
 	// Examples: example/example:latest
@@ -614,6 +637,26 @@ type ContainerSpec struct {
 	// Leave it out for a writable root filesystem, which is what most images
 	// expect.
 	ReadOnly *bool `json:"readOnly,omitempty"`
+
+	// ShmSize The size of the container's shared memory, written as a size such as
+	// "256m". Absent keeps docker's default of 64m, which a browser or a
+	// database sharing memory between processes can outgrow.
+	//
+	//
+	// Examples: 256m
+	ShmSize *string `json:"shmSize,omitempty"`
+
+	// Tmpfs Paths inside the container backed by memory rather than by its root
+	// filesystem, each absolute. This is what gives a read-only container
+	// somewhere to write temporary files. What is written there is gone
+	// when the instance is.
+	//
+	// A path that is also a mount is refused, since the daemon would refuse
+	// the duplicate when the instance starts.
+	//
+	//
+	// Examples: ["/tmp","/run"]
+	Tmpfs *[]string `json:"tmpfs,omitempty"`
 
 	// User The user to run the container's process as, replacing the one the image
 	// declares. Given in the forms docker accepts, such as a name, a numeric
@@ -692,6 +735,19 @@ type DeleteWorkloadResult struct {
 	// Workload A workload's desired state, together with the state observed from the driver
 	// that runs it.
 	Workload Workload `json:"workload"`
+}
+
+// DeviceSpec A host device a container may use.
+type DeviceSpec struct {
+	// Path The device on the host, written as an absolute path.
+	//
+	// Examples: /dev/dri
+	Path string `json:"path"`
+
+	// To Where the container finds it. Absent places it at the same path.
+	//
+	// Examples: /dev/dri
+	To *string `json:"to,omitempty"`
 }
 
 // DryRunWorkloadResult What applying a specification would do, none of it having been done.
@@ -2698,6 +2754,20 @@ type WorkloadSpec struct {
 	// workload whatever the last run did, so the policy paces retries between
 	// occurrences rather than deciding when the next one begins.
 	Schedule *ScheduleSpec `json:"schedule,omitempty"`
+
+	// StopTimeout How long an instance is given to stop on its own, after it is asked
+	// to, before it is killed. Absent keeps the runtime's own grace, which
+	// is ten seconds on either runtime.
+	//
+	// It sits alongside the runtime blocks because how long a workload
+	// needs to stop is a question about the workload, and the grace means
+	// the same thing on either runtime: the process is signalled, and
+	// killed when it is still running at the end of it. A database that
+	// flushes on shutdown is the usual reason to name one.
+	//
+	//
+	// Examples: 30s
+	StopTimeout *string `json:"stopTimeout,omitempty"`
 
 	// Version The manifest schema version. Only "v1" is understood.
 	//
