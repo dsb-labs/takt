@@ -434,6 +434,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 		Version:    w.Version,
 		StartedAt:  time.Now(),
 		Volumes:    w.Volumes,
+		StopGrace:  w.Spec.StopTimeout,
 	}
 
 	if limits != nil {
@@ -718,7 +719,7 @@ func (d *Driver) halt(ctx context.Context, workload string, records []record) er
 		// session zero, and nothing the driver started can be either.
 		switch {
 		case recorded.alive():
-			if err = d.terminate(ctx, recorded.PID); err != nil {
+			if err = d.terminate(ctx, recorded.PID, recorded.StopGrace); err != nil {
 				return fmt.Errorf("failed to stop process: %w", err)
 			}
 		case signalable(recorded.PID) && inSession(recorded.PID):
@@ -1070,7 +1071,10 @@ func signalable(pid int) bool {
 // leader exiting says nothing about what it started, and a child that ignored the
 // request would otherwise outlive the workload holding its ports, so the next
 // attempt could not bind them.
-func (d *Driver) terminate(ctx context.Context, pid int) error {
+//
+// grace is how long the group is given to stop on its own, with the driver's own
+// applied for a workload naming none.
+func (d *Driver) terminate(ctx context.Context, pid int, grace time.Duration) error {
 	if !signalable(pid) {
 		return fmt.Errorf("refusing to signal pid %d", pid)
 	}
@@ -1079,7 +1083,11 @@ func (d *Driver) terminate(ctx context.Context, pid int) error {
 		return fmt.Errorf("failed to signal process group: %w", err)
 	}
 
-	deadline := time.Now().Add(stopGrace)
+	if grace <= 0 {
+		grace = stopGrace
+	}
+
+	deadline := time.Now().Add(grace)
 	for time.Now().Before(deadline) {
 		if err := syscall.Kill(pid, 0); err != nil {
 			break

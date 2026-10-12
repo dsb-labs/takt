@@ -61,6 +61,13 @@ type state struct {
 	// How many files of output are kept, the one being written included. Zero
 	// means one.
 	LogMaxFiles int `json:"logMaxFiles,omitempty"`
+	// How long the process is given to stop on its own before it is killed, zero
+	// for a workload naming none, which gets the driver's own grace.
+	//
+	// Recorded for the reason the output cap is: the process outlives the server
+	// that started it, and a stop issued by the next one has no specification in
+	// hand.
+	StopGrace time.Duration `json:"stopGrace,omitempty"`
 	// The volumes the process was started with, which with its directory are
 	// everything its ruleset grants beyond the host's own files.
 	//
