@@ -1,0 +1,5 @@
+version: v1
+name: example
+stopTimeout: -5s
+container:
+  image: example/example:latest

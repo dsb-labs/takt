@@ -928,6 +928,59 @@ func TestParse(t *testing.T) {
 			ExpectsError: true,
 		},
 		{
+			Name: "parses a container's entrypoint, tmpfs, shared memory and devices",
+			File: "container_extras.yaml",
+			Assert: func(t *testing.T, spec manifest.Spec) {
+				require.NotNil(t, spec.Container)
+				assert.Equal(t, 45*time.Second, spec.StopTimeout)
+				assert.Equal(t, []string{"/bin/entrypoint.sh"}, spec.Container.Entrypoint)
+				assert.Equal(t, []string{"serve"}, spec.Container.Command)
+				assert.Equal(t, []string{"/tmp", "/run"}, spec.Container.Tmpfs)
+				assert.Equal(t, "256m", spec.Container.ShmSize)
+				assert.Equal(t, []manifest.Device{
+					{Path: "/dev/dri"},
+					{Path: "/dev/snd", To: "/dev/audio"},
+				}, spec.Container.Devices)
+			},
+		},
+		{
+			Name:         "rejects an empty entrypoint element",
+			File:         "container_empty_entrypoint.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a relative tmpfs path",
+			File:         "container_bad_tmpfs.yaml",
+			ExpectsError: true,
+		},
+		{
+			// The daemon would refuse the duplicate mount point when the instance
+			// starts, which reads as the instance failing rather than the manifest.
+			Name:         "rejects a tmpfs at a mount's path",
+			File:         "container_tmpfs_mount.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a shared memory size that does not parse",
+			File:         "container_bad_shm_size.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a relative device path",
+			File:         "container_bad_device.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects two devices at one path",
+			File:         "container_duplicate_device.yaml",
+			ExpectsError: true,
+		},
+		{
+			Name:         "rejects a negative stop timeout",
+			File:         "bad_stop_timeout.yaml",
+			ExpectsError: true,
+		},
+		{
 			// Host networking maps nothing, so a host port that differs from the
 			// port inside is asking for a mapping it cannot make.
 			Name:         "rejects a host-networked port whose host side differs",
@@ -1314,6 +1367,11 @@ func TestParse_EveryFieldDecodes(t *testing.T) {
 	assert.True(t, spec.Container.ReadOnly)
 	assert.NotEmpty(t, spec.Container.CapAdd)
 	assert.NotEmpty(t, spec.Container.CapDrop)
+	assert.NotEmpty(t, spec.Container.Entrypoint)
+	assert.NotEmpty(t, spec.Container.Tmpfs)
+	assert.NotEmpty(t, spec.Container.ShmSize)
+	assert.NotEmpty(t, spec.Container.Devices)
+	assert.Equal(t, 30*time.Second, spec.StopTimeout)
 	assert.NotEmpty(t, spec.Env)
 	assert.NotEmpty(t, spec.Ports)
 	assert.Equal(t, "http", spec.Ports[0].Name)
@@ -1363,16 +1421,21 @@ func TestSpec_JSON(t *testing.T) {
 					Retries:     3,
 					StartPeriod: 30 * time.Second,
 				},
-				Resources: &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 128},
-				Logs:      &manifest.Logs{MaxSize: "10m", MaxFiles: 3},
+				Resources:   &manifest.Resources{Memory: "512m", CPU: 0.5, Pids: 128},
+				Logs:        &manifest.Logs{MaxSize: "10m", MaxFiles: 3},
+				StopTimeout: 30 * time.Second,
 				Container: &manifest.Container{
-					Image:    "ghcr.io/dsb-labs/api:v1",
-					Pull:     manifest.PullAlways,
-					Command:  []string{"/api", "serve"},
-					User:     "1000:1000",
-					ReadOnly: true,
-					CapAdd:   []string{"NET_BIND_SERVICE"},
-					CapDrop:  []string{"ALL"},
+					Image:      "ghcr.io/dsb-labs/api:v1",
+					Pull:       manifest.PullAlways,
+					Command:    []string{"/api", "serve"},
+					Entrypoint: []string{"/api"},
+					User:       "1000:1000",
+					ReadOnly:   true,
+					CapAdd:     []string{"NET_BIND_SERVICE"},
+					CapDrop:    []string{"ALL"},
+					Tmpfs:      []string{"/tmp"},
+					ShmSize:    "128m",
+					Devices:    []manifest.Device{{Path: "/dev/dri", To: "/dev/gpu"}},
 				},
 			},
 		},

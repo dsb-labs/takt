@@ -33,3 +33,9 @@ container:
   readOnly: true
   capAdd: [NET_ADMIN]
   capDrop: [ALL]
+  entrypoint: ["/bin/entrypoint.sh"]
+  tmpfs: [/tmp]
+  shmSize: 128m
+  devices:
+    - path: /dev/dri
+stopTimeout: 30s

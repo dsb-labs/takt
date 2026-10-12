@@ -1,0 +1,8 @@
+version: v1
+name: example
+container:
+  image: example/example:latest
+  devices:
+    - path: /dev/dri
+    - path: /dev/snd
+      to: /dev/dri
