@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"time"
 
 	"github.com/dsb-labs/takt/internal/server/database"
 	"github.com/dsb-labs/takt/internal/server/driver"
@@ -307,6 +308,19 @@ func countOf(row database.Workload) int {
 	}
 
 	return spec.Count
+}
+
+// stopBudget is how long one instance of a workload may take to stop: the driver's
+// ordinary deadline, and the grace the workload asks for on top of it. A grace
+// longer than the deadline would otherwise be cut short by the deadline, and the
+// process killed by the context rather than given the time the manifest named.
+func stopBudget(row database.Workload) time.Duration {
+	spec, err := manifest.DecodeWorkload(row.Spec)
+	if err != nil || spec.StopTimeout <= 0 {
+		return driverTimeout
+	}
+
+	return driverTimeout + spec.StopTimeout
 }
 
 // startAll starts every slot of a workload, reporting the first failure.
