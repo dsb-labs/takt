@@ -112,7 +112,7 @@ await Promise.all([
                   >
                     {{ token.workload }}
                   </RouterLink>
-                  <span class="text-slate-500 dark:text-slate-400">
+                  <span class="ml-1 text-slate-500 dark:text-slate-400">
                     {{
                       token.instance !== undefined
                         ? `instance ${token.instance}`
