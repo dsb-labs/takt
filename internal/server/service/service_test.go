@@ -304,10 +304,10 @@ func TestServiceService_List(t *testing.T) {
 		// than in the database, because a read observes the host and one per
 		// service would observe it once per service.
 		workloads := NewMockWorkloadLister(t)
-		workloads.EXPECT().List(mock.Anything).
+		workloads.EXPECT().Fleet(mock.Anything).
 			Return([]service.Workload{
 				targetedWorkload("web", driver.Instance{Index: 0, State: driver.StateRunning}),
-			}, nil).Once()
+			}, nil, nil).Once()
 
 		svc := newServiceService(t, repo, workloads)
 
@@ -340,12 +340,12 @@ func TestServiceService_List(t *testing.T) {
 		worker.Labels = map[string]string{"tier": "backend"}
 
 		workloads := NewMockWorkloadLister(t)
-		workloads.EXPECT().List(mock.Anything).
+		workloads.EXPECT().Fleet(mock.Anything).
 			Return([]service.Workload{
 				apiWorkload,
 				targetedWorkload("web", driver.Instance{Index: 0, State: driver.StateRunning}),
 				worker,
-			}, nil).Once()
+			}, nil, nil).Once()
 
 		svc := newServiceService(t, repo, workloads)
 
@@ -381,7 +381,7 @@ func TestServiceService_List(t *testing.T) {
 		// An empty target selects everything, as the empty query the database
 		// would have been asked does.
 		workloads := NewMockWorkloadLister(t)
-		workloads.EXPECT().List(mock.Anything).Return([]service.Workload{unlabelled}, nil).Once()
+		workloads.EXPECT().Fleet(mock.Anything).Return([]service.Workload{unlabelled}, nil, nil).Once()
 
 		svc := newServiceService(t, repo, workloads)
 
@@ -412,7 +412,7 @@ func TestServiceService_List(t *testing.T) {
 		repo.EXPECT().List(mock.Anything).Return([]database.Service{storedService()}, nil).Once()
 
 		workloads := NewMockWorkloadLister(t)
-		workloads.EXPECT().List(mock.Anything).Return(nil, errors.New("database is closed")).Once()
+		workloads.EXPECT().Fleet(mock.Anything).Return(nil, nil, errors.New("database is closed")).Once()
 
 		svc := newServiceService(t, repo, workloads)
 
@@ -490,11 +490,11 @@ func TestServiceService_Stream(t *testing.T) {
 
 		reads := 0
 		workloads := NewMockWorkloadLister(t)
-		workloads.EXPECT().List(mock.Anything).RunAndReturn(func(context.Context, ...string) ([]service.Workload, error) {
+		workloads.EXPECT().Fleet(mock.Anything).RunAndReturn(func(context.Context) ([]service.Workload, []manifest.Runtime, error) {
 			fleet := fleets[reads]
 			reads++
 
-			return fleet, nil
+			return fleet, nil, nil
 		}).Times(3)
 
 		passes := make(chan struct{})
@@ -534,6 +534,80 @@ func TestServiceService_Stream(t *testing.T) {
 		cancel()
 		assert.NoError(t, <-done)
 		assert.Empty(t, reported, "the unchanged read was reported")
+	})
+
+	t.Run("keeps the backends of a runtime that did not answer", func(t *testing.T) {
+		t.Parallel()
+
+		repo := NewMockServiceRepository(t)
+		repo.EXPECT().List(mock.Anything).Return([]database.Service{storedService()}, nil)
+
+		// The daemon answers, then stalls, then answers with the instance moved.
+		// The stalled read must not drain the backend: nothing is known about the
+		// container, and a daemon out of reach is not a container stopped. The
+		// read after it is the one that changes the set. The ports come from the
+		// allocation table rather than the observation, so the stalled read still
+		// has them.
+		web := targetedWorkload("web", driver.Instance{Index: 0, State: driver.StateRunning})
+		web.Runtime = manifest.RuntimeContainer
+
+		stalled := targetedWorkload("web")
+		stalled.Runtime = manifest.RuntimeContainer
+		stalled.Ports = web.Ports
+
+		moved := targetedWorkload("web", driver.Instance{Index: 1, State: driver.StateRunning})
+		moved.Runtime = manifest.RuntimeContainer
+
+		reads := 0
+		workloads := NewMockWorkloadLister(t)
+		workloads.EXPECT().Fleet(mock.Anything).RunAndReturn(func(context.Context) ([]service.Workload, []manifest.Runtime, error) {
+			reads++
+
+			switch reads {
+			case 1:
+				return []service.Workload{web}, nil, nil
+			case 2:
+				return []service.Workload{stalled}, []manifest.Runtime{manifest.RuntimeContainer}, nil
+			default:
+				return []service.Workload{moved}, nil, nil
+			}
+		}).Times(3)
+
+		passes := make(chan struct{})
+		reconciler := NewMockPasses(t)
+		reconciler.EXPECT().Subscribe(mock.Anything).Return(passes).Once()
+
+		svc := newStreamingServiceService(t, repo, workloads, reconciler)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		reported := make(chan []service.Backend, 3)
+		done := make(chan error, 1)
+
+		go func() {
+			done <- svc.Stream(ctx, func(services []service.Service) error {
+				reported <- services[0].Backends
+				return nil
+			})
+		}()
+
+		assert.Equal(t, []service.Backend{
+			{Workload: "web", Instance: 0, Address: "203.0.113.10:20000"},
+		}, <-reported)
+
+		// Two passes: the stalled read, then the one that finds the instance
+		// moved. Only the second is reported.
+		passes <- struct{}{}
+		passes <- struct{}{}
+
+		assert.Equal(t, []service.Backend{
+			{Workload: "web", Instance: 1, Address: "203.0.113.10:20001"},
+		}, <-reported)
+
+		cancel()
+		assert.NoError(t, <-done)
+		assert.Empty(t, reported, "the stalled read was reported")
 	})
 
 	t.Run("ends with the caller's error", func(t *testing.T) {
