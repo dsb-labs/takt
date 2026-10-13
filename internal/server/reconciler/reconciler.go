@@ -825,13 +825,15 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	observeCtx, cancel := context.WithTimeout(ctx, driverTimeout)
 	defer cancel()
 
-	instances, err := r.observe(observeCtx)
-	if err != nil {
+	instances, unobserved := r.observe(observeCtx)
+	switch {
+	case len(unobserved) == len(r.drivers):
 		outcome = outcomeObserveFailed
-		span.RecordError(err)
-		r.logger.With("error", err).Error("failed to observe driver instances")
+		r.logger.Error("no driver answered, converging nothing")
 
 		return
+	case len(unobserved) > 0:
+		outcome = outcomeObservePartial
 	}
 
 	span.SetAttributes(attribute.Int("takt.instances", len(instances)))
@@ -888,14 +890,14 @@ func (r *Reconciler) reconcile(ctx context.Context) {
 	r.allocations.Store(&allocations)
 
 	r.measure(ctx, rows, observed)
-	r.register(rows, observed)
+	r.register(rows, observed, unobserved)
 
 	desired := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
 		desired[row.Name] = struct{}{}
 	}
 
-	skipped := r.convergeAll(ctx, &spawned, rows, observed, indexes)
+	skipped := r.convergeAll(ctx, &spawned, rows, observed, indexes, unobserved)
 
 	// A pass cut short by shutdown stops here. The sweep and the prune would run
 	// against a cancelled context, and every failure they reported would be the
@@ -1106,16 +1108,27 @@ func (r *Reconciler) measure(ctx context.Context, rows []database.Workload, obse
 // converge is skipped, and the count of those is returned for the pass's span: the
 // observation it was made from is mid-change, and a second converge would race the
 // first for its slots. The next pass after the converge finishes acts on it.
+//
+// A workload whose driver did not answer the observation is skipped the same way.
+// Nothing is known about what it runs, and acting on nothing would start every
+// instance again beside the ones already there.
 func (r *Reconciler) convergeAll(
 	ctx context.Context,
 	spawned *sync.WaitGroup,
 	rows []database.Workload,
 	observed map[string][]driver.Instance,
 	indexes map[string]map[int]struct{},
+	unobserved map[string]struct{},
 ) int {
 	var skipped int
 
 	for _, row := range rows {
+		if _, ok := unobserved[row.Runtime]; ok {
+			skipped++
+
+			continue
+		}
+
 		if !r.begin(row.Name) {
 			r.logger.With("workload", row.Name).Debug("leaving a workload an earlier pass is still converging")
 			skipped++

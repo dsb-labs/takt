@@ -20,12 +20,18 @@ import (
 // This belongs to the pass rather than to whoever applies a workload: the reconciler
 // is what runs continuously, so a server that restarts resumes checking the workloads
 // it adopts without waiting for anything to be applied or read again.
-func (r *Reconciler) register(rows []database.Workload, observed map[string][]driver.Instance) {
+func (r *Reconciler) register(rows []database.Workload, observed map[string][]driver.Instance, unobserved map[string]struct{}) {
 	if r.checker == nil || r.ports == nil {
 		return
 	}
 
 	for _, row := range rows {
+		// Nothing is known about what this workload runs, so its checks are left as
+		// they were rather than forgotten for slots that may well still be up.
+		if _, ok := unobserved[row.Runtime]; ok {
+			continue
+		}
+
 		count := countOf(row)
 
 		byIndex := make(map[int][]driver.Instance, count)
