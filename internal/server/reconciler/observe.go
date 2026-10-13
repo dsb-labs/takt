@@ -38,8 +38,9 @@ const (
 	coalesceWindow = 500 * time.Millisecond
 
 	// The wait before a driver's event stream is watched again after it ends,
-	// doubled on each consecutive failure up to maxRewatchDelay. A daemon
-	// restarting is the usual cause, and comes back in seconds.
+	// doubled each time a stream ends within the wait that preceded it, up to
+	// maxRewatchDelay. A daemon restarting is the usual cause, and comes back in
+	// seconds.
 	baseRewatchDelay = time.Second
 
 	// The ceiling on the wait between attempts to watch a driver again.
@@ -161,8 +162,16 @@ func (r *Reconciler) watch(ctx context.Context) (<-chan driver.Event, error) {
 
 // forward copies one driver's events onto merged until ctx ends, watching the
 // driver again each time its stream closes.
+//
+// A driver cannot always tell, when asked to watch, whether anything is listening
+// at the other end: the docker client reports a daemon it cannot reach on the
+// stream itself, so Watch succeeds and the stream closes at once. The wait between
+// attempts therefore grows on a stream that ended within the wait before it, and
+// resets only once a stream has outlived that wait. An outage otherwise cost a
+// watch, a pass and a handful of log lines every second for as long as it lasted.
 func (r *Reconciler) forward(ctx context.Context, d Driver, events <-chan driver.Event, merged chan<- driver.Event) {
 	delay := baseRewatchDelay
+	opened := r.now()
 
 	for {
 		for event := range events {
@@ -177,7 +186,14 @@ func (r *Reconciler) forward(ctx context.Context, d Driver, events <-chan driver
 			return
 		}
 
-		r.logger.With("driver", d.Name(), "delay", delay).Warn("driver event stream ended, watching again")
+		lived := r.now().Sub(opened)
+		if lived < delay {
+			delay = min(delay*2, maxRewatchDelay)
+		} else {
+			delay = baseRewatchDelay
+		}
+
+		r.logger.With("driver", d.Name(), "lived", lived, "delay", delay).Warn("driver event stream ended, watching again")
 
 		select {
 		case <-ctx.Done():
@@ -196,11 +212,11 @@ func (r *Reconciler) forward(ctx context.Context, d Driver, events <-chan driver
 
 		// Anything the driver reported while nothing was listening is gone, and
 		// the next pass observes the whole runtime, so one is asked for now rather
-		// than left to the ticker.
-		r.logger.With("driver", d.Name()).Info("driver event stream restored")
+		// than left to the ticker. Whether the stream is up is only known once it
+		// has lived, so this is not the place to say it was restored.
+		opened = r.now()
+		r.logger.With("driver", d.Name()).Debug("watching driver again")
 		r.Notify()
-
-		delay = baseRewatchDelay
 	}
 }
 

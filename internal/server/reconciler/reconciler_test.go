@@ -2644,6 +2644,52 @@ func TestReconciler_Run_WatchesADriverAgainWhenItsStreamEnds(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_WaitsLongerEachTimeAStreamEndsAtOnce(t *testing.T) {
+	t.Parallel()
+
+	d, repo := newMockDriver(t), NewMockWorkloadRepository(t)
+
+	repo.EXPECT().List(mock.Anything).Return(nil, nil).Maybe()
+	d.EXPECT().Observe(mock.Anything).Return(nil, nil).Maybe()
+
+	// A daemon that cannot be reached fails on the stream rather than on the watch,
+	// so every watch succeeds and every stream closes at once. Each closes before
+	// the wait that preceded it has passed, so the wait doubles: the second watch
+	// comes two seconds after the first, and the third four seconds after that.
+	watches := newCounter()
+	d.EXPECT().Watch(mock.Anything).RunAndReturn(func(context.Context) (<-chan driver.Event, error) {
+		watches.inc()
+
+		events := make(chan driver.Event)
+		close(events)
+
+		return events, nil
+	})
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: d},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	watches.wait(t, 2)
+
+	// Before the change, a stream that closed at once reset the wait, and the third
+	// watch followed the second within a second.
+	assert.Never(t, func() bool {
+		return watches.get() >= 3
+	}, 1500*time.Millisecond, 50*time.Millisecond)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_RefusesHostPathReachingOutsideThePrefixes(t *testing.T) {
 	t.Parallel()
 
