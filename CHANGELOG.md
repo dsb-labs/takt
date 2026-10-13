@@ -19,6 +19,10 @@ describes how an entry is written.
   killed. Both runtimes honour it
   ([#175](https://github.com/dsb-labs/takt/issues/175),
   [#211](https://github.com/dsb-labs/takt/pull/211)).
+- An `observe_partial` outcome on `takt_reconcile_passes_total`, for a pass that
+  some driver did not answer
+  ([#163](https://github.com/dsb-labs/takt/issues/163),
+  [#213](https://github.com/dsb-labs/takt/pull/213)).
 
 ### Changed
 
@@ -32,6 +36,19 @@ describes how an entry is written.
 
 - The access view ran a token's workload and version together in its source
   column ([#211](https://github.com/dsb-labs/takt/pull/211)).
+- A Docker daemon that could not be reached stopped every workload converging,
+  `exec` workloads included. A pass now leaves only that runtime's workloads
+  alone until it answers
+  ([#163](https://github.com/dsb-labs/takt/issues/163),
+  [#213](https://github.com/dsb-labs/takt/pull/213)).
+- The driver event stream was watched again every second for as long as the
+  daemon was unreachable, with a failed pass each time
+  ([#163](https://github.com/dsb-labs/takt/issues/163),
+  [#213](https://github.com/dsb-labs/takt/pull/213)).
+- A followed services list drained every backend on a runtime that did not
+  answer a read. It now keeps what it last saw of them until the runtime answers
+  ([#163](https://github.com/dsb-labs/takt/issues/163),
+  [#213](https://github.com/dsb-labs/takt/pull/213)).
 
 ## v0.12.0 - 2026-10-11
 
