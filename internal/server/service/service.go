@@ -59,6 +59,9 @@ type (
 		// List should return the workloads matching every one of the given
 		// "path=value" queries, with observed state merged in.
 		List(ctx context.Context, queries ...string) ([]Workload, error)
+		// Fleet should return every workload with observed state merged in, and
+		// the runtimes that did not answer the observation.
+		Fleet(ctx context.Context) ([]Workload, []manifest.Runtime, error)
 	}
 
 	// The Passes interface describes what the service asks of the reconciler:
@@ -235,30 +238,73 @@ func (s *ServiceService) List(ctx context.Context, queries ...string) ([]Service
 // list resolves the services matching the parsed queries, for List and for
 // each read a Stream makes.
 func (s *ServiceService) list(ctx context.Context, queries []database.Query) ([]Service, error) {
+	services, _, err := s.read(ctx, queries, nil)
+
+	return services, err
+}
+
+// read lists the services matching the queries against the fleet as it stands, and
+// returns the fleet it read them against for the next read to carry forward.
+//
+// A workload whose runtime did not answer is reported as the previous read saw it,
+// when there was one. A daemon that stalls for ten seconds otherwise reported every
+// workload on it with no instances, and a balancer following the stream drained
+// every backend on that runtime for the stall. A daemon out of reach is not a
+// container stopped: what the previous read saw is the better guess at what is
+// running, and the first read after the daemon answers corrects it.
+func (s *ServiceService) read(ctx context.Context, queries []database.Query, previous []Workload) ([]Service, []Workload, error) {
 	rows, err := s.services.List(ctx, queries...)
 	if err != nil {
 		if errors.Is(err, database.ErrInvalidQueryPath) {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
+			return nil, nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
 		}
 
-		return nil, fmt.Errorf("failed to list services: %w", err)
+		return nil, nil, fmt.Errorf("failed to list services: %w", err)
 	}
 
 	services := make([]Service, 0, len(rows))
 	if len(rows) == 0 {
-		return services, nil
+		return services, previous, nil
 	}
 
-	fleet, err := s.workloads.List(ctx)
+	fleet, unobserved, err := s.workloads.Fleet(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list workloads: %w", err)
+		return nil, nil, fmt.Errorf("failed to list workloads: %w", err)
 	}
+
+	fleet = carry(fleet, previous, unobserved)
 
 	for _, row := range rows {
 		services = append(services, s.hydrate(row, fleet))
 	}
 
-	return services, nil
+	return services, fleet, nil
+}
+
+// carry gives each workload on a runtime that did not answer the instances the
+// previous read saw for it. A workload the previous read did not see keeps what it
+// has, which is nothing.
+func carry(fleet, previous []Workload, unobserved []manifest.Runtime) []Workload {
+	if len(unobserved) == 0 || len(previous) == 0 {
+		return fleet
+	}
+
+	seen := make(map[string]Workload, len(previous))
+	for _, workload := range previous {
+		seen[workload.Name] = workload
+	}
+
+	for i, workload := range fleet {
+		if !slices.Contains(unobserved, workload.Runtime) {
+			continue
+		}
+
+		if last, ok := seen[workload.Name]; ok {
+			fleet[i].Instances = last.Instances
+		}
+	}
+
+	return fleet
 }
 
 // Delete removes the service with the given name, reporting ErrServiceNotFound
@@ -317,7 +363,7 @@ func (s *ServiceService) Stream(ctx context.Context, fn func([]Service) error, q
 		passes = s.passes.Subscribe(ctx)
 	}
 
-	last, err := s.list(ctx, parsed)
+	last, fleet, err := s.read(ctx, parsed, nil)
 	if err != nil {
 		return err
 	}
@@ -333,11 +379,12 @@ func (s *ServiceService) Stream(ctx context.Context, fn func([]Service) error, q
 		case <-passes:
 		}
 
-		next, err := s.list(ctx, parsed)
+		next, seen, err := s.read(ctx, parsed, fleet)
 		if err != nil {
 			return err
 		}
 
+		fleet = seen
 		if equalServices(last, next) {
 			continue
 		}

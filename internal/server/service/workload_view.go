@@ -146,27 +146,32 @@ func (s *WorkloadService) observeWorkload(ctx context.Context, row database.Work
 	return instances
 }
 
-// observe groups the driver's instances by workload name.
+// observe groups the driver's instances by workload name, and names the runtimes
+// that did not answer.
 //
 // A driver that cannot be reached is deliberately not an error: the desired state
 // is still worth reporting, and a read of it shouldn't fail because the runtime is
 // briefly unavailable. The failure is logged and callers see workloads with no
-// instances, which reads as pending.
+// instances, which reads as pending. The runtimes that failed are returned beside
+// the instances, for a caller that would rather keep what it last saw of them
+// than report nothing.
 //
 // The call is bounded so that a wedged daemon makes a read of desired state slower
 // rather than hanging it: a request that never returns is worse than one that
 // reports what it does know.
-func (s *WorkloadService) observe(ctx context.Context) map[string][]driver.Instance {
+func (s *WorkloadService) observe(ctx context.Context) (map[string][]driver.Instance, []manifest.Runtime) {
 	ctx, cancel := context.WithTimeout(ctx, observeTimeout)
 	defer cancel()
 
 	var instances []driver.Instance
+	var unobserved []manifest.Runtime
 	for _, runtime := range s.drivers {
 		observed, err := runtime.Observe(ctx)
 		if err != nil {
 			// Reported rather than returned: desired state is still worth reading, and
 			// a read should not fail because one runtime is briefly unavailable.
 			s.logger.With("error", err, "runtime", runtime.Name()).Error("failed to observe driver instances")
+			unobserved = append(unobserved, manifest.Runtime(runtime.Name()))
 
 			continue
 		}
@@ -179,7 +184,7 @@ func (s *WorkloadService) observe(ctx context.Context) map[string][]driver.Insta
 		byWorkload[instance.Workload] = append(byWorkload[instance.Workload], instance)
 	}
 
-	return byWorkload
+	return byWorkload, unobserved
 }
 
 // healths returns what takt knows about each instance's health, keyed by the

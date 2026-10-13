@@ -399,35 +399,49 @@ func (s *WorkloadService) List(ctx context.Context, queries ...string) ([]Worklo
 		return nil, err
 	}
 
-	rows, err := s.workloads.List(ctx, parsed...)
+	workloads, _, err := s.list(ctx, parsed)
+
+	return workloads, err
+}
+
+// Fleet returns every workload with the state observed from the driver merged in,
+// and the runtimes that did not answer the observation. A workload on one of those
+// runtimes reports no instances, which a caller reading the fleet for a stream can
+// tell apart from one that has none.
+func (s *WorkloadService) Fleet(ctx context.Context) ([]Workload, []manifest.Runtime, error) {
+	return s.list(ctx, nil)
+}
+
+func (s *WorkloadService) list(ctx context.Context, queries []database.Query) ([]Workload, []manifest.Runtime, error) {
+	rows, err := s.workloads.List(ctx, queries...)
 	if err != nil {
 		if errors.Is(err, database.ErrInvalidQueryPath) {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
+			return nil, nil, fmt.Errorf("%w: %v", ErrInvalidQuery, err)
 		}
 
-		return nil, fmt.Errorf("failed to list workloads: %w", err)
+		return nil, nil, fmt.Errorf("failed to list workloads: %w", err)
 	}
 
 	// One observation covers every workload, and so does one read of the port
 	// allocations: asking per row would turn a list into a query per workload.
-	observed := s.observe(ctx)
+	observed, unobserved := s.observe(ctx)
 
 	ports, err := s.ports.ListAll(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read workload ports: %w", err)
+		return nil, nil, fmt.Errorf("failed to read workload ports: %w", err)
 	}
 
 	workloads := make([]Workload, 0, len(rows))
 	for _, row := range rows {
 		workload, err := newWorkload(row, observed[row.Name], ports[row.ID], s.healths(row.Name, observed[row.Name]), s.pulling(row.Name, observed[row.Name]), s.drifted.behind(row.Name))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		workloads = append(workloads, workload)
 	}
 
-	return workloads, nil
+	return workloads, unobserved, nil
 }
 
 // Delete marks the workload with the given name for deletion and returns it as it
