@@ -131,6 +131,11 @@ instance that died or a check whose verdict changed, and by the next scheduled
 pass for anything else. A followed list costs one read of the fleet per pass
 rather than one per poll.
 
+A runtime that does not answer a read does not drain its backends. The stream
+reports the workloads on it as the previous line saw them, since a daemon out of
+reach is not a container stopped. The first read after the runtime answers again
+corrects them. A plain list reports those workloads with no instances.
+
 The stream ends when the caller disconnects or the server stops, and carries no
 keepalive. A consumer that loses the connection opens a new one and starts
 again from the first line. `StreamServices` on the Go client does this reading
