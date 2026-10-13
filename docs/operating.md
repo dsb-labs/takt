@@ -947,6 +947,18 @@ The metrics to alert on first:
   with `docker.digest-interval` set. A scraper alerting on it is how an operator is
   told their pins are stale. See [Configuration](configuration.md#docker).
 
+[`grafana/dashboard.json`](../grafana/dashboard.json) draws these metrics as a
+Grafana dashboard: the fleet by state, the reconciler's passes and durations,
+image pulls and prunes, the server's own jobs, the API, the database and the
+Go runtime. Import it, or provision it from a directory a grafana workload
+mounts. It asks for a Prometheus data source and the scrape job's name on
+load, so the job needs no particular name.
+
+The duration histograms carry no workload or image label, because a histogram
+is one series per bucket and either label grows with the fleet. The restart
+and giveup counters name the workload, and the traces name the image. A
+scraper that wants per-workload probe latency reads the span.
+
 Alongside takt's own instruments, the scrape carries the standard OpenTelemetry
 HTTP server metrics, with request counts and durations per route and status, and
 the Go runtime's own metrics — goroutine count, memory use and garbage collection
