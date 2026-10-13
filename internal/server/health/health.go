@@ -413,10 +413,11 @@ func (c *Checker) checkDue(ctx context.Context, probes *sync.WaitGroup) {
 
 			span.End()
 
-			// The workload alone: an instance label would multiply the series by
-			// the count for no question anyone asks of the aggregate.
+			// The outcome alone. A histogram is one series per bucket, so a
+			// workload label would multiply it by the fleet — the same rule the
+			// reconciler's converge histogram follows. Which workload's probe is
+			// slow or failing is the span's to answer, and the checker's status.
 			c.instruments.duration.Record(ctx, time.Since(started).Seconds(), metric.WithAttributes(
-				attribute.String("workload", key.workload),
 				telemetry.OutcomeOf(err).Attribute(),
 			))
 

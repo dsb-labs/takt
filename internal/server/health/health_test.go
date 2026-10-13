@@ -562,9 +562,13 @@ func TestChecker_Metrics(t *testing.T) {
 			require.True(t, ok)
 
 			for _, point := range histogram.DataPoints {
-				workload, _ := point.Attributes.Value("workload")
+				// Only the outcome labels the point: a workload label would be one
+				// series per bucket per workload.
+				_, labelled := point.Attributes.Value("workload")
+				assert.False(t, labelled, "expected no workload label on the probe duration")
+
 				outcome, _ := point.Attributes.Value("outcome")
-				if workload.AsString() == "example" && outcome.AsString() == "error" {
+				if outcome.AsString() == "error" {
 					found = point.Count >= 1
 				}
 			}

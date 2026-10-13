@@ -1264,10 +1264,12 @@ func (d *Driver) fetch(ctx context.Context, ref string, requester trace.Link) er
 		trace.WithLinks(requester))
 	defer span.End()
 
+	// No image label: a histogram is one series per bucket, and the set of
+	// references a server pulls grows with every tag it has ever run. The span
+	// above names the image for the pull that needs explaining.
 	started := time.Now()
 	defer func() {
-		d.instruments.pulls.Record(ctx, time.Since(started).Seconds(),
-			metric.WithAttributes(attribute.String("image", ref)))
+		d.instruments.pulls.Record(ctx, time.Since(started).Seconds())
 	}()
 
 	body, err := d.client.ImagePull(ctx, ref, client.ImagePullOptions{RegistryAuth: auth})

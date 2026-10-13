@@ -9,7 +9,7 @@ import (
 type (
 	// The instruments type holds the meters a checker records into.
 	instruments struct {
-		// How long each probe took, by workload and outcome.
+		// How long each probe took, by outcome.
 		duration metric.Float64Histogram
 	}
 )
