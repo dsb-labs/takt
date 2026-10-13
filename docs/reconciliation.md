@@ -81,7 +81,10 @@ flowchart TD
 
 The pass reads everything first: the workload rows, one observation per driver,
 and the port allocations, each read once rather than once per workload. A driver
-that does not answer within thirty seconds costs the pass rather than the node.
+that does not answer within thirty seconds costs its own workloads the pass
+rather than the node. They wait until it answers, since nothing is known about
+what they run. The other drivers' workloads converge as usual. A pass that no
+driver answered converges nothing.
 
 The observation is split into two views. A driver keeps the most recent stopped
 container of each instance so its output stays readable — a retained instance has

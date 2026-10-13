@@ -112,7 +112,9 @@ An instance that stays up for ten seconds clears it. See
 The reconciler is still stopping its work. A container that ignores `SIGTERM`
 takes the runtime's grace period to die. A workload that stays `terminating` past
 that is one whose runtime cannot be reached: check the server's log for the
-driver's error, and that the Docker daemon is running.
+driver's error, and that the Docker daemon is running. The delete completes on
+the first pass after the runtime answers again. Workloads on the other runtime
+are not held up by it.
 
 ## An image is gone that was expected to stay
 
