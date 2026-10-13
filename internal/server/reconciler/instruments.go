@@ -6,12 +6,15 @@ import (
 	"github.com/dsb-labs/takt/internal/server/telemetry"
 )
 
-// Outcomes for a pass that ended before it could converge anything.
+// Outcomes for a pass that could not converge everything.
 const (
 	// outcomeListFailed labels a pass that could not read desired state.
 	outcomeListFailed telemetry.Outcome = "list_failed"
-	// outcomeObserveFailed labels a pass a driver did not answer.
+	// outcomeObserveFailed labels a pass no driver answered.
 	outcomeObserveFailed telemetry.Outcome = "observe_failed"
+	// outcomeObservePartial labels a pass some driver did not answer, which left
+	// that driver's workloads alone and converged the rest.
+	outcomeObservePartial telemetry.Outcome = "observe_partial"
 )
 
 type (

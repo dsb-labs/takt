@@ -61,28 +61,35 @@ func (r *Reconciler) Observations() map[string]Observation {
 	return maps.Clone(r.observations)
 }
 
-// observe collects the instances every driver is running.
+// observe collects the instances every driver is running, and names the drivers
+// that did not answer.
 //
-// A pass has to see everything, because a workload it cannot see reads as absent and
-// would be started again. One driver failing therefore fails the whole observation
-// rather than yielding a partial picture that would be acted on as though complete.
+// A pass has to see everything a driver runs before it acts on that driver's
+// workloads, because a workload it cannot see reads as absent and would be started
+// again. A driver only ever reports its own runtime, though, so one failing says
+// nothing about the others: the workloads of a driver that answered are converged
+// and those of one that did not are left alone until it answers. A docker daemon
+// that was down otherwise stopped every exec workload converging with it.
 //
-// How each driver answered is recorded per driver, inside the loop, so a failure
-// that abandons the observation still leaves an earlier driver's success on
-// record — readiness reports each driver on its own answer, not on the pass.
-func (r *Reconciler) observe(ctx context.Context) ([]driver.Instance, error) {
+// How each driver answered is recorded per driver, so readiness reports each
+// driver on its own answer, not on the pass.
+func (r *Reconciler) observe(ctx context.Context) ([]driver.Instance, map[string]struct{}) {
 	var instances []driver.Instance
 
+	unobserved := make(map[string]struct{})
 	for name, d := range r.drivers {
 		observed, err := r.observeDriver(ctx, name, d)
 		if err != nil {
-			return nil, fmt.Errorf("failed to observe the %s runtime: %w", name, err)
+			r.logger.With("driver", name, "error", err).Error("failed to observe driver instances, leaving its workloads alone")
+			unobserved[name] = struct{}{}
+
+			continue
 		}
 
 		instances = append(instances, observed...)
 	}
 
-	return instances, nil
+	return instances, unobserved
 }
 
 // observeDriver asks one driver what it is running, recording how it answered and

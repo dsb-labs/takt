@@ -1486,6 +1486,60 @@ func TestReconciler_Run_RoutesByRuntime(t *testing.T) {
 	require.NoError(t, <-done)
 }
 
+func TestReconciler_Run_ConvergesTheDriversThatAnswered(t *testing.T) {
+	t.Parallel()
+
+	container, other := newMockDriver(t), NewMockDriver(t)
+	other.EXPECT().Name().Return("other").Maybe()
+	other.EXPECT().Prune(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+	repo := NewMockWorkloadRepository(t)
+
+	// One workload for each runtime. The docker daemon is down, so its workload is
+	// left alone: nothing is known about what it runs, and a start would put a
+	// second instance beside whatever is there. The other runtime answered, so its
+	// workload converges as it would on any pass. A start on the container driver
+	// is caught by its mock.
+	mine := storedWorkload("mine", "hash-one")
+	theirs := storedWorkload("theirs", "hash-one")
+	theirs.Runtime = "other"
+
+	repo.EXPECT().List(mock.Anything).Return([]database.Workload{mine, theirs}, nil)
+
+	started := make(chan struct{}, 1)
+	other.EXPECT().Start(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
+		return w.Name == "theirs"
+	})).RunAndReturn(func(context.Context, driver.Workload) (string, error) {
+		started <- struct{}{}
+
+		return "other-one", nil
+	}).Once()
+
+	container.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+	other.EXPECT().Watch(mock.Anything).Return(make(chan driver.Event), nil).Once()
+
+	container.EXPECT().Observe(mock.Anything).Return(nil, errors.New("daemon gone"))
+	other.EXPECT().Observe(mock.Anything).Return(nil, nil)
+
+	r := reconciler.New(reconciler.Config{
+		Logger:    newTestLogger(t),
+		Drivers:   map[string]reconciler.Driver{docker.Name: container, "other": other},
+		Workloads: repo,
+		Interval:  time.Hour,
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+
+	go func() { done <- r.Run(ctx) }()
+
+	<-started
+	awaitPasses(t, r, 1)
+
+	cancel()
+	require.NoError(t, <-done)
+}
+
 func TestReconciler_Run_ReadsTheInjectedClock(t *testing.T) {
 	t.Parallel()
 
