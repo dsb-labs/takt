@@ -20,6 +20,14 @@ describes how an entry is written.
   ([#175](https://github.com/dsb-labs/takt/issues/175),
   [#211](https://github.com/dsb-labs/takt/pull/211)).
 
+### Changed
+
+- `takt_health_check_duration_seconds` no longer carries a `workload` label and
+  `takt_image_pull_duration_seconds` no longer carries an `image` label. Both
+  grew a series per bucket for every workload or image the server had seen
+  ([#174](https://github.com/dsb-labs/takt/issues/174),
+  [#212](https://github.com/dsb-labs/takt/pull/212)).
+
 ### Fixed
 
 - The access view ran a token's workload and version together in its source
