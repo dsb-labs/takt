@@ -23,6 +23,11 @@ describes how an entry is written.
   some driver did not answer
   ([#163](https://github.com/dsb-labs/takt/issues/163),
   [#213](https://github.com/dsb-labs/takt/pull/213)).
+- `--wait` on `workload apply` and `score apply`, which blocks until the workload
+  has settled on the manifest, and `--timeout` on `workload apply` to bound it. A
+  wait that runs out exits non-zero naming the workload's state
+  ([#173](https://github.com/dsb-labs/takt/issues/173),
+  [#216](https://github.com/dsb-labs/takt/pull/216)).
 
 ### Changed
 
