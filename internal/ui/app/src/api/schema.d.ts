@@ -1133,8 +1133,11 @@ export interface components {
        *     an exec workload must pin every port, so its count is always one. A
        *     scheduled workload runs one instance by the same rule.
        *
-       *     On one node this buys throughput, not availability: the host is the
-       *     failure domain, and a second instance does not survive it.
+       *     On one node this buys throughput, not availability against the host:
+       *     the host is the failure domain, and a second instance does not survive
+       *     it. It does keep the workload serving through a change: a replacement
+       *     stops one instance at a time, so with two instances behind a service
+       *     the sibling keeps answering while the first is replaced.
        */
       count?: number;
       schedule?: components["schemas"]["ScheduleSpec"];
