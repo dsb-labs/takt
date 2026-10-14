@@ -109,17 +109,34 @@ describe what it changes. See [Configuration](configuration.md).
 
 ```sh
 takt workload apply example.yaml
+takt workload apply example.yaml --wait
+takt workload apply example.yaml --wait --timeout 10m
 ```
 
 | Flag | Description |
 |---|---|
 | `--dry-run` | Report what applying the manifest would do, and apply nothing. |
 | `--if-match` | Apply only while the workload still carries this tag. |
+| `--wait`, `-w` | Block until the workload has settled on the manifest. |
+| `--timeout` | How long to wait for the workload to settle, with `--wait`. Default `5m`. |
 
 Parses the manifest, submits it, and prints the resulting workload.
 
 Applying the same file twice is a no-op. A workload's version changes only when its
 specification does, so a repeated apply never restarts healthy work.
+
+The apply returns once the server has stored the manifest, which is before anything
+runs it. With `--wait` it blocks until the workload has settled on the manifest, and
+the workload it prints is the one that settled. A workload has settled when it is
+running, or completed for one that runs to an end, every instance the manifest asks
+for is up, and, when the manifest changed, every instance is one started since the
+apply. A rolling replacement therefore holds the wait until the last old instance
+has gone. The wait is a poll of `workload get` every half second.
+
+`--timeout` bounds the wait. A wait that runs out exits non-zero and names the state
+the workload was last in, so a pipeline learns that a version failed to come up
+rather than only that it was stored. The default is five minutes. A workload on a
+schedule settles when its next occurrence runs, so a wait on one blocks until then.
 
 Applying a workload that is still terminating is rejected rather than resurrecting it
 half torn down.
@@ -641,6 +658,7 @@ takt score apply ./blog
 takt score apply ./blog --values prod.yaml --as blog-prod
 takt score apply ./blog --secret db-password=@./password --no-input
 takt score apply ./blog --prune --yes
+takt score apply ./blog --wait
 ```
 
 | Flag | Description |
@@ -652,7 +670,8 @@ takt score apply ./blog --prune --yes
 | `--adopt` | Take over resources that exist without this score's label rather than refusing them. |
 | `--prune` | After applying, delete what carries this install's label that the score no longer names. |
 | `--yes`, `-y` | Prune without asking first. |
-| `--timeout` | How long to wait for a prune, workload teardown included. Default `5m`. |
+| `--wait`, `-w` | Block on each workload until it has settled, before applying the next. |
+| `--timeout` | How long to wait for the apply with `--wait`, and for a prune. Default `5m`. |
 
 Renders the score, validates every manifest, checks every requirement and
 ownership, sets any missing secret, then applies in dependency order: volumes,
@@ -669,6 +688,14 @@ carries the version the check read. A change that lands in between, a hand edit
 to a workload for instance, is refused rather than written over, and the error
 names the resource. A resource the check did not find is created without a
 condition.
+
+Each workload apply returns once the server has stored the manifest, which is
+before anything runs it. With `--wait` the apply blocks on each workload until it
+has settled, before the next step is taken, as [`workload apply
+--wait`](#workload-apply) does. The steps run in dependency order, so a workload
+is up before anything that references it is applied. `--timeout` bounds the whole
+apply. A workload that has not settled when it runs out fails the apply, naming
+its state, and the output names what landed before it.
 
 A failure partway stops at once with no rollback. The output names what landed
 before the failure. On success the output is what was applied and what was
