@@ -2,6 +2,7 @@
 package apply
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -38,6 +39,7 @@ func Command() *cobra.Command {
 		noInput bool
 		prune   bool
 		yes     bool
+		wait    bool
 		timeout time.Duration
 	)
 
@@ -63,6 +65,15 @@ func Command() *cobra.Command {
 				applyOptions = append(applyOptions, score.WithAdopt())
 			}
 
+			ctx := cmd.Context()
+			if wait {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+
+				applyOptions = append(applyOptions, score.WithWait())
+			}
+
 			c := client.FromContext(cmd.Context())
 
 			preconditions, err := score.Check(cmd.Context(), c, rendered)
@@ -74,7 +85,7 @@ func Command() *cobra.Command {
 				return err
 			}
 
-			report, err := score.Apply(cmd.Context(), c, rendered, applyOptions...)
+			report, err := score.Apply(ctx, c, rendered, applyOptions...)
 			if err != nil {
 				printNodes(cmd.ErrOrStderr(), "applied before the failure:", report.Applied)
 				return fmt.Errorf("failed to apply score: %w", err)
@@ -103,7 +114,8 @@ func Command() *cobra.Command {
 	flags.BoolVar(&noInput, "no-input", false, "never prompt for a missing secret, and fail naming every one instead")
 	flags.BoolVar(&prune, "prune", false, "after applying, delete what carries this install's label that the score no longer names")
 	flags.BoolVarP(&yes, "yes", "y", false, "prune without asking first")
-	flags.DurationVar(&timeout, "timeout", 5*time.Minute, "how long to wait for a prune, workload teardown included")
+	flags.BoolVarP(&wait, "wait", "w", false, "block on each workload until it has settled, before applying the next")
+	flags.DurationVar(&timeout, "timeout", 5*time.Minute, "how long to wait for the apply with --wait, and for a prune")
 
 	return cmd
 }

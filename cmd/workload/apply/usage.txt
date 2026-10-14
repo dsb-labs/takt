@@ -7,6 +7,14 @@ Use --dry-run to report what applying the manifest would do without doing
 any of it. The report says whether the workload would be created, whether
 its running instances would be replaced, and which fields would change.
 
+The apply returns once the server has stored the manifest, which is before
+anything runs it. Pass --wait to block until the workload has settled on
+it: it is running, or completed for one that runs to an end, and when the
+manifest changed, every instance is one started since. The workload
+printed is then the one that settled. --timeout bounds the wait, and a
+wait that runs out fails naming the state the workload was last in. A
+workload on a schedule settles when its next occurrence runs.
+
 Pass --if-match the tag "takt workload get" reported for the workload
 being replaced, and the apply is refused when the workload has moved on
 since, rather than writing over whatever landed in between. Without it
