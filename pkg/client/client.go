@@ -357,9 +357,45 @@ type (
 	ApplyOption func(*applyConfig)
 
 	applyConfig struct {
-		ifMatch string
+		ifMatch  string
+		wait     bool
+		interval time.Duration
 	}
 )
+
+// WithWaitForRollout modifies a workload apply to block until the workload has
+// settled on what was applied: it is running, or completed for one that runs to
+// an end, and when the apply moved its version, every instance it reports is one
+// started since.
+//
+// Read only by Apply. A volume, service, secret or variable is stored as it is
+// applied, so there is nothing for the others to wait on.
+//
+// Waiting is polling, so the call returns once that has happened, the context is
+// cancelled, or the server reports an error. A workload on a schedule settles when
+// its next occurrence runs, so a wait on one blocks until then.
+func WithWaitForRollout() ApplyOption {
+	return func(c *applyConfig) { c.wait = true }
+}
+
+// WithRolloutInterval modifies how often a waiting apply polls the server, and
+// implies WithWaitForRollout.
+func WithRolloutInterval(interval time.Duration) ApplyOption {
+	return func(c *applyConfig) {
+		c.wait = true
+		c.interval = interval
+	}
+}
+
+// newApplyConfig folds the options down to the configuration of one apply.
+func newApplyConfig(options []ApplyOption) *applyConfig {
+	config := &applyConfig{interval: 500 * time.Millisecond}
+	for _, option := range options {
+		option(config)
+	}
+
+	return config
+}
 
 // WithIfMatch conditions an apply on the resource still carrying the given tag,
 // as read from the ETag of the get that produced it.

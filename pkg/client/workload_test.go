@@ -251,6 +251,178 @@ func TestClient_Apply(t *testing.T) {
 	}
 }
 
+func TestClient_Apply_WaitsForTheRollout(t *testing.T) {
+	t.Parallel()
+
+	spec := manifest.Spec{
+		Version:   "v1",
+		Name:      "example",
+		Container: &manifest.Container{Image: "example/example:latest"},
+	}
+
+	t.Run("outlasts the instance the version moved away from", func(t *testing.T) {
+		t.Parallel()
+
+		var gets int
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPut {
+				stored := workload("example", api.WorkloadStateRunning)
+				stored.Version = 2
+
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: stored})
+				return
+			}
+
+			// The first read is the snapshot before the request. The old instance
+			// is still running on the read after it, and the replacement is not yet
+			// up on the one after that.
+			gets++
+			switch gets {
+			case 1, 2:
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+			case 3:
+				starting := workload("example", api.WorkloadStateRunning)
+				starting.Version = 2
+				starting.Instances = &[]api.Instance{
+					{ID: "container-two", State: api.InstanceStatePending, SpecHash: "hash-two"},
+				}
+
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: starting})
+			default:
+				replaced := workload("example", api.WorkloadStateRunning)
+				replaced.Version = 2
+				replaced.Instances = &[]api.Instance{
+					{ID: "container-two", State: api.InstanceStateRunning, SpecHash: "hash-two"},
+				}
+
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: replaced})
+			}
+		})
+
+		got, created, err := c.Apply(t.Context(), spec, client.WithRolloutInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		assert.False(t, created)
+		assert.Equal(t, 4, gets)
+		assert.Equal(t, 2, got.Version)
+		require.Len(t, got.Instances, 1)
+		assert.Equal(t, "container-two", got.Instances[0].ID)
+	})
+
+	t.Run("returns once an unchanged workload is running", func(t *testing.T) {
+		t.Parallel()
+
+		var gets int
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPut {
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+				return
+			}
+
+			gets++
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+		})
+
+		got, _, err := c.Apply(t.Context(), spec, client.WithRolloutInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		// The snapshot and one poll: the version never moved, so the instance the
+		// snapshot saw is the one being waited for.
+		assert.Equal(t, 2, gets)
+		require.Len(t, got.Instances, 1)
+		assert.Equal(t, "container-one", got.Instances[0].ID)
+	})
+
+	t.Run("waits for a created workload to start", func(t *testing.T) {
+		t.Parallel()
+
+		var gets int
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPut {
+				writeJSON(t, w, http.StatusCreated, api.ApplyWorkloadResult{Workload: workload("example", api.WorkloadStatePending)})
+				return
+			}
+
+			gets++
+			switch gets {
+			case 1:
+				writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "example" does not exist`})
+			case 2:
+				pending := workload("example", api.WorkloadStatePending)
+				pending.Instances = nil
+
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: pending})
+			default:
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+			}
+		})
+
+		got, created, err := c.Apply(t.Context(), spec, client.WithRolloutInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		assert.True(t, created)
+		assert.Equal(t, 3, gets)
+		assert.Equal(t, client.WorkloadStateRunning, got.State)
+	})
+
+	t.Run("keeps waiting while a slot is empty", func(t *testing.T) {
+		t.Parallel()
+
+		var gets int
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			two := workload("example", api.WorkloadStateRunning)
+			two.Spec.Count = new(2)
+
+			if r.Method == http.MethodPut {
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: two})
+				return
+			}
+
+			// One instance running reads as a running workload, and is still a
+			// slot short of what the specification asks for.
+			gets++
+			if gets > 2 {
+				two.Instances = &[]api.Instance{
+					{ID: "container-one", State: api.InstanceStateRunning, SpecHash: "hash-one"},
+					{ID: "container-two", State: api.InstanceStateRunning, SpecHash: "hash-one"},
+				}
+			}
+
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: two})
+		})
+
+		got, _, err := c.Apply(t.Context(), spec, client.WithRolloutInterval(time.Millisecond))
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, gets)
+		assert.Len(t, got.Instances, 2)
+	})
+
+	t.Run("names the state it gave up on", func(t *testing.T) {
+		t.Parallel()
+
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPut {
+				writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateRunning)})
+				return
+			}
+
+			writeJSON(t, w, http.StatusOK, api.GetWorkloadResult{Workload: workload("example", api.WorkloadStateDegraded)})
+		})
+
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancel()
+
+		_, _, err := c.Apply(ctx, spec, client.WithRolloutInterval(time.Millisecond))
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.ErrorContains(t, err, "workload example is degraded")
+	})
+}
+
 func TestClient_DryRun(t *testing.T) {
 	t.Parallel()
 
