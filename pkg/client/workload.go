@@ -425,24 +425,50 @@ const (
 //
 // Applying an unchanged specification is a no-op that leaves the workload's
 // version alone.
+//
+// The apply returns once the server has stored the specification, which is before
+// anything runs it. Pass WithWaitForRollout to block until the workload has settled
+// on it, and the returned workload is then the one that settled.
 func (c *Client) Apply(ctx context.Context, spec manifest.Spec, options ...ApplyOption) (Workload, bool, error) {
+	config := newApplyConfig(options)
+
+	// The workload is read before the request, for the reason a restart reads it.
+	// A version that moved is applied once every instance started from the one
+	// before it has gone, and the instances the request found are how the wait
+	// tells a replacement from the old instance still up.
+	var before Workload
+	if config.wait {
+		current, err := c.Get(ctx, spec.Name)
+		if err != nil && !errors.Is(err, ErrWorkloadNotFound) {
+			return Workload{}, false, err
+		}
+
+		before = current
+	}
+
 	resp, err := c.api.ApplyWorkloadWithResponse(ctx, spec.Name,
 		&api.ApplyWorkloadParams{IfMatch: ifMatch(options)}, wire.FromSpec(spec))
 	if err != nil {
 		return Workload{}, false, fmt.Errorf("failed to send the request: %w", err)
 	}
 
+	var workload Workload
+	var created bool
+
 	switch {
 	case resp.JSON201 != nil:
-		workload, err := newWorkload(resp.JSON201.Workload)
-		workload.ETag = resp.HTTPResponse.Header.Get("ETag")
+		if workload, err = newWorkload(resp.JSON201.Workload); err != nil {
+			return Workload{}, false, err
+		}
 
-		return workload, true, err
+		workload.ETag = resp.HTTPResponse.Header.Get("ETag")
+		created = true
 	case resp.JSON200 != nil:
-		workload, err := newWorkload(resp.JSON200.Workload)
-		workload.ETag = resp.HTTPResponse.Header.Get("ETag")
+		if workload, err = newWorkload(resp.JSON200.Workload); err != nil {
+			return Workload{}, false, err
+		}
 
-		return workload, false, err
+		workload.ETag = resp.HTTPResponse.Header.Get("ETag")
 	case resp.JSON412 != nil:
 		return Workload{}, false, fmt.Errorf("%s: %w", resp.JSON412.Error, ErrWorkloadChanged)
 	case resp.JSON400 != nil:
@@ -458,6 +484,49 @@ func (c *Client) Apply(ctx context.Context, spec manifest.Spec, options ...Apply
 	default:
 		return Workload{}, false, newError(resp.StatusCode(), nil)
 	}
+
+	if !config.wait {
+		return workload, created, nil
+	}
+
+	// The version moving is what makes the running instances stale, so it is also
+	// what decides whether the wait has to outlast them. An unchanged apply replaces
+	// nothing, and waits only for the workload to be up.
+	moved := workload.Version != before.Version
+
+	stale := make(map[string]struct{}, len(before.Instances))
+	for _, instance := range before.Instances {
+		stale[instance.ID] = struct{}{}
+	}
+
+	settled, err := c.waitFor(ctx, spec.Name, config.interval, func(w Workload) bool {
+		if w.State != WorkloadStateRunning && w.State != WorkloadStateCompleted {
+			return false
+		}
+
+		// Fewer instances than the specification asks for is a slot between one
+		// instance and the next, which the state alone does not show.
+		if len(w.Instances) < w.Spec.Count {
+			return false
+		}
+
+		return !slices.ContainsFunc(w.Instances, func(instance Instance) bool {
+			if _, existed := stale[instance.ID]; existed && moved {
+				return true
+			}
+
+			return instance.State != InstanceStateRunning && instance.State != InstanceStateCompleted
+		})
+	})
+	if err != nil && settled.Name != "" {
+		return Workload{}, created, fmt.Errorf("%w: workload %s is %s", err, settled.Name, settled.State)
+	}
+
+	if err != nil {
+		return Workload{}, created, err
+	}
+
+	return settled, created, nil
 }
 
 // DryRun reports what applying spec would do, without applying it.
@@ -969,23 +1038,33 @@ func (c *Client) Restart(ctx context.Context, name string, options ...LifecycleO
 
 // waitFor polls the workload until it satisfies the given condition, returning it
 // as it then stands.
+//
+// A context that ends first returns its error with the workload as it was last
+// read, so a caller can say what state the wait gave up on. The workload is zero
+// when nothing was read before the context ended.
 func (c *Client) waitFor(ctx context.Context, name string, interval time.Duration, settled func(Workload) bool) (Workload, error) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	var last Workload
 	for {
 		select {
 		case <-ctx.Done():
-			return Workload{}, ctx.Err()
+			return last, ctx.Err()
 		case <-ticker.C:
 			workload, err := c.Get(ctx, name)
-			if err != nil {
+			switch {
+			case err != nil && ctx.Err() != nil:
+				return last, ctx.Err()
+			case err != nil:
 				return Workload{}, fmt.Errorf("failed to wait for workload: %w", err)
 			}
 
 			if settled(workload) {
 				return workload, nil
 			}
+
+			last = workload
 		}
 	}
 }
