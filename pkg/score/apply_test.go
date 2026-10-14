@@ -222,6 +222,34 @@ func TestApply(t *testing.T) {
 			},
 		},
 		{
+			// The option is read by the workload apply alone, so it reaches every
+			// workload and nothing else.
+			Name:    "waits on each workload when asked",
+			Options: []score.ApplyOption{score.WithWait()},
+			SetupMocks: func(c *MockClient) {
+				expectRequirementsExist(c)
+				expectNothingExists(c)
+
+				c.EXPECT().ApplyVolume(mock.Anything, mock.Anything).Return(client.Volume{}, nil)
+				c.EXPECT().SetVariable(mock.Anything, mock.Anything).Return(client.Variable{}, true, nil)
+				c.EXPECT().Apply(mock.Anything, mock.Anything, mock.MatchedBy(func(options []client.ApplyOption) bool {
+					return len(options) == 1
+				})).Return(client.Workload{}, true, nil)
+				c.EXPECT().ApplyService(mock.Anything, mock.Anything).Return(client.Service{}, nil)
+			},
+			Expected: score.Report{
+				Applied: []score.Node{
+					{Kind: score.KindVolume, Name: "blog-pgdata"},
+					{Kind: score.KindVariable, Name: "motd"},
+					{Kind: score.KindVariable, Name: "web-config"},
+					{Kind: score.KindWorkload, Name: "blog-cron"},
+					{Kind: score.KindWorkload, Name: "blog-db"},
+					{Kind: score.KindWorkload, Name: "blog-web"},
+					{Kind: score.KindService, Name: "blog"},
+				},
+			},
+		},
+		{
 			// A hand edit landed between the check and the apply. The server
 			// refused the tag, and the score reports the change rather than
 			// writing over it.

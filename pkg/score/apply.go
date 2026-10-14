@@ -30,7 +30,8 @@ type (
 		ListVariables(ctx context.Context, queries ...string) ([]client.Variable, error)
 		// DeleteVariable should delete a variable.
 		DeleteVariable(ctx context.Context, name string, options ...client.DeleteVariableOption) error
-		// Apply should create or update a workload.
+		// Apply should create or update a workload, blocking until it has
+		// settled when passed client.WithWaitForRollout.
 		Apply(ctx context.Context, spec manifest.Spec, options ...client.ApplyOption) (client.Workload, bool, error)
 		// Get should return a workload, or client.ErrWorkloadNotFound.
 		Get(ctx context.Context, name string) (client.Workload, error)
@@ -74,6 +75,7 @@ type (
 
 	applyConfig struct {
 		adopt bool
+		wait  bool
 	}
 
 	// The resource type is what lookup reads of a resource: its labels, and the
@@ -102,6 +104,15 @@ var (
 func WithAdopt() ApplyOption {
 	return func(c *applyConfig) {
 		c.adopt = true
+	}
+}
+
+// WithWait modifies an apply to block on each workload until it has settled on
+// what was applied, before the next step is taken. The steps run in plan order,
+// so a workload is up before anything that references it is applied.
+func WithWait() ApplyOption {
+	return func(c *applyConfig) {
+		c.wait = true
 	}
 }
 
@@ -192,7 +203,7 @@ func Apply(ctx context.Context, c Client, rendered Rendered, options ...ApplyOpt
 
 	var report Report
 	for _, node := range plan.Steps {
-		if err = apply(ctx, c, rendered, node, tags[node]); err != nil {
+		if err = apply(ctx, c, rendered, node, tags[node], config.wait); err != nil {
 			return report, fmt.Errorf("failed to apply %s: %w", node, err)
 		}
 
@@ -203,8 +214,8 @@ func Apply(ctx context.Context, c Client, rendered Rendered, options ...ApplyOpt
 }
 
 // apply applies one resource of the rendered score, conditioned on the tag when
-// one was read.
-func apply(ctx context.Context, c Client, rendered Rendered, node Node, etag string) error {
+// one was read, and waiting on a workload when asked.
+func apply(ctx context.Context, c Client, rendered Rendered, node Node, etag string, wait bool) error {
 	var options []client.ApplyOption
 	if etag != "" {
 		options = append(options, client.WithIfMatch(etag))
@@ -225,6 +236,10 @@ func apply(ctx context.Context, c Client, rendered Rendered, node Node, etag str
 		_, _, err = c.SetVariable(ctx, rendered.Variables[index], options...)
 		changed = client.ErrVariableChanged
 	case KindWorkload:
+		if wait {
+			options = append(options, client.WithWaitForRollout())
+		}
+
 		index := slices.IndexFunc(rendered.Workloads, func(spec manifest.Spec) bool { return spec.Name == node.Name })
 		_, _, err = c.Apply(ctx, rendered.Workloads[index], options...)
 		changed = client.ErrWorkloadChanged
