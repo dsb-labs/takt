@@ -2,10 +2,12 @@
 package apply
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -22,6 +24,8 @@ func Command() *cobra.Command {
 	var (
 		dryRun  bool
 		ifMatch string
+		wait    bool
+		timeout time.Duration
 	)
 
 	cmd := &cobra.Command{
@@ -55,7 +59,18 @@ func Command() *cobra.Command {
 				return enc.Encode(run)
 			}
 
-			workload, _, err := c.Apply(cmd.Context(), spec, client.WithIfMatch(ifMatch))
+			ctx := cmd.Context()
+			options := []client.ApplyOption{client.WithIfMatch(ifMatch)}
+
+			if wait {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, timeout)
+				defer cancel()
+
+				options = append(options, client.WithWaitForRollout())
+			}
+
+			workload, _, err := c.Apply(ctx, spec, options...)
 			if err != nil {
 				return fmt.Errorf("failed to apply workload: %w", err)
 			}
@@ -64,9 +79,12 @@ func Command() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&ifMatch, "if-match", "",
+	flags := cmd.Flags()
+	flags.StringVar(&ifMatch, "if-match", "",
 		"apply only if the workload's tag still matches this one, as reported by \"takt workload get\"")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "report what applying the manifest would do, and apply nothing")
+	flags.BoolVar(&dryRun, "dry-run", false, "report what applying the manifest would do, and apply nothing")
+	flags.BoolVarP(&wait, "wait", "w", false, "block until the workload has settled on the manifest")
+	flags.DurationVar(&timeout, "timeout", 5*time.Minute, "how long to wait for the workload to settle, with --wait")
 
 	return cmd
 }
