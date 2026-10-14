@@ -219,6 +219,32 @@ func (s *Suite) TestWorkloadReplacedWhenSpecChanges() {
 	s.awaitInstanceOtherThan(name, first)
 }
 
+// TestApplyWaitsForTheRollout covers a waiting apply, which returns once the
+// workload has settled on the specification rather than once it was stored.
+func (s *Suite) TestApplyWaitsForTheRollout() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	created, _, err := s.client.Apply(s.ctx(), s.containerSpec(name), client.WithWaitForRollout())
+	s.Require().NoError(err)
+	s.Equal(client.WorkloadStateRunning, created.State)
+	s.Require().Len(created.Instances, 1)
+	first := created.Instances[0].ID
+
+	changed := s.containerSpec(name)
+	changed.Env = map[string]string{"EXAMPLE": "CHANGED"}
+
+	// The wait outlasts the old instance: what comes back is the replacement, up,
+	// and nothing from before the apply.
+	replaced, _, err := s.client.Apply(s.ctx(), changed, client.WithWaitForRollout())
+	s.Require().NoError(err)
+	s.Equal(2, replaced.Version)
+	s.Equal(client.WorkloadStateRunning, replaced.State)
+	s.Require().Len(replaced.Instances, 1)
+	s.NotEqual(first, replaced.Instances[0].ID)
+	s.Equal(client.InstanceStateRunning, replaced.Instances[0].State)
+}
+
 // TestWorkloadRestartedAfterItDies covers recovery from a workload dying, which takt
 // owns rather than delegating to docker's restart policy.
 func (s *Suite) TestWorkloadRestartedAfterItDies() {
