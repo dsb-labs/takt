@@ -176,7 +176,10 @@ time. The next slot waits until the last replacement has settled: up for the set
 period of ten seconds, and past its health check when the workload declares one. A
 replacement that never settles holds the roll at one instance, which is what makes
 replacing a counted workload a degradation rather than an outage. Slots with
-nothing running are not held back by the roll.
+nothing running are not held back by the roll. A workload with one instance has
+nothing to keep serving while that instance is replaced, so a change is a gap for
+as long as the successor takes to start. Running two instances behind a service is
+how a change rolls without one, which [Count](manifest.md#count) describes.
 
 **A first start waits for what it references.** A slot that has never started
 under its version, reading the address of a workload that declares a health check,

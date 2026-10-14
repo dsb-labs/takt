@@ -121,11 +121,20 @@ an exec workload with ports always runs one instance. A schedule cannot be combi
 with a count either, because N copies of a cron job firing at once is almost never
 what a schedule means.
 
-**On one node, a count buys throughput rather than availability.** The host is the
-failure domain, and a second instance on the same host does not survive it losing
-power. Several copies of a single-threaded service across several cores is the case
-this serves. A [service](services.md) reports every instance's address, so an
-external load balancer can spread requests across them.
+**On one node, a count buys throughput rather than availability against the
+host.** The host is the failure domain, and a second instance on the same host does
+not survive it losing power. Several copies of a single-threaded service across
+several cores is the case this serves. A [service](services.md) reports every
+instance's address, so an external load balancer can spread requests across them.
+
+**A count is also what rolls a change without a down window.** A specification
+change replaces one instance at a time, and a stale instance is stopped before its
+successor starts. With one instance, every change is a gap for as long as the
+successor takes to start. With two behind a [service](services.md), the sibling
+keeps serving while the first slot is replaced. The successor joins the service's
+backends once it runs, and once it passes its health check when the workload
+declares one. [Reconciliation](reconciliation.md#converging-one-instance) describes
+the roll.
 
 takt does not cap the count. The machine does: each instance costs a container or a
 process, memory, and — for a workload publishing ports — a host port per port from
