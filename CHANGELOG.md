@@ -36,6 +36,10 @@ describes how an entry is written.
   grew a series per bucket for every workload or image the server had seen
   ([#174](https://github.com/dsb-labs/takt/issues/174),
   [#212](https://github.com/dsb-labs/takt/pull/212)).
+- An empty list in the UI names the CLI command that creates the resource, so a
+  reader does not go looking for a button the UI does not have
+  ([#178](https://github.com/dsb-labs/takt/issues/178),
+  [#218](https://github.com/dsb-labs/takt/pull/218)).
 
 ### Fixed
 
