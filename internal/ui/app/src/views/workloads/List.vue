@@ -114,6 +114,8 @@ await workloads.suspense().catch(() => {});
       :sort="sort"
       :row-key="(w) => w.name"
       empty="No workloads."
+      hint="Apply a manifest with"
+      command="takt workload apply"
     >
       <template #row="{ item: workload }">
         <td class="px-4 py-3 font-medium">

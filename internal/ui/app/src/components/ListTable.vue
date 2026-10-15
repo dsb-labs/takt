@@ -7,11 +7,17 @@ import type { Sort } from "@/composables/sort";
 // view, which passes them through the row slot. A column's class is how a
 // view hides it at narrow widths, and the matching cells carry the same
 // class themselves.
+//
+// The empty row can carry a hint naming the CLI command that creates the
+// resource. Applying a specification stays in the CLI, so an empty page is
+// where a reader would otherwise go looking for a button that is not there.
 defineProps<{
   columns: { name: string; label: string; class?: string }[];
   sort: Sort<T>;
   rowKey: (item: T) => string;
   empty: string;
+  hint?: string;
+  command?: string;
 }>();
 </script>
 
@@ -43,6 +49,13 @@ defineProps<{
             class="px-4 py-8 text-center text-slate-500 dark:text-slate-400"
           >
             {{ empty }}
+            <template v-if="hint && command">
+              {{ hint }}
+              <code
+                class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                >{{ command }}</code
+              >.
+            </template>
           </td>
         </tr>
         <tr

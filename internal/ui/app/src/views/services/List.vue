@@ -45,6 +45,8 @@ await services.suspense().catch(() => {});
       :sort="sort"
       :row-key="(s) => s.name"
       empty="No services."
+      hint="Apply a manifest with"
+      command="takt service apply"
     >
       <template #row="{ item: service }">
         <td class="px-4 py-3 font-medium">
