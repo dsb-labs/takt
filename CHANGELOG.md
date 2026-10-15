@@ -8,6 +8,8 @@ describes how an entry is written.
 
 ## Unreleased
 
+## v0.13.0 - 2026-10-15
+
 ### Added
 
 - `entrypoint`, `tmpfs`, `shmSize` and `devices` under `container`, for the
