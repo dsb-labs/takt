@@ -63,6 +63,8 @@ await secrets.suspense().catch(() => {});
       :sort="sort"
       :row-key="(s) => s.name"
       empty="No secrets."
+      hint="Set one with"
+      command="takt secret set"
     >
       <template #row="{ item: secret }">
         <td class="px-4 py-3 font-medium">

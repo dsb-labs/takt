@@ -45,6 +45,8 @@ await volumes.suspense().catch(() => {});
       :sort="sort"
       :row-key="(v) => v.name"
       empty="No volumes."
+      hint="Apply a manifest with"
+      command="takt volume apply"
     >
       <template #row="{ item: volume }">
         <td class="px-4 py-3 font-medium">

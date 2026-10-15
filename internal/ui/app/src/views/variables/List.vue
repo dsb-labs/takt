@@ -61,6 +61,8 @@ await variables.suspense().catch(() => {});
       :sort="sort"
       :row-key="(v) => v.name"
       empty="No variables."
+      hint="Set one with"
+      command="takt variable set"
     >
       <template #row="{ item: variable }">
         <td class="px-4 py-3 font-medium">
