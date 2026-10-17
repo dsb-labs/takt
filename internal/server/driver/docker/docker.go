@@ -18,6 +18,9 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -91,9 +94,11 @@ var (
 type (
 	// The Driver type runs workloads as Docker containers.
 	Driver struct {
-		logger      *slog.Logger
-		client      Client
-		bind        string
+		logger *slog.Logger
+		client Client
+		bind   string
+		// Which daemon Discover found behind the socket.
+		engine      Engine
 		configFile  string
 		tracer      trace.Tracer
 		instruments instruments
@@ -172,6 +177,10 @@ type (
 		TracerProvider trace.TracerProvider
 	}
 
+	// The Engine type names the daemon behind the Docker Engine API. Docker and
+	// Podman serve the same API, and differ in what they do with parts of it.
+	Engine string
+
 	// The owner type identifies the workload instance a container belongs to,
 	// which is the grain retention is decided at.
 	owner struct {
@@ -200,6 +209,22 @@ const defaultBind = "127.0.0.1"
 // restart path, which removes it and starts another.
 const createdGrace = 30 * time.Second
 
+const (
+	// EngineDocker is the Docker daemon, which the driver assumes until told
+	// otherwise.
+	EngineDocker Engine = "docker"
+	// EnginePodman is Podman serving its Docker-compatible API.
+	EnginePodman Engine = "podman"
+
+	// The name Podman gives its own component in the version report, which is
+	// the one place it says what it is.
+	podmanComponent = "Podman Engine"
+
+	// The log driver a logs block names on Podman. Podman reads json-file as
+	// its own file driver, which is the one that takes a size.
+	podmanLogDriver = "json-file"
+)
+
 // Name returns the name this driver is registered under.
 func (d *Driver) Name() string {
 	return Name
@@ -218,6 +243,33 @@ func (d *Driver) Confinable() error {
 	return nil
 }
 
+// Discover asks the daemon which engine it is, so that the driver can shape what
+// it sends to the parts of the API the engines read differently. Until it is
+// called, or when it fails, the driver takes the daemon for Docker.
+func (d *Driver) Discover(ctx context.Context) error {
+	version, err := d.client.ServerVersion(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to read the daemon's version: %w", err)
+	}
+
+	engine := EngineDocker
+	for _, component := range version.Components {
+		if component.Name == podmanComponent {
+			engine = EnginePodman
+		}
+	}
+
+	d.engine = engine
+	d.logger.With("engine", engine, "version", version.Version, "api", version.APIVersion).Info("connected to the daemon")
+
+	return nil
+}
+
+// Engine returns the daemon Discover found, or Docker when it has not run.
+func (d *Driver) Engine() Engine {
+	return d.engine
+}
+
 // New returns a Driver that runs containers through the client in config.
 func New(config Config) *Driver {
 	bind := config.Bind
@@ -233,6 +285,7 @@ func New(config Config) *Driver {
 	return &Driver{
 		logger:       config.Logger.With("component", "driver", "driver", "docker"),
 		client:       config.Client,
+		engine:       EngineDocker,
 		bind:         bind,
 		configFile:   config.ConfigFile,
 		prune:        config.Prune,
@@ -342,7 +395,7 @@ func (d *Driver) Start(ctx context.Context, w driver.Workload) (string, error) {
 			ReadonlyRootfs: spec.ReadOnly,
 			PidMode:        container.PidMode(spec.PidMode),
 			NetworkMode:    container.NetworkMode(spec.NetworkMode),
-			LogConfig:      logConfig(w.Spec.Logs),
+			LogConfig:      logConfig(w.Spec.Logs, d.engine),
 		},
 		nil, nil,
 		containerName(w.Name, w.Version, w.Instance, attempt),
@@ -1299,20 +1352,40 @@ func (d *Driver) fetch(ctx context.Context, ref string, requester trace.Link) er
 // This is what folds a pull-always workload's image content into its specification
 // hash: the workload service calls it whenever it computes the hash, so a rebuilt
 // tag moves the hash and the instance is replaced through the ordinary stale path.
-// The registry is asked with the credentials the docker credential file holds for
-// it, so a private image resolves wherever a docker pull on the host would.
+//
+// The registry is asked directly rather than through the daemon, with the
+// credentials the docker credential file holds for it, so a private image resolves
+// wherever a docker pull on the host would. Asking directly is what makes the
+// answer the same whichever daemon is behind the socket: Podman's API has no call
+// for it. It also means a registry mirror the daemon is configured with is not
+// consulted, which is right, since the question is what the tag names upstream.
 func (d *Driver) Digest(ctx context.Context, ref string) (string, error) {
-	auth, err := d.registryAuth(ref)
+	parsed, err := name.ParseReference(ref)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse image reference: %w", err)
+	}
+
+	credentials, err := d.registryCredentials(ref)
 	if err != nil {
 		return "", err
 	}
 
-	inspect, err := d.client.DistributionInspect(ctx, ref, auth)
+	descriptor, err := remote.Head(parsed,
+		remote.WithContext(ctx),
+		remote.WithUserAgent("takt"),
+		remote.WithAuth(authn.FromConfig(authn.AuthConfig{
+			Username:      credentials.Username,
+			Password:      credentials.Password,
+			Auth:          credentials.Auth,
+			IdentityToken: credentials.IdentityToken,
+			RegistryToken: credentials.RegistryToken,
+		})),
+	)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve image digest: %w", err)
 	}
 
-	return inspect.Descriptor.Digest.String(), nil
+	return descriptor.Digest.String(), nil
 }
 
 // hasHealthCheck reports whether a container summary mentions a health check.
@@ -1608,7 +1681,12 @@ func capabilities(names []string) []string {
 // journald for one, refuses the container rather than quietly keeping everything.
 // That refusal reaches the operator as the instance's failure to start, which is
 // what a cap that cannot be applied should look like.
-func logConfig(spec *manifest.Logs) container.LogConfig {
+//
+// Podman is named its file driver outright. Its default may be journald, which
+// takes the size without applying it, and its file driver is the one that caps.
+// The cap there is the size alone: conmon truncates the file at the size, and
+// keeps no rotations, so the file count is sent and ignored.
+func logConfig(spec *manifest.Logs, engine Engine) container.LogConfig {
 	if spec == nil {
 		return container.LogConfig{}
 	}
@@ -1619,7 +1697,12 @@ func logConfig(spec *manifest.Logs) container.LogConfig {
 		options["max-file"] = strconv.Itoa(spec.MaxFiles)
 	}
 
-	return container.LogConfig{Config: options}
+	config := container.LogConfig{Config: options}
+	if engine == EnginePodman {
+		config.Type = podmanLogDriver
+	}
+
+	return config
 }
 
 // size reads a size the manifest holds as written, zero for none.

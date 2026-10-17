@@ -8,8 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,14 +21,18 @@ import (
 	"testing/iotest"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	testregistry "github.com/google/go-containerregistry/pkg/registry"
+	"github.com/google/go-containerregistry/pkg/v1/random"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/moby/moby/api/pkg/authconfig"
 	dockercontainer "github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
-	"github.com/moby/moby/api/types/registry"
+	"github.com/moby/moby/api/types/system"
 	dockerclient "github.com/moby/moby/client"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -2227,105 +2234,247 @@ func TestDriver_Digest(t *testing.T) {
 	t.Parallel()
 
 	t.Run("returns the digest the registry reports", func(t *testing.T) {
-		client := NewMockClient(t)
+		t.Parallel()
 
-		client.EXPECT().DistributionInspect(mock.Anything, "example/example:latest", "").
-			Return(registry.DistributionInspect{
-				Descriptor: ocispec.Descriptor{Digest: "sha256:abc123"},
-			}, nil).Once()
+		host, digest := testRegistry(t, "", "")
+		d := testDriver(t, NewMockClient(t))
 
-		d := testDriver(t, client)
-
-		digest, err := d.Digest(t.Context(), "example/example:latest")
+		got, err := d.Digest(t.Context(), host+"/app:latest")
 		require.NoError(t, err)
-		assert.Equal(t, "sha256:abc123", digest)
+		assert.Equal(t, digest, got)
 	})
 
 	t.Run("reports a registry it cannot reach", func(t *testing.T) {
-		client := NewMockClient(t)
+		t.Parallel()
 
-		client.EXPECT().DistributionInspect(mock.Anything, "example/example:latest", "").
-			Return(registry.DistributionInspect{}, errors.New("registry unreachable")).Once()
+		server := httptest.NewServer(http.NotFoundHandler())
+		server.Close()
 
-		d := testDriver(t, client)
+		d := testDriver(t, NewMockClient(t))
 
-		_, err := d.Digest(t.Context(), "example/example:latest")
-		assert.Error(t, err)
+		_, err := d.Digest(t.Context(), strings.TrimPrefix(server.URL, "http://")+"/app:latest")
+		require.Error(t, err)
 	})
 
 	t.Run("asks with the credentials the file holds for the registry", func(t *testing.T) {
-		client := NewMockClient(t)
+		t.Parallel()
 
-		client.EXPECT().DistributionInspect(mock.Anything, "registry.example.com/app:latest", mock.MatchedBy(sentCredentials("some-user", "some-password"))).
-			Return(registry.DistributionInspect{
-				Descriptor: ocispec.Descriptor{Digest: "sha256:abc123"},
-			}, nil).Once()
+		host, digest := testRegistry(t, "some-user", "some-password")
+		d := credentialedDriver(t, NewMockClient(t), credentialFile(t, host, "some-user", "some-password"))
 
-		d := credentialedDriver(t, client, credentialFile(t, "registry.example.com", "some-user", "some-password"))
-
-		digest, err := d.Digest(t.Context(), "registry.example.com/app:latest")
+		got, err := d.Digest(t.Context(), host+"/app:latest")
 		require.NoError(t, err)
-		assert.Equal(t, "sha256:abc123", digest)
+		assert.Equal(t, digest, got)
 	})
 
-	t.Run("finds a docker hub login under the legacy index key", func(t *testing.T) {
-		client := NewMockClient(t)
+	t.Run("reports a registry that refuses the credentials", func(t *testing.T) {
+		t.Parallel()
 
-		// A docker login against Docker Hub is stored under the legacy index
-		// address, not the docker.io domain a bare reference normalises to.
-		client.EXPECT().DistributionInspect(mock.Anything, "example/example:latest", mock.MatchedBy(sentCredentials("some-user", "some-password"))).
-			Return(registry.DistributionInspect{
-				Descriptor: ocispec.Descriptor{Digest: "sha256:abc123"},
-			}, nil).Once()
+		host, _ := testRegistry(t, "some-user", "some-password")
+		d := credentialedDriver(t, NewMockClient(t), credentialFile(t, host, "some-user", "wrong"))
 
-		d := credentialedDriver(t, client, credentialFile(t, "https://index.docker.io/v1/", "some-user", "some-password"))
-
-		_, err := d.Digest(t.Context(), "example/example:latest")
-		require.NoError(t, err)
+		_, err := d.Digest(t.Context(), host+"/app:latest")
+		require.Error(t, err)
+		assert.ErrorContains(t, err, host)
 	})
 
 	t.Run("asks anonymously about a registry the file does not mention", func(t *testing.T) {
-		client := NewMockClient(t)
+		t.Parallel()
 
-		client.EXPECT().DistributionInspect(mock.Anything, "other.example.com/app:latest", "").
-			Return(registry.DistributionInspect{
-				Descriptor: ocispec.Descriptor{Digest: "sha256:abc123"},
-			}, nil).Once()
+		host, digest := testRegistry(t, "", "")
+		d := credentialedDriver(t, NewMockClient(t), credentialFile(t, "registry.example.com", "some-user", "some-password"))
 
-		d := credentialedDriver(t, client, credentialFile(t, "registry.example.com", "some-user", "some-password"))
-
-		_, err := d.Digest(t.Context(), "other.example.com/app:latest")
+		got, err := d.Digest(t.Context(), host+"/app:latest")
 		require.NoError(t, err)
+		assert.Equal(t, digest, got)
 	})
+}
 
-	t.Run("refuses a credential file it cannot parse", func(t *testing.T) {
-		// The registry is never asked: the strict mocks fail this case if
-		// DistributionInspect is called.
-		client := NewMockClient(t)
+// testRegistry serves a registry holding one image at app:latest, returning its
+// address and the image's digest. With a username, the registry refuses every
+// request that does not carry it as basic auth.
+func testRegistry(t *testing.T, username, password string) (string, string) {
+	t.Helper()
 
-		path := filepath.Join(t.TempDir(), "config.json")
-		require.NoError(t, os.WriteFile(path, []byte("not json"), 0o600))
+	handler := http.Handler(testregistry.New(testregistry.Logger(log.New(io.Discard, "", 0))))
+	if username != "" {
+		inner := handler
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, pass, ok := r.BasicAuth()
+			if !ok || user != username || pass != password {
+				w.Header().Set("WWW-Authenticate", `Basic realm="takt"`)
+				w.WriteHeader(http.StatusUnauthorized)
 
-		d := credentialedDriver(t, client, path)
+				return
+			}
 
-		_, err := d.Digest(t.Context(), "example/example:latest")
-		assert.Error(t, err)
-	})
+			inner.ServeHTTP(w, r)
+		})
+	}
 
-	t.Run("reports a credential helper it cannot run without what it resolved", func(t *testing.T) {
-		// The registry is never asked: the strict mocks fail this case if
-		// DistributionInspect is called.
-		client := NewMockClient(t)
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
 
-		path := filepath.Join(t.TempDir(), "config.json")
-		require.NoError(t, os.WriteFile(path, []byte(`{"credHelpers":{"registry.example.com":"takt-test-absent"}}`), 0o600))
+	host := strings.TrimPrefix(server.URL, "http://")
 
-		d := credentialedDriver(t, client, path)
+	img, err := random.Image(256, 1)
+	require.NoError(t, err)
 
-		_, err := d.Digest(t.Context(), "registry.example.com/app:latest")
-		require.Error(t, err)
-		assert.ErrorContains(t, err, "registry.example.com")
-	})
+	ref, err := name.ParseReference(host + "/app:latest")
+	require.NoError(t, err)
+
+	auth := authn.Authenticator(authn.Anonymous)
+	if username != "" {
+		auth = &authn.Basic{Username: username, Password: password}
+	}
+
+	require.NoError(t, remote.Write(ref, img, remote.WithAuth(auth), remote.WithContext(t.Context())))
+
+	digest, err := img.Digest()
+	require.NoError(t, err)
+
+	return host, digest.String()
+}
+
+func TestDriver_Discover(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name       string
+		Components []system.ComponentVersion
+		Err        error
+		Expect     docker.Engine
+	}{
+		{
+			Name:       "names docker",
+			Components: []system.ComponentVersion{{Name: "Engine"}, {Name: "containerd"}},
+			Expect:     docker.EngineDocker,
+		},
+		{
+			Name:       "names podman by its component",
+			Components: []system.ComponentVersion{{Name: "Podman Engine"}, {Name: "Conmon"}},
+			Expect:     docker.EnginePodman,
+		},
+		{
+			// A daemon that cannot be asked is taken for docker, which is what
+			// the driver assumed before it could ask.
+			Name:   "takes an unreachable daemon for docker",
+			Err:    errors.New("dial unix: connection refused"),
+			Expect: docker.EngineDocker,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+
+			client := NewMockClient(t)
+			client.EXPECT().ServerVersion(mock.Anything).
+				Return(dockerclient.ServerVersionResult{Components: tc.Components}, tc.Err).Once()
+
+			d := testDriver(t, client)
+
+			err := d.Discover(t.Context())
+			if tc.Err != nil {
+				require.ErrorIs(t, err, tc.Err)
+			} else {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tc.Expect, d.Engine())
+		})
+	}
+}
+
+func TestDriver_Start_LogConfig(t *testing.T) {
+	t.Parallel()
+
+	tt := []struct {
+		Name       string
+		Components []system.ComponentVersion
+		ExpectType string
+	}{
+		{
+			// Docker keeps the driver it was configured with, and refuses the
+			// options itself when that driver cannot take them.
+			Name:       "leaves the log driver to docker",
+			Components: []system.ComponentVersion{{Name: "Engine"}},
+			ExpectType: "",
+		},
+		{
+			// Podman's default may be journald, which takes the size and does
+			// nothing with it, so the file driver is named outright.
+			Name:       "names the file driver on podman",
+			Components: []system.ComponentVersion{{Name: "Podman Engine"}},
+			ExpectType: "json-file",
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+
+			client := NewMockClient(t)
+			client.EXPECT().ServerVersion(mock.Anything).
+				Return(dockerclient.ServerVersionResult{Components: tc.Components}, nil).Once()
+
+			// Read to number the attempt, so a replacement cannot collide with a
+			// container being kept for its output.
+			client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+			client.EXPECT().ImageList(mock.Anything, mock.Anything).
+				Return([]image.Summary{{ID: "sha256:abc"}}, nil).Once()
+
+			client.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
+				mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
+					return host.LogConfig.Type == tc.ExpectType &&
+						host.LogConfig.Config["max-size"] == "1m" &&
+						host.LogConfig.Config["max-file"] == "2"
+				}),
+				mock.Anything, mock.Anything, mock.Anything,
+			).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+			client.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+
+			d := testDriver(t, client)
+			require.NoError(t, d.Discover(t.Context()))
+
+			w := workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil)
+			w.Spec.Logs = &manifest.Logs{MaxSize: "1m", MaxFiles: 2}
+
+			_, err := d.Start(t.Context(), w)
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestDriver_Start_RegistryAuth_DockerHub(t *testing.T) {
+	t.Parallel()
+
+	// A docker login against Docker Hub is stored under the legacy index
+	// address, not the docker.io domain a bare reference normalises to.
+	client := NewMockClient(t)
+	client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(nil, nil).Once()
+	client.EXPECT().ImageList(mock.Anything, mock.Anything).Return(nil, nil)
+	client.EXPECT().ImagePull(mock.Anything, "example/example:latest",
+		mock.MatchedBy(func(options dockerclient.ImagePullOptions) bool {
+			return sentCredentials("some-user", "some-password")(options.RegistryAuth)
+		}),
+	).Return(io.NopCloser(strings.NewReader(`{"status":"pulling"}`)), nil).Once()
+
+	client.EXPECT().ContainerCreate(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
+	client.EXPECT().ContainerStart(mock.Anything, "container-one", mock.Anything).Return(nil).Once()
+
+	d := credentialedDriver(t, client, credentialFile(t, "https://index.docker.io/v1/", "some-user", "some-password"))
+	w := workload("example", 1, "hash-one", containerSpec("example/example:latest", nil), nil, nil)
+
+	_, err := d.Start(t.Context(), w)
+	require.ErrorIs(t, err, driver.ErrImagePulling)
+
+	require.Eventually(t, func() bool {
+		_, err := d.Start(t.Context(), w)
+
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond)
 }
 
 func TestDriver_Start_RegistryAuth(t *testing.T) {
