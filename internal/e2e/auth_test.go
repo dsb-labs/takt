@@ -253,7 +253,7 @@ func (s *Suite) TestWorkloadEnvTokenRotatesWithTheInstance() {
 	s.Require().NoError(err)
 	s.Equal("scraper", identity.Principal)
 
-	original := s.containers(name)
+	original := s.runningContainers(name)
 	s.Require().NotEmpty(original)
 
 	_, err = admin.Restart(s.ctx(), name)
@@ -262,9 +262,11 @@ func (s *Suite) TestWorkloadEnvTokenRotatesWithTheInstance() {
 	// A replaced instance gets a fresh credential. This is the whole rotation
 	// story for the env form: an environment cannot change under a running
 	// process, so rotation happens by replacement.
+	// Judged on what is running: the stopped predecessor is kept for its
+	// output, and which of the two the daemon lists first differs by daemon.
 	var replacement string
 	s.Require().Eventuallyf(func() bool {
-		containers := s.containers(name)
+		containers := s.runningContainers(name)
 		if len(containers) == 0 || containers[0] == original[0] {
 			return false
 		}
