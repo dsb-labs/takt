@@ -62,6 +62,9 @@ type (
 		// restart so both servers' output lands in one bundle.
 		traceFile *os.File
 		logFile   *os.File
+		// Whether the daemon behind the socket is Podman, which applies a
+		// log cap differently.
+		podman bool
 	}
 
 	// The option type modifies how a test server is started.
@@ -166,7 +169,12 @@ func (s *Suite) generateCertificate() (string, string) {
 // SetupSuite checks that the daemon these tests need is actually reachable, failing
 // the whole suite up front rather than once per test.
 func (s *Suite) SetupSuite() {
-	s.Require().NoError(exec.Command("docker", "version").Run(), "docker daemon is not reachable")
+	// Podman names itself in the version report's components, which is the one
+	// place it says what it is.
+	out, err := exec.Command("docker", "version", "--format", "{{range .Server.Components}}{{.Name}} {{end}}").Output()
+	s.Require().NoError(err, "docker daemon is not reachable")
+
+	s.podman = strings.Contains(string(out), "Podman")
 }
 
 // SetupTest starts a server for the test that is about to run.
