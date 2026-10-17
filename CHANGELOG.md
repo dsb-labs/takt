@@ -8,6 +8,28 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Added
+
+- Podman as the daemon behind `[docker]`. The server asks which daemon it is
+  talking to at startup, and the manifest means the same on either. The
+  end-to-end suite runs against both daemons
+  ([#219](https://github.com/dsb-labs/takt/issues/219),
+  [#221](https://github.com/dsb-labs/takt/pull/221)).
+
+### Changed
+
+- The digest check behind `pull: always` and `pull: follow` asks the registry
+  itself rather than the daemon, with the credentials `config-file` holds. A
+  registry mirror the daemon is configured with is not consulted for it
+  ([#221](https://github.com/dsb-labs/takt/pull/221)).
+
+### Fixed
+
+- A port published on every interface is sent to the daemon with no host
+  address rather than `0.0.0.0`, which Podman took as a literal destination and
+  published nowhere reachable
+  ([#221](https://github.com/dsb-labs/takt/pull/221)).
+
 ## v0.13.0 - 2026-10-15
 
 ### Added
