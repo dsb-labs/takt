@@ -83,7 +83,10 @@ func (s *Suite) buildImage(workload, tag string) string {
 
 	ref := "takt-e2e/" + workload + ":" + tag
 
-	build := exec.Command("docker", "build", "--quiet", "--tag", ref, "-")
+	// Loaded explicitly: the docker CLI builds through buildx, which on a daemon
+	// without BuildKit keeps the result in its own cache unless told to push it
+	// into the daemon's store. Docker's own daemon loads either way.
+	build := exec.Command("docker", "build", "--quiet", "--load", "--tag", ref, "-")
 	build.Stdin = strings.NewReader("FROM " + testImage + "\nRUN echo " + tag + " > /takt-e2e\n")
 
 	out, err := build.CombinedOutput()

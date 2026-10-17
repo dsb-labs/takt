@@ -9,7 +9,6 @@ import (
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/api/types/network"
-	"github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -32,9 +31,6 @@ type (
 		// ImageRemove should remove the named image, or untag it when the name is
 		// one of several tags on it, returning what the daemon deleted and untagged.
 		ImageRemove(ctx context.Context, ref string, options client.ImageRemoveOptions) ([]image.DeleteResponse, error)
-		// DistributionInspect should ask the image's registry for its manifest,
-		// which carries the digest the reference currently resolves to.
-		DistributionInspect(ctx context.Context, ref, encodedAuth string) (registry.DistributionInspect, error)
 		// ContainerCreate should create a container from the given configuration.
 		ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, name string) (container.CreateResponse, error)
 		// ContainerStart should start the container with the given identifier.
@@ -68,6 +64,9 @@ type (
 		// ExecInspect should report whether the exec with the given identifier is
 		// still running, and how it exited once it is not.
 		ExecInspect(ctx context.Context, id string) (client.ExecInspectResult, error)
+		// ServerVersion should report which daemon is behind the socket and the
+		// versions of its parts.
+		ServerVersion(ctx context.Context) (client.ServerVersionResult, error)
 		// Events should return a stream of engine events matching the given options,
 		// alongside a channel carrying any error that ends the stream.
 		Events(ctx context.Context, options client.EventsListOptions) (<-chan events.Message, <-chan error)
@@ -142,15 +141,6 @@ func (c *engineClient) ImageRemove(ctx context.Context, ref string, options clie
 	}
 
 	return result.Items, nil
-}
-
-func (c *engineClient) DistributionInspect(ctx context.Context, ref, encodedAuth string) (registry.DistributionInspect, error) {
-	result, err := c.inner.DistributionInspect(ctx, ref, client.DistributionInspectOptions{EncodedRegistryAuth: encodedAuth})
-	if err != nil {
-		return registry.DistributionInspect{}, err
-	}
-
-	return result.DistributionInspect, nil
 }
 
 func (c *engineClient) ContainerCreate(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, platform *ocispec.Platform, name string) (container.CreateResponse, error) {
@@ -239,6 +229,10 @@ func (c *engineClient) ExecAttach(ctx context.Context, id string) (io.ReadCloser
 
 func (c *engineClient) ExecInspect(ctx context.Context, id string) (client.ExecInspectResult, error) {
 	return c.inner.ExecInspect(ctx, id, client.ExecInspectOptions{})
+}
+
+func (c *engineClient) ServerVersion(ctx context.Context) (client.ServerVersionResult, error) {
+	return c.inner.ServerVersion(ctx, client.ServerVersionOptions{})
 }
 
 func (c *engineClient) Events(ctx context.Context, options client.EventsListOptions) (<-chan events.Message, <-chan error) {

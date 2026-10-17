@@ -55,6 +55,33 @@ sudo dnf install ./takt_<version>_linux_amd64.rpm
 
 The grant-and-enable step above applies unchanged.
 
+## Under Podman
+
+Podman serves the Docker API, and takt runs against it with the socket named in
+`[docker]`. Podman's socket is a systemd unit, so the daemon needs enabling the
+way Docker's does. Nothing else about the install changes:
+
+```sh
+sudo systemctl enable --now podman.socket
+```
+
+The socket is root-owned, and its directory too, so the `takt` user needs a way
+in. Podman has no equivalent of the `docker` group. Either run the server as root,
+or open the directory and the socket to the user with a `tmpfiles` rule or a
+drop-in on `podman.socket` that sets `SocketGroup` and `SocketMode`. The grant is
+root-equivalent, as the Docker one is.
+
+Point the server at the socket:
+
+```toml
+[docker]
+host = "unix:///run/podman/podman.sock"
+```
+
+The server logs which daemon it found. The manifest means the same on either, with
+one difference in how a `logs` block is applied, which
+[Manifest](manifest.md#logs) describes. Rootless Podman is untested.
+
 ## Removing
 
 Stop and disable the service before the package goes, because removal does

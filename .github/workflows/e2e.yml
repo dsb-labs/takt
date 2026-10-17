@@ -38,6 +38,15 @@ on:
 jobs:
   e2e:
     runs-on: ubuntu-latest
+    # The driver speaks the Docker Engine API, which Podman also serves. Each
+    # daemon gets its own run so that a Podman failure names the daemon rather
+    # than hiding inside a run that works on Docker.
+    strategy:
+      fail-fast: false
+      matrix:
+        daemon:
+          - docker
+          - podman
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -46,6 +55,23 @@ jobs:
         uses: ./.github/actions/setup-go
         with:
           cache-name: e2e
+
+      # The server reads DOCKER_HOST when the configuration names no host, and
+      # the harness shells out to the docker CLI, which reads the same variable.
+      # Setting it once points both at Podman. The socket and its directory are
+      # root-only, so the runner user is let in by mode rather than by running
+      # everything as root.
+      - name: Start Podman
+        if: matrix.daemon == 'podman'
+        env:
+          DOCKER_HOST: unix:///run/podman/podman.sock
+        run: |
+          sudo systemctl enable --now podman.socket
+          sudo chmod 755 /run/podman
+          sudo chmod 666 /run/podman/podman.sock
+          ls -ld /run/podman /run/podman/podman.sock
+          echo "DOCKER_HOST=$DOCKER_HOST" >> "$GITHUB_ENV"
+          docker version
 
       - name: Run end-to-end tests
         run: make e2e
@@ -58,11 +84,12 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-debug-bundles
+          name: e2e-debug-bundles-${{ matrix.daemon }}
           path: internal/e2e/artifacts/
 
+      # One save is enough: both runs compile the same objects.
       - name: Save the Go caches
-        if: always()
+        if: always() && matrix.daemon == 'docker'
         uses: ./.github/actions/setup-go
         with:
           mode: save

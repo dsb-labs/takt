@@ -22,6 +22,31 @@ const indexServer = "https://index.docker.io/v1/"
 // form the Docker Engine API takes. An empty string means the registry is
 // asked anonymously, which is what an absent file or a registry the file does
 // not mention resolves to.
+func (d *Driver) registryAuth(ref string) (string, error) {
+	resolved, err := d.registryCredentials(ref)
+	if err != nil {
+		return "", err
+	}
+
+	// Anonymous stays the empty string rather than an encoded empty credential,
+	// so a registry the file does not mention sees exactly the request it saw
+	// before the driver knew about credentials.
+	if resolved == (registry.AuthConfig{}) {
+		return "", nil
+	}
+
+	encoded, err := authconfig.Encode(resolved)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode registry credentials: %w", err)
+	}
+
+	return encoded, nil
+}
+
+// registryCredentials resolves the credentials the docker credential file holds
+// for the registry the given image reference names. The zero value means the
+// registry is asked anonymously, which is what an absent file or a registry the
+// file does not mention resolves to.
 //
 // The file is read on every call rather than once at startup, so a docker
 // login on the host takes effect without restarting the server. Resolution
@@ -30,10 +55,10 @@ const indexServer = "https://index.docker.io/v1/"
 //
 // The resolved credential must never appear in a log line or an error: a
 // failure names the registry, not what was sent to it.
-func (d *Driver) registryAuth(ref string) (string, error) {
+func (d *Driver) registryCredentials(ref string) (registry.AuthConfig, error) {
 	named, err := reference.ParseNormalizedNamed(ref)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse image reference: %w", err)
+		return registry.AuthConfig{}, fmt.Errorf("failed to parse image reference: %w", err)
 	}
 
 	key := reference.Domain(named)
@@ -49,24 +74,24 @@ func (d *Driver) registryAuth(ref string) (string, error) {
 	file, err := os.Open(path)
 	switch {
 	case os.IsNotExist(err):
-		return "", nil
+		return registry.AuthConfig{}, nil
 	case err != nil:
 		// An unreadable file means anonymous pulls rather than a failure, so a
 		// host that never logged in to anything keeps working. The warning is
 		// the trail an operator follows when a private pull later fails.
 		d.logger.With("error", err, "path", path).Warn("failed to read docker config file")
-		return "", nil
+		return registry.AuthConfig{}, nil
 	}
 	defer file.Close()
 
 	configFile, err := config.LoadFromReader(file)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse docker config file: %w", err)
+		return registry.AuthConfig{}, fmt.Errorf("failed to parse docker config file: %w", err)
 	}
 
 	auth, err := configFile.GetAuthConfig(key)
 	if err != nil {
-		return "", fmt.Errorf("failed to resolve credentials for registry %q: %w", key, err)
+		return registry.AuthConfig{}, fmt.Errorf("failed to resolve credentials for registry %q: %w", key, err)
 	}
 
 	resolved := registry.AuthConfig{
@@ -78,19 +103,9 @@ func (d *Driver) registryAuth(ref string) (string, error) {
 		RegistryToken: auth.RegistryToken,
 	}
 
-	// Anonymous stays the empty string rather than an encoded empty credential,
-	// so a registry the file does not mention sees exactly the request it saw
-	// before the driver knew about credentials.
-	if resolved == (registry.AuthConfig{}) {
-		return "", nil
+	if resolved != (registry.AuthConfig{}) {
+		d.logger.With("registry", key).Debug("resolved registry credentials")
 	}
 
-	d.logger.With("registry", key).Debug("resolved registry credentials")
-
-	encoded, err := authconfig.Encode(resolved)
-	if err != nil {
-		return "", fmt.Errorf("failed to encode registry credentials: %w", err)
-	}
-
-	return encoded, nil
+	return resolved, nil
 }

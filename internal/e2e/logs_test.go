@@ -229,6 +229,17 @@ func (s *Suite) TestContainerOutputIsCapped() {
 	ids := s.containers(name)
 	s.Require().NotEmpty(ids)
 
+	// Podman's compatible inspect reports the driver it was given and not the
+	// options, so what can be seen there is that the file driver was named,
+	// which is what makes the size apply.
+	if s.podman {
+		out, err := exec.Command("docker", "inspect", "--format", `{{.HostConfig.LogConfig.Type}}`, ids[0]).Output()
+		s.Require().NoError(err)
+		s.Equal("json-file", strings.TrimSpace(string(out)))
+
+		return
+	}
+
 	out, err := exec.Command("docker", "inspect", "--format", `{{index .HostConfig.LogConfig.Config "max-size"}} {{index .HostConfig.LogConfig.Config "max-file"}}`, ids[0]).Output()
 	s.Require().NoError(err)
 	s.Equal("1m 2", strings.TrimSpace(string(out)))
