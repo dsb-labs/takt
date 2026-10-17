@@ -47,9 +47,6 @@ jobs:
         daemon:
           - docker
           - podman
-    # Podman does not block a merge yet. The job runs to collect what fails
-    # there, and becomes blocking once the driver refuses what Podman cannot do.
-    continue-on-error: ${{ matrix.daemon == 'podman' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
