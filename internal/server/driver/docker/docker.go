@@ -1430,6 +1430,14 @@ func portBindings(bind string, ports []driver.Port) (network.PortSet, network.Po
 		return nil, nil, fmt.Errorf("invalid bind address %q: %w", bind, err)
 	}
 
+	// Every interface is asked for by naming no address rather than the
+	// unspecified one. Docker reads both the same way. Podman takes 0.0.0.0 as a
+	// literal destination, writes it into the port's forwarding rule, and the
+	// port answers nowhere.
+	if address.IsUnspecified() {
+		address = netip.Addr{}
+	}
+
 	exposed := make(network.PortSet, len(ports))
 	bindings := make(network.PortMap, len(ports))
 

@@ -794,9 +794,16 @@ func TestDriver_Start_PublishAddress(t *testing.T) {
 			ExpectIP: "10.0.0.5",
 		},
 		{
+			// Named by an empty address, which both daemons read as every
+			// interface. Podman reads 0.0.0.0 as a literal destination.
 			Name:     "publishes on every interface when asked",
 			Bind:     "0.0.0.0",
-			ExpectIP: "0.0.0.0",
+			ExpectIP: "",
+		},
+		{
+			Name:     "publishes on every interface when asked over ipv6",
+			Bind:     "::",
+			ExpectIP: "",
 		},
 		{
 			// Docker would read an empty address as every interface, so the driver
@@ -821,7 +828,15 @@ func TestDriver_Start_PublishAddress(t *testing.T) {
 			client.EXPECT().ContainerCreate(mock.Anything, mock.Anything,
 				mock.MatchedBy(func(host *dockercontainer.HostConfig) bool {
 					bindings := host.PortBindings[network.MustParsePort("8080/tcp")]
-					return len(bindings) == 1 && bindings[0].HostIP.String() == tc.ExpectIP
+					if len(bindings) != 1 {
+						return false
+					}
+
+					if tc.ExpectIP == "" {
+						return !bindings[0].HostIP.IsValid()
+					}
+
+					return bindings[0].HostIP.String() == tc.ExpectIP
 				}),
 				mock.Anything, mock.Anything, mock.Anything,
 			).Return(dockercontainer.CreateResponse{ID: "container-one"}, nil).Once()
