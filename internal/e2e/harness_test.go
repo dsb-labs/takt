@@ -684,7 +684,10 @@ func (s *Suite) volumeFile(path, name string) string {
 // file rewritten in place is visible to the container, where one replaced by a rename
 // would leave it reading the old inode.
 func (s *Suite) mountedFile(workload, path string) string {
-	containers := s.containers(workload)
+	// The running container rather than the first listed: exec needs a running
+	// one, and after a replacement the daemons disagree on which comes first.
+	// Docker lists the newest, Podman the oldest.
+	containers := s.runningContainers(workload)
 	if len(containers) == 0 {
 		return ""
 	}
@@ -701,7 +704,7 @@ func (s *Suite) mountedFile(workload, path string) string {
 // workload is running, which is how a test checks what an env reference resolved
 // to. Returns empty when there is no container or no such variable.
 func (s *Suite) containerEnv(workload, variable string) string {
-	containers := s.containers(workload)
+	containers := s.runningContainers(workload)
 	if len(containers) == 0 {
 		return ""
 	}
