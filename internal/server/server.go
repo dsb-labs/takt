@@ -264,6 +264,13 @@ func Run(ctx context.Context, config Config) error {
 		TracerProvider: tel.TracerProvider(),
 	})
 
+	// Asked once at startup: which daemon answers is a property of the socket.
+	// A daemon that cannot be asked is taken for Docker, the way an unreachable
+	// daemon is left to fail each request on its own.
+	if err = dockerDriver.Discover(ctx); err != nil {
+		logger.With("error", err).Warn("could not tell which daemon is behind the docker socket, taking it for docker")
+	}
+
 	// The service and the reconciler each need something from the other: the service
 	// wakes the reconciler when desired state changes, and the reconciler asks the
 	// service to reallocate ports that turned out to be unusable. Both are passed as
