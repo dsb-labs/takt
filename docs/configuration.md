@@ -135,6 +135,19 @@ already exists keeps its mode — takt sets the mode only on what it creates.
 Empty `host` uses the environment, then the local socket. Set it to reach a daemon
 elsewhere, such as `tcp://127.0.0.1:2375`.
 
+The daemon may be Podman, which serves the same API on a socket of its own:
+
+```toml
+[docker]
+host = "unix:///run/podman/podman.sock"
+```
+
+The server asks the daemon which it is at startup and logs the answer. Every part
+of the manifest works the same on either. The one difference is the `logs` block,
+which [Manifest](manifest.md#logs) describes. Rootful Podman is what the
+end-to-end suite runs against. Rootless Podman is untested. See
+[Installing](installing.md#under-podman).
+
 `config-file` names the `config.json` that `docker login` writes. When a workload's
 image is pulled, or its digest resolved for `pull: always`, the driver reads the
 file and sends the credentials it holds for the image's registry. Empty reads
@@ -169,7 +182,10 @@ See [Images](operating.md#images).
 
 `digest-interval` turns on the check behind `pull: always` and `pull: follow`. On
 each interval the server asks the registry what every pulled tag resolves to and
-compares it with what each workload was hashed with. An `always` workload behind its
+compares it with what each workload was hashed with. The server asks the registry
+itself, with the credentials `config-file` holds, rather than through the daemon.
+A registry mirror the daemon is configured with is not consulted for this: the
+question is what the tag names upstream. An `always` workload behind its
 tag is reported and left alone. A `follow` workload is moved on. Zero, the default,
 never asks, and `follow` on such a server follows nothing, which the apply reports.
 See [Manifest](manifest.md#container).

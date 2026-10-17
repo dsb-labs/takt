@@ -1196,6 +1196,12 @@ Logs sit beside the runtime blocks because how much a workload may write is a
 question about the workload, and the cap means the same thing on either runtime.
 Where it differs is who applies it.
 
+On Podman the block names Podman's file driver outright, since Podman's default
+driver may be journald, which takes the size and does nothing with it. The cap
+there is the size alone: conmon truncates the file at the size and keeps no
+rotations, so `maxFiles` is sent and ignored. Newer conmon rotates, and a host
+with one gets the rotation without a change here.
+
 A container's cap is applied by the Docker daemon, which rotates the container's log
 files itself. The daemon keeps whichever logging driver it was configured with, and
 only its file-backed drivers, `json-file` and `local`, rotate by size. A daemon
