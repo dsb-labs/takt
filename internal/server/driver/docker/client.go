@@ -1,9 +1,11 @@
 package docker
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
+	"net"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/events"
@@ -61,10 +63,12 @@ type (
 		// ExecCreate should prepare a command to run inside the container with the
 		// given identifier, returning the identifier of the exec.
 		ExecCreate(ctx context.Context, id string, options client.ExecCreateOptions) (string, error)
-		// ExecAttach should start the exec with the given identifier and return its
-		// output, multiplexed as the engine multiplexes a container's logs. The
-		// caller must close the stream.
-		ExecAttach(ctx context.Context, id string) (io.ReadCloser, error)
+		// ExecAttach should start the exec with the given identifier and return the
+		// stream attached to it. What the command writes is read from the stream,
+		// multiplexed as the engine multiplexes a container's logs, and what is
+		// written to the stream reaches the command's standard input when the exec
+		// was created with one. The caller must close the stream.
+		ExecAttach(ctx context.Context, id string) (Stream, error)
 		// ExecInspect should report whether the exec with the given identifier is
 		// still running, and how it exited once it is not.
 		ExecInspect(ctx context.Context, id string) (client.ExecInspectResult, error)
@@ -75,24 +79,53 @@ type (
 		Close() error
 	}
 
+	// The Stream interface describes the connection to a command running inside a
+	// container: its output is read from the stream and its input is written to it.
+	Stream interface {
+		io.Reader
+		io.Writer
+		// CloseWrite should tell the command its standard input has ended, leaving
+		// its output readable.
+		CloseWrite() error
+		// Close should release the connection.
+		Close() error
+	}
+
 	engineClient struct {
 		inner *client.Client
 	}
 
-	// The hijacked type is the output of an attached exec as a stream the driver
-	// can read and close, which the SDK's hijacked connection is not quite: its
-	// Close returns nothing.
+	// The hijacked type is an attached exec as a Stream, which the SDK's hijacked
+	// connection is not quite: its Close returns nothing, and its reader and its
+	// connection are separate fields where one value is wanted.
 	hijacked struct {
-		io.Reader
-		close func()
+		conn   net.Conn
+		reader *bufio.Reader
 	}
 )
 
-// Close releases the connection the stream reads from.
-func (h *hijacked) Close() error {
-	h.close()
+func (h *hijacked) Read(p []byte) (int, error) {
+	return h.reader.Read(p)
+}
+
+func (h *hijacked) Write(p []byte) (int, error) {
+	return h.conn.Write(p)
+}
+
+// CloseWrite half-closes the connection, which is how the daemon learns the
+// command's input has ended. A connection that cannot be half-closed is left as it
+// is: the command sees no end of file, but its output still arrives.
+func (h *hijacked) CloseWrite() error {
+	if closer, ok := h.conn.(interface{ CloseWrite() error }); ok {
+		return closer.CloseWrite()
+	}
 
 	return nil
+}
+
+// Close releases the connection the stream reads from.
+func (h *hijacked) Close() error {
+	return h.conn.Close()
 }
 
 // NewClient returns a Client talking to the Docker daemon described by the
@@ -228,13 +261,13 @@ func (c *engineClient) ExecCreate(ctx context.Context, id string, options client
 	return result.ID, nil
 }
 
-func (c *engineClient) ExecAttach(ctx context.Context, id string) (io.ReadCloser, error) {
+func (c *engineClient) ExecAttach(ctx context.Context, id string) (Stream, error) {
 	result, err := c.inner.ExecAttach(ctx, id, client.ExecAttachOptions{})
 	if err != nil {
 		return nil, err
 	}
 
-	return &hijacked{Reader: result.Reader, close: result.Close}, nil
+	return &hijacked{conn: result.Conn, reader: result.Reader}, nil
 }
 
 func (c *engineClient) ExecInspect(ctx context.Context, id string) (client.ExecInspectResult, error) {
