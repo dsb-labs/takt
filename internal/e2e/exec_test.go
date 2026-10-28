@@ -266,6 +266,64 @@ func (s *Suite) TestExecWorkloadCannotReachTheDataDirectory() {
 	s.Contains(out.String(), "Permission denied")
 }
 
+// TestExecRunsACommandInsideAProcess covers the exec surface on the exec runtime: a
+// command runs in the instance's working directory, confined as the instance is,
+// so it reads what the instance reads and nothing the instance cannot.
+func (s *Suite) TestExecRunsACommandInsideAProcess() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	// The instance writes a marker into its working directory, which is where the
+	// command starts. Finding the marker proves the directory, and the key the
+	// server generated proves the confinement: the server's own user can read it
+	// and the command must not.
+	spec := s.execSpec(name, "sh", "-c", "echo here > marker; sleep 60")
+
+	_, _, err := s.client.Apply(s.ctx(), spec)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	keyring := filepath.Join(s.directory, "keys")
+
+	entries, err := os.ReadDir(keyring)
+	s.Require().NoError(err, "this test needs a keyring the server's own user can read")
+	s.Require().Len(entries, 1)
+
+	key := filepath.Join(keyring, entries[0].Name())
+
+	contents, err := os.ReadFile(key)
+	s.Require().NoError(err, "this test needs a key file the server's own user can read")
+
+	var stdout, stderr bytes.Buffer
+
+	s.Require().Eventuallyf(func() bool {
+		stdout.Reset()
+		stderr.Reset()
+
+		status, err := s.client.Exec(s.ctx(), name, client.Command{
+			Command: []string{"sh", "-c", "cat marker; cat " + key},
+			Stdout:  &stdout,
+			Stderr:  &stderr,
+		})
+
+		return err == nil && status != 0 && strings.Contains(stdout.String(), "here")
+	}, convergeTimeout, 500*time.Millisecond, "the command never ran in the instance's working directory")
+
+	s.NotContains(stdout.String(), string(contents), "a command read the secret encryption key")
+	s.Contains(stderr.String(), "Permission denied")
+
+	// A command needs a running instance, and a stopped workload has none.
+	_, err = s.client.Stop(s.ctx(), name)
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateSuspended)
+
+	_, err = s.client.Exec(s.ctx(), name, client.Command{Command: []string{"true"}})
+	s.Require().Error(err)
+	s.True(client.IsConflict(err), "a suspended workload was not refused: %v", err)
+}
+
 // TestExecWorkloadRunsMultipleInstances covers count on the exec runtime, whose
 // instances are processes with records and directories of their own.
 func (s *Suite) TestExecWorkloadRunsMultipleInstances() {
