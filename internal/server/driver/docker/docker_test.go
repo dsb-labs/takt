@@ -1257,7 +1257,7 @@ func TestDriver_Probe(t *testing.T) {
 		missing := w
 		missing.Instance = 2
 
-		assert.ErrorIs(t, d.Probe(t.Context(), missing, probe), docker.ErrNoRunningInstance)
+		assert.ErrorIs(t, d.Probe(t.Context(), missing, probe), driver.ErrNoRunningInstance)
 	})
 
 	t.Run("refuses a probe naming no command", func(t *testing.T) {

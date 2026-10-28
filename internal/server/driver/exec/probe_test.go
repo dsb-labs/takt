@@ -161,7 +161,7 @@ func TestDriver_Probe(t *testing.T) {
 
 		awaitState(t, d, "example", driver.StateExited)
 
-		assert.ErrorIs(t, d.Probe(t.Context(), w, probe("exit 0")), exec.ErrNoRunningInstance)
+		assert.ErrorIs(t, d.Probe(t.Context(), w, probe("exit 0")), driver.ErrNoRunningInstance)
 	})
 
 	t.Run("refuses a workload it has no record of", func(t *testing.T) {
@@ -169,7 +169,7 @@ func TestDriver_Probe(t *testing.T) {
 
 		d, _ := newDriver(t)
 
-		assert.ErrorIs(t, d.Probe(t.Context(), workload(t, "example", 1, "hash", "exit 0"), probe("exit 0")), exec.ErrNoRunningInstance)
+		assert.ErrorIs(t, d.Probe(t.Context(), workload(t, "example", 1, "hash", "exit 0"), probe("exit 0")), driver.ErrNoRunningInstance)
 	})
 }
 

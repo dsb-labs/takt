@@ -18,9 +18,6 @@ import (
 )
 
 var (
-	// ErrNoRunningInstance is returned when a probe is asked of an instance the
-	// driver has nothing running for.
-	ErrNoRunningInstance = errors.New("no running instance to probe")
 	// ErrProbeFailed is returned when a probe ran and exited with a status other
 	// than zero. The error carries the status and the tail of what the command
 	// wrote.
@@ -194,7 +191,7 @@ func (d *Driver) await(ctx context.Context, cmd *osexec.Cmd, output *driver.Tail
 }
 
 // running finds the record of an instance's process that is alive, reporting
-// ErrNoRunningInstance when none is.
+// driver.ErrNoRunningInstance when none is.
 //
 // The newest record alone is considered: an older version of the slot is one the
 // reconciler has stopped or is about to, and probing it would answer a question
@@ -207,7 +204,7 @@ func (d *Driver) running(id string, instance int) (state, error) {
 
 	current := newest(ofInstance(records, instance))
 	if current.path == "" {
-		return state{}, fmt.Errorf("%w: instance %d", ErrNoRunningInstance, instance)
+		return state{}, fmt.Errorf("%w: instance %d", driver.ErrNoRunningInstance, instance)
 	}
 
 	recorded, err := d.states.read(current.path)
@@ -216,7 +213,7 @@ func (d *Driver) running(id string, instance int) (state, error) {
 	}
 
 	if !recorded.alive() {
-		return state{}, fmt.Errorf("%w: instance %d", ErrNoRunningInstance, instance)
+		return state{}, fmt.Errorf("%w: instance %d", driver.ErrNoRunningInstance, instance)
 	}
 
 	return recorded, nil

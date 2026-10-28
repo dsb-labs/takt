@@ -75,9 +75,6 @@ var (
 	// ErrNotContainerWorkload is returned when NewWorkload is given a stored
 	// workload whose specification carries no container block.
 	ErrNotContainerWorkload = errors.New("workload does not describe a container")
-	// ErrNoRunningInstance is returned when a probe is asked of an instance the
-	// driver has no running container for.
-	ErrNoRunningInstance = errors.New("no running instance to probe")
 	// ErrProbeFailed is returned when a probe ran and exited with a status other
 	// than zero. The error carries the status and the tail of what the command
 	// wrote.
@@ -642,7 +639,7 @@ func (d *Driver) Probe(ctx context.Context, w driver.Workload, probe driver.Prob
 }
 
 // running finds the container currently running one instance of a workload,
-// reporting ErrNoRunningInstance when there is none.
+// reporting driver.ErrNoRunningInstance when there is none.
 //
 // A retained container is left out: it has been replaced, and probing it would
 // answer a question about an attempt that is over.
@@ -660,7 +657,7 @@ func (d *Driver) running(ctx context.Context, workload string, instance int) (st
 		}
 	}
 
-	return "", fmt.Errorf("%w: instance %d", ErrNoRunningInstance, instance)
+	return "", fmt.Errorf("%w: instance %d", driver.ErrNoRunningInstance, instance)
 }
 
 // Observe returns an instance for every container the driver owns, whatever state

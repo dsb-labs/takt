@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -47,6 +48,13 @@ var (
 	// reading only reaches a socket, a FIFO or a device, which a read-only mount
 	// does not stop a workload from writing to.
 	ErrHostPathNotFile = errors.New("host path is not a regular file or directory")
+
+	// ErrNoRunningInstance is returned when a probe or a command is asked of an
+	// instance the driver has nothing running for.
+	//
+	// Shared between the drivers so that a caller holding one of them behind an
+	// interface can match it without knowing which runtime answered.
+	ErrNoRunningInstance = errors.New("no running instance")
 )
 
 // The HostPath type is one entry of the server's allow-host-paths configuration:
@@ -199,6 +207,31 @@ type (
 		//
 		// A function rather than a map so that a secret is read, and a token
 		// minted, only when a runtime has to.
+		Env func(ctx context.Context) (map[string]string, error)
+	}
+
+	// The Exec type describes a command an operator asks to run inside an instance
+	// that is already running.
+	//
+	// It is the operator's counterpart to Probe. A probe is a command the manifest
+	// names, run on a schedule, with its output kept only for the verdict. This is a
+	// command a person typed, run once, with its output streamed back to them and
+	// its input, when they attach one, streamed in. A driver runs both the same
+	// way: where the instance runs, under the same confinement and the same limits.
+	Exec struct {
+		// The command to run, and its arguments.
+		Command []string
+		// The operator's input, copied to the command's standard input until it
+		// reaches end of file. Nil gives the command an input that is closed from
+		// the start, which is what a command nobody types at should see.
+		Stdin io.Reader
+		// Where the command's standard output is written. Never nil.
+		Stdout io.Writer
+		// Where the command's standard error is written. Never nil.
+		Stderr io.Writer
+		// Env should resolve the environment the workload was started with, as
+		// Probe's does. A runtime whose instance carries its own environment never
+		// calls it.
 		Env func(ctx context.Context) (map[string]string, error)
 	}
 
