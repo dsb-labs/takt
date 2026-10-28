@@ -108,13 +108,15 @@ Three fixed roles, hierarchical: `admin` covers `operator`, `operator` covers
 | Role | Holds |
 |---|---|
 | `viewer` | Reads of the resources themselves, including logs, metrics and target discovery. |
-| `operator` | Workload, volume, service, variable and secret lifecycle. |
+| `operator` | Workload, volume, service, variable and secret lifecycle, and running a command inside an instance. |
 | `admin` | Applying the policy, managing tokens, and the node-level operations: reading the policy, listing tokens, backup and rekey. |
 
 **`operator` is control of the host.** Applying a workload runs code with
 whatever the Docker socket grants, and a manifest may add any kernel capability,
 mount any host path the configuration allows, and name any principal in a
-workload token, the admin ones included. Nothing in the role table narrows that,
+workload token, the admin ones included. Running a command inside an instance
+runs code the same way, and reads what the instance reads, a resolved secret
+included. Nothing in the role table narrows that,
 and nothing is meant to: a workload is what takt exists to run. What `admin`
 adds is control of takt itself — the policy, the tokens, the backups. The grant
 to be stingy with is therefore `operator`, and a token holding it deserves the

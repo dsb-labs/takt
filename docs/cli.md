@@ -9,6 +9,7 @@ takt workload list                      List workloads                       (al
 takt workload get <name>                Show a single workload
 takt workload events <name>             Read what the server recorded about a workload
 takt workload logs <name>               Read a workload's recent output
+takt workload exec <name> -- <command>  Run a command inside a running instance
 takt workload delete <name>             Delete a workload and stop its work  (alias: rm)
 takt workload stop <name>               Stop a workload and hold it down
 takt workload start <name>              Start a stopped workload
@@ -377,6 +378,50 @@ output nothing could attribute.
 `2026-08-25T12:00:00Z`. It applies to container workloads, whose runtime holds a
 timestamp for every line it keeps. It is ignored for exec workloads, whose output is a
 plain file with no timestamps in it.
+
+## workload exec
+
+```sh
+takt workload exec example -- ps
+takt workload exec example -- ls -l /data
+takt workload exec example --instance 1 -- env
+takt workload exec db --stdin -- psql -U app < dump.sql
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--instance`, `-i` | the only instance | The index of the instance to run the command in, for a workload running more than one. |
+| `--stdin`, `-s` | `false` | Attach this process's standard input to the command. |
+
+Runs a command inside a running instance and prints its output as it arrives,
+standard output to standard output and standard error to standard error. The
+command and its arguments follow a double dash, so flags meant for the command are
+not read as takt's own. The command's exit status becomes the exit status of
+`takt`, so a script reads it the way it would read the command run directly.
+
+`--instance` selects the instance by its index for a workload running more than
+one. It is required for such a workload, because a command runs in one instance and
+there is no reasonable choice to make for you.
+
+`--stdin` copies this process's standard input to the command until it ends, which
+is how a file is piped into a command. Without it the command sees an input that has
+already ended, so a command that reads its input returns at once.
+
+The command runs where the instance runs. In a container it runs inside the
+container, as `docker exec` would run it. For an `exec` workload it runs under the
+same confinement and the same limits the instance was started with, in the
+instance's working directory, with the workload's environment resolved again. It
+can read what the instance can read, which for a workload resolving a secret into
+its environment is the secret's plaintext. This needs the `operator` role for the
+same reason applying a workload does: both run code on the host. See [ACL](acl.md).
+
+Running a command is recorded against the workload as a `commandRan` event naming
+who ran it and what they ran, so `workload events` says what was done to an instance
+beside what the server did to it.
+
+No terminal is allocated. A shell run this way reads its commands from standard
+input and does not prompt, so pipe a script into `sh` rather than expecting a
+prompt. A suspended workload is refused, since nothing of it is running.
 
 ## workload delete
 

@@ -201,6 +201,14 @@ promise the exec runtime makes is that nothing a manifest names runs unconfined.
 and `docker exec` runs inside the container's own cgroup, namespaces and capability
 set. What it costs is that the binary has to be in the image.
 
+A command an operator runs inside an instance takes the same path as the probe. It
+is not something a manifest names, but the instance is what the operator asked to
+look inside, so the command runs as the instance does: confined to its ruleset, in
+its working directory, with its environment resolved again, in a cgroup of its own
+beside the instance's under the same limits. On the container runtime it is a
+`docker exec`. Either way it is recorded against the workload, naming who ran what,
+because running a command in an instance is an action on the workload.
+
 ## Only the reconciler touches the runtime
 
 Deleting a workload records the intent and returns. The reconciler performs the
