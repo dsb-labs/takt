@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
@@ -110,6 +111,16 @@ type (
 		// The same server, reached without a request timeout, for the one call that
 		// legitimately outlives one.
 		stream *api.ClientWithResponses
+		// The address of the server, for the one call the generated client cannot
+		// make: a websocket is opened by hand.
+		address string
+		// The client a websocket is opened through. Pinned to HTTP/1.1, which is
+		// the only version an upgrade works over, where every other request
+		// negotiates whatever the server offers.
+		dialer *http.Client
+		// The credential presented on a websocket handshake, which no request
+		// editor reaches. Empty presents none.
+		token string
 	}
 
 	// The Error type describes an unsuccessful response from the server.
@@ -216,13 +227,22 @@ func New(address string, options ...Option) (*Client, error) {
 		return nil, fmt.Errorf("failed to construct client: %w", err)
 	}
 
-	return &Client{api: inner, stream: streaming}, nil
+	return &Client{
+		api:     inner,
+		stream:  streaming,
+		address: strings.TrimSuffix(address, "/"),
+		dialer:  &http.Client{Transport: upgradable(transport)},
+		token:   cfg.token,
+	}, nil
 }
 
 // transport returns the transport every request goes through.
-func (c config) transport() (http.RoundTripper, error) {
+func (c config) transport() (*http.Transport, error) {
+	// Cloned from the default transport rather than built empty, so proxy
+	// support, dial timeouts and HTTP/2 stay as they are everywhere else.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if c.caCertificate == "" {
-		return http.DefaultTransport, nil
+		return transport, nil
 	}
 
 	pem, err := os.ReadFile(c.caCertificate)
@@ -235,12 +255,26 @@ func (c config) transport() (http.RoundTripper, error) {
 		return nil, fmt.Errorf("no certificates in ca certificate file %s", c.caCertificate)
 	}
 
-	// Cloned from the default transport rather than built empty, so proxy
-	// support, dial timeouts and HTTP/2 stay as they are everywhere else.
-	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.TLSClientConfig = &tls.Config{RootCAs: pool}
 
 	return transport, nil
+}
+
+// upgradable returns a copy of the transport that speaks HTTP/1.1 only, which a
+// connection upgrade needs: HTTP/2 refuses the headers an upgrade is made of, and a
+// server reached over TLS negotiates it whenever the client offers.
+func upgradable(transport *http.Transport) *http.Transport {
+	upgradable := transport.Clone()
+	upgradable.ForceAttemptHTTP2 = false
+	upgradable.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+
+	if upgradable.TLSClientConfig == nil {
+		upgradable.TLSClientConfig = &tls.Config{}
+	}
+
+	upgradable.TLSClientConfig.NextProtos = []string{"http/1.1"}
+
+	return upgradable
 }
 
 // Error returns the message the server reported.
