@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -4320,6 +4321,221 @@ func TestWorkloadService_Logs(t *testing.T) {
 		svc := newTestService(t, d, repo, ports, nil)
 
 		require.NoError(t, svc.Logs(t.Context(), io.Discard, "example", driver.LogOptions{Tail: 20, Previous: true}))
+	})
+}
+
+func TestWorkloadService_Exec(t *testing.T) {
+	t.Parallel()
+
+	options := func(command ...string) service.ExecOptions {
+		return service.ExecOptions{Command: command, Stdout: io.Discard, Stderr: io.Discard, Principal: "alice@example.com"}
+	}
+
+	t.Run("runs the command through the workload's driver and records who ran it", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		events := NewMockWorkloadEventRepository(t)
+
+		row := storedWorkload("example")
+		row.ID = "workload-id"
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+
+		// Recorded before the command runs, so a session an operator holds open
+		// is in the history from the moment it starts.
+		events.EXPECT().Record(mock.Anything, "example", event.CommandRan, event.Encode(event.Fields{
+			Principal: "alice@example.com",
+			Command:   []string{"ls", "-l"},
+		})).Return(nil).Once()
+
+		d.EXPECT().Exec(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
+			return w.ID == "workload-id" && w.Name == "example" && w.Instance == 0
+		}), mock.MatchedBy(func(exec driver.Exec) bool {
+			return slices.Equal(exec.Command, []string{"ls", "-l"}) && exec.Stdin == nil
+		})).RunAndReturn(func(_ context.Context, _ driver.Workload, exec driver.Exec) (int, error) {
+			_, err := exec.Stdout.Write([]byte("listed\n"))
+			return 3, err
+		}).Once()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]service.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Claimer:   newTestClaimer(ports, allocatorStub{}),
+			Events:    events,
+		})
+
+		var stdout strings.Builder
+
+		opts := options("ls", "-l")
+		opts.Stdout = &stdout
+
+		status, err := svc.Exec(t.Context(), "example", opts)
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, status)
+		assert.Equal(t, "listed\n", stdout.String())
+	})
+
+	t.Run("resolves the environment the instance was started with", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+		env := NewMockEnvResolver(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Env = map[string]string{"TOKEN": "${secret:token}"}
+		spec.Defaults()
+
+		row := storedWorkload("example")
+		row.ID = "workload-id"
+		row.Spec = encodedSpec(spec)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+
+		// Resolved for the instance the command runs in, so a token minted for it
+		// is bound to that instance as the instance's own was.
+		env.EXPECT().Resolve(mock.Anything, map[string]string{"TOKEN": "${secret:token}"}, "workload-id", "example", 0).
+			Return(map[string]string{"TOKEN": "plaintext"}, nil).Once()
+
+		d.EXPECT().Exec(mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(ctx context.Context, _ driver.Workload, exec driver.Exec) (int, error) {
+				resolved, err := exec.Env(ctx)
+				if err != nil {
+					return 0, err
+				}
+
+				assert.Equal(t, map[string]string{"TOKEN": "plaintext"}, resolved)
+
+				return 0, nil
+			}).Once()
+
+		svc := service.NewWorkloadService(service.WorkloadServiceConfig{
+			Logger:    newTestLogger(t),
+			Drivers:   map[string]service.Driver{docker.Name: d},
+			Workloads: repo,
+			Ports:     ports,
+			Claimer:   newTestClaimer(ports, allocatorStub{}),
+			Env:       env,
+		})
+
+		_, err := svc.Exec(t.Context(), "example", options("env"))
+		require.NoError(t, err)
+	})
+
+	t.Run("selects the instance asked for", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Count = 2
+		spec.Defaults()
+
+		row := storedWorkload("example")
+		row.Spec = encodedSpec(spec)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+		d.EXPECT().Exec(mock.Anything, mock.MatchedBy(func(w driver.Workload) bool {
+			return w.Instance == 1
+		}), mock.Anything).Return(0, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		opts := options("ls")
+		opts.Instance = new(1)
+
+		_, err := svc.Exec(t.Context(), "example", opts)
+		require.NoError(t, err)
+	})
+
+	t.Run("requires an instance of a workload running several", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		spec := containerSpec("example", "example/example:latest")
+		spec.Count = 2
+		spec.Defaults()
+
+		row := storedWorkload("example")
+		row.Spec = encodedSpec(spec)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Exec(t.Context(), "example", options("ls"))
+		assert.ErrorIs(t, err, service.ErrInstanceRequired)
+	})
+
+	t.Run("refuses an instance the count does not include", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		opts := options("ls")
+		opts.Instance = new(1)
+
+		_, err := svc.Exec(t.Context(), "example", opts)
+		assert.ErrorIs(t, err, service.ErrNoSuchInstance)
+	})
+
+	t.Run("reports an instance with nothing running", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(storedWorkload("example"), nil).Once()
+		d.EXPECT().Exec(mock.Anything, mock.Anything, mock.Anything).
+			Return(0, fmt.Errorf("%w: instance 0", driver.ErrNoRunningInstance)).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Exec(t.Context(), "example", options("ls"))
+		assert.ErrorIs(t, err, service.ErrInstanceNotRunning)
+	})
+
+	t.Run("refuses a runtime no driver runs", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		row := storedWorkload("example")
+		row.Runtime = exec.Name
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Exec(t.Context(), "example", options("ls"))
+		assert.ErrorIs(t, err, service.ErrUnsupportedRuntime)
+	})
+
+	t.Run("refuses a suspended workload", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		row := storedWorkload("example")
+		row.SuspendedAt = time.Now()
+
+		repo.EXPECT().Get(mock.Anything, "example").Return(row, nil).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Exec(t.Context(), "example", options("ls"))
+		assert.ErrorIs(t, err, service.ErrWorkloadSuspended)
+	})
+
+	t.Run("reports a missing workload", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		repo.EXPECT().Get(mock.Anything, "nope").Return(database.Workload{}, database.ErrWorkloadNotFound).Once()
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Exec(t.Context(), "nope", options("ls"))
+		assert.ErrorIs(t, err, service.ErrWorkloadNotFound)
+	})
+
+	t.Run("refuses a request naming no command", func(t *testing.T) {
+		d, repo, ports := newMockDriver(t), NewMockWorkloadRepository(t), NewMockPortRepository(t)
+
+		svc := newTestService(t, d, repo, ports, nil)
+
+		_, err := svc.Exec(t.Context(), "example", options())
+		assert.ErrorIs(t, err, service.ErrNoCommand)
 	})
 }
 
