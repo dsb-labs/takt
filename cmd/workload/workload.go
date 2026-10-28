@@ -10,6 +10,7 @@ import (
 	"github.com/dsb-labs/takt/cmd/workload/apply"
 	delcmd "github.com/dsb-labs/takt/cmd/workload/delete"
 	"github.com/dsb-labs/takt/cmd/workload/events"
+	"github.com/dsb-labs/takt/cmd/workload/exec"
 	"github.com/dsb-labs/takt/cmd/workload/get"
 	"github.com/dsb-labs/takt/cmd/workload/list"
 	"github.com/dsb-labs/takt/cmd/workload/logs"
@@ -36,6 +37,7 @@ func Command() *cobra.Command {
 		get.Command(),
 		delcmd.Command(),
 		logs.Command(),
+		exec.Command(),
 		events.Command(),
 		stop.Command(),
 		start.Command(),
