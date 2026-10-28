@@ -8,6 +8,18 @@ describes how an entry is written.
 
 ## Unreleased
 
+### Added
+
+- `takt workload exec <name> -- <command>` runs a command inside a running
+  instance and exits with the command's status. `--stdin` attaches standard
+  input, so a file can be piped into a command. An `exec` workload's command
+  runs under the same confinement and limits the instance was started with.
+  The API gains `GET /api/v1/workloads/{name}/exec`, a websocket carrying the
+  command's streams, which needs the `operator` role. Running a command is
+  recorded against the workload as a `commandRan` event naming who ran what
+  ([#220](https://github.com/dsb-labs/takt/issues/220),
+  [#227](https://github.com/dsb-labs/takt/pull/227)).
+
 ## v0.13.0 - 2026-10-15
 
 ### Added
