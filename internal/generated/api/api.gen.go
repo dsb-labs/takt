@@ -3093,6 +3093,16 @@ type GetWorkloadEventsParams struct {
 	Since *time.Time `form:"since,omitempty" json:"since,omitempty"`
 }
 
+// ExecWorkloadParams defines parameters for ExecWorkload.
+type ExecWorkloadParams struct {
+	// Instance Which instance to run the command in, selected by its index. Omitted
+	// selects the only instance there is, and is refused for a workload running
+	// more than one: a command runs in one instance, and there is no reasonable
+	// choice to make for the caller. An index the workload's count does not
+	// include is refused.
+	Instance *int `form:"instance,omitempty" json:"instance,omitempty"`
+}
+
 // GetWorkloadLogsParams defines parameters for GetWorkloadLogs.
 type GetWorkloadLogsParams struct {
 	// Tail The number of lines to return from the end of the logs. Capped, because
@@ -4163,6 +4173,53 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/workloads/{name}/events (the `GetWorkloadEvents` operationId).
 	GetWorkloadEvents(ctx context.Context, name WorkloadName, params *GetWorkloadEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExecWorkload Run a command inside a running instance
+	//
+	// Upgrades the connection to a websocket and runs a command inside one running
+	// instance of the workload, streaming its output back and the caller's input
+	// in, until the command ends.
+	//
+	// A websocket rather than a one-way stream like the logs endpoint, because the
+	// caller's input has to travel the other way on the same connection. A
+	// websocket rather than a hijacked connection, because a hijack is refused
+	// under HTTP/2, which a server reached over TLS negotiates, and because a
+	// websocket passes through a reverse proxy and reaches a browser unchanged.
+	//
+	// Everything the server can refuse before the command is named is refused
+	// before the upgrade, with an ordinary status: a missing workload, an instance
+	// the count does not include, a workload running several instances with none
+	// selected, a workload that is suspended or being deleted. The command itself
+	// travels in the first frame rather than in the URL, so it reaches no access
+	// log.
+	//
+	// Once upgraded, the client sends one text frame first, a JSON object with
+	// `type` set to `start`, `command` holding the command and its arguments, and
+	// `stdin` saying whether input follows. Binary frames then carry bytes, each
+	// opening with one byte naming its stream: `0` for the caller's input, `1` for
+	// the command's standard output and `2` for its standard error. A frame carries
+	// at most 32767 bytes after that byte. When the caller's input has ended, the
+	// client sends a text frame with `type` set to `closeStdin`. When the command
+	// ends, the server sends a text frame with `type` set to `exit` and `exitCode`
+	// holding its status, or `type` set to `error` and `error` saying why it did not
+	// run, and closes the connection.
+	//
+	// The command runs where the instance runs: inside its container, or for an
+	// exec workload under the same confinement and limits the instance was started
+	// with, in its working directory, with its environment resolved again. It runs
+	// as the instance does and can read what the instance can, which for a
+	// workload resolving a secret into its environment is the secret's plaintext.
+	// The operator role is required for the same reason applying a workload needs
+	// it: both run code on the host.
+	//
+	// Running a command is recorded against the workload as a `commandRan` event
+	// naming the principal and the command.
+	//
+	// A terminal is not allocated. The command sees pipes, so an interactive shell
+	// does not behave as one would in a terminal.
+	//
+	// Corresponds with GET /api/v1/workloads/{name}/exec (the `ExecWorkload` operationId).
+	ExecWorkload(ctx context.Context, name WorkloadName, params *ExecWorkloadParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetWorkloadLogs Read a workload's logs
 	//
@@ -5708,6 +5765,63 @@ func (c *Client) DryRunWorkload(ctx context.Context, name WorkloadName, body Dry
 // Corresponds with GET /api/v1/workloads/{name}/events (the `GetWorkloadEvents` operationId).
 func (c *Client) GetWorkloadEvents(ctx context.Context, name WorkloadName, params *GetWorkloadEventsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetWorkloadEventsRequest(c.Server, name, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ExecWorkload Run a command inside a running instance
+//
+// Upgrades the connection to a websocket and runs a command inside one running
+// instance of the workload, streaming its output back and the caller's input
+// in, until the command ends.
+//
+// A websocket rather than a one-way stream like the logs endpoint, because the
+// caller's input has to travel the other way on the same connection. A
+// websocket rather than a hijacked connection, because a hijack is refused
+// under HTTP/2, which a server reached over TLS negotiates, and because a
+// websocket passes through a reverse proxy and reaches a browser unchanged.
+//
+// Everything the server can refuse before the command is named is refused
+// before the upgrade, with an ordinary status: a missing workload, an instance
+// the count does not include, a workload running several instances with none
+// selected, a workload that is suspended or being deleted. The command itself
+// travels in the first frame rather than in the URL, so it reaches no access
+// log.
+//
+// Once upgraded, the client sends one text frame first, a JSON object with
+// `type` set to `start`, `command` holding the command and its arguments, and
+// `stdin` saying whether input follows. Binary frames then carry bytes, each
+// opening with one byte naming its stream: `0` for the caller's input, `1` for
+// the command's standard output and `2` for its standard error. A frame carries
+// at most 32767 bytes after that byte. When the caller's input has ended, the
+// client sends a text frame with `type` set to `closeStdin`. When the command
+// ends, the server sends a text frame with `type` set to `exit` and `exitCode`
+// holding its status, or `type` set to `error` and `error` saying why it did not
+// run, and closes the connection.
+//
+// The command runs where the instance runs: inside its container, or for an
+// exec workload under the same confinement and limits the instance was started
+// with, in its working directory, with its environment resolved again. It runs
+// as the instance does and can read what the instance can, which for a
+// workload resolving a secret into its environment is the secret's plaintext.
+// The operator role is required for the same reason applying a workload needs
+// it: both run code on the host.
+//
+// Running a command is recorded against the workload as a `commandRan` event
+// naming the principal and the command.
+//
+// A terminal is not allocated. The command sees pipes, so an interactive shell
+// does not behave as one would in a terminal.
+//
+// Corresponds with GET /api/v1/workloads/{name}/exec (the `ExecWorkload` operationId).
+func (c *Client) ExecWorkload(ctx context.Context, name WorkloadName, params *ExecWorkloadParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExecWorkloadRequest(c.Server, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -7755,6 +7869,67 @@ func NewGetWorkloadEventsRequest(server string, name WorkloadName, params *GetWo
 	return req, nil
 }
 
+// NewExecWorkloadRequest constructs an http.Request for the ExecWorkload method
+func NewExecWorkloadRequest(server string, name WorkloadName, params *ExecWorkloadParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/workloads/%s/exec", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Instance != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "instance", *params.Instance, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetWorkloadLogsRequest constructs an http.Request for the GetWorkloadLogs method
 func NewGetWorkloadLogsRequest(server string, name WorkloadName, params *GetWorkloadLogsParams) (*http.Request, error) {
 	var err error
@@ -9017,6 +9192,55 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /api/v1/workloads/{name}/events (the `GetWorkloadEvents` operationId).
 	GetWorkloadEventsWithResponse(ctx context.Context, name WorkloadName, params *GetWorkloadEventsParams, reqEditors ...RequestEditorFn) (*GetWorkloadEventsResponse, error)
+
+	// ExecWorkloadWithResponse Run a command inside a running instance
+	//
+	// Upgrades the connection to a websocket and runs a command inside one running
+	// instance of the workload, streaming its output back and the caller's input
+	// in, until the command ends.
+	//
+	// A websocket rather than a one-way stream like the logs endpoint, because the
+	// caller's input has to travel the other way on the same connection. A
+	// websocket rather than a hijacked connection, because a hijack is refused
+	// under HTTP/2, which a server reached over TLS negotiates, and because a
+	// websocket passes through a reverse proxy and reaches a browser unchanged.
+	//
+	// Everything the server can refuse before the command is named is refused
+	// before the upgrade, with an ordinary status: a missing workload, an instance
+	// the count does not include, a workload running several instances with none
+	// selected, a workload that is suspended or being deleted. The command itself
+	// travels in the first frame rather than in the URL, so it reaches no access
+	// log.
+	//
+	// Once upgraded, the client sends one text frame first, a JSON object with
+	// `type` set to `start`, `command` holding the command and its arguments, and
+	// `stdin` saying whether input follows. Binary frames then carry bytes, each
+	// opening with one byte naming its stream: `0` for the caller's input, `1` for
+	// the command's standard output and `2` for its standard error. A frame carries
+	// at most 32767 bytes after that byte. When the caller's input has ended, the
+	// client sends a text frame with `type` set to `closeStdin`. When the command
+	// ends, the server sends a text frame with `type` set to `exit` and `exitCode`
+	// holding its status, or `type` set to `error` and `error` saying why it did not
+	// run, and closes the connection.
+	//
+	// The command runs where the instance runs: inside its container, or for an
+	// exec workload under the same confinement and limits the instance was started
+	// with, in its working directory, with its environment resolved again. It runs
+	// as the instance does and can read what the instance can, which for a
+	// workload resolving a secret into its environment is the secret's plaintext.
+	// The operator role is required for the same reason applying a workload needs
+	// it: both run code on the host.
+	//
+	// Running a command is recorded against the workload as a `commandRan` event
+	// naming the principal and the command.
+	//
+	// A terminal is not allocated. The command sees pipes, so an interactive shell
+	// does not behave as one would in a terminal.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/workloads/{name}/exec (the `ExecWorkload` operationId).
+	ExecWorkloadWithResponse(ctx context.Context, name WorkloadName, params *ExecWorkloadParams, reqEditors ...RequestEditorFn) (*ExecWorkloadResponse, error)
 
 	// GetWorkloadLogsWithResponse Read a workload's logs
 	//
@@ -12417,6 +12641,89 @@ func (r GetWorkloadEventsResponse) ContentType() string {
 	return ""
 }
 
+// ExecWorkloadResponse401Headers the declared response headers of an HTTP 401 response for ExecWorkload
+type ExecWorkloadResponse401Headers struct {
+	WWWAuthenticate *string
+}
+
+type ExecWorkloadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *ErrorResponse
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *InternalServerError
+	// Headers401 the parsed response headers for an HTTP 401 response
+	Headers401 *ExecWorkloadResponse401Headers
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ExecWorkloadResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ExecWorkloadResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ExecWorkloadResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ExecWorkloadResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r ExecWorkloadResponse) GetJSON409() *ErrorResponse {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r ExecWorkloadResponse) GetJSON500() *InternalServerError {
+	return r.JSON500
+}
+
+// GetBody returns the raw response body bytes
+func (r ExecWorkloadResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ExecWorkloadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExecWorkloadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ExecWorkloadResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // GetWorkloadLogsResponse401Headers the declared response headers of an HTTP 401 response for GetWorkloadLogs
 type GetWorkloadLogsResponse401Headers struct {
 	WWWAuthenticate *string
@@ -14042,6 +14349,61 @@ func (c *ClientWithResponses) GetWorkloadEventsWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseGetWorkloadEventsResponse(rsp)
+}
+
+// ExecWorkloadWithResponse Run a command inside a running instance
+//
+// Upgrades the connection to a websocket and runs a command inside one running
+// instance of the workload, streaming its output back and the caller's input
+// in, until the command ends.
+//
+// A websocket rather than a one-way stream like the logs endpoint, because the
+// caller's input has to travel the other way on the same connection. A
+// websocket rather than a hijacked connection, because a hijack is refused
+// under HTTP/2, which a server reached over TLS negotiates, and because a
+// websocket passes through a reverse proxy and reaches a browser unchanged.
+//
+// Everything the server can refuse before the command is named is refused
+// before the upgrade, with an ordinary status: a missing workload, an instance
+// the count does not include, a workload running several instances with none
+// selected, a workload that is suspended or being deleted. The command itself
+// travels in the first frame rather than in the URL, so it reaches no access
+// log.
+//
+// Once upgraded, the client sends one text frame first, a JSON object with
+// `type` set to `start`, `command` holding the command and its arguments, and
+// `stdin` saying whether input follows. Binary frames then carry bytes, each
+// opening with one byte naming its stream: `0` for the caller's input, `1` for
+// the command's standard output and `2` for its standard error. A frame carries
+// at most 32767 bytes after that byte. When the caller's input has ended, the
+// client sends a text frame with `type` set to `closeStdin`. When the command
+// ends, the server sends a text frame with `type` set to `exit` and `exitCode`
+// holding its status, or `type` set to `error` and `error` saying why it did not
+// run, and closes the connection.
+//
+// The command runs where the instance runs: inside its container, or for an
+// exec workload under the same confinement and limits the instance was started
+// with, in its working directory, with its environment resolved again. It runs
+// as the instance does and can read what the instance can, which for a
+// workload resolving a secret into its environment is the secret's plaintext.
+// The operator role is required for the same reason applying a workload needs
+// it: both run code on the host.
+//
+// Running a command is recorded against the workload as a `commandRan` event
+// naming the principal and the command.
+//
+// A terminal is not allocated. The command sees pipes, so an interactive shell
+// does not behave as one would in a terminal.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/workloads/{name}/exec (the `ExecWorkload` operationId).
+func (c *ClientWithResponses) ExecWorkloadWithResponse(ctx context.Context, name WorkloadName, params *ExecWorkloadParams, reqEditors ...RequestEditorFn) (*ExecWorkloadResponse, error) {
+	rsp, err := c.ExecWorkload(ctx, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExecWorkloadResponse(rsp)
 }
 
 // GetWorkloadLogsWithResponse Read a workload's logs
@@ -17172,6 +17534,83 @@ func ParseGetWorkloadEventsResponse(rsp *http.Response) (*GetWorkloadEventsRespo
 	return response, nil
 }
 
+// ParseExecWorkloadResponse parses an HTTP response from a ExecWorkloadWithResponse call
+func ParseExecWorkloadResponse(rsp *http.Response) (*ExecWorkloadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExecWorkloadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 101:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest ErrorResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest InternalServerError
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 401:
+		var headers ExecWorkloadResponse401Headers
+		if values := rsp.Header.Values("WWW-Authenticate"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "WWW-Authenticate", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.WWWAuthenticate = &value
+		}
+		response.Headers401 = &headers
+	}
+
+	return response, nil
+}
+
 // ParseGetWorkloadLogsResponse parses an HTTP response from a GetWorkloadLogsWithResponse call
 func ParseGetWorkloadLogsResponse(rsp *http.Response) (*GetWorkloadLogsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -17607,6 +18046,9 @@ type ServerInterface interface {
 	// GetWorkloadEvents Read what the server recorded about a workload
 	// (GET /api/v1/workloads/{name}/events)
 	GetWorkloadEvents(w http.ResponseWriter, r *http.Request, name WorkloadName, params GetWorkloadEventsParams)
+	// ExecWorkload Run a command inside a running instance
+	// (GET /api/v1/workloads/{name}/exec)
+	ExecWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName, params ExecWorkloadParams)
 	// GetWorkloadLogs Read a workload's logs
 	// (GET /api/v1/workloads/{name}/logs)
 	GetWorkloadLogs(w http.ResponseWriter, r *http.Request, name WorkloadName, params GetWorkloadLogsParams)
@@ -19106,6 +19548,56 @@ func (siw *ServerInterfaceWrapper) GetWorkloadEvents(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ExecWorkload operation middleware
+func (siw *ServerInterfaceWrapper) ExecWorkload(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "name" -------------
+	var name WorkloadName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", r.PathValue("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	ctx := r.Context()
+
+	ctx = context.WithValue(ctx, BearerScopes, []string{"operator"})
+
+	ctx = context.WithValue(ctx, SessionScopes, []string{"operator"})
+
+	r = r.WithContext(ctx)
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExecWorkloadParams
+
+	// ------------- Optional query parameter "instance" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "instance", r.URL.Query(), &params.Instance, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "instance"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "instance", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExecWorkload(w, r, name, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetWorkloadLogs operation middleware
 func (siw *ServerInterfaceWrapper) GetWorkloadLogs(w http.ResponseWriter, r *http.Request) {
 
@@ -19435,6 +19927,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}", wrapper.GetWorkload)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/workloads/{name}", wrapper.ApplyWorkload)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}/logs", wrapper.GetWorkloadLogs)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}/exec", wrapper.ExecWorkload)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/workloads/{name}/events", wrapper.GetWorkloadEvents)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/stop", wrapper.StopWorkload)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/workloads/{name}/start", wrapper.StartWorkload)
@@ -23282,6 +23775,112 @@ func (response GetWorkloadEvents500JSONResponse) VisitGetWorkloadEventsResponse(
 	return err
 }
 
+type ExecWorkloadRequestObject struct {
+	Name   WorkloadName `json:"name"`
+	Params ExecWorkloadParams
+}
+
+type ExecWorkloadResponseObject interface {
+	VisitExecWorkloadResponse(w http.ResponseWriter) error
+}
+
+type ExecWorkload101Response struct {
+}
+
+func (response ExecWorkload101Response) VisitExecWorkloadResponse(w http.ResponseWriter) error {
+	w.WriteHeader(101)
+	return nil
+}
+
+type ExecWorkload400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ExecWorkload400JSONResponse) VisitExecWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExecWorkload401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ExecWorkload401JSONResponse) VisitExecWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response.Body); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if response.Headers.WWWAuthenticate != nil {
+		w.Header().Set("WWW-Authenticate", fmt.Sprint(*response.Headers.WWWAuthenticate))
+	}
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExecWorkload403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ExecWorkload403JSONResponse) VisitExecWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExecWorkload404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ExecWorkload404JSONResponse) VisitExecWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExecWorkload409JSONResponse ErrorResponse
+
+func (response ExecWorkload409JSONResponse) VisitExecWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExecWorkload500JSONResponse struct {
+	InternalServerErrorJSONResponse
+}
+
+func (response ExecWorkload500JSONResponse) VisitExecWorkloadResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(500)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetWorkloadLogsRequestObject struct {
 	Name   WorkloadName `json:"name"`
 	Params GetWorkloadLogsParams
@@ -23838,6 +24437,9 @@ type StrictServerInterface interface {
 	// GetWorkloadEvents Read what the server recorded about a workload
 	// (GET /api/v1/workloads/{name}/events)
 	GetWorkloadEvents(ctx context.Context, request GetWorkloadEventsRequestObject) (GetWorkloadEventsResponseObject, error)
+	// ExecWorkload Run a command inside a running instance
+	// (GET /api/v1/workloads/{name}/exec)
+	ExecWorkload(ctx context.Context, request ExecWorkloadRequestObject) (ExecWorkloadResponseObject, error)
 	// GetWorkloadLogs Read a workload's logs
 	// (GET /api/v1/workloads/{name}/logs)
 	GetWorkloadLogs(ctx context.Context, request GetWorkloadLogsRequestObject) (GetWorkloadLogsResponseObject, error)
@@ -25007,6 +25609,33 @@ func (sh *strictHandler) GetWorkloadEvents(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetWorkloadEventsResponseObject); ok {
 		if err := validResponse.VisitGetWorkloadEventsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExecWorkload operation middleware
+func (sh *strictHandler) ExecWorkload(w http.ResponseWriter, r *http.Request, name WorkloadName, params ExecWorkloadParams) {
+	var request ExecWorkloadRequestObject
+
+	request.Name = name
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ExecWorkload(ctx, request.(ExecWorkloadRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExecWorkload")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ExecWorkloadResponseObject); ok {
+		if err := validResponse.VisitExecWorkloadResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

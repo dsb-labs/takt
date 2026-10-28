@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/middleware"
@@ -54,6 +56,9 @@ type (
 		// Logs should write the recent output of the named workload to out, as the
 		// options describe.
 		Logs(ctx context.Context, out io.Writer, name string, options driver.LogOptions) error
+		// Exec should run a command inside one running instance of the named
+		// workload, as the options describe, and report the status it exited with.
+		Exec(ctx context.Context, name string, options service.ExecOptions) (int, error)
 	}
 
 	// The WorkloadAPI type exposes HTTP endpoints for managing workloads.
@@ -595,6 +600,282 @@ func (r logsResponse) VisitGetWorkloadLogsResponse(w http.ResponseWriter) error 
 	}
 
 	return nil
+}
+
+// ExecWorkload runs a command inside one running instance of the named workload,
+// over a websocket the request is upgraded to.
+//
+// Everything that can be refused without the command is refused here, before the
+// upgrade, with an ordinary status. The command arrives in the first frame, so
+// what it names is checked by the service once the connection is the operator's.
+func (a *WorkloadAPI) ExecWorkload(ctx context.Context, request api.ExecWorkloadRequestObject) (api.ExecWorkloadResponseObject, error) {
+	workload, err := a.workloads.Get(ctx, request.Name)
+	switch {
+	case errors.Is(err, service.ErrWorkloadNotFound):
+		return api.ExecWorkload404JSONResponse{
+			Error: fmt.Sprintf("workload %q does not exist", request.Name),
+		}, nil
+	case err != nil:
+		return api.ExecWorkload500JSONResponse{
+			Error: internalError(a.logger, "run command", err),
+		}, nil
+	case workload.Deleting:
+		return api.ExecWorkload409JSONResponse{
+			Error: fmt.Sprintf("workload %q is being deleted", request.Name),
+		}, nil
+	case workload.Suspended:
+		return api.ExecWorkload409JSONResponse{
+			Error: fmt.Sprintf("workload %q is suspended, so nothing is running to run a command in", request.Name),
+		}, nil
+	}
+
+	instance := request.Params.Instance
+
+	// The instance rules are enforced before the upgrade for the reason the missing
+	// workload is. The service refuses both again, but a refusal after the upgrade
+	// can no longer become a status code.
+	if instance != nil && (*instance < 0 || *instance >= workload.Spec.Count) {
+		return api.ExecWorkload400JSONResponse{
+			Error: fmt.Sprintf("workload %q has no instance %d", request.Name, *instance),
+		}, nil
+	}
+
+	if instance == nil && workload.Spec.Count > 1 {
+		return api.ExecWorkload400JSONResponse{
+			Error: fmt.Sprintf("select an instance to run the command in: workload %q runs %d", request.Name, workload.Spec.Count),
+		}, nil
+	}
+
+	return execResponse{
+		ctx:       ctx,
+		logger:    a.logger,
+		request:   requestOf(ctx),
+		conn:      middleware.Connection(ctx),
+		name:      request.Name,
+		instance:  instance,
+		principal: middleware.CallerIdentity(ctx).Principal,
+		run:       a.workloads.Exec,
+	}, nil
+}
+
+// The execResponse type takes over a request's connection to run a command inside
+// an instance, carrying the command's streams over a websocket for as long as it
+// runs.
+type execResponse struct {
+	ctx    context.Context
+	logger *slog.Logger
+	// The request being upgraded, for the headers the handshake reads.
+	request *http.Request
+	// The connection's own writer, which is the one the upgrade has to go through.
+	// Every wrapper between it and the handler is written for a response that
+	// answers and stops, and one of them compresses a body this response never
+	// has. Nil when nothing put it there, and the handler's writer is used.
+	conn http.ResponseWriter
+	// The workload and the instance the command runs in.
+	name     string
+	instance *int
+	// Who is running it, recorded against the workload.
+	principal string
+	run       func(ctx context.Context, name string, options service.ExecOptions) (int, error)
+}
+
+// How long the closing frames are given to reach a client, so a client that
+// stopped reading does not hold the handler open after the command has ended.
+const execCloseTimeout = 10 * time.Second
+
+// errExecProtocol marks a session the client opened wrongly: a first frame that is
+// not the start of a command. It is the client's mistake rather than the server's,
+// so the client is told what it was.
+var errExecProtocol = errors.New("invalid exec session")
+
+// VisitExecWorkloadResponse upgrades the connection and serves the command on it.
+//
+// A request that cannot be upgraded has already been answered by the time the
+// upgrade fails, with a status saying what was wrong with it, so nothing is left
+// to return.
+func (r execResponse) VisitExecWorkloadResponse(w http.ResponseWriter) error {
+	if r.request == nil {
+		return errors.New("the request is not within reach of the handler")
+	}
+
+	if r.conn != nil {
+		w = r.conn
+	}
+
+	// The origin is checked against the host the request named, which is the
+	// check the guard in front of the API already makes. Compression is off: the
+	// frames are a terminal's worth of bytes at a time, and the latency of each
+	// matters more than its size.
+	conn, err := websocket.Accept(w, r.request, &websocket.AcceptOptions{
+		CompressionMode: websocket.CompressionDisabled,
+	})
+	if err != nil {
+		r.logger.With("error", err, "workload", r.name).Debug("refused a websocket upgrade")
+
+		return nil
+	}
+	defer conn.CloseNow()
+
+	r.serve(conn)
+
+	return nil
+}
+
+// serve runs the command the first frame names, carrying its streams over the
+// connection until it ends, and says how it ended.
+func (r execResponse) serve(conn *websocket.Conn) {
+	// Ended when the client goes away, which is what ends the command. After the
+	// upgrade the request's own context no longer notices a client leaving, so the
+	// read loop below is what reports it.
+	ctx, cancel := context.WithCancel(r.ctx)
+	defer cancel()
+
+	start, err := readExecMessage(ctx, conn)
+	switch {
+	case err != nil:
+		r.end(ctx, conn, 0, fmt.Errorf("%w: failed to read the first frame: %w", errExecProtocol, err))
+
+		return
+	case start.Type != wire.ExecStart:
+		r.end(ctx, conn, 0, fmt.Errorf("%w: the first frame must start the command, got %q", errExecProtocol, start.Type))
+
+		return
+	}
+
+	send := func(frame []byte) error {
+		return conn.Write(ctx, websocket.MessageBinary, frame)
+	}
+
+	options := service.ExecOptions{
+		Instance:  r.instance,
+		Command:   start.Command,
+		Stdout:    wire.ExecFrameWriter{Stream: wire.ExecStdout, Send: send},
+		Stderr:    wire.ExecFrameWriter{Stream: wire.ExecStderr, Send: send},
+		Principal: r.principal,
+	}
+
+	// The operator's input reaches the command through a pipe the read loop writes
+	// to. Closed once the command has ended however it ended, so a driver still
+	// copying from it stops.
+	var input *io.PipeWriter
+	if start.Stdin {
+		var reader *io.PipeReader
+
+		reader, input = io.Pipe()
+		options.Stdin = reader
+
+		defer input.Close()
+	}
+
+	go readExecInput(ctx, conn, input, cancel)
+
+	status, err := r.run(ctx, r.name, options)
+
+	r.end(ctx, conn, status, err)
+}
+
+// end tells the client how the command ended and closes the connection.
+//
+// A client that has gone is told nothing: the context the read loop cancelled says
+// so, and every write would fail anyway. A failure the service reported is given
+// to the client in the words the API would have used for a status, and one it did
+// not expect is logged here and reported as a failure to run the command.
+func (r execResponse) end(ctx context.Context, conn *websocket.Conn, status int, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, execCloseTimeout)
+	defer cancel()
+
+	message := wire.ExecMessage{Type: wire.ExecExit, ExitCode: new(status)}
+	if err != nil {
+		message = wire.ExecMessage{Type: wire.ExecError, Error: r.reason(err)}
+	}
+
+	encoded, err := json.Marshal(message)
+	if err != nil {
+		return
+	}
+
+	if err = conn.Write(ctx, websocket.MessageText, encoded); err != nil {
+		return
+	}
+
+	_ = conn.Close(websocket.StatusNormalClosure, "")
+}
+
+// reason renders why a command did not run, or did not finish, for the client.
+func (r execResponse) reason(err error) string {
+	switch {
+	case errors.Is(err, errExecProtocol),
+		errors.Is(err, service.ErrInstanceNotRunning),
+		errors.Is(err, service.ErrNoCommand),
+		errors.Is(err, service.ErrNoSuchInstance),
+		errors.Is(err, service.ErrInstanceRequired),
+		errors.Is(err, service.ErrUnsupportedRuntime),
+		errors.Is(err, service.ErrWorkloadNotFound),
+		errors.Is(err, service.ErrWorkloadSuspended),
+		errors.Is(err, service.ErrWorkloadDeleting):
+		return err.Error()
+	default:
+		return internalError(r.logger, "run command", err)
+	}
+}
+
+// readExecMessage reads the next frame, which has to be a text frame carrying a
+// message about the command.
+func readExecMessage(ctx context.Context, conn *websocket.Conn) (wire.ExecMessage, error) {
+	kind, data, err := conn.Read(ctx)
+	switch {
+	case err != nil:
+		return wire.ExecMessage{}, err
+	case kind != websocket.MessageText:
+		return wire.ExecMessage{}, errors.New("expected a text frame")
+	}
+
+	var message wire.ExecMessage
+	if err = json.Unmarshal(data, &message); err != nil {
+		return wire.ExecMessage{}, fmt.Errorf("failed to decode the frame: %w", err)
+	}
+
+	return message, nil
+}
+
+// readExecInput reads what the client sends for the rest of the session: the
+// operator's input, the end of it, and the client going away.
+//
+// Input is written to the pipe the command reads from, so a command that is not
+// reading holds the loop at the frame it cannot deliver, which is the back pressure
+// a pipe is meant to apply. A frame on a stream the client does not send is dropped
+// rather than failing the session. The read that fails is the client leaving, and
+// cancelling the context is what ends the command.
+func readExecInput(ctx context.Context, conn *websocket.Conn, input *io.PipeWriter, cancel context.CancelFunc) {
+	defer cancel()
+
+	for {
+		kind, data, err := conn.Read(ctx)
+		if err != nil {
+			return
+		}
+
+		switch {
+		case kind == websocket.MessageBinary && input != nil && len(data) > 0 && data[0] == wire.ExecStdin:
+			if _, err = input.Write(data[1:]); err != nil {
+				return
+			}
+		case kind == websocket.MessageText:
+			var message wire.ExecMessage
+			if err = json.Unmarshal(data, &message); err != nil {
+				return
+			}
+
+			if message.Type == wire.ExecCloseStdin && input != nil {
+				_ = input.Close()
+				input = nil
+			}
+		}
+	}
 }
 
 // instanceHealth maps what takt established about a workload's health onto the wire

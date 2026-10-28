@@ -2926,6 +2926,78 @@ func (_c *MockWorkloadService_Events_Call) RunAndReturn(run func(ctx context.Con
 	return _c
 }
 
+// Exec provides a mock function for the type MockWorkloadService
+func (_mock *MockWorkloadService) Exec(ctx context.Context, name string, options service.ExecOptions) (int, error) {
+	ret := _mock.Called(ctx, name, options)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Exec")
+	}
+
+	var r0 int
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, service.ExecOptions) (int, error)); ok {
+		return returnFunc(ctx, name, options)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, service.ExecOptions) int); ok {
+		r0 = returnFunc(ctx, name, options)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, service.ExecOptions) error); ok {
+		r1 = returnFunc(ctx, name, options)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockWorkloadService_Exec_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Exec'
+type MockWorkloadService_Exec_Call struct {
+	*mock.Call
+}
+
+// Exec is a helper method to define mock.On call
+//   - ctx context.Context
+//   - name string
+//   - options service.ExecOptions
+func (_e *MockWorkloadService_Expecter) Exec(ctx any, name any, options any) *MockWorkloadService_Exec_Call {
+	return &MockWorkloadService_Exec_Call{Call: _e.mock.On("Exec", ctx, name, options)}
+}
+
+func (_c *MockWorkloadService_Exec_Call) Run(run func(ctx context.Context, name string, options service.ExecOptions)) *MockWorkloadService_Exec_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 service.ExecOptions
+		if args[2] != nil {
+			arg2 = args[2].(service.ExecOptions)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockWorkloadService_Exec_Call) Return(n int, err error) *MockWorkloadService_Exec_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockWorkloadService_Exec_Call) RunAndReturn(run func(ctx context.Context, name string, options service.ExecOptions) (int, error)) *MockWorkloadService_Exec_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Get provides a mock function for the type MockWorkloadService
 func (_mock *MockWorkloadService) Get(ctx context.Context, name string) (service.Workload, error) {
 	ret := _mock.Called(ctx, name)

@@ -11,15 +11,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	generated "github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/server/api"
+	"github.com/dsb-labs/takt/internal/server/auth"
 	"github.com/dsb-labs/takt/internal/server/driver"
 	"github.com/dsb-labs/takt/internal/server/event"
 	"github.com/dsb-labs/takt/internal/server/health"
@@ -27,6 +31,7 @@ import (
 	"github.com/dsb-labs/takt/internal/server/port"
 	"github.com/dsb-labs/takt/internal/server/service"
 	"github.com/dsb-labs/takt/internal/server/state"
+	"github.com/dsb-labs/takt/internal/wire"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
 
@@ -1289,6 +1294,288 @@ func TestWorkloadAPI_GetWorkloadEvents(t *testing.T) {
 		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/events", nil)
 		assert.Equal(t, http.StatusInternalServerError, resp.Code)
 	})
+}
+
+func TestWorkloadAPI_ExecWorkload(t *testing.T) {
+	t.Parallel()
+
+	t.Run("reports a missing workload before the upgrade", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "nope").Return(service.Workload{}, service.ErrWorkloadNotFound).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/nope/exec", nil)
+		assert.Equal(t, http.StatusNotFound, resp.Code)
+	})
+
+	t.Run("refuses a suspended workload before the upgrade", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+
+		suspended := workload("example", state.Suspended)
+		suspended.Suspended = true
+
+		svc.EXPECT().Get(mock.Anything, "example").Return(suspended, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/exec", nil)
+		assert.Equal(t, http.StatusConflict, resp.Code)
+	})
+
+	t.Run("refuses an instance the count does not include before the upgrade", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/exec?instance=3", nil)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("requires an instance of a workload running several before the upgrade", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+
+		counted := workload("example", state.Running)
+		counted.Spec.Count = 2
+
+		svc.EXPECT().Get(mock.Anything, "example").Return(counted, nil).Once()
+
+		resp := do(t, svc, http.MethodGet, "/api/v1/workloads/example/exec", nil)
+		assert.Equal(t, http.StatusBadRequest, resp.Code)
+	})
+
+	t.Run("runs the command and reports how it ended", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
+		svc.EXPECT().Exec(mock.Anything, "example", mock.MatchedBy(func(options service.ExecOptions) bool {
+			return slices.Equal(options.Command, []string{"ls", "-l"}) && options.Instance == nil && options.Stdin == nil
+		})).RunAndReturn(func(_ context.Context, _ string, options service.ExecOptions) (int, error) {
+			_, _ = options.Stdout.Write([]byte("listed\n"))
+			_, _ = options.Stderr.Write([]byte("warned\n"))
+
+			return 3, nil
+		}).Once()
+
+		conn := dialExec(t, serveExec(t, svc), "/api/v1/workloads/example/exec")
+
+		sendExec(t, conn, wire.ExecMessage{Type: wire.ExecStart, Command: []string{"ls", "-l"}})
+
+		assert.Equal(t, "\x01listed\n", string(readFrame(t, conn, websocket.MessageBinary)))
+		assert.Equal(t, "\x02warned\n", string(readFrame(t, conn, websocket.MessageBinary)))
+
+		ended := readExec(t, conn)
+		assert.Equal(t, wire.ExecExit, ended.Type)
+		require.NotNil(t, ended.ExitCode)
+		assert.Equal(t, 3, *ended.ExitCode)
+
+		assertClosed(t, conn)
+	})
+
+	t.Run("carries the operator's input to the command", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
+		svc.EXPECT().Exec(mock.Anything, "example", mock.MatchedBy(func(options service.ExecOptions) bool {
+			return options.Instance != nil && *options.Instance == 0 && options.Stdin != nil
+		})).RunAndReturn(func(_ context.Context, _ string, options service.ExecOptions) (int, error) {
+			// Everything until the input ends, so this also proves closeStdin
+			// reaches the command as end of file.
+			typed, err := io.ReadAll(options.Stdin)
+			if err != nil {
+				return 0, err
+			}
+
+			_, _ = options.Stdout.Write(typed)
+
+			return 0, nil
+		}).Once()
+
+		conn := dialExec(t, serveExec(t, svc), "/api/v1/workloads/example/exec?instance=0")
+
+		sendExec(t, conn, wire.ExecMessage{Type: wire.ExecStart, Command: []string{"cat"}, Stdin: true})
+		require.NoError(t, conn.Write(t.Context(), websocket.MessageBinary, []byte("\x00typed\n")))
+		sendExec(t, conn, wire.ExecMessage{Type: wire.ExecCloseStdin})
+
+		assert.Equal(t, "\x01typed\n", string(readFrame(t, conn, websocket.MessageBinary)))
+
+		ended := readExec(t, conn)
+		assert.Equal(t, wire.ExecExit, ended.Type)
+	})
+
+	t.Run("reports a command that could not run", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
+		svc.EXPECT().Exec(mock.Anything, "example", mock.Anything).
+			Return(0, fmt.Errorf("%w: instance 0", service.ErrInstanceNotRunning)).Once()
+
+		conn := dialExec(t, serveExec(t, svc), "/api/v1/workloads/example/exec")
+
+		sendExec(t, conn, wire.ExecMessage{Type: wire.ExecStart, Command: []string{"ls"}})
+
+		ended := readExec(t, conn)
+		assert.Equal(t, wire.ExecError, ended.Type)
+		assert.Contains(t, ended.Error, "instance is not running")
+	})
+
+	t.Run("refuses a first frame that does not start a command", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
+
+		conn := dialExec(t, serveExec(t, svc), "/api/v1/workloads/example/exec")
+
+		sendExec(t, conn, wire.ExecMessage{Type: wire.ExecCloseStdin})
+
+		ended := readExec(t, conn)
+		assert.Equal(t, wire.ExecError, ended.Type)
+		assert.Contains(t, ended.Error, "must start the command")
+	})
+
+	t.Run("ends the command when the client goes away", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
+
+		// What a command that runs until something stops it looks like from the
+		// service: it returns when its context does, and not before.
+		ended := make(chan error, 1)
+
+		svc.EXPECT().Exec(mock.Anything, "example", mock.Anything).
+			RunAndReturn(func(ctx context.Context, _ string, _ service.ExecOptions) (int, error) {
+				<-ctx.Done()
+				ended <- ctx.Err()
+
+				return 0, ctx.Err()
+			}).Once()
+
+		conn := dialExec(t, serveExec(t, svc), "/api/v1/workloads/example/exec")
+
+		sendExec(t, conn, wire.ExecMessage{Type: wire.ExecStart, Command: []string{"sleep", "60"}})
+		require.NoError(t, conn.CloseNow())
+
+		select {
+		case err := <-ended:
+			assert.ErrorIs(t, err, context.Canceled)
+		case <-time.After(5 * time.Second):
+			t.Fatal("the command outlived the client")
+		}
+	})
+
+	t.Run("names the principal who ran the command", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+		svc.EXPECT().Get(mock.Anything, "example").Return(workload("example", state.Running), nil).Once()
+		svc.EXPECT().Exec(mock.Anything, "example", mock.MatchedBy(func(options service.ExecOptions) bool {
+			return options.Principal == "alice@example.com"
+		})).Return(0, nil).Once()
+
+		server := serveExecAs(t, svc, identityStub{identity: auth.Identity{
+			Principal: "alice@example.com",
+			Role:      manifest.RoleOperator,
+			TokenID:   "id",
+		}})
+
+		conn := dialExec(t, server, "/api/v1/workloads/example/exec")
+
+		sendExec(t, conn, wire.ExecMessage{Type: wire.ExecStart, Command: []string{"ls"}})
+
+		ended := readExec(t, conn)
+		assert.Equal(t, wire.ExecExit, ended.Type)
+	})
+
+	t.Run("requires the operator role", func(t *testing.T) {
+		svc := NewMockWorkloadService(t)
+
+		server := serveExecAs(t, svc, identityStub{identity: auth.Identity{
+			Principal: "prometheus",
+			Role:      manifest.RoleViewer,
+			TokenID:   "id",
+		}})
+
+		_, resp, err := websocket.Dial(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+"/api/v1/workloads/example/exec", &websocket.DialOptions{
+			HTTPHeader: http.Header{"Authorization": {"Bearer credential"}},
+		})
+		require.Error(t, err)
+		require.NotNil(t, resp)
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	})
+}
+
+// serveExec serves the API over a real connection, through the middleware the
+// server puts in front of it, with authentication disabled. The exec endpoint
+// takes the connection over, which the recorder every other test writes to cannot
+// offer.
+func serveExec(t *testing.T, svc *MockWorkloadService) *httptest.Server {
+	t.Helper()
+
+	return serveExecAs(t, svc, nil)
+}
+
+// serveExecAs serves the API as serveExec does, resolving every credential to the
+// identity the given authenticator returns.
+func serveExecAs(t *testing.T, svc *MockWorkloadService, authenticator middleware.Authenticator) *httptest.Server {
+	t.Helper()
+
+	logger := slog.New(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelError}))
+
+	mux := http.NewServeMux()
+	api.New(api.Config{
+		Logger:    logger,
+		Workloads: api.NewWorkloadAPI(api.WorkloadAPIConfig{Logger: logger, Workloads: svc}),
+	}).Register(mux)
+
+	server := httptest.NewServer(middleware.Wrap(mux, middleware.Config{
+		Logger:        logger,
+		Authenticator: authenticator,
+	}))
+	t.Cleanup(server.Close)
+
+	return server
+}
+
+// dialExec opens the exec websocket at the given path, presenting a credential so
+// an authenticator that reads one has something to resolve.
+func dialExec(t *testing.T, server *httptest.Server, path string) *websocket.Conn {
+	t.Helper()
+
+	conn, _, err := websocket.Dial(t.Context(), "ws"+strings.TrimPrefix(server.URL, "http")+path, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": {"Bearer credential"}},
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.CloseNow() })
+
+	return conn
+}
+
+// sendExec sends a message about the command as a text frame.
+func sendExec(t *testing.T, conn *websocket.Conn, message wire.ExecMessage) {
+	t.Helper()
+
+	encoded, err := json.Marshal(message)
+	require.NoError(t, err)
+	require.NoError(t, conn.Write(t.Context(), websocket.MessageText, encoded))
+}
+
+// readFrame reads the next frame, requiring it to be of the given kind.
+func readFrame(t *testing.T, conn *websocket.Conn, want websocket.MessageType) []byte {
+	t.Helper()
+
+	kind, data, err := conn.Read(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, want, kind)
+
+	return data
+}
+
+// readExec reads the next frame as a message about the command.
+func readExec(t *testing.T, conn *websocket.Conn) wire.ExecMessage {
+	t.Helper()
+
+	var message wire.ExecMessage
+	require.NoError(t, json.Unmarshal(readFrame(t, conn, websocket.MessageText), &message))
+
+	return message
+}
+
+// assertClosed asserts the server closed the connection normally once it had said
+// how the command ended.
+func assertClosed(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+
+	_, _, err := conn.Read(t.Context())
+	require.Error(t, err)
+	assert.Equal(t, websocket.StatusNormalClosure, websocket.CloseStatus(err))
 }
 
 func do(t *testing.T, svc *MockWorkloadService, method, target string, body io.Reader) *httptest.ResponseRecorder {

@@ -115,6 +115,69 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/workloads/{name}/exec": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The name that identifies the workload. */
+        name: components["parameters"]["WorkloadName"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Run a command inside a running instance
+     * @description Upgrades the connection to a websocket and runs a command inside one running
+     *     instance of the workload, streaming its output back and the caller's input
+     *     in, until the command ends.
+     *
+     *     A websocket rather than a one-way stream like the logs endpoint, because the
+     *     caller's input has to travel the other way on the same connection. A
+     *     websocket rather than a hijacked connection, because a hijack is refused
+     *     under HTTP/2, which a server reached over TLS negotiates, and because a
+     *     websocket passes through a reverse proxy and reaches a browser unchanged.
+     *
+     *     Everything the server can refuse before the command is named is refused
+     *     before the upgrade, with an ordinary status: a missing workload, an instance
+     *     the count does not include, a workload running several instances with none
+     *     selected, a workload that is suspended or being deleted. The command itself
+     *     travels in the first frame rather than in the URL, so it reaches no access
+     *     log.
+     *
+     *     Once upgraded, the client sends one text frame first, a JSON object with
+     *     `type` set to `start`, `command` holding the command and its arguments, and
+     *     `stdin` saying whether input follows. Binary frames then carry bytes, each
+     *     opening with one byte naming its stream: `0` for the caller's input, `1` for
+     *     the command's standard output and `2` for its standard error. A frame carries
+     *     at most 32767 bytes after that byte. When the caller's input has ended, the
+     *     client sends a text frame with `type` set to `closeStdin`. When the command
+     *     ends, the server sends a text frame with `type` set to `exit` and `exitCode`
+     *     holding its status, or `type` set to `error` and `error` saying why it did not
+     *     run, and closes the connection.
+     *
+     *     The command runs where the instance runs: inside its container, or for an
+     *     exec workload under the same confinement and limits the instance was started
+     *     with, in its working directory, with its environment resolved again. It runs
+     *     as the instance does and can read what the instance can, which for a
+     *     workload resolving a secret into its environment is the secret's plaintext.
+     *     The operator role is required for the same reason applying a workload needs
+     *     it: both run code on the host.
+     *
+     *     Running a command is recorded against the workload as a `commandRan` event
+     *     naming the principal and the command.
+     *
+     *     A terminal is not allocated. The command sees pipes, so an interactive shell
+     *     does not behave as one would in a terminal.
+     */
+    get: operations["execWorkload"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/workloads/{name}/events": {
     parameters: {
       query?: never;
@@ -3573,6 +3636,53 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
+      500: components["responses"]["InternalServerError"];
+    };
+  };
+  execWorkload: {
+    parameters: {
+      query?: {
+        /**
+         * @description Which instance to run the command in, selected by its index. Omitted
+         *     selects the only instance there is, and is refused for a workload running
+         *     more than one: a command runs in one instance, and there is no reasonable
+         *     choice to make for the caller. An index the workload's count does not
+         *     include is refused.
+         */
+        instance?: number;
+      };
+      header?: never;
+      path: {
+        /** @description The name that identifies the workload. */
+        name: components["parameters"]["WorkloadName"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /**
+       * @description The connection was upgraded. What follows is the websocket exchange the
+       *     description above lays out.
+       */
+      101: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      /** @description The workload is being deleted or is suspended. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ErrorResponse"];
+        };
+      };
       500: components["responses"]["InternalServerError"];
     };
   };

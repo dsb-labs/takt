@@ -120,7 +120,7 @@ func New(config Config) *API {
 // cannot write, with a plain-text body of its own. Both are routed through the
 // API's own error shape instead, so a client decodes every failure the same way.
 func (a *API) Register(mux *http.ServeMux) {
-	handler := api.NewStrictHandlerWithOptions(a, []api.StrictMiddlewareFunc{authorize}, api.StrictHTTPServerOptions{
+	handler := api.NewStrictHandlerWithOptions(a, []api.StrictMiddlewareFunc{authorize, withRequest}, api.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc:  a.requestError,
 		ResponseErrorHandlerFunc: a.responseError,
 	})
@@ -291,6 +291,30 @@ func authorize(f api.StrictHandlerFunc, _ string) api.StrictHandlerFunc {
 
 		return f(ctx, w, r, request)
 	}
+}
+
+// The key the request itself is stored under, for the one handler that has to take
+// over its connection.
+type requestKey struct{}
+
+// withRequest keeps the request within reach of the handler.
+//
+// The generated code hands a handler its decoded parameters and nothing else, which
+// is right for every operation but one: upgrading a connection to a websocket needs
+// the request the parameters came from, headers and all. It travels in the context
+// the way the caller's identity does, rather than widening every handler's signature
+// for the one that reads it.
+func withRequest(f api.StrictHandlerFunc, _ string) api.StrictHandlerFunc {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, request any) (any, error) {
+		return f(context.WithValue(ctx, requestKey{}, r), w, r, request)
+	}
+}
+
+// requestOf returns the request withRequest stored, or nil when nothing did.
+func requestOf(ctx context.Context) *http.Request {
+	r, _ := ctx.Value(requestKey{}).(*http.Request)
+
+	return r
 }
 
 // keepOpen prepares a response that stays open for as long as something keeps
