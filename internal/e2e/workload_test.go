@@ -835,6 +835,70 @@ func (s *Suite) TestEventsRecordWhyAWorkloadLooksTheWayItDoes() {
 	s.False(started.LastSeen.Before(started.FirstSeen))
 }
 
+// TestExecRunsACommandInsideAContainer covers the exec surface end to end on the
+// container runtime: a command runs inside the instance, its streams come back
+// apart, its input reaches it, its status is reported, and the workload's events
+// say it ran.
+func (s *Suite) TestExecRunsACommandInsideAContainer() {
+	name := s.workloadName()
+	s.T().Cleanup(func() { s.cleanup(name) })
+
+	_, _, err := s.client.Apply(s.ctx(), s.containerSpec(name))
+	s.Require().NoError(err)
+
+	s.awaitState(name, client.WorkloadStateRunning)
+
+	// The hostname inside a container is the container's own identifier, so what
+	// the command prints proves it ran inside the instance rather than on the host.
+	containers := s.runningContainers(name)
+	s.Require().Len(containers, 1)
+
+	var stdout, stderr bytes.Buffer
+
+	status, err := s.client.Exec(s.ctx(), name, client.Command{
+		Command: []string{"sh", "-c", "hostname; echo on-stderr >&2; exit 3"},
+		Stdout:  &stdout,
+		Stderr:  &stderr,
+	})
+	s.Require().NoError(err)
+
+	s.Equal(3, status, "the command's status was not reported")
+	s.True(strings.HasPrefix(containers[0], strings.TrimSpace(stdout.String())), "the command did not run inside the container")
+	s.Equal("on-stderr\n", stderr.String(), "the command's standard error was not kept apart")
+
+	// The input ends when the reader does, which is what lets cat return.
+	stdout.Reset()
+
+	status, err = s.client.Exec(s.ctx(), name, client.Command{
+		Command: []string{"cat"},
+		Stdin:   strings.NewReader("piped in\n"),
+		Stdout:  &stdout,
+	})
+	s.Require().NoError(err)
+
+	s.Zero(status)
+	s.Equal("piped in\n", stdout.String(), "the operator's input did not reach the command")
+
+	events, err := s.client.Events(s.ctx(), name)
+	s.Require().NoError(err)
+
+	var ran []client.Event
+	for _, recorded := range events {
+		if recorded.Reason == client.EventCommandRan {
+			ran = append(ran, recorded)
+		}
+	}
+
+	s.Require().Len(ran, 2, "running a command was not recorded against the workload")
+
+	commands := make([][]string, 0, len(ran))
+	for _, recorded := range ran {
+		commands = append(commands, recorded.Data.Command)
+	}
+
+	s.Contains(commands, []string{"cat"})
+}
+
 // TestNeverPullPolicyRefusesAnAbsentImage covers the pull policy's loud failure: a
 // workload forbidden to pull must not fall through to a pull when its image is
 // absent, or the policy is indistinguishable from missing.
