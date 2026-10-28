@@ -336,12 +336,24 @@ func Run(ctx context.Context, config Config) error {
 		Directory: config.Data.Directory,
 	})
 
+	// One resolver for both kinds, because one value in an environment may hold
+	// both and expansion refuses what it cannot resolve. Shared with the workload
+	// service, so a command an operator runs in an exec instance is given the
+	// environment the instance was started with.
+	env := resolve.NewEnvResolver(resolve.EnvResolverConfig{
+		Logger:    logger,
+		Secrets:   secretSvc,
+		Variables: variableSvc,
+		Tokens:    tokenSvc,
+		Workloads: addresses,
+	})
+
 	// The drivers are keyed by the name each one declares, which is what a workload's
 	// runtime is matched against. A runtime with no driver is stored and left alone.
 	//
 	// Each consumer gets a map of its own interface: the reconciler starts and stops
-	// work where the service only reads, so neither is handed a driver wider than it
-	// needs.
+	// work where the service reads and runs an operator's command, so neither is
+	// handed a driver wider than it needs.
 	reconcile := reconciler.New(reconciler.Config{
 		Logger: logger,
 		// Wrapped so that every driver explains a converge the same way,
@@ -352,15 +364,7 @@ func Run(ctx context.Context, config Config) error {
 		},
 		Workloads: workloads,
 		Ports:     ports,
-		// One resolver for both kinds, because one value in an environment may hold
-		// both and expansion refuses what it cannot resolve.
-		Env: resolve.NewEnvResolver(resolve.EnvResolverConfig{
-			Logger:    logger,
-			Secrets:   secretSvc,
-			Variables: variableSvc,
-			Tokens:    tokenSvc,
-			Workloads: addresses,
-		}),
+		Env:       env,
 		// Written as a workload starts and removed when it stops, so a mounted value's
 		// plaintext is on the disk for no longer than the workload reading it.
 		Mounts: mounter,
@@ -504,6 +508,7 @@ func Run(ctx context.Context, config Config) error {
 		Checker:        checker,
 		Reconciler:     reconcile,
 		Events:         events,
+		Env:            env,
 		AllowHostPaths: hostPaths,
 		DigestInterval: config.Docker.DigestInterval,
 		MeterProvider:  tel.MeterProvider(),

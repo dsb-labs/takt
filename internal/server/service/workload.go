@@ -54,6 +54,11 @@ var (
 	// ErrInstanceRequired is returned when a request must select one instance of a
 	// workload running several and selects none.
 	ErrInstanceRequired = errors.New("an instance must be selected")
+	// ErrInstanceNotRunning is returned when a command is asked of an instance the
+	// driver has nothing running for.
+	ErrInstanceNotRunning = errors.New("instance is not running")
+	// ErrNoCommand is returned when a request to run a command names none.
+	ErrNoCommand = errors.New("no command given")
 )
 
 type (
@@ -81,6 +86,11 @@ type (
 		// rather than fail, since the caller does not know which runtime holds the
 		// workload.
 		Logs(ctx context.Context, out io.Writer, workload string, options driver.LogOptions) error
+		// Exec should run a command inside the running instance of a workload,
+		// copying its output and input as the Exec describes until it ends, and
+		// report the status it exited with. An instance the driver has nothing
+		// running for is reported as driver.ErrNoRunningInstance.
+		Exec(ctx context.Context, w driver.Workload, exec driver.Exec) (int, error)
 		// Enforceable should report whether the host lets the driver enforce
 		// resource limits, returning an error naming what is missing when it
 		// does not. A driver whose limits need nothing of the host answers nil
@@ -142,6 +152,20 @@ type (
 		// image pull, so an instance stopped to make way for it reads as pending
 		// rather than as ended.
 		Pulling(workload string, instance int) bool
+	}
+
+	// The EnvResolver interface describes how the service turns the references in a
+	// workload's environment into the values an operator's command is given.
+	//
+	// A command runs inside an instance the reconciler started, and on a runtime
+	// that keeps no environment it has to be resolved again. It is resolved here as
+	// late as it can be, so a secret's plaintext exists only while the command
+	// that needs it runs.
+	EnvResolver interface {
+		// Resolve should return env with every reference replaced by the value it
+		// names, reporting an error when one cannot be resolved. The reader's
+		// identifier is what a token minted for the instance is bound to.
+		Resolve(ctx context.Context, env map[string]string, readerID, reader string, readerInstance int) (map[string]string, error)
 	}
 
 	// The WorkloadEventRepository interface describes the event operations the
@@ -275,12 +299,36 @@ type (
 		checker    Checker
 		reconciler Reconciler
 		events     WorkloadEventRepository
+		env        EnvResolver
 		hostPaths  []driver.HostPath
 		samples    *usageSamples
 		digests    time.Duration
 		drifted    driftState
 	}
 )
+
+// The ExecOptions type describes a command an operator asks to run inside an
+// instance of a workload.
+type ExecOptions struct {
+	// Which instance to run the command in, by its index. Nil means the only
+	// instance there is, and is refused for a workload running more than one.
+	//
+	// A pointer rather than an index, because zero is a valid index and the unset
+	// case has to be told apart from asking for the first instance.
+	Instance *int
+	// The command to run, and its arguments.
+	Command []string
+	// The operator's input, copied to the command until it reaches end of file.
+	// Nil gives the command an input that is closed from the start.
+	Stdin io.Reader
+	// Where the command's standard output is written.
+	Stdout io.Writer
+	// Where the command's standard error is written.
+	Stderr io.Writer
+	// The principal running the command, recorded against the workload. Empty
+	// when the server authenticates nobody.
+	Principal string
+}
 
 // The WorkloadServiceConfig type contains fields used to construct a WorkloadService.
 type WorkloadServiceConfig struct {
@@ -324,6 +372,10 @@ type WorkloadServiceConfig struct {
 	// The repository holding what the server recorded about each workload. May be
 	// nil, in which case every workload reports no events.
 	Events WorkloadEventRepository
+	// Where the references in a workload's environment are resolved for a command
+	// an operator runs. May be nil, in which case a command is given the
+	// environment as the manifest wrote it.
+	Env EnvResolver
 	// The absolute prefixes a path mount may sit beneath. Empty rejects every
 	// path mount, which is the safe default: a host path reaches outside
 	// takt-managed state, so which ones are reachable is the operator's call.
@@ -354,6 +406,7 @@ func NewWorkloadService(config WorkloadServiceConfig) *WorkloadService {
 		checker:    config.Checker,
 		reconciler: config.Reconciler,
 		events:     config.Events,
+		env:        config.Env,
 		hostPaths:  config.AllowHostPaths,
 		samples:    newUsageSamples(),
 		digests:    config.DigestInterval,
@@ -644,6 +697,104 @@ func (s *WorkloadService) Logs(ctx context.Context, out io.Writer, name string, 
 	}
 
 	return nil
+}
+
+// Exec runs a command inside one running instance of the named workload, copying
+// its output and input as the options describe until it ends, and reports the
+// status it exited with.
+//
+// Returns ErrWorkloadNotFound when no such workload exists, ErrWorkloadDeleting
+// when it is being torn down, ErrWorkloadSuspended when nothing of it is meant to
+// be running, ErrNoSuchInstance for an index the count does not include,
+// ErrInstanceRequired for a counted workload with no instance selected,
+// ErrUnsupportedRuntime when no driver runs the workload's runtime, ErrNoCommand
+// for a request naming no command, and ErrInstanceNotRunning when the instance
+// has nothing running to run the command in.
+//
+// The driver is chosen from the workload's runtime rather than asked of every
+// driver as a read is. A command runs exactly once, and nothing reports which
+// runtime holds a workload more reliably than its stored specification.
+//
+// The event is recorded as the command starts. An operator's session may last
+// for as long as they keep it open, and what the history exists to say is that
+// somebody ran something, which is true from the moment it starts.
+func (s *WorkloadService) Exec(ctx context.Context, name string, options ExecOptions) (int, error) {
+	if len(options.Command) == 0 {
+		return 0, ErrNoCommand
+	}
+
+	row, err := s.workloads.Get(ctx, name)
+	switch {
+	case errors.Is(err, database.ErrWorkloadNotFound):
+		return 0, ErrWorkloadNotFound
+	case err != nil:
+		return 0, fmt.Errorf("failed to load workload: %w", err)
+	case !row.DeletedAt.IsZero():
+		return 0, ErrWorkloadDeleting
+	case !row.SuspendedAt.IsZero():
+		return 0, ErrWorkloadSuspended
+	}
+
+	spec, err := manifest.DecodeWorkload(row.Spec)
+	if err != nil {
+		return 0, err
+	}
+
+	var instance int
+	switch {
+	case options.Instance != nil && (*options.Instance < 0 || *options.Instance >= spec.Count):
+		return 0, fmt.Errorf("%w: workload %s runs %d", ErrNoSuchInstance, name, spec.Count)
+	case options.Instance != nil:
+		instance = *options.Instance
+	case spec.Count > 1:
+		return 0, fmt.Errorf("%w: workload %s runs %d instances and a command runs in one", ErrInstanceRequired, name, spec.Count)
+	}
+
+	runtime, ok := s.drivers[row.Runtime]
+	if !ok {
+		return 0, fmt.Errorf("%w: %s", ErrUnsupportedRuntime, row.Runtime)
+	}
+
+	// Only what identifies the instance to its driver. The mounts and ports an
+	// instance was started with are the instance's own, and a driver finds them
+	// from what it recorded when it started the instance rather than from here.
+	w := driver.Workload{
+		ID:       row.ID,
+		Name:     row.Name,
+		Instance: instance,
+		Version:  row.Version,
+		SpecHash: row.SpecHash,
+		Env:      spec.Env,
+		Spec:     spec,
+	}
+
+	s.record(ctx, name, event.CommandRan, event.Fields{
+		Principal: options.Principal,
+		Command:   options.Command,
+		Instance:  instance,
+	})
+
+	status, err := runtime.Exec(ctx, w, driver.Exec{
+		Command: options.Command,
+		Stdin:   options.Stdin,
+		Stdout:  options.Stdout,
+		Stderr:  options.Stderr,
+		Env: func(ctx context.Context) (map[string]string, error) {
+			if s.env == nil {
+				return w.Env, nil
+			}
+
+			return s.env.Resolve(ctx, w.Env, row.ID, row.Name, instance)
+		},
+	})
+	switch {
+	case errors.Is(err, driver.ErrNoRunningInstance):
+		return 0, fmt.Errorf("%w: instance %d", ErrInstanceNotRunning, instance)
+	case err != nil:
+		return 0, fmt.Errorf("failed to run command: %w", err)
+	default:
+		return status, nil
+	}
 }
 
 // parseQueries turns "path=value" strings into repository queries.
