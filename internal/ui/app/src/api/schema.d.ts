@@ -2284,6 +2284,7 @@ export interface components {
       | "instanceRemoved"
       | "portsAbandoned"
       | "mountsRefreshed"
+      | "commandRan"
       | "runStarted"
       | "runFinished"
       | "occurrenceSkipped"
@@ -2346,6 +2347,13 @@ export interface components {
       ports?: number[];
       /** @description What went wrong, where the event reports a failure. */
       error?: string;
+      /**
+       * @description The principal who acted, where the event reports something a person did.
+       *     Absent when the server authenticates nobody.
+       */
+      principal?: string;
+      /** @description The command an operator ran inside an instance, with its arguments. */
+      command?: string[];
     };
     /** @description A single unit of work the driver is running for a workload. */
     Instance: {

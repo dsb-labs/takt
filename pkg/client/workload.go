@@ -381,6 +381,9 @@ const (
 	// EventMountsRefreshed indicates the workload was signalled because a value it
 	// mounts changed.
 	EventMountsRefreshed EventReason = "mountsRefreshed"
+	// EventCommandRan indicates an operator ran a command inside an instance. The
+	// event's data names the principal and the command.
+	EventCommandRan EventReason = "commandRan"
 )
 
 // The reasons particular to a workload on a schedule.

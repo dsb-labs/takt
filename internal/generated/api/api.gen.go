@@ -348,6 +348,7 @@ const (
 	WorkloadEventReasonAddressMoved          WorkloadEventReason = "addressMoved"
 	WorkloadEventReasonAddressRemoved        WorkloadEventReason = "addressRemoved"
 	WorkloadEventReasonApplied               WorkloadEventReason = "applied"
+	WorkloadEventReasonCommandRan            WorkloadEventReason = "commandRan"
 	WorkloadEventReasonConvergeFailed        WorkloadEventReason = "convergeFailed"
 	WorkloadEventReasonDeleted               WorkloadEventReason = "deleted"
 	WorkloadEventReasonDependencyNotReady    WorkloadEventReason = "dependencyNotReady"
@@ -391,6 +392,8 @@ func (e WorkloadEventReason) Valid() bool {
 	case WorkloadEventReasonAddressRemoved:
 		return true
 	case WorkloadEventReasonApplied:
+		return true
+	case WorkloadEventReasonCommandRan:
 		return true
 	case WorkloadEventReasonConvergeFailed:
 		return true
@@ -2573,6 +2576,9 @@ type WorkloadEvent struct {
 // optional. This is here for a caller doing something with the event beyond
 // showing it, which already has the message.
 type WorkloadEventData struct {
+	// Command The command an operator ran inside an instance, with its arguments.
+	Command *[]string `json:"command,omitempty"`
+
 	// Count How many times something has happened, such as the consecutive failures a
 	// health check has reported.
 	//
@@ -2608,6 +2614,10 @@ type WorkloadEventData struct {
 
 	// Previous The specification hash the workload was at, where the event reports a move.
 	Previous *string `json:"previous,omitempty"`
+
+	// Principal The principal who acted, where the event reports something a person did.
+	// Absent when the server authenticates nobody.
+	Principal *string `json:"principal,omitempty"`
 
 	// Reference The image reference, expected hash, or other reference the event concerns.
 	Reference *string `json:"reference,omitempty"`

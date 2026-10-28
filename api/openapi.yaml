@@ -3791,6 +3791,7 @@ components:
         - instanceRemoved
         - portsAbandoned
         - mountsRefreshed
+        - commandRan
         # The reasons particular to a workload on a schedule.
         - runStarted
         - runFinished
@@ -3869,6 +3870,16 @@ components:
         error:
           type: string
           description: What went wrong, where the event reports a failure.
+        principal:
+          type: string
+          description: |
+            The principal who acted, where the event reports something a person did.
+            Absent when the server authenticates nobody.
+        command:
+          type: array
+          items:
+            type: string
+          description: The command an operator ran inside an instance, with its arguments.
 
     Instance:
       type: object
