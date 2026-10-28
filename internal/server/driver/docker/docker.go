@@ -572,51 +572,88 @@ func (d *Driver) Signal(ctx context.Context, _, workload, signal string) error {
 // same constraint. Output is captured to a bounded buffer for the error and never
 // reaches the container's log.
 func (d *Driver) Probe(ctx context.Context, w driver.Workload, probe driver.Probe) error {
-	if len(probe.Command) == 0 {
-		return fmt.Errorf("%w: no command", ErrNotContainerWorkload)
+	output := new(driver.Tail)
+
+	status, err := d.Exec(ctx, w, driver.Exec{
+		Command: probe.Command,
+		Stdout:  output,
+		Stderr:  output,
+	})
+	switch {
+	case err != nil:
+		return err
+	case status != 0:
+		return fmt.Errorf("%w: exit status %d%s", ErrProbeFailed, status, output.Suffix())
+	default:
+		return nil
+	}
+}
+
+// Exec runs a command inside the running container of one instance, copying its
+// output to the given writers and its input from the given reader until it ends,
+// and reports the status it exited with.
+//
+// The command runs as the container does, as a probe does, and the engine's
+// constraint on ending one is the same: a command that outlives the caller's
+// context is left running inside the container. The input is copied on a goroutine
+// of its own, which ends when the reader does. A command that ended before its
+// input did leaves that goroutine blocked on the reader, so the caller ends the
+// reader when the session ends.
+func (d *Driver) Exec(ctx context.Context, w driver.Workload, exec driver.Exec) (int, error) {
+	if len(exec.Command) == 0 {
+		return 0, fmt.Errorf("%w: no command", ErrNotContainerWorkload)
 	}
 
 	id, err := d.running(ctx, w.Name, w.Instance)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	execID, err := d.client.ExecCreate(ctx, id, client.ExecCreateOptions{
+		AttachStdin:  exec.Stdin != nil,
 		AttachStdout: true,
 		AttachStderr: true,
-		Cmd:          probe.Command,
+		Cmd:          exec.Command,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create probe: %w", err)
+		return 0, fmt.Errorf("failed to create command: %w", err)
 	}
 
 	stream, err := d.client.ExecAttach(ctx, execID)
 	if err != nil {
-		return fmt.Errorf("failed to start probe: %w", err)
+		return 0, fmt.Errorf("failed to start command: %w", err)
 	}
 	defer stream.Close()
+
+	// Half-closed once the input ends, which is how the command learns there is
+	// no more of it. Its output stays readable.
+	if exec.Stdin != nil {
+		go func() {
+			_, _ = io.Copy(stream, exec.Stdin)
+			_ = stream.CloseWrite()
+		}()
+	}
 
 	// The stream ends when the command does, so this is the wait. The copy is on a
 	// goroutine of its own because the stream is a hijacked connection the context
 	// does not reach: closing it is what ends a read the deadline cut short.
-	output := new(driver.Tail)
 	copied := make(chan error, 1)
 
 	go func() {
-		_, err := stdcopy.StdCopy(output, output, stream)
+		_, err := stdcopy.StdCopy(exec.Stdout, exec.Stderr, stream)
 		copied <- err
 	}()
 
 	select {
 	case err = <-copied:
 		if err != nil {
-			return fmt.Errorf("failed to read probe output: %w", err)
+			return 0, fmt.Errorf("failed to read command output: %w", err)
 		}
 	case <-ctx.Done():
 		_ = stream.Close()
 		<-copied
 
-		return ctx.Err()
+		return 0, ctx.Err()
 	}
 
 	// Inspected with a context of its own: the stream has ended so the command
@@ -628,13 +665,11 @@ func (d *Driver) Probe(ctx context.Context, w driver.Workload, probe driver.Prob
 	inspected, err := d.client.ExecInspect(inspectCtx, execID)
 	switch {
 	case err != nil:
-		return fmt.Errorf("failed to inspect probe: %w", err)
+		return 0, fmt.Errorf("failed to inspect command: %w", err)
 	case inspected.Running:
-		return fmt.Errorf("%w: still running after its output ended", ErrProbeFailed)
-	case inspected.ExitCode != 0:
-		return fmt.Errorf("%w: exit status %d%s", ErrProbeFailed, inspected.ExitCode, output.Suffix())
+		return 0, errors.New("command is still running after its output ended")
 	default:
-		return nil
+		return inspected.ExitCode, nil
 	}
 }
 

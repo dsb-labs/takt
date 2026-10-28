@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -1187,7 +1188,7 @@ func TestDriver_Probe(t *testing.T) {
 		client.EXPECT().ExecCreate(mock.Anything, "zero-new", mock.MatchedBy(func(options dockerclient.ExecCreateOptions) bool {
 			return options.AttachStdout && options.AttachStderr && slices.Equal(options.Cmd, []string{"worker", "check"}) && !options.Privileged
 		})).Return("exec-one", nil).Once()
-		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(io.NopCloser(strings.NewReader(multiplexed("ok\n"))), nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(attached(strings.NewReader(multiplexed("ok\n"))), nil).Once()
 		client.EXPECT().ExecInspect(mock.Anything, "exec-one").Return(dockerclient.ExecInspectResult{ExitCode: 0}, nil).Once()
 
 		d := testDriver(t, client)
@@ -1200,7 +1201,7 @@ func TestDriver_Probe(t *testing.T) {
 
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
 		client.EXPECT().ExecCreate(mock.Anything, "zero-new", mock.Anything).Return("exec-one", nil).Once()
-		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(io.NopCloser(strings.NewReader(multiplexed("not ready\n"))), nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(attached(strings.NewReader(multiplexed("not ready\n"))), nil).Once()
 		client.EXPECT().ExecInspect(mock.Anything, "exec-one").Return(dockerclient.ExecInspectResult{ExitCode: 3}, nil).Once()
 
 		d := testDriver(t, client)
@@ -1216,7 +1217,7 @@ func TestDriver_Probe(t *testing.T) {
 
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
 		client.EXPECT().ExecCreate(mock.Anything, "one-only", mock.Anything).Return("exec-one", nil).Once()
-		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(io.NopCloser(strings.NewReader("")), nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(attached(strings.NewReader("")), nil).Once()
 		client.EXPECT().ExecInspect(mock.Anything, "exec-one").Return(dockerclient.ExecInspectResult{}, nil).Once()
 
 		d := testDriver(t, client)
@@ -1237,7 +1238,7 @@ func TestDriver_Probe(t *testing.T) {
 
 		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
 		client.EXPECT().ExecCreate(mock.Anything, "zero-new", mock.Anything).Return("exec-one", nil).Once()
-		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(reader, nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(attached(reader), nil).Once()
 
 		d := testDriver(t, client)
 
@@ -1264,6 +1265,106 @@ func TestDriver_Probe(t *testing.T) {
 		d := testDriver(t, NewMockClient(t))
 
 		assert.ErrorIs(t, d.Probe(t.Context(), w, driver.Probe{}), docker.ErrNotContainerWorkload)
+	})
+}
+
+func TestDriver_Exec(t *testing.T) {
+	t.Parallel()
+
+	containers := []dockercontainer.Summary{
+		{ID: "zero-new", State: dockercontainer.StateRunning, Labels: map[string]string{docker.LabelInstance: "0", docker.LabelAttempt: "1"}},
+	}
+
+	w := driver.Workload{Name: "example", Instance: 0}
+
+	t.Run("reports the status and splits the output by stream", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		// One frame on each stream, so the test can see them land in different
+		// writers rather than merged as a probe merges them.
+		output := multiplexed("to stdout\n") + multiplexedOn(2, "to stderr\n")
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
+		client.EXPECT().ExecCreate(mock.Anything, "zero-new", mock.MatchedBy(func(options dockerclient.ExecCreateOptions) bool {
+			return !options.AttachStdin && options.AttachStdout && options.AttachStderr && slices.Equal(options.Cmd, []string{"ls", "-l"})
+		})).Return("exec-one", nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(attached(strings.NewReader(output)), nil).Once()
+		client.EXPECT().ExecInspect(mock.Anything, "exec-one").Return(dockerclient.ExecInspectResult{ExitCode: 3}, nil).Once()
+
+		d := testDriver(t, client)
+
+		var stdout, stderr bytes.Buffer
+
+		status, err := d.Exec(t.Context(), w, driver.Exec{Command: []string{"ls", "-l"}, Stdout: &stdout, Stderr: &stderr})
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, status)
+		assert.Equal(t, "to stdout\n", stdout.String())
+		assert.Equal(t, "to stderr\n", stderr.String())
+	})
+
+	t.Run("copies the input to the command and half-closes the stream after it", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		// The output is held back until the input has arrived, which is how the
+		// test knows the input was written before the stream was read to its end.
+		input := strings.NewReader("typed\n")
+		output, writer := io.Pipe()
+		s := attached(output)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
+		client.EXPECT().ExecCreate(mock.Anything, "zero-new", mock.MatchedBy(func(options dockerclient.ExecCreateOptions) bool {
+			return options.AttachStdin
+		})).Return("exec-one", nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").RunAndReturn(func(context.Context, string) (docker.Stream, error) {
+			go func() {
+				require.Eventually(t, s.halfOpen.Load, time.Second, 10*time.Millisecond)
+				_, _ = writer.Write([]byte(multiplexed("echoed\n")))
+				_ = writer.Close()
+			}()
+
+			return s, nil
+		}).Once()
+		client.EXPECT().ExecInspect(mock.Anything, "exec-one").Return(dockerclient.ExecInspectResult{}, nil).Once()
+
+		d := testDriver(t, client)
+
+		var stdout bytes.Buffer
+
+		status, err := d.Exec(t.Context(), w, driver.Exec{Command: []string{"cat"}, Stdin: input, Stdout: &stdout, Stderr: io.Discard})
+		require.NoError(t, err)
+
+		assert.Zero(t, status)
+		assert.Equal(t, "typed\n", s.written.String())
+		assert.Equal(t, "echoed\n", stdout.String())
+	})
+
+	t.Run("refuses an instance with no running container", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
+
+		d := testDriver(t, client)
+
+		missing := w
+		missing.Instance = 2
+
+		_, err := d.Exec(t.Context(), missing, driver.Exec{Command: []string{"ls"}, Stdout: io.Discard, Stderr: io.Discard})
+		assert.ErrorIs(t, err, driver.ErrNoRunningInstance)
+	})
+
+	t.Run("fails a command that is still running after its output ended", func(t *testing.T) {
+		client := NewMockClient(t)
+
+		client.EXPECT().ContainerList(mock.Anything, mock.Anything).Return(containers, nil).Once()
+		client.EXPECT().ExecCreate(mock.Anything, "zero-new", mock.Anything).Return("exec-one", nil).Once()
+		client.EXPECT().ExecAttach(mock.Anything, "exec-one").Return(attached(strings.NewReader("")), nil).Once()
+		client.EXPECT().ExecInspect(mock.Anything, "exec-one").Return(dockerclient.ExecInspectResult{Running: true}, nil).Once()
+
+		d := testDriver(t, client)
+
+		_, err := d.Exec(t.Context(), w, driver.Exec{Command: []string{"sleep"}, Stdout: io.Discard, Stderr: io.Discard})
+		assert.ErrorContains(t, err, "still running")
 	})
 }
 
@@ -2353,8 +2454,51 @@ func TestDriver_Start_RegistryAuth(t *testing.T) {
 // multiplexed frames payload the way the docker daemon frames the output of a
 // container without a TTY: an 8 byte header carrying the stream type and the
 // payload length, followed by the payload itself.
+// The stream type stands in for an attached exec: the command's output is read from
+// the reader it is given, and what is written to it is kept so a test can read what
+// reached the command's standard input.
+type stream struct {
+	io.Reader
+	written bytes.Buffer
+	// Set once the driver has half-closed the stream, which is after everything it
+	// copied in has been written. Atomic because a test reads it from another
+	// goroutine to learn when the input has all arrived.
+	halfOpen atomic.Bool
+}
+
+func (s *stream) Write(p []byte) (int, error) {
+	return s.written.Write(p)
+}
+
+func (s *stream) CloseWrite() error {
+	s.halfOpen.Store(true)
+
+	return nil
+}
+
+// Close ends the reader when it can be ended, which is what frees a read the
+// driver's deadline cut short.
+func (s *stream) Close() error {
+	if closer, ok := s.Reader.(io.Closer); ok {
+		return closer.Close()
+	}
+
+	return nil
+}
+
+// attached returns a stream reading the given output.
+func attached(output io.Reader) *stream {
+	return &stream{Reader: output}
+}
+
 func multiplexed(payload string) string {
-	header := []byte{1, 0, 0, 0, 0, 0, 0, 0}
+	return multiplexedOn(1, payload)
+}
+
+// multiplexedOn frames a payload as the daemon frames one written to the numbered
+// stream: 1 for standard output, 2 for standard error.
+func multiplexedOn(fd byte, payload string) string {
+	header := []byte{fd, 0, 0, 0, 0, 0, 0, 0}
 	size := len(payload)
 	header[4] = byte(size >> 24)
 	header[5] = byte(size >> 16)
