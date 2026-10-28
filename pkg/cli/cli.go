@@ -52,6 +52,23 @@ type (
 	}
 )
 
+// The ExitError type is an error a command returns to end the process with a
+// status of its own, rather than the one every other failure ends it with.
+//
+// A command run inside an instance has a status of its own, and a caller scripting
+// around it reads that status rather than the output. This is the one place the
+// process's status carries something other than whether takt itself failed, which
+// is why it is a type rather than a sentinel: the status has to travel with it.
+type ExitError struct {
+	// The status the process ends with.
+	Code int
+}
+
+// Error names the status.
+func (e ExitError) Error() string {
+	return fmt.Sprintf("exit status %d", e.Code)
+}
+
 // DefaultAddress is where a client connects when nothing names a server.
 const DefaultAddress = "http://localhost:7373"
 
