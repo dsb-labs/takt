@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
@@ -117,7 +118,12 @@ func main() {
 		dev.Command(),
 	)
 
-	if err := cmd.ExecuteContext(ctx); err != nil {
+	err := cmd.ExecuteContext(ctx)
+	exit, ok := errors.AsType[cli.ExitError](err)
+	switch {
+	case ok:
+		os.Exit(exit.Code)
+	case err != nil:
 		os.Exit(1)
 	}
 }
