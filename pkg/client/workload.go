@@ -2,12 +2,17 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
+	"strconv"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
 	"github.com/dsb-labs/takt/internal/wire"
@@ -139,6 +144,11 @@ type (
 		Ports []int
 		// What went wrong, where the event reports a failure.
 		Error string
+		// The principal who acted, where the event reports something a person did.
+		// Empty when the server authenticates nobody.
+		Principal string
+		// The command an operator ran inside an instance, with its arguments.
+		Command []string
 	}
 
 	// The DryRun type reports what applying a specification would do, none of it
@@ -1206,6 +1216,179 @@ func (c *Client) Logs(ctx context.Context, out io.Writer, name string, options .
 	return nil
 }
 
+// The Command type describes a command to run inside one running instance of a
+// workload, and where its streams go.
+type Command struct {
+	// The command to run, and its arguments.
+	Command []string
+	// Which instance to run the command in, by its index. Nil means the only
+	// instance there is, which the server refuses for a workload running more
+	// than one.
+	Instance *int
+	// The operator's input, copied to the command until it reaches end of file.
+	// Nil gives the command an input that has ended from the start.
+	Stdin io.Reader
+	// Where the command's standard output is written. Nil discards it.
+	Stdout io.Writer
+	// Where the command's standard error is written. Nil discards it.
+	Stderr io.Writer
+}
+
+// Exec runs a command inside one running instance of the named workload, copying
+// its output to the command's writers and its input from the command's reader
+// until it ends, and reports the status it exited with.
+//
+// The status is the command's own, so a non-zero one is not an error here: the
+// command ran and said what it had to say. An error is a command that did not run,
+// or did not finish, and the server's reason is what the error carries. Returns
+// ErrWorkloadNotFound when no such workload exists.
+//
+// A terminal is not allocated. The command sees pipes, so a shell run this way
+// does not behave as one in a terminal would.
+//
+// Cancelling the context ends the command and is reported as the context's error.
+func (c *Client) Exec(ctx context.Context, name string, command Command) (int, error) {
+	target, err := url.Parse(c.address + "/api/v1/workloads/" + url.PathEscape(name) + "/exec")
+	if err != nil {
+		return 0, fmt.Errorf("failed to build the request: %w", err)
+	}
+
+	if command.Instance != nil {
+		target.RawQuery = url.Values{"instance": {strconv.Itoa(*command.Instance)}}.Encode()
+	}
+
+	options := &websocket.DialOptions{
+		HTTPClient:      c.dialer,
+		CompressionMode: websocket.CompressionDisabled,
+	}
+
+	if c.token != "" {
+		options.HTTPHeader = http.Header{"Authorization": {"Bearer " + c.token}}
+	}
+
+	conn, resp, err := websocket.Dial(ctx, target.String(), options)
+	switch {
+	case err != nil && resp != nil && resp.StatusCode == http.StatusNotFound:
+		return 0, fmt.Errorf("%w: %s", ErrWorkloadNotFound, errorBody(resp).Error)
+	case err != nil && resp != nil:
+		return 0, newError(resp.StatusCode, new(errorBody(resp)))
+	case err != nil:
+		return 0, fmt.Errorf("failed to open the connection: %w", err)
+	}
+	defer conn.CloseNow()
+
+	// Every write goes through the context, so cancelling it ends a write a
+	// stalled server would otherwise hold open.
+	send := func(frame []byte) error {
+		return conn.Write(ctx, websocket.MessageBinary, frame)
+	}
+
+	if err = sendExecMessage(ctx, conn, wire.ExecMessage{
+		Type:    wire.ExecStart,
+		Command: command.Command,
+		Stdin:   command.Stdin != nil,
+	}); err != nil {
+		return 0, err
+	}
+
+	// The input is copied on a goroutine of its own, because the reader is the
+	// operator's keyboard and a read of it returns when they type. The goroutine
+	// outlives a command that ended first: nothing can interrupt the read, and
+	// the frame it then sends fails against a closed connection and is dropped.
+	if command.Stdin != nil {
+		go func() {
+			if _, err := io.Copy(wire.ExecFrameWriter{Stream: wire.ExecStdin, Send: send}, command.Stdin); err != nil {
+				return
+			}
+
+			_ = sendExecMessage(ctx, conn, wire.ExecMessage{Type: wire.ExecCloseStdin})
+		}()
+	}
+
+	stdout, stderr := command.Stdout, command.Stderr
+	if stdout == nil {
+		stdout = io.Discard
+	}
+
+	if stderr == nil {
+		stderr = io.Discard
+	}
+
+	for {
+		kind, data, err := conn.Read(ctx)
+		switch {
+		case ctx.Err() != nil:
+			return 0, ctx.Err()
+		case err != nil:
+			return 0, fmt.Errorf("the connection ended before the command did: %w", err)
+		}
+
+		if kind == websocket.MessageBinary {
+			if err = writeExecFrame(data, stdout, stderr); err != nil {
+				return 0, err
+			}
+
+			continue
+		}
+
+		var message wire.ExecMessage
+		if err = json.Unmarshal(data, &message); err != nil {
+			return 0, fmt.Errorf("failed to decode a frame: %w", err)
+		}
+
+		switch message.Type {
+		case wire.ExecExit:
+			_ = conn.Close(websocket.StatusNormalClosure, "")
+
+			if message.ExitCode == nil {
+				return 0, errors.New("the command ended without a status")
+			}
+
+			return *message.ExitCode, nil
+		case wire.ExecError:
+			_ = conn.Close(websocket.StatusNormalClosure, "")
+
+			return 0, errors.New(message.Error)
+		}
+	}
+}
+
+// sendExecMessage sends a message about the command as a text frame.
+func sendExecMessage(ctx context.Context, conn *websocket.Conn, message wire.ExecMessage) error {
+	encoded, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to encode the frame: %w", err)
+	}
+
+	if err = conn.Write(ctx, websocket.MessageText, encoded); err != nil {
+		return fmt.Errorf("failed to send the frame: %w", err)
+	}
+
+	return nil
+}
+
+// writeExecFrame writes a binary frame's bytes to the writer its leading byte
+// names. A frame on a stream the server does not send is dropped.
+func writeExecFrame(frame []byte, stdout, stderr io.Writer) error {
+	if len(frame) == 0 {
+		return nil
+	}
+
+	var err error
+	switch frame[0] {
+	case wire.ExecStdout:
+		_, err = stdout.Write(frame[1:])
+	case wire.ExecStderr:
+		_, err = stderr.Write(frame[1:])
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to write the command's output: %w", err)
+	}
+
+	return nil
+}
+
 // logsError turns an unsuccessful logs response into an error, decoding the server's
 // message where it sent one.
 func (c *Client) logsError(resp *http.Response) error {
@@ -1275,6 +1458,8 @@ func newEvent(e api.WorkloadEvent) Event {
 		Signal:    value(e.Data.Signal),
 		Ports:     value(e.Data.Ports),
 		Error:     value(e.Data.Error),
+		Principal: value(e.Data.Principal),
+		Command:   value(e.Data.Command),
 	}
 
 	return event

@@ -12,10 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dsb-labs/takt/internal/generated/api"
+	"github.com/dsb-labs/takt/internal/wire"
 	"github.com/dsb-labs/takt/pkg/client"
 	"github.com/dsb-labs/takt/pkg/manifest"
 )
@@ -1418,6 +1420,168 @@ func TestClient_NamesTheRequestWhenTheServerIsUnreachable(t *testing.T) {
 	// The caller names the operation, so the client names the step it failed at.
 	assert.Contains(t, err.Error(), "failed to send the request")
 	assert.NotContains(t, err.Error(), "failed to get workload")
+}
+
+func TestClient_Exec(t *testing.T) {
+	t.Parallel()
+
+	// A server that upgrades the connection and runs the given session, which is
+	// what the API does once a request has passed its checks.
+	serve := func(t *testing.T, session func(t *testing.T, conn *websocket.Conn, start wire.ExecMessage)) *client.Client {
+		t.Helper()
+
+		return newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "/api/v1/workloads/example/exec", r.URL.Path)
+
+			conn, err := websocket.Accept(w, r, nil)
+			require.NoError(t, err)
+			defer conn.CloseNow()
+
+			var start wire.ExecMessage
+			require.NoError(t, json.Unmarshal(readTextFrame(t, conn), &start))
+			require.Equal(t, wire.ExecStart, start.Type)
+
+			session(t, conn, start)
+		})
+	}
+
+	t.Run("reports the status and splits the output by stream", func(t *testing.T) {
+		c := serve(t, func(t *testing.T, conn *websocket.Conn, start wire.ExecMessage) {
+			assert.Equal(t, []string{"ls", "-l"}, start.Command)
+			assert.False(t, start.Stdin)
+
+			require.NoError(t, conn.Write(t.Context(), websocket.MessageBinary, []byte("\x01listed\n")))
+			require.NoError(t, conn.Write(t.Context(), websocket.MessageBinary, []byte("\x02warned\n")))
+			sendTextFrame(t, conn, wire.ExecMessage{Type: wire.ExecExit, ExitCode: new(3)})
+		})
+
+		var stdout, stderr strings.Builder
+
+		status, err := c.Exec(t.Context(), "example", client.Command{Command: []string{"ls", "-l"}, Stdout: &stdout, Stderr: &stderr})
+		require.NoError(t, err)
+
+		assert.Equal(t, 3, status)
+		assert.Equal(t, "listed\n", stdout.String())
+		assert.Equal(t, "warned\n", stderr.String())
+	})
+
+	t.Run("sends the input and says when it ends", func(t *testing.T) {
+		c := serve(t, func(t *testing.T, conn *websocket.Conn, start wire.ExecMessage) {
+			assert.True(t, start.Stdin)
+
+			kind, data, err := conn.Read(t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, websocket.MessageBinary, kind)
+			assert.Equal(t, "\x00typed\n", string(data))
+
+			var closed wire.ExecMessage
+			require.NoError(t, json.Unmarshal(readTextFrame(t, conn), &closed))
+			assert.Equal(t, wire.ExecCloseStdin, closed.Type)
+
+			sendTextFrame(t, conn, wire.ExecMessage{Type: wire.ExecExit, ExitCode: new(0)})
+		})
+
+		status, err := c.Exec(t.Context(), "example", client.Command{Command: []string{"cat"}, Stdin: strings.NewReader("typed\n")})
+		require.NoError(t, err)
+		assert.Zero(t, status)
+	})
+
+	t.Run("selects the instance asked for", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "1", r.URL.Query().Get("instance"))
+
+			conn, err := websocket.Accept(w, r, nil)
+			require.NoError(t, err)
+			defer conn.CloseNow()
+
+			readTextFrame(t, conn)
+			sendTextFrame(t, conn, wire.ExecMessage{Type: wire.ExecExit, ExitCode: new(0)})
+		})
+
+		_, err := c.Exec(t.Context(), "example", client.Command{Command: []string{"ls"}, Instance: new(1)})
+		require.NoError(t, err)
+	})
+
+	t.Run("reports the server's reason when the command did not run", func(t *testing.T) {
+		c := serve(t, func(t *testing.T, conn *websocket.Conn, _ wire.ExecMessage) {
+			sendTextFrame(t, conn, wire.ExecMessage{Type: wire.ExecError, Error: "instance is not running: instance 0"})
+		})
+
+		_, err := c.Exec(t.Context(), "example", client.Command{Command: []string{"ls"}})
+		assert.ErrorContains(t, err, "instance is not running")
+	})
+
+	t.Run("reports a missing workload refused before the upgrade", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusNotFound, api.ErrorResponse{Error: `workload "example" does not exist`})
+		})
+
+		_, err := c.Exec(t.Context(), "example", client.Command{Command: []string{"ls"}})
+		assert.ErrorIs(t, err, client.ErrWorkloadNotFound)
+	})
+
+	t.Run("reports another refusal with its status", func(t *testing.T) {
+		c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusConflict, api.ErrorResponse{Error: `workload "example" is suspended`})
+		})
+
+		_, err := c.Exec(t.Context(), "example", client.Command{Command: []string{"ls"}})
+		assert.True(t, client.IsConflict(err))
+		assert.ErrorContains(t, err, "suspended")
+	})
+
+	t.Run("presents the credential on the handshake", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "Bearer secret", r.Header.Get("Authorization"))
+
+			conn, err := websocket.Accept(w, r, nil)
+			require.NoError(t, err)
+			defer conn.CloseNow()
+
+			readTextFrame(t, conn)
+			sendTextFrame(t, conn, wire.ExecMessage{Type: wire.ExecExit, ExitCode: new(0)})
+		}))
+		t.Cleanup(server.Close)
+
+		c, err := client.New(server.URL, client.WithToken("secret"))
+		require.NoError(t, err)
+
+		_, err = c.Exec(t.Context(), "example", client.Command{Command: []string{"ls"}})
+		require.NoError(t, err)
+	})
+
+	t.Run("reports cancellation as the context's error", func(t *testing.T) {
+		c := serve(t, func(t *testing.T, conn *websocket.Conn, _ wire.ExecMessage) {
+			// A command that never ends, from the client's side: nothing arrives.
+			<-t.Context().Done()
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		_, err := c.Exec(ctx, "example", client.Command{Command: []string{"sleep", "60"}})
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+}
+
+// readTextFrame reads the next frame, requiring it to be a text frame.
+func readTextFrame(t *testing.T, conn *websocket.Conn) []byte {
+	t.Helper()
+
+	kind, data, err := conn.Read(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, websocket.MessageText, kind)
+
+	return data
+}
+
+// sendTextFrame sends a message about the command as a text frame.
+func sendTextFrame(t *testing.T, conn *websocket.Conn, message wire.ExecMessage) {
+	t.Helper()
+
+	encoded, err := json.Marshal(message)
+	require.NoError(t, err)
+	require.NoError(t, conn.Write(t.Context(), websocket.MessageText, encoded))
 }
 
 func newTestClient(t *testing.T, handler http.HandlerFunc) *client.Client {
