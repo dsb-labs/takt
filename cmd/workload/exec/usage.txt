@@ -1,0 +1,17 @@
+Run a command inside a running instance of a workload.
+
+The command and its arguments follow a double dash, so flags meant for the
+command are not read as takt's own. Its output is printed as it arrives,
+and the command's exit status becomes this command's. Pass --instance to
+pick one of a workload running more than one, and --stdin to attach this
+process's standard input to the command, which is how a file is piped into
+it. Without --stdin the command sees an input that has already ended.
+
+The command runs where the instance runs: inside its container, or for an
+exec workload under the same confinement and limits the instance was
+started with, in its working directory, with its environment resolved
+again. It can read what the instance can read. Running a command is
+recorded against the workload, so workload events says who ran what.
+
+No terminal is allocated. A shell run this way reads its commands from
+standard input and does not prompt.
