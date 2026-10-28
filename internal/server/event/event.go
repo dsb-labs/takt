@@ -111,6 +111,10 @@ const (
 	// MountsRefreshed is recorded when a workload is signalled because the values it
 	// mounts changed.
 	MountsRefreshed Reason = "mountsRefreshed"
+	// CommandRan is recorded when an operator runs a command inside an instance.
+	// Running a command in an instance is an action on the workload, and the
+	// event is what says who ran what.
+	CommandRan Reason = "commandRan"
 )
 
 // The reasons particular to a workload on a schedule.

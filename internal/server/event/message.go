@@ -53,6 +53,11 @@ type Fields struct {
 	Ports []int `json:"ports,omitempty"`
 	// What went wrong, where the event reports a failure.
 	Error string `json:"error,omitempty"`
+	// The principal who acted, where the event reports something a person did.
+	// Empty when the server authenticates nobody.
+	Principal string `json:"principal,omitempty"`
+	// The command an operator ran, with its arguments.
+	Command []string `json:"command,omitempty"`
 }
 
 // Encode renders fields as the JSON stored against an event.
@@ -152,6 +157,8 @@ func Message(reason Reason, data []byte) string {
 		return fmt.Sprintf("Gave up host %s %s", plural("port", len(fields.Ports)), ports(fields))
 	case MountsRefreshed:
 		return fmt.Sprintf("Mounted value %s changed, sent %s", fields.Name, fields.Signal)
+	case CommandRan:
+		return fmt.Sprintf("%s ran %s in instance %d", principal(fields), strings.Join(fields.Command, " "), fields.Instance)
 
 	case RunStarted:
 		return "Run started"
@@ -224,6 +231,16 @@ func because(fields Fields) string {
 	}
 
 	return ": " + fields.Error
+}
+
+// principal renders who acted, as the sentence's subject, naming an operator the
+// server did not authenticate as one.
+func principal(fields Fields) string {
+	if fields.Principal == "" {
+		return "An operator"
+	}
+
+	return fields.Principal
 }
 
 // exitCode renders an instance's exit status, naming it as unknown when the event

@@ -150,6 +150,18 @@ func TestMessage(t *testing.T) {
 			Fields:   event.Fields{Reference: "ghcr.io/dsb-labs/api:latest"},
 			Expected: "Image ghcr.io/dsb-labs/api:latest will not be followed, this server does not check digests",
 		},
+		{
+			Name:     "names who ran a command and what they ran",
+			Reason:   event.CommandRan,
+			Fields:   event.Fields{Principal: "alice@example.com", Command: []string{"sh", "-c", "ls -l"}, Instance: 1},
+			Expected: "alice@example.com ran sh -c ls -l in instance 1",
+		},
+		{
+			Name:     "names an operator the server did not authenticate",
+			Reason:   event.CommandRan,
+			Fields:   event.Fields{Command: []string{"ls"}},
+			Expected: "An operator ran ls in instance 0",
+		},
 	}
 
 	for _, tc := range tt {
