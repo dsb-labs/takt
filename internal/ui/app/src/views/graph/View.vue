@@ -94,13 +94,13 @@ watch(
     structure = key;
     const positions = layout(graph.nodes, graph.edges);
 
-    nodes.value = graph.nodes.map((node) => ({
+    nodes.value = graph.nodes.map<Node>((node) => ({
       id: node.id,
       type: "resource",
       position: positions.get(node.id)!,
       data: node,
     }));
-    edges.value = graph.edges.map((edge) => ({
+    edges.value = graph.edges.map<Edge>((edge) => ({
       id: edge.id,
       source: edge.source,
       target: edge.target,
