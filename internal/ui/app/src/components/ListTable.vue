@@ -53,8 +53,7 @@ defineProps<{
               {{ hint }}
               <code
                 class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                >{{ command }}</code
-              >.
+                >{{ command }}</code>.
             </template>
           </td>
         </tr>
